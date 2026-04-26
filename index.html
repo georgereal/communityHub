@@ -99,7 +99,9 @@
           </div>
         </header>
 
-        <section class="dashboard-metrics">
+        <details class="mobile-disclosure mobile-disclosure--light" id="registry-overview" open style="padding: 0 1.6rem;">
+          <summary><span>Overview</span></summary>
+          <section class="dashboard-metrics" style="padding-left:0; padding-right:0;">
           <div class="metric-card"><span class="label">Total Registry</span><span class="value" id="kpi-total">0</span>
           </div>
           <div class="metric-card"><span class="label">Compliant</span><span class="value" style="color: var(--success)"
@@ -112,17 +114,20 @@
               style="color: var(--success);" id="kpi-bikes">0</span></div>
           <div class="metric-card"><span class="label">Occupancy</span><span class="value" style="color: var(--accent)"
               id="kpi-occupancy">0%</span></div>
-        </section>
+          </section>
+        </details>
 
-        <section id="pool-visualiser" style="margin-bottom: 1rem; padding: 0 1.6rem;">
-          <label
-            style="display: block; font-size: 0.65rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 0.75rem;">Community
-            Pool Grid</label>
+        <details id="pool-visualiser" class="mobile-disclosure" open style="margin-bottom: 1rem; padding: 0 1.6rem;">
+          <summary>
+            <span>Community Pool Grid</span>
+          </summary>
           <div id="pool-grid"
             style="display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: 0.5rem;"></div>
-        </section>
+        </details>
 
-        <section class="explorer-controls">
+        <details class="mobile-disclosure mobile-disclosure--light" id="registry-units" open style="padding: 0 1.6rem;">
+          <summary><span>Units</span></summary>
+          <section class="explorer-controls" style="padding:0;">
           <div
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; gap: 0.75rem;">
             <div class="search-container"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="apt-search"
@@ -148,7 +153,8 @@
             </div>
             <div id="registry-items"></div>
           </div>
-        </section>
+          </section>
+        </details>
       </section>
 
       <!-- VIEW: ACCOUNTS -->
@@ -181,7 +187,7 @@
           </div>
         </header>
 
-        <nav
+        <nav class="subview-tabs"
           style="margin-bottom: 1rem; display: flex; gap: 1rem; border-bottom: 1px solid var(--border); padding: 0 1.6rem 0.6rem;">
           <button id="btn-show-ledger"
             style="background:none; border:none; color:#111827; font-weight:800; font-size:0.8rem; cursor:pointer;"
@@ -234,7 +240,7 @@
         </div>
 
         <div id="subview-reports" style="display:none; padding: 0 1.6rem 1.6rem;">
-          <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+          <div class="reports-grid" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 1rem; margin-bottom: 1rem;">
             <div class="metric-card"
               style="padding: 1rem; min-height: 360px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border);">
               <h3
@@ -300,7 +306,7 @@
           </div>
         </header>
 
-        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 2rem; margin-top: 1rem;">
+        <div class="setup-grid" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 2rem; margin-top: 1rem;">
           <div style="background:#fff; border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px;">
             <h3
               style="font-size: 0.8rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2rem;">
@@ -363,7 +369,7 @@
 
         <div style="margin-top: 1rem; background:#fff; border:1px solid var(--border); padding:1.25rem; border-radius:10px;">
           <h3 style="font-size:0.78rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:1rem;">Portfolio & User Mapping</h3>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-bottom:1rem;">
+          <div class="access-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-bottom:1rem;">
             <div style="border:1px solid var(--border); border-radius:8px; padding:0.9rem;">
               <label style="display:block; font-size:0.62rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.45rem;">Add Apartment</label>
               <div style="display:flex; gap:0.5rem;">

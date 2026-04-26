@@ -48,9 +48,12 @@ export const renderRegistry = () => {
     const search = document.getElementById('apt-search').value.toLowerCase();
     const sort = document.getElementById('registry-sort').value;
     const filter = document.body.dataset.registryFilter || 'ALL';
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 520px)').matches;
 
     let filtered = portalState.units.filter(u => {
-        return u.number.toLowerCase().includes(search) || u.vehicles.some(v => v.plate.toLowerCase().includes(search));
+        const unitMatch = (u.number || '').toString().toLowerCase().includes(search);
+        const plateMatch = u.vehicles.some(v => (v.plate || '').toString().toLowerCase().includes(search));
+        return unitMatch || plateMatch;
     });
 
     filtered = filtered.filter(u => {
@@ -67,9 +70,104 @@ export const renderRegistry = () => {
     } else filtered.sort((a, b) => a.number.localeCompare(b.number));
 
     filtered.forEach(u => {
-        const item = document.createElement('div'); item.className = 'apt-row'; item.onclick = () => window.openMdl(u.id);
         const activeFleet = u.vehicles.filter(v => v.is_parking_active);
         const dormantFleet = u.vehicles.filter(v => !v.is_parking_active);
+        const hasViolation = activeFleet.some(v => v.status === 'OVERLIMIT');
+        const activeCars = activeFleet.filter(v => (v.type || 'CAR').toUpperCase() === 'CAR');
+        const activeBikes = activeFleet.filter(v => (v.type || 'BIKE').toUpperCase() !== 'CAR');
+        const overlimitVehicles = activeFleet.filter(v => v.status === 'OVERLIMIT');
+        const carUsage = `${activeCars.length}/${u.car_limit}`;
+        const bikeUsage = `${activeBikes.length}/${u.bike_limit}`;
+
+        if (isMobile) {
+            const card = document.createElement('details');
+            card.className = `unit-card ${hasViolation ? 'unit-card--violation' : ''}`;
+            card.innerHTML = `
+              <summary class="unit-card__summary">
+                <div class="unit-card__title">
+                  <div class="unit-card__unit">Unit ${u.number}</div>
+                  <div class="unit-card__meta">
+                    <span class="unit-card__usage"><i class="fa-solid fa-car"></i> ${carUsage}</span>
+                    <span class="unit-card__usage"><i class="fa-solid fa-motorcycle"></i> ${bikeUsage}</span>
+                    <span class="unit-card__dot">•</span>
+                    <span>${activeFleet.length} active</span>
+                    <span class="unit-card__dot">•</span>
+                    <span>${dormantFleet.length} dormant</span>
+                  </div>
+                </div>
+                <div class="unit-card__right">
+                  <div class="status-pill ${hasViolation ? 'danger' : (activeFleet.length > 0 ? 'success' : 'warning')}"><span>${hasViolation ? 'Violation' : (activeFleet.length > 0 ? 'Pass' : 'Empty')}</span></div>
+                  <button class="btn btn-outline unit-card__manage" type="button" aria-label="Manage unit"><i class="fa-solid fa-gear"></i></button>
+                </div>
+              </summary>
+              <div class="unit-card__body">
+                ${hasViolation ? `
+                <div class="unit-card__section unit-card__section--danger">
+                  <div class="unit-card__label">Violation details</div>
+                  <div class="unit-card__hint">
+                    Overlimit happens when active vehicles exceed base slots (Cars: ${carUsage}, Bikes: ${bikeUsage}).
+                    Fix: move extra vehicles to <b>Community Pool</b> or <b>Neighbor Unit</b>.
+                  </div>
+                  <div class="unit-card__chips">
+                    ${overlimitVehicles.map(v => {
+                        const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
+                        const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
+                        const t = (v.type || 'CAR').toLowerCase();
+                        const alloc = ((v.allocation_type || 'BASE').toUpperCase());
+                        const allocLabel = alloc === 'BASE' ? 'Base slot exceeded' : `Allocated: ${alloc}`;
+                        return `<span class="unit-chip ${t} overlimit"><i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}"></i>${v.plate}<span class="unit-chip__sub">${allocLabel}</span></span>`;
+                    }).join('')}
+                  </div>
+                </div>` : ''}
+                <div class="unit-card__section">
+                  <div class="unit-card__label">Active fleet</div>
+                  <div class="unit-card__chips">
+                    ${activeFleet.length ? activeFleet.map(v => {
+                        const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
+                        const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
+                        const s = (v.status || 'ALLOWED').toLowerCase();
+                        const t = (v.type || 'CAR').toLowerCase();
+                        return `<span class="unit-chip ${t} ${s}"><i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}"></i>${v.plate}</span>`;
+                    }).join('') : `<span class="unit-card__empty">No active vehicles</span>`}
+                  </div>
+                </div>
+
+                <div class="unit-card__grid">
+                  <div class="unit-card__kv">
+                    <div class="unit-card__label">Base slots</div>
+                    <div class="unit-card__value"><i class="fa-solid fa-car"></i> ${u.car_limit} <i class="fa-solid fa-motorcycle"></i> ${u.bike_limit}</div>
+                  </div>
+                  <div class="unit-card__kv">
+                    <div class="unit-card__label">Pool allocated</div>
+                    <div class="unit-card__value">
+                      ${activeFleet
+                        .filter(v => (v.allocation_type || 'BASE').toUpperCase() === 'COMMON')
+                        .map(v => portalState.slots.find(s => s.id === v.allocation_target_id)?.name ? `${v.plate} → ${portalState.slots.find(s => s.id === v.allocation_target_id)?.name}` : null)
+                        .filter(Boolean)
+                        .join('<br/>') || `<span class="unit-card__empty">None</span>`}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="unit-card__section">
+                  <div class="unit-card__label">Dormant registry</div>
+                  <div class="unit-card__chips">
+                    ${dormantFleet.length ? dormantFleet.map(v => {
+                        const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
+                        const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
+                        const t = (v.type || 'CAR').toLowerCase();
+                        return `<span class="unit-chip ${t} inactive"><i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}"></i>${v.plate}</span>`;
+                    }).join('') : `<span class="unit-card__empty">None</span>`}
+                  </div>
+                </div>
+              </div>
+            `;
+            card.querySelector('.unit-card__manage').onclick = (e) => { e.preventDefault(); e.stopPropagation(); window.openMdl(u.id); };
+            list.appendChild(card);
+            return;
+        }
+
+        const item = document.createElement('div'); item.className = 'apt-row'; item.onclick = () => window.openMdl(u.id);
         const dormantDetails = dormantFleet
             .map(v => {
                 const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
@@ -95,8 +193,6 @@ export const renderRegistry = () => {
                 <span>${v.plate}</span>
             </div>`;
         }).join('');
-
-        const hasViolation = activeFleet.some(v => v.status === 'OVERLIMIT');
 
         item.innerHTML = `
         <div class="apt-number">${u.number}</div>
