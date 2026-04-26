@@ -40,6 +40,11 @@ export const processAnalytics = () => {
         k('kpi-dormant').textContent = overlimit; k('kpi-cars').textContent = tc;
         k('kpi-bikes').textContent = tb; k('complex-title').textContent = portalState.community.name;
     }
+
+    // Mobile summary badges (optional)
+    if (k('ms-total')) k('ms-total').textContent = total;
+    if (k('ms-ok')) k('ms-ok').textContent = allowed;
+    if (k('ms-bad')) k('ms-bad').textContent = overlimit;
 };
 
 export const renderRegistry = () => {
@@ -59,8 +64,14 @@ export const renderRegistry = () => {
     filtered = filtered.filter(u => {
         const activeFleet = u.vehicles.filter(v => v.is_parking_active);
         const hasOverlimit = activeFleet.some(v => v.status === 'OVERLIMIT');
+        const hasCompliant = activeFleet.some(v => v.status === 'ALLOWED' || v.status === 'REALLOCATED');
+        const activeCars = activeFleet.filter(v => (v.type || 'CAR').toUpperCase() === 'CAR');
+        const activeBikes = activeFleet.filter(v => (v.type || 'BIKE').toUpperCase() !== 'CAR');
 
         if (filter === 'OVERLIMIT') return hasOverlimit;
+        if (filter === 'COMPLIANT') return hasCompliant && !hasOverlimit;
+        if (filter === 'CARS') return activeCars.length > 0;
+        if (filter === 'BIKES') return activeBikes.length > 0;
         if (filter === 'UNFILLED') return activeFleet.length === 0;
         return true; // ALL
     });
@@ -209,7 +220,9 @@ export const renderRegistry = () => {
 
 export const renderPoolGrid = () => {
     const grid = document.getElementById('pool-grid'); if (!grid) return; grid.innerHTML = '';
+    let occupied = 0;
     portalState.slots.forEach(s => {
+        if (s.occupant) occupied++;
         const d = document.createElement('div');
         d.className = `pool-slot ${s.occupant ? 'occupied' : 'empty'}`;
         d.onclick = () => window.openPool(s.id);
@@ -220,6 +233,10 @@ export const renderPoolGrid = () => {
         `;
         grid.appendChild(d);
     });
+
+    const k = (id) => document.getElementById(id);
+    if (k('ms-pool-total')) k('ms-pool-total').textContent = portalState.slots.length;
+    if (k('ms-pool-occ')) k('ms-pool-occ').textContent = occupied;
 };
 
 const renderPoolSearchResults = (slotId, query = '') => {

@@ -487,6 +487,16 @@ const saveResident = async () => {
  * Event Listener Initialization
  */
 document.addEventListener('DOMContentLoaded', () => {
+  // On mobile, keep heavy sections collapsed by default (desktop stays open via HTML).
+  try {
+    if (window.matchMedia && window.matchMedia('(max-width: 520px)').matches) {
+      document.getElementById('registry-overview')?.removeAttribute('open');
+      document.getElementById('pool-visualiser')?.removeAttribute('open');
+    }
+  } catch {
+    // ignore
+  }
+
   // Auth handlers
   const loginBtn = document.getElementById('auth-login-btn');
   const signupBtn = document.getElementById('auth-signup-btn');
@@ -558,6 +568,31 @@ document.addEventListener('DOMContentLoaded', () => {
       renderRegistry();
     };
   });
+
+  // KPI quick-filters (Registry)
+  const setRegistryFilter = (filter) => {
+    document.body.dataset.registryFilter = filter;
+    // Keep pills in sync when the filter maps to one.
+    document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+    const pill = document.querySelector(`.filter-pill[data-filter="${filter}"]`);
+    if (pill) pill.classList.add('active');
+    renderRegistry();
+    document.getElementById('registry-units')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const bindKpi = (valueId, filter) => {
+    const el = document.getElementById(valueId);
+    const card = el?.closest?.('.metric-card');
+    if (!card) return;
+    card.classList.add('metric-card--clickable');
+    card.onclick = () => setRegistryFilter(filter);
+  };
+
+  bindKpi('kpi-total', 'ALL');
+  bindKpi('kpi-allowed', 'COMPLIANT');
+  bindKpi('kpi-dormant', 'OVERLIMIT');
+  bindKpi('kpi-cars', 'CARS');
+  bindKpi('kpi-bikes', 'BIKES');
 
   // Bulk Import Hook
   const csvFile = document.getElementById('csv-file');

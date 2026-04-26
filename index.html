@@ -100,7 +100,14 @@
         </header>
 
         <details class="mobile-disclosure mobile-disclosure--light" id="registry-overview" open style="padding: 0 1.6rem;">
-          <summary><span>Overview</span></summary>
+          <summary class="mobile-summary">
+            <span>Overview</span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill"><b id="ms-total">0</b> Total</span>
+              <span class="ms-pill good"><b id="ms-ok">0</b> OK</span>
+              <span class="ms-pill bad"><b id="ms-bad">0</b> Viol</span>
+            </span>
+          </summary>
           <section class="dashboard-metrics" style="padding-left:0; padding-right:0;">
           <div class="metric-card"><span class="label">Total Registry</span><span class="value" id="kpi-total">0</span>
           </div>
@@ -118,15 +125,20 @@
         </details>
 
         <details id="pool-visualiser" class="mobile-disclosure" open style="margin-bottom: 1rem; padding: 0 1.6rem;">
-          <summary>
-            <span>Community Pool Grid</span>
+          <summary class="mobile-summary">
+            <span>Community Pool</span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill"><b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> occupied</span>
+            </span>
           </summary>
           <div id="pool-grid"
             style="display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: 0.5rem;"></div>
         </details>
 
         <details class="mobile-disclosure mobile-disclosure--light" id="registry-units" open style="padding: 0 1.6rem;">
-          <summary><span>Units</span></summary>
+          <summary class="mobile-summary">
+            <span>Units</span>
+          </summary>
           <section class="explorer-controls" style="padding:0;">
           <div
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; gap: 0.75rem;">
@@ -457,8 +469,8 @@
       </div>
 
       <div class="drawer-footer">
-        <button class="btn btn-outline" style="flex: 1;" onclick="window.closeMdl()">Dismiss Panel</button>
-        <button class="btn btn-primary" style="flex: 1;" id="save-mdl-btn">Update Unit Policy</button>
+        <button class="btn btn-outline" style="flex: 1;" onclick="window.closeMdl()">Cancel</button>
+        <button class="btn btn-primary" style="flex: 1;" id="save-mdl-btn">Save</button>
       </div>
     </div>
   </div>
