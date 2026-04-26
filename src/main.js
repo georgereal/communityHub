@@ -1,0 +1,812 @@
+/**
+ * Sentry Portal Modular Entry (Vercel Edition)
+ * Primary Boot Sequence & View Coordination
+ */
+import { portalState, persist, migrateAndRecover, supabase, pullState } from './store.js';
+import { processAnalytics, renderRegistry, saveMdlData, handleCSVImport, downloadVehicleRegistryXlsx } from './registry.js';
+import { processFinances, renderCashLedger, saveCashData } from './finances.js';
+
+const showAuth = (msg = '') => {
+  const modal = document.getElementById('auth-modal');
+  if (modal) modal.classList.add('active');
+  const err = document.getElementById('auth-error');
+  if (err) {
+    if (msg) { err.style.display = 'block'; err.textContent = msg; }
+    else { err.style.display = 'none'; err.textContent = ''; }
+  }
+};
+
+const hideAuth = () => {
+  const modal = document.getElementById('auth-modal');
+  if (modal) modal.classList.remove('active');
+  const err = document.getElementById('auth-error');
+  if (err) { err.style.display = 'none'; err.textContent = ''; }
+};
+
+const getProfile = async (userId) => {
+  if (!supabase || !userId) return null;
+  try {
+    const { data } = await supabase.from('profiles').select('id, full_name, role, email').eq('id', userId).single();
+    return data || null;
+  } catch {
+    // Backward-compatible fallback if the `email` column isn't migrated yet.
+    try {
+      const { data } = await supabase.from('profiles').select('id, full_name, role').eq('id', userId).single();
+      return data || null;
+    } catch {
+      return null;
+    }
+  }
+};
+
+const ROLE_OPTIONS = [
+  { key: 'admin', label: 'Admin' },
+  { key: 'property_manager', label: 'Property Manager' },
+  { key: 'accounts_manager', label: 'Accounts Manager' },
+  { key: 'security', label: 'Security' },
+  { key: 'resident_viewer', label: 'Resident Viewer' }
+];
+
+const hasPermission = (role, perm) => {
+  const r = role || 'resident_viewer';
+  const matrix = {
+    admin: new Set(['registry.view', 'registry.edit', 'accounts.view', 'accounts.edit', 'setup.view', 'setup.edit', 'users.manage']),
+    property_manager: new Set(['registry.view', 'registry.edit', 'accounts.view', 'setup.view']),
+    accounts_manager: new Set(['accounts.view', 'accounts.edit']),
+    security: new Set(['registry.view', 'registry.edit']),
+    resident_viewer: new Set(['registry.view', 'accounts.view'])
+  };
+  return (matrix[r] || matrix.resident_viewer).has(perm);
+};
+
+const can = (perm) => {
+  const role = portalState.auth?.role || 'resident_viewer';
+  // v1 fallback permissions mapping until v2 tables are enabled
+  return hasPermission(role, perm);
+};
+
+const fetchEffectivePermissions = async (apartmentId) => {
+  if (!supabase) return null;
+  const { data: s } = await supabase.auth.getSession();
+  const uid = s?.session?.user?.id;
+  if (!uid) return null;
+
+  // Pull scoped user roles for this apartment + system roles
+  const { data: roles } = await supabase.from('user_role_assignments')
+    .select('role_key, scope, apartment_id')
+    .eq('user_id', uid);
+
+  if (!roles) return [];
+
+  const isSystemAdmin = roles.some(r => r.scope === 'system' && r.role_key === 'system_admin');
+  if (isSystemAdmin) {
+    const { data: perms } = await supabase.from('permissions').select('key');
+    return (perms || []).map(p => p.key);
+  }
+
+  const aptRoleKeys = roles.filter(r => r.scope === 'apartment' && r.apartment_id === apartmentId).map(r => r.role_key);
+  if (!aptRoleKeys.length) return [];
+
+  const { data: rp } = await supabase.from('role_permissions').select('permission_key, role_key').in('role_key', aptRoleKeys);
+  return Array.from(new Set((rp || []).map(x => x.permission_key)));
+};
+
+const applyPermissionsToNav = (perms) => {
+  const arr = perms || [];
+  // If we couldn't resolve permissions yet, don't hide navigation.
+  if (!Array.isArray(arr) || arr.length === 0) return;
+  const set = new Set(arr);
+  const show = (route, ok) => document.querySelectorAll(`.nav-link-btn[data-route="${route}"]`).forEach(b => b.style.display = ok ? 'flex' : 'none');
+  show('registry', set.has('vehicle_registry.view') || !supabase); // keep visible in offline
+  show('accounts', set.has('accounts.view'));
+  show('setup', set.has('setup.view') || set.has('rbac.view') || set.has('system.apartments.manage'));
+  show('apartment', set.has('apartment_mgmt.view'));
+};
+
+const applyAuthToUI = async (session) => {
+  const user = session?.user;
+  if (!user) return;
+  const profile = await getProfile(user.id);
+  const name = profile?.full_name || profile?.email || user.email || 'User';
+  const role = profile?.role || 'resident_viewer';
+  portalState.auth = { id: user.id, email: user.email || '', name, role };
+
+  const initials = (name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+  const topbarInitialsNode = document.getElementById('topbar-user-initials');
+  const topbarNameNode = document.getElementById('topbar-user-name');
+  const topbarRoleNode = document.getElementById('topbar-user-role');
+  const sidebarInitials = document.getElementById('sidebar-user-initials');
+  const sidebarName = document.getElementById('sidebar-user-name');
+  const sidebarRole = document.getElementById('sidebar-user-role');
+
+  if (topbarInitialsNode) topbarInitialsNode.textContent = initials;
+  if (sidebarInitials) sidebarInitials.textContent = initials;
+  if (topbarNameNode) topbarNameNode.textContent = name;
+  if (sidebarName) sidebarName.textContent = name;
+  if (topbarRoleNode) topbarRoleNode.textContent = role;
+  if (sidebarRole) sidebarRole.textContent = role;
+
+  // RBAC gating (UI-level; server-side via RLS in SQL file)
+  const manageBtn = document.getElementById('user-menu-manage');
+  if (manageBtn) manageBtn.style.display = hasPermission(role, 'users.manage') ? 'flex' : 'none';
+  document.querySelectorAll('.nav-link-btn[data-route="setup"]').forEach(btn => {
+    btn.style.display = hasPermission(role, 'setup.view') ? 'flex' : 'none';
+  });
+  document.querySelectorAll('.nav-link-btn[data-route="accounts"]').forEach(btn => {
+    btn.style.display = hasPermission(role, 'accounts.view') ? 'flex' : 'none';
+  });
+
+  // Show "Make me admin" only if no admin exists yet and user isn't admin.
+  const makeAdminBtn = document.getElementById('user-menu-make-admin');
+  if (makeAdminBtn && supabase && role !== 'admin') {
+    try {
+      const { data } = await supabase.rpc('no_admin_exists');
+      makeAdminBtn.style.display = data ? 'flex' : 'none';
+    } catch {
+      makeAdminBtn.style.display = 'none';
+    }
+  }
+};
+
+const ensureAccessState = () => {
+  if (!portalState.access) {
+    portalState.access = {
+      apartments: [{ id: 'apt-default', name: portalState.community?.name || 'CommunityHub' }],
+      users: [{ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: ['apt-default'] }],
+      activeApartmentId: 'apt-default',
+      activeUserId: 'usr-default'
+    };
+  }
+  if (!portalState.access.apartments.length) portalState.access.apartments.push({ id: 'apt-default', name: 'CommunityHub' });
+  if (!portalState.access.activeApartmentId) portalState.access.activeApartmentId = portalState.access.apartments[0].id;
+  if (!portalState.access.users.length) portalState.access.users.push({ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: [portalState.access.activeApartmentId] });
+  if (!portalState.access.activeUserId) portalState.access.activeUserId = portalState.access.users[0].id;
+};
+
+const setActiveApartment = (apartmentId) => {
+  const apt = portalState.access.apartments.find(a => a.id === apartmentId);
+  if (!apt) return;
+  portalState.access.activeApartmentId = apartmentId;
+  portalState.community.name = apt.name;
+  const titleNode = document.getElementById('complex-title');
+  if (titleNode) titleNode.textContent = apt.name;
+  const topApt = document.getElementById('topbar-apartment-name');
+  if (topApt) topApt.textContent = apt.name;
+  persist();
+};
+
+const setActiveUser = (userId) => {
+  const user = portalState.access.users.find(u => u.id === userId);
+  if (!user) return;
+  portalState.access.activeUserId = userId;
+  renderAccessMappings();
+  persist();
+};
+
+const renderAccessMappings = () => {
+  ensureAccessState();
+  const apartments = portalState.access.apartments;
+  const users = portalState.access.users;
+
+  const sidebarApartmentSelect = document.getElementById('sidebar-apartment-switch');
+  const headerApartmentSelect = document.getElementById('header-apartment-switch');
+  const headerApartmentSelectAccounts = document.getElementById('header-apartment-switch-accounts');
+  const headerApartmentSelectSetup = document.getElementById('header-apartment-switch-setup');
+  const drawerApartmentSelect = document.getElementById('nav-apartment-switch');
+  const activeApartmentSelect = document.getElementById('access-active-apartment');
+  const userApartmentsSelect = document.getElementById('access-user-apartments');
+  const userRoleSelect = document.getElementById('access-user-role');
+  const activeUserSelect = document.getElementById('access-active-user');
+  const usersList = document.getElementById('access-users-list');
+
+  const apartmentOptions = apartments.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+  if (sidebarApartmentSelect) {
+    sidebarApartmentSelect.innerHTML = apartmentOptions;
+    sidebarApartmentSelect.value = portalState.access.activeApartmentId;
+  }
+  if (drawerApartmentSelect) {
+    drawerApartmentSelect.innerHTML = apartmentOptions;
+    drawerApartmentSelect.value = portalState.access.activeApartmentId;
+  }
+  if (headerApartmentSelect) {
+    headerApartmentSelect.innerHTML = apartmentOptions;
+    headerApartmentSelect.value = portalState.access.activeApartmentId;
+  }
+  if (headerApartmentSelectAccounts) {
+    headerApartmentSelectAccounts.innerHTML = apartmentOptions;
+    headerApartmentSelectAccounts.value = portalState.access.activeApartmentId;
+  }
+  if (headerApartmentSelectSetup) {
+    headerApartmentSelectSetup.innerHTML = apartmentOptions;
+    headerApartmentSelectSetup.value = portalState.access.activeApartmentId;
+  }
+  if (activeApartmentSelect) {
+    activeApartmentSelect.innerHTML = apartmentOptions;
+    activeApartmentSelect.value = portalState.access.activeApartmentId;
+  }
+  if (userApartmentsSelect) {
+    userApartmentsSelect.innerHTML = apartmentOptions;
+  }
+  if (userRoleSelect) {
+    userRoleSelect.innerHTML = ROLE_OPTIONS.map(r => `<option value="${r.key}">${r.label}</option>`).join('');
+  }
+
+  if (activeUserSelect) {
+    activeUserSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.email ? ` (${u.email})` : ''}</option>`).join('');
+    activeUserSelect.value = portalState.access.activeUserId;
+  }
+
+  // Don't overwrite authenticated user header.
+  // Header/sidebar user identity is driven by Supabase auth (applyAuthToUI).
+
+  if (usersList) {
+    usersList.innerHTML = users.map(u => {
+      const mapped = apartments.filter(a => (u.apartment_ids || []).includes(a.id)).map(a => a.name).join(', ') || 'No mapping';
+      return `<div style="padding:0.45rem 0.6rem; border:1px solid var(--border); border-radius:6px; margin-bottom:0.45rem; background:#fafafa;">
+        <b style="color:#111827;">${u.name}</b> <span style="color:var(--text-dim);">${u.email || ''}</span>
+        <div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.15rem;">Apartments: ${mapped}</div>
+      </div>`;
+    }).join('');
+  }
+};
+
+const syncAccessFromSupabase = async () => {
+  if (!supabase) return false;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const uid = sessionData?.session?.user?.id;
+  if (!uid) return false;
+
+  // Always hydrate the current user's profile (RLS allows self-read).
+  const selfProfile = await getProfile(uid);
+  if (selfProfile) {
+    const selfUser = {
+      id: selfProfile.id,
+      name: selfProfile.full_name || selfProfile.email || 'User',
+      email: selfProfile.email || '',
+      role: selfProfile.role || 'resident_viewer',
+      apartment_ids: []
+    };
+    portalState.access.users = [selfUser];
+    portalState.access.activeUserId = uid;
+  }
+
+  // Apartments the current user can see (RLS enforces)
+  const { data: apartmentsRaw } = await supabase.from('apartments').select('id, name').order('name');
+  const apartments = (apartmentsRaw || []).filter(a => a.name !== '__SYSTEM__');
+  if (apartments && apartments.length) {
+    portalState.access.apartments = apartments;
+    const cur = portalState.access.activeApartmentId;
+    const invalid = !cur || cur === 'apt-default' || !apartments.some(a => a.id === cur);
+    if (invalid) portalState.access.activeApartmentId = apartments[0].id;
+    setActiveApartment(portalState.access.activeApartmentId);
+  }
+
+  // Apply scoped permissions if RBAC v2 tables exist
+  try {
+    const perms = await fetchEffectivePermissions(portalState.access.activeApartmentId);
+    if (perms && perms.length > 0) {
+      portalState.authPermissions = perms;
+      applyPermissionsToNav(perms);
+    }
+  } catch {
+    // ignore
+  }
+
+  // Current user's apartment mappings (always allowed under current RLS).
+  const { data: selfMappings } = await supabase.from('user_apartments').select('apartment_id').eq('user_id', uid);
+  if (portalState.access.users?.length) {
+    portalState.access.users[0].apartment_ids = (selfMappings || []).map(m => m.apartment_id);
+  }
+
+  // Users list (admin only due to RLS). If allowed, hydrate full directory.
+  const { data: profiles } = await supabase.from('profiles').select('id, full_name, email, role').order('full_name');
+  if (profiles && profiles.length) {
+    const { data: mappings } = await supabase.from('user_apartments').select('user_id, apartment_id');
+    const map = new Map();
+    (mappings || []).forEach(m => {
+      if (!map.has(m.user_id)) map.set(m.user_id, []);
+      map.get(m.user_id).push(m.apartment_id);
+    });
+    portalState.access.users = profiles.map(p => ({
+      id: p.id,
+      name: p.full_name || p.email || p.id,
+      email: p.email || '',
+      role: p.role || 'resident_viewer',
+      apartment_ids: map.get(p.id) || []
+    }));
+
+    if (!portalState.access.activeUserId || !portalState.access.users.some(u => u.id === portalState.access.activeUserId)) {
+      portalState.access.activeUserId = uid;
+    }
+  }
+
+  persist();
+  renderAccessMappings();
+  return true;
+};
+
+/**
+ * Global Boot Sequence: Partition Restoration & Initialization
+ */
+/**
+ * Global Boot Sequence: Relational Retrieval & Modular Hydration
+ */
+const boot = async () => {
+  document.body.prepend(Object.assign(document.createElement('div'), { id: 'sentry-boot-loader', innerHTML: '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; color:#fff;"><i class="fa-solid fa-hotel fa-spin" style="font-size:2rem; margin-bottom:1rem; color:var(--accent);"></i><div style="font-weight:900; letter-spacing:1px; text-transform:uppercase; font-size:0.75rem;">Initializing CommunityHub</div></div>' }));
+
+  let bootHasSupabaseSession = false;
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    if (!data?.session) {
+      document.getElementById('sentry-boot-loader')?.remove();
+      showAuth();
+      return;
+    }
+    bootHasSupabaseSession = true;
+    await applyAuthToUI(data.session);
+    // Resolve real apartment UUID before pullState — otherwise queries use apt-default and return empty rows.
+    ensureAccessState();
+    await syncAccessFromSupabase();
+  }
+
+  const connected = await migrateAndRecover();
+  document.getElementById('sentry-boot-loader')?.remove();
+  if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
+  if (!supabase || !bootHasSupabaseSession) ensureAccessState();
+  setActiveApartment(portalState.access.activeApartmentId);
+  renderAccessMappings();
+
+  processAnalytics();
+  processFinances();
+  renderRegistry();
+
+  const route = window.location.hash.slice(1) || 'registry';
+  window.switchView(route);
+};
+
+export const initializeSeedData = async () => {
+  const blocks = ['A', 'B']; const pUnits = [];
+  for (let b = 0; b < 2; b++) { for (let f = 1; f <= 5; f++) { for (let n = 1; n <= 2; n++) { pUnits.push({ number: `${blocks[b]}-${f}0${n}`, car_limit: 1, bike_limit: 1, is_community: false }); } } }
+  if (supabase) { const { error } = await supabase.from('units').insert(pUnits); if (!error) { await pullState(); window.location.reload(); } }
+};
+window.initializeSeedData = initializeSeedData;
+
+/**
+ * View & SubView Navigation logic (Sentry Strategic Router)
+ */
+window.switchView = (v) => {
+  // Validate route and fallback to registry
+  const routes = ['registry', 'accounts', 'units', 'setup', 'apartment'];
+  const route = routes.includes(v) ? v : 'registry';
+
+  document.querySelectorAll('.content-view').forEach(x => x.classList.remove('active'));
+  const viewNode = document.getElementById(`view-${route}`);
+  if (!viewNode) {
+    console.warn(`Missing view section for route: ${route}`);
+    document.getElementById('view-registry')?.classList.add('active');
+    return;
+  }
+  viewNode.classList.add('active');
+
+  // Breadcrumb menu replaces sidebar nav links.
+
+  if (route === 'accounts') { window.switchSubView('ledger'); renderCashLedger(); }
+  if (route === 'registry') renderRegistry();
+  if (route === 'setup') {
+    document.getElementById('setup-name').value = portalState.community.name;
+    document.getElementById('setup-car').value = portalState.community.defaults.cars;
+    document.getElementById('setup-bike').value = portalState.community.defaults.bikes;
+    renderAccessMappings();
+  }
+};
+
+const renderResidents = async () => {
+  const list = document.getElementById('resident-items');
+  if (!list) return;
+  list.innerHTML = '';
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId || !supabase) {
+    list.innerHTML = `<div style="padding:0.9rem; color:var(--text-dim);">Supabase required.</div>`;
+    return;
+  }
+
+  const { data, error } = await supabase.from('residents')
+    .select('id, unit_number, kind, full_name, phone, email, notes')
+    .eq('apartment_id', apartmentId)
+    .order('unit_number');
+  if (error) {
+    list.innerHTML = `<div style="padding:0.9rem; color:var(--danger); font-weight:800;">${error.message}</div>`;
+    return;
+  }
+
+  (data || []).forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'apt-row';
+    row.style = "grid-template-columns: 120px 110px 1fr 160px 220px 90px; padding: 0.75rem 0.95rem; align-items: center;";
+    row.innerHTML = `
+      <div style="font-weight:800;">${r.unit_number}</div>
+      <div style="font-size:0.72rem; font-weight:900; color:var(--text-dim); text-transform:uppercase;">${r.kind}</div>
+      <div style="font-weight:800;">${r.full_name}</div>
+      <div style="color:var(--text-dim); font-weight:700;">${r.phone || '-'}</div>
+      <div style="color:var(--text-dim); font-weight:700;">${r.email || '-'}</div>
+      <div style="text-align:right; display:flex; gap:0.35rem; justify-content:flex-end;">
+        <button class="btn btn-outline" style="padding:0.2rem 0.45rem;" data-action="edit"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn btn-outline" style="padding:0.2rem 0.45rem; color:var(--danger);" data-action="del"><i class="fa-solid fa-trash-can"></i></button>
+      </div>
+    `;
+    row.querySelector('[data-action="edit"]').onclick = () => openResidentModal(r);
+    row.querySelector('[data-action="del"]').onclick = async () => {
+      if (!confirm('Delete resident record?')) return;
+      await supabase.from('residents').delete().eq('id', r.id);
+      renderResidents();
+    };
+    list.appendChild(row);
+  });
+};
+
+let editingResidentId = null;
+const openResidentModal = (r = null) => {
+  editingResidentId = r?.id || null;
+  document.getElementById('resident-unit').value = r?.unit_number || '';
+  document.getElementById('resident-kind').value = r?.kind || 'OWNER';
+  document.getElementById('resident-name').value = r?.full_name || '';
+  document.getElementById('resident-phone').value = r?.phone || '';
+  document.getElementById('resident-email').value = r?.email || '';
+  document.getElementById('resident-notes').value = r?.notes || '';
+  document.getElementById('resident-modal').classList.add('active');
+};
+
+const closeResidentModal = () => {
+  document.getElementById('resident-modal').classList.remove('active');
+  editingResidentId = null;
+};
+
+const saveResident = async () => {
+  if (!supabase) return;
+  const apartmentId = portalState.access?.activeApartmentId;
+  const payload = {
+    apartment_id: apartmentId,
+    unit_number: document.getElementById('resident-unit').value.trim(),
+    kind: document.getElementById('resident-kind').value,
+    full_name: document.getElementById('resident-name').value.trim(),
+    phone: document.getElementById('resident-phone').value.trim(),
+    email: document.getElementById('resident-email').value.trim(),
+    notes: document.getElementById('resident-notes').value.trim()
+  };
+  if (!payload.unit_number || !payload.full_name) return alert('Unit + name required.');
+  const q = editingResidentId
+    ? supabase.from('residents').update(payload).eq('id', editingResidentId)
+    : supabase.from('residents').insert(payload);
+  const { error } = await q;
+  if (error) return alert(error.message);
+  closeResidentModal();
+  renderResidents();
+};
+
+/**
+ * Event Listener Initialization
+ */
+document.addEventListener('DOMContentLoaded', () => {
+  // Auth handlers
+  const loginBtn = document.getElementById('auth-login-btn');
+  const signupBtn = document.getElementById('auth-signup-btn');
+  const emailEl = document.getElementById('auth-email');
+  const passEl = document.getElementById('auth-password');
+
+  const signIn = async () => {
+    if (!supabase) return showAuth('Supabase is not configured.');
+    const email = (emailEl?.value || '').trim();
+    const password = (passEl?.value || '').trim();
+    if (!email || !password) return showAuth('Email and password required.');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return showAuth(error.message);
+    await applyAuthToUI(data.session);
+    hideAuth();
+    ensureAccessState();
+    if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
+    await syncAccessFromSupabase();
+    setActiveApartment(portalState.access.activeApartmentId);
+    renderAccessMappings();
+    await pullState();
+    processAnalytics();
+    processFinances();
+    renderRegistry();
+  };
+
+  const signUp = async () => {
+    if (!supabase) return showAuth('Supabase is not configured.');
+    const email = (emailEl?.value || '').trim();
+    const password = (passEl?.value || '').trim();
+    if (!email || !password) return showAuth('Email and password required.');
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) return showAuth(error.message);
+    if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
+    await applyAuthToUI(data.session);
+    hideAuth();
+    ensureAccessState();
+    if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
+    await syncAccessFromSupabase();
+    setActiveApartment(portalState.access.activeApartmentId);
+    renderAccessMappings();
+    await pullState();
+    processAnalytics();
+    processFinances();
+    renderRegistry();
+  };
+
+  if (loginBtn) loginBtn.onclick = signIn;
+  if (signupBtn) signupBtn.onclick = signUp;
+
+  // Global View Router
+  window.addEventListener('hashchange', () => {
+    const route = window.location.hash.slice(1);
+    window.switchView(route);
+  });
+
+  // Registry Tactical controls
+  const searchInput = document.getElementById('apt-search');
+  if (searchInput) searchInput.oninput = () => renderRegistry();
+
+  const sortSelect = document.getElementById('registry-sort');
+  if (sortSelect) sortSelect.onchange = () => renderRegistry();
+
+  document.querySelectorAll('.filter-pill').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.dataset.registryFilter = btn.dataset.filter;
+      renderRegistry();
+    };
+  });
+
+  // Bulk Import Hook
+  const csvFile = document.getElementById('csv-file');
+  if (csvFile) csvFile.onchange = (e) => {
+    if (e.target.files.length > 0) handleCSVImport(e.target.files[0]);
+  };
+
+  // Administration Logic
+  document.getElementById('save-setup-btn').onclick = async () => {
+    const name = document.getElementById('setup-name').value;
+    const car_default = parseInt(document.getElementById('setup-car').value);
+    const bike_default = parseInt(document.getElementById('setup-bike').value);
+
+    const activeApartment = portalState.access.apartments.find(a => a.id === portalState.access.activeApartmentId);
+    if (activeApartment && name) activeApartment.name = name;
+    portalState.community.name = name;
+
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) return alert('No active apartment selected.');
+
+    if (supabase) {
+      // 1. Update Society Config
+      await supabase.from('society_config').upsert({ apartment_id, name, car_default, bike_default });
+
+      // 2. Propagation: Apply new defaults to ALL units
+      const { error } = await supabase.from('units').update({ car_limit: car_default, bike_limit: bike_default }).eq('apartment_id', apartment_id).neq('number', '');
+
+      if (!error) {
+        await pullState();
+        ensureAccessState();
+        if (activeApartment && name) {
+          const refreshed = portalState.access.apartments.find(a => a.id === activeApartment.id);
+          if (refreshed) refreshed.name = name;
+        }
+        portalState.community.name = name;
+        renderAccessMappings();
+        processAnalytics();
+        renderRegistry();
+        alert('Cloud Policy Synchronized: All units updated to new defaults!');
+      }
+    }
+    persist();
+  };
+
+  document.getElementById('clear-all-btn').onclick = () => {
+    if (confirm('DANGER: This will permanently wipe all community data (Vehicles, Accounts AND Units). Proceed?')) {
+      localStorage.clear();
+      portalState.units = [];
+      portalState.finances.txns = [];
+      persist();
+      window.location.reload();
+    }
+  };
+
+  document.getElementById('deep-repair-btn').onclick = () => {
+    portalState.units.forEach(u => { if (!u.vehicles) u.vehicles = []; u.vehicles.forEach(v => { if (v.isParkingActive === undefined) v.isParkingActive = true; }); });
+    portalState.finances.txns.forEach(t => { if (!t.wallet) t.wallet = 'CASH'; if (!t.type) t.type = 'OUT'; });
+    persist(); alert('Deep repair complete. State sanitized.'); window.location.reload();
+  };
+
+  const addApartmentBtn = document.getElementById('add-apartment-btn');
+  if (addApartmentBtn) addApartmentBtn.onclick = () => {
+    const nameInput = document.getElementById('access-apt-name');
+    const name = nameInput.value.trim();
+    if (!name) return;
+    (async () => {
+      if (supabase) {
+        const { data, error } = await supabase.from('apartments').insert({ name }).select('id, name').single();
+        if (error) return alert(error.message);
+        nameInput.value = '';
+        await syncAccessFromSupabase();
+        setActiveApartment(data.id);
+        renderAccessMappings();
+        return;
+      }
+      const newApt = { id: `apt-${Date.now()}`, name };
+      portalState.access.apartments.push(newApt);
+      portalState.access.users.forEach(u => { if (!u.apartment_ids) u.apartment_ids = []; });
+      nameInput.value = '';
+      setActiveApartment(newApt.id);
+      renderAccessMappings();
+      persist();
+    })();
+  };
+
+  const addUserBtn = document.getElementById('add-user-btn');
+  if (addUserBtn) addUserBtn.onclick = () => {
+    const nameInput = document.getElementById('access-user-name');
+    const emailInput = document.getElementById('access-user-email');
+    const aptSelect = document.getElementById('access-user-apartments');
+    const roleSelect = document.getElementById('access-user-role');
+    const name = nameInput.value.trim();
+    const email = emailInput.value.trim();
+    const role = roleSelect?.value || 'resident_viewer';
+    if (!email) return alert('Email is required (user must already exist).');
+    const apartment_ids = Array.from(aptSelect.selectedOptions).map(o => o.value);
+    if (!apartment_ids.length) apartment_ids.push(portalState.access.activeApartmentId);
+    (async () => {
+      if (supabase) {
+        // Find profile by email (requires profiles.email + admin RLS to read/update)
+        const { data: prof, error: pErr } = await supabase.from('profiles').select('id, full_name, email, role').eq('email', email).single();
+        if (pErr || !prof) return alert('User not found. Ask them to sign up first.');
+        // Update profile name/role (admin only)
+        await supabase.from('profiles').update({ full_name: name || prof.full_name, role }).eq('id', prof.id);
+        // Replace mappings (simple: insert new; ignore existing duplicates)
+        for (const aid of apartment_ids) {
+          await supabase.from('user_apartments').upsert({ user_id: prof.id, apartment_id: aid });
+        }
+        nameInput.value = '';
+        emailInput.value = '';
+        await syncAccessFromSupabase();
+        portalState.access.activeUserId = prof.id;
+        renderAccessMappings();
+        return;
+      }
+      const user = { id: `usr-${Date.now()}`, name, email, role, apartment_ids };
+      portalState.access.users.push(user);
+      portalState.access.activeUserId = user.id;
+      nameInput.value = '';
+      emailInput.value = '';
+      renderAccessMappings();
+      persist();
+    })();
+  };
+
+  const activeApartmentSelect = document.getElementById('access-active-apartment');
+  if (activeApartmentSelect) activeApartmentSelect.onchange = (e) => {
+    setActiveApartment(e.target.value);
+    renderAccessMappings();
+    renderRegistry();
+  };
+
+  const navApartmentSwitch = document.getElementById('nav-apartment-switch');
+  if (navApartmentSwitch) navApartmentSwitch.onchange = (e) => {
+    setActiveApartment(e.target.value);
+    renderAccessMappings();
+    renderRegistry();
+    renderResidents();
+  };
+
+  const navToggle = document.getElementById('nav-toggle');
+  if (navToggle) {
+    navToggle.onclick = () => {
+      document.body.classList.toggle('nav-expanded');
+    };
+  }
+
+  document.querySelectorAll('.nav-link-btn').forEach(btn => {
+    btn.onclick = () => {
+      const route = btn.dataset.route;
+      document.body.classList.remove('nav-expanded');
+      window.location.hash = `#${route}`;
+      window.switchView(route);
+      const viewName = document.getElementById('topbar-view-name');
+      if (viewName) viewName.textContent = route;
+      if (route === 'apartment') renderResidents();
+    };
+  });
+
+  const userBtn = document.getElementById('topbar-user-btn');
+  const userMenu = document.getElementById('topbar-user-menu');
+  const hideUserMenu = () => { if (userMenu) userMenu.style.display = 'none'; };
+  if (userBtn && userMenu) {
+    userBtn.onclick = (e) => {
+      e.stopPropagation();
+      userMenu.style.display = userMenu.style.display === 'none' ? 'block' : 'none';
+    };
+    document.addEventListener('click', hideUserMenu);
+    userMenu.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  const profileBtn = document.getElementById('user-menu-profile');
+  if (profileBtn) profileBtn.onclick = () => {
+    const authUser = portalState.auth;
+    const apartments = portalState.access?.apartments || [];
+    const mappedIds = portalState.access?.users?.find(u => u.id === authUser?.id)?.apartment_ids || [];
+    const mapped = apartments.filter(a => mappedIds.includes(a.id)).map(a => a.name).join(', ') || '—';
+    hideUserMenu();
+    alert(`${authUser?.name || authUser?.email || 'User'}\n\nRole: ${authUser?.role || 'resident_viewer'}\nApartments: ${mapped}`);
+  };
+
+  const manageBtn = document.getElementById('user-menu-manage');
+  if (manageBtn) manageBtn.onclick = () => {
+    hideUserMenu();
+    window.location.hash = '#setup';
+    window.switchView('setup');
+    setTimeout(() => document.getElementById('access-users-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+
+  const resRefresh = document.getElementById('resident-refresh-btn');
+  if (resRefresh) resRefresh.onclick = () => renderResidents();
+  const resAdd = document.getElementById('resident-add-btn');
+  if (resAdd) resAdd.onclick = () => openResidentModal(null);
+  const resCancel = document.getElementById('resident-cancel-btn');
+  if (resCancel) resCancel.onclick = () => closeResidentModal();
+  const resSave = document.getElementById('resident-save-btn');
+  if (resSave) resSave.onclick = () => saveResident();
+
+  const logoutBtn = document.getElementById('user-menu-logout');
+  if (logoutBtn) logoutBtn.onclick = () => {
+    hideUserMenu();
+    if (supabase) supabase.auth.signOut();
+    localStorage.clear();
+    showAuth('Signed out.');
+  };
+
+  const makeAdminBtn = document.getElementById('user-menu-make-admin');
+  if (makeAdminBtn) makeAdminBtn.onclick = async () => {
+    hideUserMenu();
+    if (!supabase) return alert('Supabase not configured.');
+    const { data: s } = await supabase.auth.getSession();
+    const uid = s?.session?.user?.id;
+    if (!uid) return showAuth('Please sign in again.');
+    const { error } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
+    if (error) return alert(error.message);
+    // Force refresh of UI gating after role change.
+    const refreshed = await supabase.auth.getSession();
+    await applyAuthToUI(refreshed.data.session);
+    alert('You are now admin. Setup/User management is enabled.');
+  };
+
+  const activeUserSelect = document.getElementById('access-active-user');
+  if (activeUserSelect) activeUserSelect.onchange = (e) => setActiveUser(e.target.value);
+
+  // Modal Unified Button Hooks
+  document.getElementById('save-mdl-btn').onclick = () => saveMdlData();
+  document.getElementById('save-cash-btn').onclick = () => saveCashData();
+
+  const registryDownload = document.getElementById('registry-download-xlsx');
+  if (registryDownload) {
+    registryDownload.onclick = () => {
+      downloadVehicleRegistryXlsx().catch((err) => {
+        console.error(err);
+        alert('Download failed. Check the console for details.');
+      });
+    };
+  }
+
+  // Registry Header Register Hook
+  const addBtn = document.getElementById('add-vehicle-top');
+  if (addBtn) addBtn.onclick = () => {
+    const firstUnit = portalState.units[0];
+    if (firstUnit) window.openMdl(firstUnit.id);
+  };
+
+  // Initialize Router State
+  boot();
+  const currentRoute = window.location.hash.slice(1) || 'registry';
+  window.switchView(currentRoute);
+  const viewName = document.getElementById('topbar-view-name');
+  if (viewName) viewName.textContent = currentRoute;
+});
