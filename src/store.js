@@ -60,11 +60,26 @@ export const pullState = async () => {
 export const persist = () => { localStorage.setItem('sentry_portal_v5_platinum', JSON.stringify(portalState)); };
 
 export const migrateAndRecover = async () => {
-    const cloudLink = await pullState();
-    if (!cloudLink) {
-        const local = localStorage.getItem('sentry_portal_v5_platinum');
-        if (local) { portalState = JSON.parse(local); return true; }
+    // 1. Try to restore active apartment from local storage first
+    const local = localStorage.getItem('sentry_portal_v5_platinum');
+    if (local) {
+        try {
+            const savedState = JSON.parse(local);
+            if (savedState.access?.activeApartmentId) {
+                portalState.access.activeApartmentId = savedState.access.activeApartmentId;
+            }
+        } catch (e) { console.error('Local state recovery failed', e); }
     }
+
+    // 2. Now pull data for that specific apartment
+    const cloudLink = await pullState();
+    
+    // 3. Fallback to local data if offline
+    if (!cloudLink && local) {
+        portalState = JSON.parse(local);
+        return true;
+    }
+
     if (!portalState.access) {
         portalState.access = {
             apartments: [{ id: 'apt-default', name: portalState.community?.name || 'CommunityHub' }],

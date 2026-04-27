@@ -163,16 +163,38 @@ const ensureAccessState = () => {
   if (!portalState.access.activeUserId) portalState.access.activeUserId = portalState.access.users[0].id;
 };
 
-const setActiveApartment = (apartmentId) => {
+const setActiveApartment = async (apartmentId) => {
   const apt = portalState.access.apartments.find(a => a.id === apartmentId);
   if (!apt) return;
+  
   portalState.access.activeApartmentId = apartmentId;
   portalState.community.name = apt.name;
+  
+  // UI header updates
   const titleNode = document.getElementById('complex-title');
   if (titleNode) titleNode.textContent = apt.name;
   const topApt = document.getElementById('topbar-apartment-name');
   if (topApt) topApt.textContent = apt.name;
+  
   persist();
+  
+  // Save to DB for permanent history (cross-device)
+  if (supabase) {
+    const { data: s } = await supabase.auth.getSession();
+    if (s?.session?.user?.id) {
+      await supabase.from('profiles').update({ last_apartment_id: apartmentId }).eq('id', s.session.user.id);
+    }
+  }
+
+  // 🔄 Pull new data partition from Supabase and refresh all views
+  const success = await pullState();
+  if (success) {
+    renderAccessMappings();
+    renderRegistry();
+    // Refresh other view-specific components if they exist
+    if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
+    if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
+  }
 };
 
 const setActiveUser = (userId) => {
@@ -188,16 +210,10 @@ const renderAccessMappings = () => {
   const apartments = portalState.access.apartments;
   const users = portalState.access.users;
 
+  // 1. Sidebar/Header Selects
   const sidebarApartmentSelect = document.getElementById('sidebar-apartment-switch');
-  const headerApartmentSelect = document.getElementById('header-apartment-switch');
-  const headerApartmentSelectAccounts = document.getElementById('header-apartment-switch-accounts');
-  const headerApartmentSelectSetup = document.getElementById('header-apartment-switch-setup');
   const drawerApartmentSelect = document.getElementById('nav-apartment-switch');
-  const activeApartmentSelect = document.getElementById('access-active-apartment');
-  const userApartmentsSelect = document.getElementById('access-user-apartments');
-  const userRoleSelect = document.getElementById('access-user-role');
-  const activeUserSelect = document.getElementById('access-active-user');
-  const usersList = document.getElementById('access-users-list');
+  const headerApartmentSelect = document.getElementById('header-apartment-switch');
 
   const apartmentOptions = apartments.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
   if (sidebarApartmentSelect) {
@@ -212,41 +228,66 @@ const renderAccessMappings = () => {
     headerApartmentSelect.innerHTML = apartmentOptions;
     headerApartmentSelect.value = portalState.access.activeApartmentId;
   }
-  if (headerApartmentSelectAccounts) {
-    headerApartmentSelectAccounts.innerHTML = apartmentOptions;
-    headerApartmentSelectAccounts.value = portalState.access.activeApartmentId;
-  }
-  if (headerApartmentSelectSetup) {
-    headerApartmentSelectSetup.innerHTML = apartmentOptions;
-    headerApartmentSelectSetup.value = portalState.access.activeApartmentId;
-  }
-  if (activeApartmentSelect) {
-    activeApartmentSelect.innerHTML = apartmentOptions;
-    activeApartmentSelect.value = portalState.access.activeApartmentId;
-  }
-  if (userApartmentsSelect) {
-    userApartmentsSelect.innerHTML = apartmentOptions;
-  }
-  if (userRoleSelect) {
-    userRoleSelect.innerHTML = ROLE_OPTIONS.map(r => `<option value="${r.key}">${r.label}</option>`).join('');
-  }
 
-  if (activeUserSelect) {
-    activeUserSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.email ? ` (${u.email})` : ''}</option>`).join('');
-    activeUserSelect.value = portalState.access.activeUserId;
-  }
+  // 2. New User Directory Table (v2)
+  const usersListV2 = document.getElementById('access-users-list-v2');
+  if (usersListV2) {
+    usersListV2.innerHTML = users.map(u => {
+      const mappedApts = apartments.filter(a => (u.apartment_ids || []).includes(a.id));
+      const aptChips = mappedApts.map(a => `<span class="apt-chip">${a.name}</span>`).join('') || '<span style="color:var(--text-dim); font-style:italic;">No access</span>';
+      const initials = (u.name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+      const roleLabel = ROLE_OPTIONS.find(r => r.key === u.role)?.label || u.role || 'Viewer';
 
-  // Don't overwrite authenticated user header.
-  // Header/sidebar user identity is driven by Supabase auth (applyAuthToUI).
-
-  if (usersList) {
-    usersList.innerHTML = users.map(u => {
-      const mapped = apartments.filter(a => (u.apartment_ids || []).includes(a.id)).map(a => a.name).join(', ') || 'No mapping';
-      return `<div style="padding:0.45rem 0.6rem; border:1px solid var(--border); border-radius:6px; margin-bottom:0.45rem; background:#fafafa;">
-        <b style="color:#111827;">${u.name}</b> <span style="color:var(--text-dim);">${u.email || ''}</span>
-        <div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.15rem;">Apartments: ${mapped}</div>
-      </div>`;
+      return `
+        <div class="user-row">
+          <div class="user-info">
+            <div class="user-avatar">${initials}</div>
+            <div class="user-details">
+              <span class="user-name">${u.name}</span>
+              <span class="user-email">${u.email || '—'}</span>
+            </div>
+          </div>
+          <div>
+            <span class="role-badge ${u.role || 'resident_viewer'}">${roleLabel}</span>
+          </div>
+          <div class="apt-chips">${aptChips}</div>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button class="btn-icon" onclick="window.openUserModal('${u.id}')" title="Edit Access"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="btn-icon danger" onclick="window.deleteUser('${u.id}')" title="Revoke All Access"><i class="fa-solid fa-user-slash"></i></button>
+          </div>
+        </div>
+      `;
     }).join('');
+  }
+
+  // 3. Apartment Portfolio Grid
+  const portfolioGrid = document.getElementById('portfolio-grid');
+  if (portfolioGrid) {
+    portfolioGrid.innerHTML = apartments.map(a => {
+      const userCount = users.filter(u => (u.apartment_ids || []).includes(a.id)).length;
+      return `
+        <div class="portfolio-card">
+          <div class="portfolio-info">
+            <span class="portfolio-name">${a.name}</span>
+            <span class="portfolio-meta">${userCount} authorized users</span>
+          </div>
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn-icon" onclick="window.openAptModal('${a.id}')" title="Rename"><i class="fa-solid fa-pen"></i></button>
+            <button class="btn-icon danger" onclick="window.deleteApartment('${a.id}')" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 4. Modal Dropdowns (Role & Apartments)
+  const userRoleSelectV2 = document.getElementById('access-user-role-v2');
+  if (userRoleSelectV2) {
+    userRoleSelectV2.innerHTML = ROLE_OPTIONS.map(r => `<option value="${r.key}">${r.label}</option>`).join('');
+  }
+  const userAptsSelectV2 = document.getElementById('access-user-apartments-v2');
+  if (userAptsSelectV2) {
+    userAptsSelectV2.innerHTML = apartments.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
   }
 };
 
@@ -256,7 +297,7 @@ const syncAccessFromSupabase = async () => {
   const uid = sessionData?.session?.user?.id;
   if (!uid) return false;
 
-  // Always hydrate the current user's profile (RLS allows self-read).
+  // 1. Get profile (including last_viewed_apartment if column exists)
   const selfProfile = await getProfile(uid);
   if (selfProfile) {
     const selfUser = {
@@ -268,17 +309,30 @@ const syncAccessFromSupabase = async () => {
     };
     portalState.access.users = [selfUser];
     portalState.access.activeUserId = uid;
+    
+    // If we have a saved ID in the DB and current state is default, use the DB one
+    if (selfProfile.last_apartment_id && (!portalState.access.activeApartmentId || portalState.access.activeApartmentId === 'apt-default')) {
+      portalState.access.activeApartmentId = selfProfile.last_apartment_id;
+    }
   }
 
-  // Apartments the current user can see (RLS enforces)
+  // 2. Apartments the current user can see (RLS enforces)
   const { data: apartmentsRaw } = await supabase.from('apartments').select('id, name').order('name');
   const apartments = (apartmentsRaw || []).filter(a => a.name !== '__SYSTEM__');
+  
   if (apartments && apartments.length) {
     portalState.access.apartments = apartments;
     const cur = portalState.access.activeApartmentId;
-    const invalid = !cur || cur === 'apt-default' || !apartments.some(a => a.id === cur);
-    if (invalid) portalState.access.activeApartmentId = apartments[0].id;
-    setActiveApartment(portalState.access.activeApartmentId);
+    
+    // Verify if the current apartment is still valid/permitted
+    const isValid = cur && cur !== 'apt-default' && apartments.some(a => a.id === cur);
+    
+    if (!isValid) {
+      portalState.access.activeApartmentId = apartments[0].id;
+    }
+    
+    // 🔥 Ensure the UI and Data Partition are fully synchronized
+    await setActiveApartment(portalState.access.activeApartmentId);
   }
 
   // Apply scoped permissions if RBAC v2 tables exist
@@ -653,85 +707,133 @@ document.addEventListener('DOMContentLoaded', () => {
     persist(); alert('Deep repair complete. State sanitized.'); window.location.reload();
   };
 
-  const addApartmentBtn = document.getElementById('add-apartment-btn');
-  if (addApartmentBtn) addApartmentBtn.onclick = () => {
-    const nameInput = document.getElementById('access-apt-name');
-    const name = nameInput.value.trim();
-    if (!name) return;
-    (async () => {
-      if (supabase) {
-        const { data, error } = await supabase.from('apartments').insert({ name }).select('id, name').single();
-        if (error) return alert(error.message);
-        nameInput.value = '';
-        await syncAccessFromSupabase();
-        setActiveApartment(data.id);
-        renderAccessMappings();
-        return;
-      }
-      const newApt = { id: `apt-${Date.now()}`, name };
-      portalState.access.apartments.push(newApt);
-      portalState.access.users.forEach(u => { if (!u.apartment_ids) u.apartment_ids = []; });
-      nameInput.value = '';
-      setActiveApartment(newApt.id);
-      renderAccessMappings();
-      persist();
-    })();
+  // User & Apartment Management Modals
+  let activeUserIdForEdit = null;
+  window.openUserModal = (userId = null) => {
+    activeUserIdForEdit = userId;
+    const user = portalState.access.users.find(u => u.id === userId);
+    document.getElementById('access-user-name-v2').value = user?.name || '';
+    document.getElementById('access-user-email-v2').value = user?.email || '';
+    document.getElementById('access-user-role-v2').value = user?.role || 'resident_viewer';
+    const aptSelect = document.getElementById('access-user-apartments-v2');
+    Array.from(aptSelect.options).forEach(opt => {
+      opt.selected = (user?.apartment_ids || []).includes(opt.value);
+    });
+    document.getElementById('user-access-modal').classList.add('active');
   };
+  window.closeUserModal = () => document.getElementById('user-access-modal').classList.remove('active');
 
-  const addUserBtn = document.getElementById('add-user-btn');
-  if (addUserBtn) addUserBtn.onclick = () => {
-    const nameInput = document.getElementById('access-user-name');
-    const emailInput = document.getElementById('access-user-email');
-    const aptSelect = document.getElementById('access-user-apartments');
-    const roleSelect = document.getElementById('access-user-role');
-    const name = nameInput.value.trim();
-    const email = emailInput.value.trim();
-    const role = roleSelect?.value || 'resident_viewer';
-    if (!email) return alert('Email is required (user must already exist).');
+  let activeAptIdForEdit = null;
+  window.openAptModal = (aptId = null) => {
+    activeAptIdForEdit = aptId;
+    const apt = portalState.access.apartments.find(a => a.id === aptId);
+    document.getElementById('apt-mgmt-title').textContent = aptId ? 'Edit Apartment' : 'Add Apartment';
+    document.getElementById('apt-mgmt-name').value = apt?.name || '';
+    document.getElementById('apt-mgmt-modal').classList.add('active');
+  };
+  window.closeAptModal = () => document.getElementById('apt-mgmt-modal').classList.remove('active');
+
+  document.getElementById('save-user-access-btn').onclick = async () => {
+    const name = document.getElementById('access-user-name-v2').value.trim();
+    const email = document.getElementById('access-user-email-v2').value.trim();
+    const role = document.getElementById('access-user-role-v2').value;
+    const aptSelect = document.getElementById('access-user-apartments-v2');
     const apartment_ids = Array.from(aptSelect.selectedOptions).map(o => o.value);
-    if (!apartment_ids.length) apartment_ids.push(portalState.access.activeApartmentId);
-    (async () => {
-      if (supabase) {
-        // Find profile by email (requires profiles.email + admin RLS to read/update)
-        const { data: prof, error: pErr } = await supabase.from('profiles').select('id, full_name, email, role').eq('email', email).single();
-        if (pErr || !prof) return alert('User not found. Ask them to sign up first.');
-        // Update profile name/role (admin only)
-        await supabase.from('profiles').update({ full_name: name || prof.full_name, role }).eq('id', prof.id);
-        // Replace mappings (simple: insert new; ignore existing duplicates)
-        for (const aid of apartment_ids) {
-          await supabase.from('user_apartments').upsert({ user_id: prof.id, apartment_id: aid });
-        }
-        nameInput.value = '';
-        emailInput.value = '';
-        await syncAccessFromSupabase();
-        portalState.access.activeUserId = prof.id;
-        renderAccessMappings();
-        return;
+
+    if (!email) return alert('Email is required.');
+
+    if (supabase) {
+      const { data: prof, error: pErr } = await supabase.from('profiles').select('id, full_name, email, role').eq('email', email).single();
+      if (pErr || !prof) return alert('User not found. Ask them to sign up first.');
+      await supabase.from('profiles').update({ full_name: name || prof.full_name, role }).eq('id', prof.id);
+      
+      // Delete existing mappings for this user and re-insert (simple approach)
+      await supabase.from('user_apartments').delete().eq('user_id', prof.id);
+      for (const aid of apartment_ids) {
+        await supabase.from('user_apartments').upsert({ user_id: prof.id, apartment_id: aid });
       }
-      const user = { id: `usr-${Date.now()}`, name, email, role, apartment_ids };
-      portalState.access.users.push(user);
-      portalState.access.activeUserId = user.id;
-      nameInput.value = '';
-      emailInput.value = '';
-      renderAccessMappings();
+      await syncAccessFromSupabase();
+    } else {
+      const user = activeUserIdForEdit 
+        ? portalState.access.users.find(u => u.id === activeUserIdForEdit)
+        : { id: `usr-${Date.now()}` };
+      
+      user.name = name;
+      user.email = email;
+      user.role = role;
+      user.apartment_ids = apartment_ids;
+
+      if (!activeUserIdForEdit) portalState.access.users.push(user);
       persist();
-    })();
+      renderAccessMappings();
+    }
+    window.closeUserModal();
   };
 
-  const activeApartmentSelect = document.getElementById('access-active-apartment');
-  if (activeApartmentSelect) activeApartmentSelect.onchange = (e) => {
-    setActiveApartment(e.target.value);
-    renderAccessMappings();
-    renderRegistry();
+  document.getElementById('save-apt-mgmt-btn').onclick = async () => {
+    const name = document.getElementById('apt-mgmt-name').value.trim();
+    if (!name) return;
+
+    if (supabase) {
+      if (activeAptIdForEdit) {
+        await supabase.from('apartments').update({ name }).eq('id', activeAptIdForEdit);
+      } else {
+        await supabase.from('apartments').insert({ name });
+      }
+      await syncAccessFromSupabase();
+    } else {
+      if (activeAptIdForEdit) {
+        const apt = portalState.access.apartments.find(a => a.id === activeAptIdForEdit);
+        if (apt) apt.name = name;
+      } else {
+        portalState.access.apartments.push({ id: `apt-${Date.now()}`, name });
+      }
+      persist();
+      renderAccessMappings();
+    }
+    window.closeAptModal();
   };
 
-  const navApartmentSwitch = document.getElementById('nav-apartment-switch');
-  if (navApartmentSwitch) navApartmentSwitch.onchange = (e) => {
-    setActiveApartment(e.target.value);
-    renderAccessMappings();
-    renderRegistry();
-    renderResidents();
+  window.deleteUser = async (userId) => {
+    if (!confirm('Revoke all access for this user?')) return;
+    if (supabase) {
+      await supabase.from('user_apartments').delete().eq('user_id', userId);
+      // We don't delete the profile, just their access mappings.
+      await syncAccessFromSupabase();
+    } else {
+      portalState.access.users = portalState.access.users.filter(u => u.id !== userId);
+      persist();
+      renderAccessMappings();
+    }
   };
+
+  window.deleteApartment = async (aptId) => {
+    if (!confirm('Delete this apartment? This will NOT delete associated vehicles/units but will break access.')) return;
+    if (supabase) {
+      await supabase.from('apartments').delete().eq('id', aptId);
+      await syncAccessFromSupabase();
+    } else {
+      portalState.access.apartments = portalState.access.apartments.filter(a => a.id !== aptId);
+      persist();
+      renderAccessMappings();
+    }
+  };
+
+  // 🏢 Apartment Switching (Global)
+  const apartmentSelectors = ['access-active-apartment', 'nav-apartment-switch', 'sidebar-apartment-switch', 'header-apartment-switch'];
+  apartmentSelectors.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.onchange = async (e) => {
+        await setActiveApartment(e.target.value);
+        // Ensure all selectors stay in sync
+        apartmentSelectors.forEach(sid => {
+          const sel = document.getElementById(sid);
+          if (sel) sel.value = e.target.value;
+        });
+      };
+    }
+  });
 
   const navToggle = document.getElementById('nav-toggle');
   if (navToggle) {
