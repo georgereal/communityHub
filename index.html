@@ -32,11 +32,11 @@
         <select id="nav-apartment-switch" class="nav-drawer-select"></select>
 
         <div class="nav-drawer-links">
-          <button class="nav-link-btn" data-route="registry"><i class="fa-solid fa-car"></i><span>Vehicle Registry</span></button>
-          <button class="nav-link-btn" data-route="accounts"><i class="fa-solid fa-file-invoice-dollar"></i><span>Accounts</span></button>
-          <button class="nav-link-btn" data-route="apartment"><i class="fa-solid fa-address-card"></i><span>Apartment Mgmt</span></button>
-          <button class="nav-link-btn" data-route="units"><i class="fa-solid fa-building"></i><span>Units</span></button>
-          <button class="nav-link-btn" data-route="setup"><i class="fa-solid fa-sliders"></i><span>Setup</span></button>
+          <button class="nav-link-btn" type="button" data-route="registry"><i class="fa-solid fa-car"></i><span>Vehicle Registry</span></button>
+          <button class="nav-link-btn" type="button" data-route="accounts"><i class="fa-solid fa-file-invoice-dollar"></i><span>Accounts</span></button>
+          <button class="nav-link-btn" type="button" data-route="apartment"><i class="fa-solid fa-address-card"></i><span>Apartment Mgmt</span></button>
+          <button class="nav-link-btn" type="button" data-route="units"><i class="fa-solid fa-building"></i><span>Units</span></button>
+          <button class="nav-link-btn" type="button" data-route="setup"><i class="fa-solid fa-sliders"></i><span>Setup</span></button>
         </div>
       </div>
 
@@ -56,8 +56,15 @@
       <!-- Global Header -->
       <div class="topbar">
         <div class="topbar-left">
+          <button id="mobile-nav-toggle" class="topbar-nav-btn" type="button" aria-label="Open menu">
+            <i class="fa-solid fa-bars"></i>
+          </button>
           <div class="topbar-brand">
-            <span id="topbar-apartment-name" class="topbar-apt">CommunityHub</span>
+            <div class="brand-lockup" aria-label="CommunityHub workspace">
+              <span class="brand-lockup__app">CommunityHub</span>
+              <span class="brand-lockup__sep">for</span>
+              <span id="topbar-apartment-name" class="brand-lockup__workspace">CommunityHub</span>
+            </div>
           </div>
         </div>
         <div class="topbar-right">
@@ -82,7 +89,7 @@
       <section id="view-registry" class="content-view active">
         <header>
           <div class="header-title">
-            <h2 id="complex-title">CommunityHub</h2>
+            <h2 id="complex-title" class="page-title"><span class="page-title__accent">Vehicle</span> Command Center</h2>
             <p>Vehicle Allocation & Compliance Management</p>
           </div>
           <div style="display: flex; gap: 0.5rem;">

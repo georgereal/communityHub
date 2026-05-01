@@ -180,6 +180,33 @@ aside {
   min-width: 0;
 }
 
+.topbar-nav-btn {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+
+.topbar-nav-btn:hover {
+  background: #f3f4f6;
+}
+
+.nav-backdrop {
+  display: none;
+}
+
+.nav-expanded .nav-backdrop {
+  /* Default: no backdrop on desktop rail expansion.
+     Backdrop is enabled only for mobile off-canvas in the 820px media query below. */
+  display: none;
+}
+
 .topbar-brand {
   display: flex;
   align-items: baseline;
@@ -187,15 +214,41 @@ aside {
   min-width: 0;
 }
 
-.topbar-apt {
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.brand-lockup__app {
   font-size: 1.02rem;
   font-weight: 950;
   letter-spacing: -0.25px;
   color: #111827;
   white-space: nowrap;
+}
+
+.brand-lockup__sep {
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #9ca3af;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.brand-lockup__workspace {
+  font-size: 0.9rem;
+  font-weight: 900;
+  color: #111827;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 280px;
+  max-width: 320px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
 }
 
 .topbar-user {
@@ -527,6 +580,33 @@ header {
   font-size: 2rem;
   font-weight: 800;
   letter-spacing: -0.4px;
+}
+
+.page-title {
+  font-size: clamp(1.75rem, 3.2vw, 2.35rem);
+  font-weight: 950;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.page-title__accent {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.15em;
+  margin: 0 -0.15em;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(55, 65, 81, 0.14), rgba(55, 65, 81, 0.06));
+}
+
+.page-title__accent::after {
+  content: '';
+  position: absolute;
+  left: 0.18em;
+  right: 0.18em;
+  bottom: -0.08em;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(55, 65, 81, 0.9), rgba(55, 65, 81, 0.35));
 }
 
 .header-title p {
@@ -1479,6 +1559,18 @@ header {
 }
 
 @media (max-width: 820px) {
+  .topbar-nav-btn {
+    display: inline-flex;
+  }
+
+  .nav-expanded .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.35);
+    z-index: 2500; /* just under the sidebar (3000) */
+  }
+
   /* Off-canvas sidebar: keep rail toggle, reclaim width */
   aside {
     position: fixed;
@@ -1514,7 +1606,7 @@ header {
     padding: 0.6rem 1rem;
   }
 
-  .topbar-apt {
+  .brand-lockup__workspace {
     max-width: 52vw;
   }
 

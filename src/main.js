@@ -171,8 +171,6 @@ const setActiveApartment = async (apartmentId) => {
   portalState.community.name = apt.name;
   
   // UI header updates
-  const titleNode = document.getElementById('complex-title');
-  if (titleNode) titleNode.textContent = apt.name;
   const topApt = document.getElementById('topbar-apartment-name');
   if (topApt) topApt.textContent = apt.name;
   
@@ -541,6 +539,29 @@ const saveResident = async () => {
  * Event Listener Initialization
  */
 document.addEventListener('DOMContentLoaded', () => {
+  // Mobile nav: add backdrop + topbar hamburger toggle for off-canvas sidebar.
+  const ensureNavBackdrop = () => {
+    if (document.querySelector('.nav-backdrop')) return;
+    const d = document.createElement('div');
+    d.className = 'nav-backdrop';
+    d.setAttribute('aria-hidden', 'true');
+    d.onclick = () => document.body.classList.remove('nav-expanded');
+    document.body.appendChild(d);
+  };
+  ensureNavBackdrop();
+
+  const mobileNavToggle = document.getElementById('mobile-nav-toggle');
+  if (mobileNavToggle) {
+    mobileNavToggle.onclick = () => {
+      document.body.classList.toggle('nav-expanded');
+    };
+  }
+
+  // Allow ESC to close the off-canvas nav quickly.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.body.classList.remove('nav-expanded');
+  });
+
   // On mobile, keep heavy sections collapsed by default (desktop stays open via HTML).
   try {
     if (window.matchMedia && window.matchMedia('(max-width: 520px)').matches) {
@@ -853,6 +874,22 @@ document.addEventListener('DOMContentLoaded', () => {
       if (route === 'apartment') renderResidents();
     };
   });
+
+  // Defensive routing: delegated handler ensures nav always works (even if individual handlers are lost/overwritten).
+  document.addEventListener('click', (e) => {
+    const btn = e.target?.closest?.('.nav-link-btn');
+    if (!btn) return;
+    const route = btn.dataset.route;
+    if (!route) return;
+    e.preventDefault();
+    e.stopPropagation();
+    document.body.classList.remove('nav-expanded');
+    window.location.hash = `#${route}`;
+    window.switchView(route);
+    const viewName = document.getElementById('topbar-view-name');
+    if (viewName) viewName.textContent = route;
+    if (route === 'apartment') renderResidents();
+  }, true);
 
   const userBtn = document.getElementById('topbar-user-btn');
   const userMenu = document.getElementById('topbar-user-menu');

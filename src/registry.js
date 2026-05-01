@@ -38,7 +38,7 @@ export const processAnalytics = () => {
     if (k('kpi-total')) {
         k('kpi-total').textContent = total; k('kpi-allowed').textContent = allowed;
         k('kpi-dormant').textContent = overlimit; k('kpi-cars').textContent = tc;
-        k('kpi-bikes').textContent = tb; k('complex-title').textContent = portalState.community.name;
+        k('kpi-bikes').textContent = tb;
     }
 
     // Mobile summary badges (optional)
