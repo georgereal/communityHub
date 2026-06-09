@@ -1,50 +1,112 @@
 /**
  * Sentry Registry Engine (Relational)
  */
-import { portalState, persist, supabase, pullState } from './store.js';
+import { portalState, persist, supabase, pullState, upsertSocietyConfig } from './store.js';
+import {
+  RECONCILE_EXPORT_HEADERS,
+  buildReconcileExportRows,
+  getSlotPoolKind,
+  nextCommunityPoolSlotName,
+  slotsForPoolKind,
+} from './parkingImport.js';
+
+let activePoolKind = 'car';
+
+/** Resolve allocation including EH/BH pool rows linked via parking_slots. */
+export const effectiveAllocationType = (v) => {
+    const declared = (v.allocation_type || 'BASE').toUpperCase();
+    if (declared === 'COMMON' || declared === 'NEIGHBOR') return declared;
+
+    const poolSlot = portalState.slots.find(
+        (s) => s.assigned_vehicle_id === v.id && getSlotPoolKind(s),
+    );
+    if (poolSlot) return 'COMMON';
+
+    if (v.allocation_target_id) {
+        const slot = portalState.slots.find((s) => s.id === v.allocation_target_id);
+        if (slot && getSlotPoolKind(slot)) return 'COMMON';
+        if (portalState.units.some((u) => u.id === v.allocation_target_id)) return 'NEIGHBOR';
+    }
+    return 'BASE';
+};
+
+/** Active vehicles consuming this unit's base car/bike quota (excludes pool + neighbor). */
+export const countBaseSlotUsage = (unit) => {
+    let baseCars = 0;
+    let baseBikes = 0;
+    (unit.vehicles || []).forEach((v) => {
+        if (!v.is_parking_active) return;
+        if (effectiveAllocationType(v) !== 'BASE') return;
+        if ((v.type || 'CAR').toUpperCase() === 'CAR') baseCars++;
+        else baseBikes++;
+    });
+    const carLimit = unit.car_limit || 0;
+    const bikeLimit = unit.bike_limit || 0;
+    const freeCars = Math.max(0, carLimit - baseCars);
+    const freeBikes = Math.max(0, bikeLimit - baseBikes);
+    return {
+        baseCars,
+        baseBikes,
+        freeCars,
+        freeBikes,
+        hasFreeCarSlots: freeCars > 0,
+        hasFreeBikeSlots: freeBikes > 0,
+        hasFreeSlots: freeCars > 0 || freeBikes > 0,
+    };
+};
 
 export const processAnalytics = () => {
-    let total = 0, allowed = 0, overlimit = 0, tc = 0, tb = 0;
+    let overlimitCars = 0, overlimitBikes = 0, tc = 0, tb = 0;
+    let baseCapacity = 0;
     portalState.units.forEach(u => {
-        let lc = 0, lb = 0;
+        baseCapacity += (u.car_limit || 0) + (u.bike_limit || 0);
+        let baseCars = 0, baseBikes = 0;
         u.vehicles.forEach(v => {
-            total++;
             if (!v.is_parking_active) {
                 v.status = 'INACTIVE';
                 return;
             }
 
-            // Count every active vehicle against unit entitlement.
-            // If excess vehicles are moved to COMMUNITY/NEIGHBOR allocations,
-            // mark them as reallocated (compliant but visibly differentiated).
-            const allocType = (v.allocation_type || 'BASE').toUpperCase();
-            if (v.type === 'CAR') {
-                tc++;
-                lc++;
-                if (lc <= u.car_limit) v.status = 'ALLOWED';
-                else v.status = allocType === 'BASE' ? 'OVERLIMIT' : 'REALLOCATED';
-            } else {
-                tb++;
-                lb++;
-                if (lb <= u.bike_limit) v.status = 'ALLOWED';
-                else v.status = allocType === 'BASE' ? 'OVERLIMIT' : 'REALLOCATED';
+            const allocType = effectiveAllocationType(v);
+            if (v.type === 'CAR') tc++;
+            else tb++;
+
+            // EH pool + flat-to-flat rentals do not consume base slot quota.
+            if (allocType === 'COMMON' || allocType === 'NEIGHBOR') {
+                v.status = 'REALLOCATED';
+                return;
             }
 
-            if (v.status === 'ALLOWED' || v.status === 'REALLOCATED') allowed++;
-            else overlimit++;
+            if (v.type === 'CAR') {
+                baseCars++;
+                v.status = baseCars <= u.car_limit ? 'ALLOWED' : 'OVERLIMIT';
+                if (v.status === 'OVERLIMIT') overlimitCars++;
+            } else {
+                baseBikes++;
+                v.status = baseBikes <= u.bike_limit ? 'ALLOWED' : 'OVERLIMIT';
+                if (v.status === 'OVERLIMIT') overlimitBikes++;
+            }
         });
     });
+
+    const activeTotal = tc + tb;
+    const occupancyPct = baseCapacity > 0
+        ? Math.round((activeTotal / baseCapacity) * 100)
+        : null;
+    const occupancyLabel = occupancyPct == null ? '—' : `${occupancyPct}%`;
+
     const k = (id) => document.getElementById(id);
-    if (k('kpi-total')) {
-        k('kpi-total').textContent = total; k('kpi-allowed').textContent = allowed;
-        k('kpi-dormant').textContent = overlimit; k('kpi-cars').textContent = tc;
+    if (k('kpi-overlimit-cars')) {
+        k('kpi-overlimit-cars').textContent = overlimitCars;
+        k('kpi-overlimit-bikes').textContent = overlimitBikes;
+        k('kpi-cars').textContent = tc;
         k('kpi-bikes').textContent = tb;
+        k('kpi-occupancy').textContent = occupancyLabel;
     }
 
-    // Mobile summary badges (optional)
-    if (k('ms-total')) k('ms-total').textContent = total;
-    if (k('ms-ok')) k('ms-ok').textContent = allowed;
-    if (k('ms-bad')) k('ms-bad').textContent = overlimit;
+    if (k('ms-over-cars')) k('ms-over-cars').textContent = overlimitCars;
+    if (k('ms-over-bikes')) k('ms-over-bikes').textContent = overlimitBikes;
+    if (k('ms-occ')) k('ms-occ').textContent = occupancyLabel;
 };
 
 export const renderRegistry = () => {
@@ -69,10 +131,14 @@ export const renderRegistry = () => {
         const activeBikes = activeFleet.filter(v => (v.type || 'BIKE').toUpperCase() !== 'CAR');
 
         if (filter === 'OVERLIMIT') return hasOverlimit;
+        if (filter === 'OVERLIMIT_CARS') return activeCars.some(v => v.status === 'OVERLIMIT');
+        if (filter === 'OVERLIMIT_BIKES') return activeBikes.some(v => v.status === 'OVERLIMIT');
         if (filter === 'COMPLIANT') return hasCompliant && !hasOverlimit;
         if (filter === 'CARS') return activeCars.length > 0;
         if (filter === 'BIKES') return activeBikes.length > 0;
         if (filter === 'UNFILLED') return activeFleet.length === 0;
+        if (filter === 'FREE_SLOTS_CARS') return countBaseSlotUsage(u).hasFreeCarSlots;
+        if (filter === 'FREE_SLOTS_BIKES') return countBaseSlotUsage(u).hasFreeBikeSlots;
         return true; // ALL
     });
 
@@ -124,7 +190,7 @@ export const renderRegistry = () => {
                         const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
                         const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
                         const t = (v.type || 'CAR').toLowerCase();
-                        const alloc = ((v.allocation_type || 'BASE').toUpperCase());
+                        const alloc = effectiveAllocationType(v);
                         const allocLabel = alloc === 'BASE' ? 'Base slot exceeded' : `Allocated: ${alloc}`;
                         return `<span class="unit-chip ${t} overlimit"><i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}"></i>${v.plate}<span class="unit-chip__sub">${allocLabel}</span></span>`;
                     }).join('')}
@@ -152,7 +218,7 @@ export const renderRegistry = () => {
                     <div class="unit-card__label">Pool allocated</div>
                     <div class="unit-card__value">
                       ${activeFleet
-                        .filter(v => (v.allocation_type || 'BASE').toUpperCase() === 'COMMON')
+                        .filter(v => effectiveAllocationType(v) === 'COMMON')
                         .map(v => portalState.slots.find(s => s.id === v.allocation_target_id)?.name ? `${v.plate} → ${portalState.slots.find(s => s.id === v.allocation_target_id)?.name}` : null)
                         .filter(Boolean)
                         .join('<br/>') || `<span class="unit-card__empty">None</span>`}
@@ -187,7 +253,7 @@ export const renderRegistry = () => {
             })
             .join('');
         const allocationDetails = activeFleet
-            .filter(v => (v.allocation_type || 'BASE').toUpperCase() === 'COMMON')
+            .filter(v => effectiveAllocationType(v) === 'COMMON')
             .map(v => {
                 const target = portalState.slots.find(s => s.id === v.allocation_target_id)?.name;
                 if (!target) return '';
@@ -199,9 +265,11 @@ export const renderRegistry = () => {
         const tags = activeFleet.map(v => {
             const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
             const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
+            const rent = parkingAllocationLabel(v);
+            const rentSuffix = rent ? ` <span class="v-tag-rent">${rent.replace('Rented slot ', '').replace('Rented from ', '@')}</span>` : '';
             return `<div class="v-tag ${(v.type || 'CAR').toLowerCase()} ${(v.status || 'ALLOWED').toLowerCase()}">
                 <i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}" style="font-size: 0.70rem; margin-right: 0.35rem; opacity: 0.95;"></i>
-                <span>${v.plate}</span>
+                <span>${v.plate}${rentSuffix}</span>
             </div>`;
         }).join('');
 
@@ -216,28 +284,162 @@ export const renderRegistry = () => {
         list.appendChild(item);
     });
     renderPoolGrid();
+    renderBikePoolGrid();
+    renderFlatRentalGrid();
 };
 
-export const renderPoolGrid = () => {
-    const grid = document.getElementById('pool-grid'); if (!grid) return; grid.innerHTML = '';
-    let occupied = 0;
-    portalState.slots.forEach(s => {
-        if (s.occupant) occupied++;
+const collectFlatRentalCards = () => {
+    const cards = [];
+    const seenPlates = new Set();
+
+    portalState.units.forEach((tenant) => {
+        tenant.vehicles.forEach((v) => {
+            if (!v.is_parking_active) return;
+            if ((v.allocation_type || '').toUpperCase() !== 'NEIGHBOR') return;
+            if (!v.allocation_target_id) return;
+            const source = portalState.units.find((u) => u.id === v.allocation_target_id);
+            if (seenPlates.has(v.plate)) return;
+            seenPlates.add(v.plate);
+            cards.push({
+                sourceLabel: source?.number || '?',
+                plate: v.plate,
+                tenantLabel: tenant.number,
+            });
+        });
+    });
+
+    portalState.slots.forEach((s) => {
+        if (getSlotPoolKind(s)) return;
+        if (!s.occupant) return;
+        if (seenPlates.has(s.occupant)) return;
+        seenPlates.add(s.occupant);
+        cards.push({
+            sourceLabel: s.name,
+            plate: s.occupant,
+            tenantLabel: s.unit_num || '--',
+            legacySlot: true,
+            slotId: s.id,
+        });
+    });
+
+    return cards.sort((a, b) => String(a.sourceLabel).localeCompare(String(b.sourceLabel)));
+};
+
+export const renderFlatRentalGrid = () => {
+    const grid = document.getElementById('flat-rental-grid');
+    const empty = document.getElementById('flat-rental-empty');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const cards = collectFlatRentalCards();
+    if (empty) empty.hidden = cards.length > 0;
+
+    cards.forEach((c) => {
         const d = document.createElement('div');
-        d.className = `pool-slot ${s.occupant ? 'occupied' : 'empty'}`;
-        d.onclick = () => window.openPool(s.id);
+        d.className = 'pool-slot flat-rental-slot occupied';
+        if (c.legacySlot && c.slotId) {
+            d.onclick = () => window.openPool(c.slotId);
+            d.title = 'Legacy pool row — click to manage';
+        }
         d.innerHTML = `
-            <div class="slot-name">${s.name}</div>
-            <div class="slot-occupant">${s.occupant || 'VACANT'}</div>
-            <div class="slot-unit">${s.unit_num || '--'}</div>
+            <div class="slot-name">${c.sourceLabel}</div>
+            <div class="slot-occupant">${c.plate}</div>
+            <div class="slot-unit">→ ${c.tenantLabel}</div>
         `;
         grid.appendChild(d);
     });
 
-    const k = (id) => document.getElementById(id);
-    if (k('ms-pool-total')) k('ms-pool-total').textContent = portalState.slots.length;
-    if (k('ms-pool-occ')) k('ms-pool-occ').textContent = occupied;
+    const countEl = document.getElementById('ms-flat-rent-count');
+    if (countEl) countEl.textContent = cards.length;
 };
+
+const renderCommunityPoolGrid = (kind, gridId, occId, totalId, emptyId) => {
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const poolSlots = slotsForPoolKind(portalState.slots, kind);
+    let occupied = 0;
+
+    poolSlots.forEach((s) => {
+        if (s.occupant) occupied++;
+        const d = document.createElement('div');
+        d.className = `pool-slot pool-slot--managed ${s.occupant ? 'occupied' : 'empty'}`;
+        d.onclick = () => window.openPool(s.id);
+
+        const delBtn = !s.occupant
+            ? `<button type="button" class="pool-slot__del" title="Delete slot" aria-label="Delete ${s.name}"><i class="fa-solid fa-xmark"></i></button>`
+            : '';
+
+        d.innerHTML = `
+            ${delBtn}
+            <div class="slot-name">${s.name}</div>
+            <div class="slot-occupant">${s.occupant || 'VACANT'}</div>
+            <div class="slot-unit">${s.unit_num || '--'}</div>
+        `;
+
+        const del = d.querySelector('.pool-slot__del');
+        if (del) {
+            del.onclick = (e) => {
+                e.stopPropagation();
+                void window.deleteCommunityPoolSlot(s.id, kind);
+            };
+        }
+        grid.appendChild(d);
+    });
+
+    const emptyEl = emptyId ? document.getElementById(emptyId) : null;
+    if (emptyEl) emptyEl.hidden = poolSlots.length > 0;
+
+    const k = (id) => document.getElementById(id);
+    if (totalId && k(totalId)) k(totalId).textContent = poolSlots.length;
+    if (occId && k(occId)) k(occId).textContent = occupied;
+};
+
+export const renderPoolGrid = () => {
+    renderCommunityPoolGrid('car', 'pool-grid', 'ms-pool-occ', 'ms-pool-total', null);
+};
+
+export const renderBikePoolGrid = () => {
+    renderCommunityPoolGrid('bike', 'bike-pool-grid', 'ms-bike-pool-occ', 'ms-bike-pool-total', 'bike-pool-empty');
+};
+
+export const addCommunityPoolSlot = async (kind) => {
+    if (!supabase) return alert('Supabase is required.');
+    const apartmentId = portalState.access?.activeApartmentId;
+    if (!apartmentId) return alert('No active apartment selected.');
+
+    const name = nextCommunityPoolSlotName(kind, portalState.slots);
+    const payload = { apartment_id: apartmentId, name, pool_kind: kind };
+    let { error } = await supabase.from('parking_slots').insert(payload);
+    if (error && /pool_kind/i.test(error.message)) {
+        ({ error } = await supabase.from('parking_slots').insert({ apartment_id: apartmentId, name }));
+    }
+    if (error) return alert(`Could not add slot: ${error.message}`);
+
+    await pullState();
+    processAnalytics();
+    renderRegistry();
+};
+window.addCommunityPoolSlot = addCommunityPoolSlot;
+
+export const deleteCommunityPoolSlot = async (slotId, kind) => {
+    if (!supabase) return;
+    const slot = portalState.slots.find((s) => s.id === slotId);
+    if (!slot) return;
+    if (slot.occupant || slot.assigned_vehicle_id) {
+        return alert('Release the vehicle from this slot before deleting it.');
+    }
+    if (!confirm(`Delete pool slot ${slot.name}?`)) return;
+
+    const { error } = await supabase.from('parking_slots').delete().eq('id', slotId);
+    if (error) return alert(`Could not delete slot: ${error.message}`);
+
+    await pullState();
+    processAnalytics();
+    renderRegistry();
+};
+window.deleteCommunityPoolSlot = deleteCommunityPoolSlot;
 
 const renderPoolSearchResults = (slotId, query = '') => {
     const list = document.getElementById('pool-search-results');
@@ -254,6 +456,9 @@ const renderPoolSearchResults = (slotId, query = '') => {
 
             const plate = (v.plate || '').toUpperCase();
             const type = (v.type || 'CAR').toUpperCase();
+            const isBike = type !== 'CAR';
+            if (activePoolKind === 'bike' && !isBike) return;
+            if (activePoolKind === 'car' && isBike) return;
             const haystack = `${u.number} ${plate} ${type}`.toLowerCase();
             if (q && !haystack.includes(q)) return;
             candidates.push({ unit: u, vehicle: v });
@@ -276,6 +481,10 @@ const renderPoolSearchResults = (slotId, query = '') => {
         row.onclick = async () => {
             if (!supabase) return;
             await supabase.from('parking_slots').update({ assigned_vehicle_id: vehicle.id }).eq('id', slotId);
+            await supabase.from('vehicles').update({
+                allocation_type: 'COMMON',
+                allocation_target_id: slotId,
+            }).eq('id', vehicle.id);
             document.getElementById('pool-modal').classList.remove('active');
             await pullState();
             renderRegistry();
@@ -286,8 +495,12 @@ const renderPoolSearchResults = (slotId, query = '') => {
 
 export const openPool = (id) => {
     const s = portalState.slots.find(x => x.id === id); if (!s) return;
+    activePoolKind = getSlotPoolKind(s) || 'car';
+    const isBike = activePoolKind === 'bike';
     document.getElementById('pool-mdl-title').textContent = `Slot ${s.name}`;
     document.getElementById('pool-mdl-status').textContent = s.occupant ? 'Active Assignment' : 'Available for Allocation';
+    const iconEl = document.getElementById('pool-v-icon');
+    if (iconEl) iconEl.textContent = isBike ? '🏍️' : '🚗';
 
     document.getElementById('pool-mdl-occupied').style.display = s.occupant ? 'block' : 'none';
     document.getElementById('pool-mdl-available').style.display = s.occupant ? 'none' : 'block';
@@ -310,7 +523,15 @@ window.openPool = openPool;
 
 export const deallocateSlot = async (id) => {
     if (confirm('Release this community slot?') && supabase) {
+        const slot = portalState.slots.find((s) => s.id === id);
+        const vid = slot?.assigned_vehicle_id;
         await supabase.from('parking_slots').update({ assigned_vehicle_id: null }).eq('id', id);
+        if (vid) {
+            await supabase.from('vehicles').update({
+                allocation_type: 'BASE',
+                allocation_target_id: null,
+            }).eq('id', vid);
+        }
         document.getElementById('pool-modal').classList.remove('active');
         await pullState(); renderRegistry();
     }
@@ -330,6 +551,197 @@ window.openMdl = openMdl;
 export const closeMdl = () => document.getElementById('apt-modal').classList.remove('active');
 window.closeMdl = closeMdl;
 
+let capacityDraft = null;
+
+const showCapacityError = (msg) => {
+    const el = document.getElementById('capacity-error');
+    if (!el) return;
+    if (msg) {
+        el.style.display = 'block';
+        el.textContent = msg;
+    } else {
+        el.style.display = 'none';
+        el.textContent = '';
+    }
+};
+
+const initCapacityDraft = () => {
+    capacityDraft = new Map();
+    portalState.units.forEach((u) => {
+        capacityDraft.set(u.id, {
+            car: u.car_limit ?? 0,
+            bike: u.bike_limit ?? 0,
+        });
+    });
+};
+
+const updateCapacityTotals = () => {
+    const el = document.getElementById('capacity-totals');
+    if (!el || !capacityDraft) return;
+    let cars = 0;
+    let bikes = 0;
+    capacityDraft.forEach((d) => {
+        cars += d.car;
+        bikes += d.bike;
+    });
+    el.textContent = `${capacityDraft.size} flats · ${cars} car + ${bikes} bike base slots`;
+};
+
+export const refreshCapacityUnitList = () => {
+    const list = document.getElementById('capacity-unit-list');
+    if (!list || !capacityDraft) return;
+    const q = (document.getElementById('capacity-search')?.value || '').toLowerCase();
+    list.innerHTML = '';
+
+    [...portalState.units]
+        .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
+        .forEach((u) => {
+            if (q && !String(u.number).toLowerCase().includes(q)) return;
+            const draft = capacityDraft.get(u.id);
+            if (!draft) return;
+            const usage = countBaseSlotUsage(u);
+            const row = document.createElement('div');
+            row.className = 'capacity-row';
+            row.dataset.unitId = u.id;
+            row.innerHTML = `
+                <span class="capacity-row__unit">${u.number}</span>
+                <span class="capacity-row__usage">
+                    <i class="fa-solid fa-car"></i> ${usage.baseCars}/${draft.car}
+                    <i class="fa-solid fa-motorcycle"></i> ${usage.baseBikes}/${draft.bike}
+                </span>
+                <input type="number" min="0" step="1" class="capacity-car" value="${draft.car}" />
+                <input type="number" min="0" step="1" class="capacity-bike" value="${draft.bike}" />
+            `;
+            const carInput = row.querySelector('.capacity-car');
+            const bikeInput = row.querySelector('.capacity-bike');
+            carInput.oninput = () => {
+                draft.car = Math.max(0, parseInt(carInput.value, 10) || 0);
+                row.querySelector('.capacity-row__usage').innerHTML = `
+                    <i class="fa-solid fa-car"></i> ${usage.baseCars}/${draft.car}
+                    <i class="fa-solid fa-motorcycle"></i> ${usage.baseBikes}/${draft.bike}
+                `;
+                updateCapacityTotals();
+            };
+            bikeInput.oninput = () => {
+                draft.bike = Math.max(0, parseInt(bikeInput.value, 10) || 0);
+                row.querySelector('.capacity-row__usage').innerHTML = `
+                    <i class="fa-solid fa-car"></i> ${usage.baseCars}/${draft.car}
+                    <i class="fa-solid fa-motorcycle"></i> ${usage.baseBikes}/${draft.bike}
+                `;
+                updateCapacityTotals();
+            };
+            list.appendChild(row);
+        });
+
+    updateCapacityTotals();
+};
+
+export const openCapacityModal = () => {
+    if (!supabase) return alert('Supabase is required.');
+    if (!portalState.units.length) return alert('No units loaded yet.');
+    initCapacityDraft();
+    const carDefault = document.getElementById('cap-default-cars');
+    const bikeDefault = document.getElementById('cap-default-bikes');
+    if (carDefault) carDefault.value = portalState.community.defaults?.cars ?? 1;
+    if (bikeDefault) bikeDefault.value = portalState.community.defaults?.bikes ?? 1;
+    const search = document.getElementById('capacity-search');
+    if (search) search.value = '';
+    showCapacityError('');
+    refreshCapacityUnitList();
+    document.getElementById('capacity-modal')?.classList.add('active');
+};
+
+export const closeCapacityModal = () => {
+    document.getElementById('capacity-modal')?.classList.remove('active');
+    capacityDraft = null;
+    showCapacityError('');
+};
+
+export const applyCapacityDefaultsToAll = () => {
+    if (!capacityDraft) return;
+    const cars = Math.max(0, parseInt(document.getElementById('cap-default-cars')?.value, 10) || 0);
+    const bikes = Math.max(0, parseInt(document.getElementById('cap-default-bikes')?.value, 10) || 0);
+    capacityDraft.forEach((d) => {
+        d.car = cars;
+        d.bike = bikes;
+    });
+    refreshCapacityUnitList();
+};
+
+export const saveCapacityAllocation = async () => {
+    if (!supabase || !capacityDraft) return;
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) return alert('No active apartment selected.');
+
+    const car_default = Math.max(0, parseInt(document.getElementById('cap-default-cars')?.value, 10) || 0);
+    const bike_default = Math.max(0, parseInt(document.getElementById('cap-default-bikes')?.value, 10) || 0);
+    const updates = [...capacityDraft.entries()].map(([id, d]) => ({
+        id,
+        car_limit: Math.max(0, d.car),
+        bike_limit: Math.max(0, d.bike),
+    }));
+
+    showCapacityError('');
+    const results = await Promise.all(
+        updates.map((u) =>
+            supabase.from('units').update({ car_limit: u.car_limit, bike_limit: u.bike_limit }).eq('id', u.id),
+        ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+        showCapacityError(failed.error.message);
+        return;
+    }
+
+    const { error: cfgError } = await upsertSocietyConfig(apartment_id, {
+        name: portalState.community.name,
+        car_default,
+        bike_default,
+    });
+    if (cfgError) {
+        showCapacityError(cfgError.message);
+        return;
+    }
+
+    portalState.community.defaults = { cars: car_default, bikes: bike_default };
+    await pullState();
+    processAnalytics();
+    renderRegistry();
+    persist();
+    closeCapacityModal();
+};
+
+const formatRegistryMetaLine = (v) => {
+    const parts = [];
+    if (v.parking_sticker) parts.push(`Sticker: ${v.parking_sticker}`);
+    const rfid = v.rfid_number || v.rfid_tag;
+    if (rfid && !String(rfid).toLowerCase().includes('not assigned')) {
+        parts.push(`RFID: ${v.rfid_number || v.rfid_tag}`);
+    } else if (v.rfid_tag) {
+        parts.push(`RFID: ${v.rfid_tag}`);
+    }
+    if (v.registry_updated_on) parts.push(`Updated: ${v.registry_updated_on}`);
+    return parts.length ? `<div class="vehicle-registry-meta">${parts.join(' · ')}</div>` : '';
+};
+
+const parkingAllocationLabel = (v) => {
+    const alloc = effectiveAllocationType(v);
+    if (alloc === 'COMMON') {
+        const slot = portalState.slots.find((s) => s.id === v.allocation_target_id);
+        return slot?.name ? `Rented slot ${slot.name}` : '';
+    }
+    if (alloc === 'NEIGHBOR') {
+        const unit = portalState.units.find((u) => u.id === v.allocation_target_id);
+        return unit?.number ? `Rented from ${unit.number}` : '';
+    }
+    return '';
+};
+
+const formatParkingAllocLine = (v) => {
+    const label = parkingAllocationLabel(v);
+    return label ? `<div class="vehicle-parking-alloc">${label}</div>` : '';
+};
+
 const renderMdlList = (u) => {
     const c = document.getElementById('mdl-vehicle-list'); if (!c) return; c.innerHTML = '';
     // Stable Sort: Maintain arrival order to prevent jumpy UI
@@ -342,7 +754,7 @@ const renderMdlList = (u) => {
 
         const type = (v.type || 'CAR').toLowerCase();
         const icon = type === 'car' ? 'fa-car' : 'fa-motorcycle';
-        const alloc = v.allocation_type || 'BASE';
+        const alloc = effectiveAllocationType(v);
         const statusChip = status === 'OVERLIMIT'
             ? `<span class="alloc-status-chip overlimit">Overlimit</span>`
             : (status === 'REALLOCATED'
@@ -354,7 +766,11 @@ const renderMdlList = (u) => {
         <div class="apt-alloc-row">
           <div class="apt-alloc-vehicle">
             <i class="fa-solid ${icon} vehicle-type-icon ${type}"></i>
-            <b>${v.plate}</b>
+            <div class="apt-alloc-vehicle__text">
+              <b>${v.plate}</b>
+              ${formatParkingAllocLine(v)}
+              ${formatRegistryMetaLine(v)}
+            </div>
             ${statusChip}
           </div>
           <div class="apt-alloc-controls ${alloc !== 'BASE' ? 'with-target' : ''}">
@@ -492,62 +908,22 @@ export const handleCSVImport = async (file) => {
 window.handleCSVImport = handleCSVImport;
 
 const HEADER_GREEN = 'FF00FF00';
-const HEADER_YELLOW = 'FFFFFF00';
-
-const vehicleWheelType = (v) => {
-    const t = (v.type || 'CAR').toUpperCase();
-    return t === 'CAR' ? 'FOUR_WHEELER' : 'TWO_WHEELER';
-};
-
-const vehicleBrandField = (v) => (v.brand ?? v.make ?? v.vehicle_brand ?? '').toString().trim();
-
-const buildParkingRow = (u, v) => [
-    'PARKING',
-    u.number,
-    vehicleWheelType(v),
-    (v.plate || '').toString().trim(),
-    vehicleBrandField(v)
-];
-
-/**
- * Active vehicles → Main (compliant) vs overlimit; dormant → separate sheet.
- */
-const collectRegistryExportRows = () => {
-    processAnalytics();
-    const compliant = [];
-    const overlimit = [];
-    const dormant = [];
-    portalState.units.forEach((u) => {
-        u.vehicles.forEach((v) => {
-            if (!v.is_parking_active) {
-                dormant.push(buildParkingRow(u, v));
-                return;
-            }
-            const row = buildParkingRow(u, v);
-            if (v.status === 'OVERLIMIT') overlimit.push(row);
-            else compliant.push(row);
-        });
-    });
-    return { compliant, overlimit, dormant };
-};
-
-const applyRegistrySheetHeader = (ws) => {
-    const headers = ['Parking Area', 'Parking Slot Name', 'Vehicle Type', 'Vehicle Number', 'Vehicle Brand'];
-    ws.addRow(headers);
-    const row = ws.getRow(1);
-    row.font = { bold: true, color: { argb: 'FF000000' } };
-    row.alignment = { vertical: 'middle', horizontal: 'center' };
-    for (let c = 1; c <= 4; c++) {
-        row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_GREEN } };
-    }
-    row.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_YELLOW } };
-};
 
 const thinOutline = { style: 'thin', color: { argb: 'FF000000' } };
 
-const gridBorders = (ws, rowStart, rowEnd) => {
+const applyReconcileSheetHeader = (ws) => {
+    ws.addRow(RECONCILE_EXPORT_HEADERS);
+    const row = ws.getRow(1);
+    row.font = { bold: true, color: { argb: 'FF000000' } };
+    row.alignment = { vertical: 'middle', horizontal: 'center' };
+    for (let c = 1; c <= RECONCILE_EXPORT_HEADERS.length; c++) {
+        row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_GREEN } };
+    }
+};
+
+const gridBordersWide = (ws, rowStart, rowEnd, colCount) => {
     for (let r = rowStart; r <= rowEnd; r++) {
-        for (let c = 1; c <= 5; c++) {
+        for (let c = 1; c <= colCount; c++) {
             ws.getCell(r, c).border = {
                 top: thinOutline,
                 left: thinOutline,
@@ -560,37 +936,39 @@ const gridBorders = (ws, rowStart, rowEnd) => {
 
 export const downloadVehicleRegistryXlsx = async () => {
     const ExcelJS = (await import('exceljs')).default;
-    const { compliant, overlimit, dormant } = collectRegistryExportRows();
+    const rows = buildReconcileExportRows(portalState.units, portalState.slots);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'CommunityHub';
     wb.created = new Date();
 
-    const mkSheet = (name, rows) => {
-        const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
-        applyRegistrySheetHeader(ws);
-        rows.forEach((cells) => ws.addRow(cells));
-        ws.columns = [
-            { width: 14 },
-            { width: 18 },
-            { width: 16 },
-            { width: 18 },
-            { width: 16 }
-        ];
-        const lastRow = 1 + rows.length;
-        gridBorders(ws, 1, Math.max(lastRow, 1));
-    };
-
-    mkSheet('Main', compliant);
-    mkSheet('overlimit', overlimit);
-    mkSheet('dormant', dormant);
+    const ws = wb.addWorksheet('Main', { views: [{ state: 'frozen', ySplit: 1 }] });
+    applyReconcileSheetHeader(ws);
+    rows.forEach((cells) => ws.addRow(cells));
+    ws.columns = [
+        { width: 10 },
+        { width: 8 },
+        { width: 12 },
+        { width: 12 },
+        { width: 16 },
+        { width: 16 },
+        { width: 14 },
+        { width: 14 },
+        { width: 14 },
+        { width: 12 },
+        { width: 18 },
+        { width: 18 },
+        { width: 12 },
+    ];
+    const lastRow = 1 + rows.length;
+    gridBordersWide(ws, 1, Math.max(lastRow, 1), RECONCILE_EXPORT_HEADERS.length);
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const base = (portalState.community?.name || 'vehicle_registry').replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'vehicle_registry';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${base}_parking_export.xlsx`;
+    a.download = `${base}_parking_reconcile.xlsx`;
     a.click();
     URL.revokeObjectURL(a.href);
 };

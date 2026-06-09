@@ -12,7 +12,7 @@ export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
     finances: { txns: [] },
-    community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 } },
+    community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
         users: [{ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: ['apt-default'] }],
@@ -40,7 +40,15 @@ export const pullState = async () => {
             supabase.from('parking_slots').select('*').eq('apartment_id', activeApartmentId).order('name')
         ]);
 
-        if (s.data) portalState.community = { name: s.data.name, defaults: { cars: s.data.car_default, bikes: s.data.bike_default } };
+        if (s.data) {
+            portalState.community = {
+                name: s.data.name,
+                defaults: { cars: s.data.car_default, bikes: s.data.bike_default },
+                configId: s.data.id,
+            };
+        } else {
+            portalState.community.configId = null;
+        }
 
         const units = u.data || [];
         const vehicles = v.data || [];
@@ -58,6 +66,28 @@ export const pullState = async () => {
 };
 
 export const persist = () => { localStorage.setItem('sentry_portal_v5_platinum', JSON.stringify(portalState)); };
+
+/** Insert or update society_config (id is required on first insert). */
+export const upsertSocietyConfig = async (apartment_id, { name, car_default, bike_default }) => {
+    if (!supabase) return { error: new Error('Supabase is required.') };
+
+    const row = {
+        id: portalState.community.configId || crypto.randomUUID(),
+        apartment_id,
+        name,
+        car_default,
+        bike_default,
+    };
+
+    const { data, error } = await supabase
+        .from('society_config')
+        .upsert(row, { onConflict: 'apartment_id' })
+        .select('id');
+
+    const savedId = data?.[0]?.id;
+    if (!error && savedId) portalState.community.configId = savedId;
+    return { data, error };
+};
 
 export const migrateAndRecover = async () => {
     // 1. Try to restore active apartment from local storage first

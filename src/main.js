@@ -2,9 +2,26 @@
  * Sentry Portal Modular Entry (Vercel Edition)
  * Primary Boot Sequence & View Coordination
  */
-import { portalState, persist, migrateAndRecover, supabase, pullState } from './store.js';
-import { processAnalytics, renderRegistry, saveMdlData, handleCSVImport, downloadVehicleRegistryXlsx } from './registry.js';
+import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig } from './store.js';
+import {
+  processAnalytics,
+  renderRegistry,
+  saveMdlData,
+  handleCSVImport,
+  downloadVehicleRegistryXlsx,
+  addCommunityPoolSlot,
+  openCapacityModal,
+  closeCapacityModal,
+  applyCapacityDefaultsToAll,
+  saveCapacityAllocation,
+  refreshCapacityUnitList,
+} from './registry.js';
 import { processFinances, renderCashLedger, saveCashData } from './finances.js';
+import {
+  parseParkingExcelFile,
+  buildImportPreview,
+  applyParkingImport,
+} from './parkingImport.js';
 
 const showAuth = (msg = '') => {
   const modal = document.getElementById('auth-modal');
@@ -629,8 +646,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Registry Tactical controls
+  const preventSearchAutofill = (el) => {
+    if (!el) return;
+    el.setAttribute('readonly', 'readonly');
+    const unlock = () => {
+      el.removeAttribute('readonly');
+      el.removeEventListener('focus', unlock);
+    };
+    el.addEventListener('focus', unlock);
+  };
+
   const searchInput = document.getElementById('apt-search');
-  if (searchInput) searchInput.oninput = () => renderRegistry();
+  if (searchInput) {
+    preventSearchAutofill(searchInput);
+    searchInput.oninput = () => renderRegistry();
+  }
+  preventSearchAutofill(document.getElementById('cash-search'));
+  preventSearchAutofill(document.getElementById('pool-search-input'));
 
   const sortSelect = document.getElementById('registry-sort');
   if (sortSelect) sortSelect.onchange = () => renderRegistry();
@@ -663,9 +695,8 @@ document.addEventListener('DOMContentLoaded', () => {
     card.onclick = () => setRegistryFilter(filter);
   };
 
-  bindKpi('kpi-total', 'ALL');
-  bindKpi('kpi-allowed', 'COMPLIANT');
-  bindKpi('kpi-dormant', 'OVERLIMIT');
+  bindKpi('kpi-overlimit-cars', 'OVERLIMIT_CARS');
+  bindKpi('kpi-overlimit-bikes', 'OVERLIMIT_BIKES');
   bindKpi('kpi-cars', 'CARS');
   bindKpi('kpi-bikes', 'BIKES');
 
@@ -690,7 +721,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (supabase) {
       // 1. Update Society Config
-      await supabase.from('society_config').upsert({ apartment_id, name, car_default, bike_default });
+      const { error: cfgError } = await upsertSocietyConfig(apartment_id, { name, car_default, bike_default });
+      if (cfgError) return alert(`Could not save policy: ${cfgError.message}`);
 
       // 2. Propagation: Apply new defaults to ALL units
       const { error } = await supabase.from('units').update({ car_limit: car_default, bike_limit: bike_default }).eq('apartment_id', apartment_id).neq('number', '');
@@ -969,6 +1001,158 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     };
   }
+
+  document.getElementById('pool-add-car')?.addEventListener('click', () => void addCommunityPoolSlot('car'));
+  document.getElementById('pool-add-bike')?.addEventListener('click', () => void addCommunityPoolSlot('bike'));
+
+  document.getElementById('registry-base-capacity')?.addEventListener('click', openCapacityModal);
+  document.getElementById('capacity-close')?.addEventListener('click', closeCapacityModal);
+  document.getElementById('capacity-cancel')?.addEventListener('click', closeCapacityModal);
+  document.getElementById('capacity-apply-all')?.addEventListener('click', applyCapacityDefaultsToAll);
+  document.getElementById('capacity-save')?.addEventListener('click', () => void saveCapacityAllocation());
+  document.getElementById('capacity-search')?.addEventListener('input', refreshCapacityUnitList);
+
+  // Parking Excel reconcile import
+  const parkingImportModal = document.getElementById('parking-import-modal');
+  const parkingImportStepPick = document.getElementById('parking-import-step-pick');
+  const parkingImportStepPreview = document.getElementById('parking-import-step-preview');
+  const parkingImportError = document.getElementById('parking-import-error');
+  const parkingImportSummary = document.getElementById('parking-import-summary');
+  const parkingImportWarn = document.getElementById('parking-import-warn');
+  const parkingImportFileName = document.getElementById('parking-import-file-name');
+  const xlsxFileInput = document.getElementById('xlsx-file');
+  let pendingParkingImport = null;
+  let pendingParkingFileName = '';
+
+  const showParkingImportError = (msg) => {
+    if (!parkingImportError) return;
+    if (msg) {
+      parkingImportError.style.display = 'block';
+      parkingImportError.textContent = msg;
+    } else {
+      parkingImportError.style.display = 'none';
+      parkingImportError.textContent = '';
+    }
+  };
+
+  const resetParkingImportModal = () => {
+    pendingParkingImport = null;
+    pendingParkingFileName = '';
+    if (parkingImportStepPick) parkingImportStepPick.style.display = 'block';
+    if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'none';
+    showParkingImportError('');
+    if (xlsxFileInput) xlsxFileInput.value = '';
+  };
+
+  const openParkingImportModal = () => {
+    if (!supabase) return alert('Supabase is required for Excel reconcile.');
+    resetParkingImportModal();
+    parkingImportModal?.classList.add('active');
+  };
+
+  const closeParkingImportModal = () => {
+    parkingImportModal?.classList.remove('active');
+    resetParkingImportModal();
+  };
+
+  const getParkingImportMode = () => {
+    const picked = document.querySelector('input[name="parking-import-mode"]:checked');
+    return picked?.value === 'overwrite' ? 'overwrite' : 'merge';
+  };
+
+  const renderParkingPreview = (parsed, mode, fileName) => {
+    const preview = buildImportPreview(parsed, mode);
+    if (parkingImportFileName) parkingImportFileName.textContent = fileName;
+    if (parkingImportSummary) {
+      parkingImportSummary.innerHTML = `
+        <div><strong>Mode:</strong> ${mode === 'overwrite' ? 'Overwrite' : 'Merge'}</div>
+        <div><strong>Rows parsed:</strong> ${preview.rowCount}</div>
+        <div><strong>Units:</strong> ${preview.unitCount} (${preview.newUnits} new, ${preview.updatedUnits} updated)</div>
+        <div><strong>Vehicles:</strong> ${preview.vehicleCount} (${preview.newVehicles} new, ${preview.updatedVehicles} to update)</div>
+        <div><strong>Sticker / RFID rows:</strong> ${preview.withSticker ?? 0} with sticker, ${preview.withRfid ?? 0} with RFID data</div>
+        <div><strong>Rented / external parking:</strong> ${preview.rentedParking ?? 0} vehicle(s) with Parking_No ≠ Flat</div>
+        ${mode === 'overwrite' && preview.removedVehicles > 0
+          ? `<div style="color:#b45309;"><strong>Will remove:</strong> ${preview.removedVehicles} existing vehicle(s) not in file</div>`
+          : ''}
+      `;
+    }
+    if (parkingImportWarn) {
+      if (mode === 'overwrite') {
+        parkingImportWarn.style.display = 'block';
+        parkingImportWarn.textContent =
+          'Overwrite deletes all current vehicles for this apartment, then loads vehicles from the spreadsheet.';
+      } else {
+        parkingImportWarn.style.display = 'none';
+        parkingImportWarn.textContent = '';
+      }
+    }
+    if (parkingImportStepPick) parkingImportStepPick.style.display = 'none';
+    if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'block';
+  };
+
+  document.getElementById('registry-import-xlsx')?.addEventListener('click', openParkingImportModal);
+  document.getElementById('parking-import-close')?.addEventListener('click', closeParkingImportModal);
+  document.getElementById('parking-import-cancel')?.addEventListener('click', closeParkingImportModal);
+  document.getElementById('parking-import-back')?.addEventListener('click', () => {
+    if (parkingImportStepPick) parkingImportStepPick.style.display = 'block';
+    if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'none';
+    showParkingImportError('');
+  });
+  document.getElementById('parking-import-choose-file')?.addEventListener('click', () => xlsxFileInput?.click());
+
+  if (xlsxFileInput) {
+    xlsxFileInput.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      showParkingImportError('');
+      try {
+        const parsed = await parseParkingExcelFile(file);
+        pendingParkingImport = parsed;
+        pendingParkingFileName = file.name;
+        renderParkingPreview(parsed, getParkingImportMode(), file.name);
+      } catch (err) {
+        showParkingImportError(err?.message || 'Could not read that Excel file.');
+      }
+    };
+  }
+
+  document.getElementById('parking-import-apply')?.addEventListener('click', async () => {
+    if (!pendingParkingImport) return;
+    const mode = getParkingImportMode();
+    if (mode === 'overwrite') {
+      const ok = confirm(
+        'This will delete ALL vehicles for the active apartment and replace them with the spreadsheet. Continue?',
+      );
+      if (!ok) return;
+    }
+    const applyBtn = document.getElementById('parking-import-apply');
+    if (applyBtn) {
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Importing…';
+    }
+    showParkingImportError('');
+    try {
+      const result = await applyParkingImport(pendingParkingImport, mode);
+      processAnalytics();
+      renderRegistry();
+      closeParkingImportModal();
+      if (result.skippedRegistryMeta) {
+        alert(
+          'Import completed for units and vehicles, but RFID/sticker columns are missing in Supabase.\n\n' +
+            'Open Supabase → SQL Editor and run supabase_vehicle_rfid_sticker.sql, then re-import to save sticker/RFID data.',
+        );
+      } else {
+        alert(`Parking registry ${mode === 'overwrite' ? 'overwritten' : 'merged'} successfully.`);
+      }
+    } catch (err) {
+      showParkingImportError(err?.message || 'Import failed.');
+    } finally {
+      if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply import';
+      }
+    }
+  });
 
   // Registry Header Register Hook
   const addBtn = document.getElementById('add-vehicle-top');

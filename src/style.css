@@ -631,6 +631,71 @@ header {
   padding: 0.95rem 1.6rem 1rem;
 }
 
+.pool-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+  gap: 0.5rem;
+}
+
+.pool-section-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.85rem 0.5rem;
+}
+
+.btn--small {
+  padding: 0.35rem 0.65rem !important;
+  font-size: 0.76rem !important;
+}
+
+.pool-slot--managed {
+  position: relative;
+}
+
+.pool-slot__del {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #9ca3af;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.pool-slot__del:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.pool-section-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.pool-section-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.flat-rental-slot .slot-unit {
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .pool-slot {
   background: #fff;
   border: 1px solid var(--border);
@@ -757,6 +822,10 @@ header {
   flex: 1;
   display: flex;
   align-items: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .search-container i {
@@ -764,6 +833,11 @@ header {
   left: 1rem;
   color: var(--text-dim);
   pointer-events: none;
+}
+
+.search-container input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .search-container input {
@@ -1365,10 +1439,38 @@ header {
   align-items: center;
 }
 
+.vehicle-parking-alloc {
+  font-size: 0.68rem;
+  color: var(--accent);
+  font-weight: 800;
+  margin-top: 0.1rem;
+}
+
+.v-tag-rent {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--accent);
+  margin-left: 0.2rem;
+}
+
+.vehicle-registry-meta {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-top: 0.15rem;
+  line-height: 1.35;
+}
+
+.apt-alloc-vehicle__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .apt-alloc-vehicle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
   min-width: 0;
 }
 
@@ -1814,15 +1916,39 @@ header {
     color: #991b1b;
   }
 
-  #pool-grid {
+  .pool-slot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+    gap: 0.5rem;
     padding: 0.85rem;
   }
 
   /* Heavy sections should scroll inside when expanded */
-  #pool-visualiser[open] #pool-grid {
+  #pool-visualiser[open] .pool-slot-grid,
+  #bike-pool-visualiser[open] .pool-slot-grid,
+  #flat-rental-visualiser[open] .pool-slot-grid {
     max-height: 320px;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .pool-section-hint {
+    margin: 0 0.85rem 0.35rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .pool-section-empty {
+    margin: 0 0.85rem 0.85rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .flat-rental-slot .slot-unit {
+    color: var(--accent);
+    font-weight: 800;
   }
 
   /* Overview metrics: keep compact, but still readable */
@@ -2141,4 +2267,169 @@ header {
   .slot-occupant {
     font-size: 0.86rem;
   }
+}
+
+.import-mode-option {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.import-mode-option input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.import-preview-box {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.nb-form-error {
+  color: #991b1b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.capacity-section-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+}
+
+.capacity-defaults {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.capacity-defaults__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.capacity-defaults__field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.capacity-defaults__field input {
+  width: 64px;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.capacity-defaults__icon {
+  color: var(--text-dim);
+  width: 1.1rem;
+  text-align: center;
+}
+
+.capacity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.capacity-toolbar input {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.capacity-totals {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.capacity-grid-head,
+.capacity-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(100px, 1.4fr) 72px 72px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.capacity-grid-head {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding: 0 0.25rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.capacity-unit-list {
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.capacity-row {
+  padding: 0.45rem 0.25rem;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.82rem;
+}
+
+.capacity-row__unit {
+  font-weight: 800;
+}
+
+.capacity-row__usage {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.capacity-row input {
+  width: 100%;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-weight: 700;
+  text-align: center;
+}
+
+#capacity-modal .modal-content {
+  max-height: min(92vh, 820px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#capacity-modal .capacity-unit-list {
+  flex: 1;
+  min-height: 120px;
 }

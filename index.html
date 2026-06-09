@@ -93,9 +93,16 @@
             <p>Vehicle Allocation & Compliance Management</p>
           </div>
           <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-outline" type="button" id="registry-base-capacity">
+              <i class="fa-solid fa-table-cells"></i> <span>Base Capacity</span>
+            </button>
             <button class="btn btn-outline" type="button" id="registry-download-xlsx">
               <i class="fa-solid fa-download"></i> <span>Download</span>
             </button>
+            <button class="btn btn-outline" type="button" id="registry-import-xlsx">
+              <i class="fa-solid fa-file-excel"></i> <span>Reconcile Excel</span>
+            </button>
+            <input type="file" id="xlsx-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;" />
             <button class="btn btn-outline" onclick="document.getElementById('csv-file').click()">
               <i class="fa-solid fa-file-import"></i> <span>Import CSV</span>
             </button>
@@ -110,36 +117,66 @@
           <summary class="mobile-summary">
             <span>Overview</span>
             <span class="mobile-summary__stats">
-              <span class="ms-pill"><b id="ms-total">0</b> Total</span>
-              <span class="ms-pill good"><b id="ms-ok">0</b> OK</span>
-              <span class="ms-pill bad"><b id="ms-bad">0</b> Viol</span>
+              <span class="ms-pill bad"><b id="ms-over-cars">0</b> Car+</span>
+              <span class="ms-pill bad"><b id="ms-over-bikes">0</b> Bike+</span>
+              <span class="ms-pill"><b id="ms-occ">—</b> Occ</span>
             </span>
           </summary>
           <section class="dashboard-metrics" style="padding-left:0; padding-right:0;">
-          <div class="metric-card"><span class="label">Total Registry</span><span class="value" id="kpi-total">0</span>
-          </div>
-          <div class="metric-card"><span class="label">Compliant</span><span class="value" style="color: var(--success)"
-              id="kpi-allowed">0</span></div>
-          <div class="metric-card"><span class="label">Overlimit</span><span class="value" style="color: var(--danger)"
-              id="kpi-dormant">0</span></div>
+          <div class="metric-card"><span class="label">Overlimit Cars</span><span class="value" style="color: var(--danger)"
+              id="kpi-overlimit-cars">0</span></div>
+          <div class="metric-card"><span class="label">Overlimit Bikes</span><span class="value" style="color: var(--danger)"
+              id="kpi-overlimit-bikes">0</span></div>
           <div class="metric-card"><span class="label">Active Cars</span><span class="value"
               style="color: var(--accent);" id="kpi-cars">0</span></div>
           <div class="metric-card"><span class="label">Active Bikes</span><span class="value"
               style="color: var(--success);" id="kpi-bikes">0</span></div>
-          <div class="metric-card"><span class="label">Occupancy</span><span class="value" style="color: var(--accent)"
-              id="kpi-occupancy">0%</span></div>
+          <div class="metric-card" title="Active vehicles vs total base slot capacity (car + bike limits)"><span class="label">Occupancy</span><span class="value" style="color: var(--accent)"
+              id="kpi-occupancy">—</span></div>
           </section>
         </details>
 
         <details id="pool-visualiser" class="mobile-disclosure" open style="margin-bottom: 1rem; padding: 0 1.6rem;">
           <summary class="mobile-summary">
-            <span>Community Pool</span>
+            <span>Community Pool — Cars (EH)</span>
             <span class="mobile-summary__stats">
               <span class="ms-pill"><b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> occupied</span>
             </span>
           </summary>
-          <div id="pool-grid"
-            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: 0.5rem;"></div>
+          <div class="pool-section-toolbar">
+            <button type="button" class="btn btn-outline btn--small" id="pool-add-car">
+              <i class="fa-solid fa-plus"></i> Add EH slot
+            </button>
+          </div>
+          <div id="pool-grid" class="pool-slot-grid"></div>
+        </details>
+
+        <details id="bike-pool-visualiser" class="mobile-disclosure mobile-disclosure--light" style="margin-bottom: 1rem; padding: 0 1.6rem;">
+          <summary class="mobile-summary">
+            <span>Community Pool — Bikes (BH)</span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill"><b id="ms-bike-pool-occ">0</b>/<b id="ms-bike-pool-total">0</b> occupied</span>
+            </span>
+          </summary>
+          <div class="pool-section-toolbar">
+            <button type="button" class="btn btn-outline btn--small" id="pool-add-bike">
+              <i class="fa-solid fa-plus"></i> Add BH slot
+            </button>
+          </div>
+          <div id="bike-pool-grid" class="pool-slot-grid"></div>
+          <p id="bike-pool-empty" class="pool-section-empty" hidden>No bike pool slots yet — add a BH slot to start.</p>
+        </details>
+
+        <details id="flat-rental-visualiser" class="mobile-disclosure mobile-disclosure--light" style="margin-bottom: 1rem; padding: 0 1.6rem;">
+          <summary class="mobile-summary">
+            <span>Flat-to-flat rentals</span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill"><b id="ms-flat-rent-count">0</b> active</span>
+            </span>
+          </summary>
+          <p class="pool-section-hint">One flat renting parking from another flat (e.g. D-005 slot used by D-006).</p>
+          <div id="flat-rental-grid" class="pool-slot-grid"></div>
+          <p id="flat-rental-empty" class="pool-section-empty" hidden>No flat-to-flat rentals.</p>
         </details>
 
         <details class="mobile-disclosure mobile-disclosure--light" id="registry-units" open style="padding: 0 1.6rem;">
@@ -149,8 +186,23 @@
           <section class="explorer-controls" style="padding:0;">
           <div
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; gap: 0.75rem;">
-            <div class="search-container"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="apt-search"
-                placeholder="Search by unit or plate..." /></div>
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input
+                type="search"
+                id="apt-search"
+                name="registry-unit-plate-filter"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                inputmode="search"
+                data-lpignore="true"
+                data-1p-ignore
+                data-form-type="other"
+                placeholder="Search by unit or plate..."
+              />
+            </form>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
               <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-dim);">SORT:</span>
               <select id="registry-sort"
@@ -163,6 +215,8 @@
           <div class="filter-bar" style="display: flex; gap: 0.45rem; margin-bottom: 0.8rem;">
             <button class="filter-pill active" data-filter="ALL">All Units</button>
             <button class="filter-pill" data-filter="OVERLIMIT">Overlimit</button>
+            <button class="filter-pill" data-filter="FREE_SLOTS_CARS">Free Cars</button>
+            <button class="filter-pill" data-filter="FREE_SLOTS_BIKES">Free Bikes</button>
             <button class="filter-pill" data-filter="UNFILLED">Unfilled</button>
           </div>
           <div class="registry-list">
@@ -242,11 +296,23 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding: 0 1.6rem;">
               <h3 style="font-size: 0.78rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase;">
                 Financial Ledger</h3>
-              <div class="search-container" style="max-width: 240px;">
+              <form class="search-container" role="search" autocomplete="off" onsubmit="return false" style="max-width: 240px;">
                 <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="cash-search" placeholder="Search transactions..."
-                  oninput="window.renderCashLedger()" />
-              </div>
+                <input
+                  type="search"
+                  id="cash-search"
+                  name="ledger-txn-filter"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  inputmode="search"
+                  data-lpignore="true"
+                  data-1p-ignore
+                  data-form-type="other"
+                  placeholder="Search transactions..."
+                  oninput="window.renderCashLedger()"
+                />
+              </form>
             </div>
             <div class="registry-list">
               <div class="registry-header" style="grid-template-columns: 100px 100px 140px 1fr 120px 100px;">
@@ -513,8 +579,20 @@
         <label
           style="display: block; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 0.75rem;">Allocate
           Overflow Vehicle</label>
-        <input type="text" id="pool-search-input" placeholder="Search Plate or Unit..."
-          style="width: 100%; padding: 0.6rem; border: 1px solid var(--border); margin-bottom: 1rem;" />
+        <input
+          type="search"
+          id="pool-search-input"
+          name="pool-vehicle-filter"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          inputmode="search"
+          data-lpignore="true"
+          data-1p-ignore
+          data-form-type="other"
+          placeholder="Search Plate or Unit..."
+          style="width: 100%; padding: 0.6rem; border: 1px solid var(--border); margin-bottom: 1rem;"
+        />
         <div id="pool-search-results"
           style="max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;"></div>
       </div>
@@ -582,19 +660,19 @@
     <div class="modal-content auth-card">
       <h2 style="font-size: 1.35rem; font-weight: 950; letter-spacing: -0.3px;">Sign in</h2>
       <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1.25rem;">Access your CommunityHub workspace.</p>
-      <div style="display:flex; flex-direction:column; gap:0.75rem;">
+      <form id="auth-form" autocomplete="on" style="display:flex; flex-direction:column; gap:0.75rem;">
         <div>
           <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Email</label>
-          <input id="auth-email" type="email" autocomplete="email" placeholder="you@domain.com" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
+          <input id="auth-email" name="email" type="email" autocomplete="username email" placeholder="you@domain.com" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
         </div>
         <div>
           <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Password</label>
-          <input id="auth-password" type="password" autocomplete="current-password" placeholder="••••••••" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
         </div>
         <div id="auth-error" style="display:none; padding:0.6rem 0.7rem; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-weight:800; font-size:0.8rem;"></div>
-        <button id="auth-login-btn" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem;">Sign in</button>
-        <button id="auth-signup-btn" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Create account</button>
-      </div>
+        <button type="button" id="auth-login-btn" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem;">Sign in</button>
+        <button type="button" id="auth-signup-btn" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Create account</button>
+      </form>
     </div>
   </div>
 
@@ -695,6 +773,113 @@
         <button class="btn btn-outline" style="flex: 1; padding: 0.7rem;" onclick="window.closeAptModal()">Cancel</button>
         <button id="save-apt-mgmt-btn" class="btn btn-primary" style="flex: 1; padding: 0.7rem;">Save Apartment</button>
       </div>
+    </div>
+  </div>
+
+
+  <!-- BASE CAPACITY ALLOCATION -->
+  <div class="modal-backdrop" id="capacity-modal">
+    <div class="modal-content capacity-modal" style="max-width: 720px;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 900;">Base Capacity Allocation</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
+            Set default car and bike slots per flat, or adjust individual units.
+          </p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" type="button" id="capacity-close">&times;</button>
+      </div>
+
+      <section class="capacity-defaults">
+        <label class="capacity-section-label">Defaults for all flats</label>
+        <div class="capacity-defaults__row">
+          <div class="capacity-defaults__field">
+            <span class="capacity-defaults__icon"><i class="fa-solid fa-car"></i></span>
+            <input type="number" id="cap-default-cars" min="0" step="1" />
+          </div>
+          <div class="capacity-defaults__field">
+            <span class="capacity-defaults__icon"><i class="fa-solid fa-motorcycle"></i></span>
+            <input type="number" id="cap-default-bikes" min="0" step="1" />
+          </div>
+          <button type="button" class="btn btn-outline btn--small" id="cap-apply-all">Apply to all</button>
+        </div>
+      </section>
+
+      <div class="capacity-toolbar">
+        <input
+          type="search"
+          id="capacity-search"
+          placeholder="Filter by unit…"
+          autocomplete="off"
+        />
+        <div id="capacity-totals" class="capacity-totals"></div>
+      </div>
+
+      <div class="capacity-grid-head">
+        <span>Unit</span>
+        <span>Usage</span>
+        <span><i class="fa-solid fa-car"></i> Cars</span>
+        <span><i class="fa-solid fa-motorcycle"></i> Bikes</span>
+      </div>
+      <div id="capacity-unit-list" class="capacity-unit-list"></div>
+
+      <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+        <button type="button" class="btn btn-outline" style="flex: 1;" id="capacity-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" style="flex: 1;" id="capacity-save">Save allocation</button>
+      </div>
+      <p id="capacity-error" class="nb-form-error" style="display: none; margin-top: 0.75rem;"></p>
+    </div>
+  </div>
+
+  <!-- PARKING RECONCILE IMPORT -->
+  <div class="modal-backdrop" id="parking-import-modal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 900;">Reconcile from Excel</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
+            Upload a spreadsheet with Flat, Vehicle_Number, slot counts, and related columns.
+          </p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" id="parking-import-close" type="button">&times;</button>
+      </div>
+
+      <div id="parking-import-step-pick">
+        <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
+          Expected columns: <strong>Flat</strong>, <strong>Vehicle_Number</strong>, <strong>Vehicle_Type</strong>,
+          <strong>two_wheeler_count</strong>, <strong>four_wheeler_count</strong>, <strong>Parking_No</strong>,
+          <strong>Parking_Sticker</strong>, <strong>RFID_Tag</strong>, <strong>RFID_Number</strong>, etc.
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <label style="font-size: 0.65rem; font-weight: 900; color: var(--text-dim); text-transform: uppercase;">Import mode</label>
+          <label class="import-mode-option">
+            <input type="radio" name="parking-import-mode" value="merge" checked />
+            <span><strong>Merge</strong> — add/update units and vehicles from the file; keep records not in the file.</span>
+          </label>
+          <label class="import-mode-option">
+            <input type="radio" name="parking-import-mode" value="overwrite" />
+            <span><strong>Overwrite</strong> — replace all vehicles for this apartment with the file (units are updated/added).</span>
+          </label>
+        </div>
+        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="parking-import-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="parking-import-choose-file">
+            <i class="fa-solid fa-file-arrow-up"></i> Choose Excel file
+          </button>
+        </div>
+      </div>
+
+      <div id="parking-import-step-preview" style="display: none;">
+        <div id="parking-import-file-name" style="font-weight: 700; margin-bottom: 0.5rem;"></div>
+        <div id="parking-import-summary" class="import-preview-box"></div>
+        <p id="parking-import-warn" style="display: none; font-size: 0.78rem; color: #b45309; font-weight: 700; margin-top: 0.75rem;"></p>
+        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="parking-import-back">Back</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="parking-import-apply">Apply import</button>
+        </div>
+      </div>
+
+      <p id="parking-import-error" class="nb-form-error" style="display: none; margin-top: 1rem;"></p>
     </div>
   </div>
 
