@@ -528,8 +528,34 @@ function stripRegistryColumns(payload) {
   return next;
 }
 
+function importAuditSnapshot(row, unitNumber, alloc = null) {
+  const allocation_type = alloc?.allocation_type || (row.allocation_type || 'BASE').toUpperCase();
+  let allocation_target = null;
+  if (alloc && allocation_type !== 'BASE') allocation_target = alloc.parkingLabel || null;
+  return {
+    plate: row.plate ?? null,
+    type: (row.type || 'CAR').toUpperCase(),
+    unit_number: unitNumber ?? null,
+    is_parking_active: row.is_parking_active !== false,
+    allocation_type,
+    allocation_target,
+    parking_sticker: row.parking_sticker ?? null,
+    rfid_tag: row.rfid_tag ?? null,
+    rfid_number: row.rfid_number ?? null,
+    registry_updated_on: row.registry_updated_on ?? null,
+    registry_updated_by: row.registry_updated_by ?? null,
+  };
+}
+
 async function writeVehicleRecord({ existingId, payload, alloc, plateToId, v }) {
   const op = existingId ? 'update' : 'insert';
+  let before = null;
+  if (existingId) {
+    const { data: prev } = await supabase.from('vehicles').select('*').eq('id', existingId).maybeSingle();
+    if (prev) before = importAuditSnapshot(prev, v.unitNumber);
+  }
+  const after = importAuditSnapshot(payload, v.unitNumber, alloc);
+
   let result = existingId
     ? await supabase.from('vehicles').update(payload).eq('id', existingId)
     : await supabase.from('vehicles').insert(payload).select('id').single();
@@ -558,6 +584,17 @@ async function writeVehicleRecord({ existingId, payload, alloc, plateToId, v }) 
   } else if (alloc.allocation_type === 'NEIGHBOR' && vehicleId) {
     await supabase.from('parking_slots').update({ assigned_vehicle_id: null }).eq('assigned_vehicle_id', vehicleId);
   }
+
+  const { logVehicleAudit } = await import('./vehicleAudit.js');
+  await logVehicleAudit({
+    action: op === 'update' ? 'update' : 'insert',
+    source: 'excel_import',
+    vehicleId,
+    unitNumber: v.unitNumber,
+    plate: v.plate,
+    before,
+    after,
+  });
 
   return { vehicleId, skippedRegistryMeta };
 }

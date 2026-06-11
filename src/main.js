@@ -22,6 +22,14 @@ import {
   buildImportPreview,
   applyParkingImport,
 } from './parkingImport.js';
+import {
+  openVehicleAuditModal,
+  closeVehicleAuditModal,
+  renderVehicleAuditModal,
+  downloadPendingAuditCsv,
+  markAllPendingVehicleAuditSynced,
+  refreshAuditBadge,
+} from './vehicleAudit.js';
 
 const showAuth = (msg = '') => {
   const modal = document.getElementById('auth-modal');
@@ -460,7 +468,10 @@ window.switchView = (v) => {
   // Breadcrumb menu replaces sidebar nav links.
 
   if (route === 'accounts') { window.switchSubView('ledger'); renderCashLedger(); }
-  if (route === 'registry') renderRegistry();
+  if (route === 'registry') {
+    renderRegistry();
+    void refreshAuditBadge();
+  }
   if (route === 'setup') {
     document.getElementById('setup-name').value = portalState.community.name;
     document.getElementById('setup-car').value = portalState.community.defaults.cars;
@@ -1006,6 +1017,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pool-add-bike')?.addEventListener('click', () => void addCommunityPoolSlot('bike'));
 
   document.getElementById('registry-base-capacity')?.addEventListener('click', openCapacityModal);
+
+  document.getElementById('registry-change-log')?.addEventListener('click', () => void openVehicleAuditModal());
+  document.getElementById('audit-log-close')?.addEventListener('click', closeVehicleAuditModal);
+  document.getElementById('audit-pending-only')?.addEventListener('change', () => void renderVehicleAuditModal());
+  document.getElementById('audit-export-csv')?.addEventListener('click', () => void downloadPendingAuditCsv());
+  document.getElementById('audit-mark-synced')?.addEventListener('click', async () => {
+    if (!confirm('Mark all pending vehicle changes as synced to the other system?')) return;
+    const { error } = await markAllPendingVehicleAuditSynced();
+    if (error) return alert(error.message || 'Could not update sync status.');
+    await renderVehicleAuditModal();
+    await refreshAuditBadge();
+  });
   document.getElementById('capacity-close')?.addEventListener('click', closeCapacityModal);
   document.getElementById('capacity-cancel')?.addEventListener('click', closeCapacityModal);
   document.getElementById('capacity-apply-all')?.addEventListener('click', applyCapacityDefaultsToAll);
@@ -1135,6 +1158,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await applyParkingImport(pendingParkingImport, mode);
       processAnalytics();
       renderRegistry();
+      void refreshAuditBadge();
       closeParkingImportModal();
       if (result.skippedRegistryMeta) {
         alert(

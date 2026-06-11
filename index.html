@@ -93,6 +93,10 @@
             <p>Vehicle Allocation & Compliance Management</p>
           </div>
           <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-outline btn--with-badge" type="button" id="registry-change-log">
+              <i class="fa-solid fa-clock-rotate-left"></i> <span>Change Log</span>
+              <span class="btn-badge" id="audit-pending-badge" hidden>0</span>
+            </button>
             <button class="btn btn-outline" type="button" id="registry-base-capacity">
               <i class="fa-solid fa-table-cells"></i> <span>Base Capacity</span>
             </button>
@@ -776,6 +780,40 @@
     </div>
   </div>
 
+
+  <!-- VEHICLE CHANGE LOG -->
+  <div class="modal-backdrop" id="audit-log-modal">
+    <div class="modal-content" style="max-width: 720px;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 900;">Vehicle Change Log</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
+            Pending deltas since your last sync to the other system. Export CSV or mark as synced when applied.
+          </p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" type="button" id="audit-log-close">&times;</button>
+      </div>
+
+      <div class="audit-toolbar">
+        <label class="audit-filter">
+          <input type="checkbox" id="audit-pending-only" checked />
+          Pending only
+        </label>
+        <span id="audit-pending-count" class="audit-pending-count"></span>
+        <div class="audit-toolbar__actions">
+          <button type="button" class="btn btn-outline btn--small" id="audit-export-csv">
+            <i class="fa-solid fa-download"></i> Export CSV
+          </button>
+          <button type="button" class="btn btn-outline btn--small" id="audit-mark-synced">
+            Mark all synced
+          </button>
+        </div>
+      </div>
+
+      <div id="audit-log-list" class="audit-log-list"></div>
+      <p id="audit-log-empty" class="audit-empty" hidden>No changes recorded yet.</p>
+    </div>
+  </div>
 
   <!-- BASE CAPACITY ALLOCATION -->
   <div class="modal-backdrop" id="capacity-modal">

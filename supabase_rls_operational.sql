@@ -167,6 +167,7 @@ alter table if exists public.vehicles enable row level security;
 alter table if exists public.transactions enable row level security;
 alter table if exists public.parking_slots enable row level security;
 alter table if exists public.society_config enable row level security;
+alter table if exists public.vehicle_audit_log enable row level security;
 
 -- ============================================================
 -- PROFILES
@@ -428,3 +429,25 @@ with check (public.effective_apartment_permission(apartment_id, 'setup.edit'));
 create policy "society_config delete"
 on public.society_config for delete
 using (public.effective_apartment_permission(apartment_id, 'setup.edit'));
+
+-- ============================================================
+-- vehicle_audit_log (also in supabase_vehicle_audit_log.sql)
+-- ============================================================
+
+alter table if exists public.vehicle_audit_log enable row level security;
+
+drop policy if exists "vehicle_audit_log read" on public.vehicle_audit_log;
+create policy "vehicle_audit_log read"
+on public.vehicle_audit_log for select
+using (public.effective_apartment_permission(apartment_id, 'vehicle_registry.view'));
+
+drop policy if exists "vehicle_audit_log insert" on public.vehicle_audit_log;
+create policy "vehicle_audit_log insert"
+on public.vehicle_audit_log for insert
+with check (public.effective_apartment_permission(apartment_id, 'vehicle_registry.edit'));
+
+drop policy if exists "vehicle_audit_log update" on public.vehicle_audit_log;
+create policy "vehicle_audit_log update"
+on public.vehicle_audit_log for update
+using (public.effective_apartment_permission(apartment_id, 'vehicle_registry.edit'))
+with check (public.effective_apartment_permission(apartment_id, 'vehicle_registry.edit'));

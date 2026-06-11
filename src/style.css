@@ -1474,10 +1474,34 @@ header {
   min-width: 0;
 }
 
-.apt-alloc-vehicle b {
+.apt-alloc-vehicle b,
+.vehicle-plate-input {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.96rem;
   letter-spacing: 0.25px;
+}
+
+.vehicle-plate-input {
+  width: 100%;
+  max-width: 11rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-weight: 800;
+  background: transparent;
+  color: inherit;
+}
+
+.vehicle-plate-input:hover {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.vehicle-plate-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 
 .alloc-status-chip {
@@ -2432,4 +2456,138 @@ header {
 #capacity-modal .capacity-unit-list {
   flex: 1;
   min-height: 120px;
+}
+
+.btn--with-badge {
+  position: relative;
+}
+
+.btn-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.audit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.audit-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.audit-pending-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.audit-toolbar__actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.audit-log-list {
+  max-height: min(55vh, 480px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.audit-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: #fafafa;
+}
+
+.audit-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  margin-bottom: 0.35rem;
+}
+
+.audit-row__unit {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.audit-row__when {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.audit-row__delta {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.audit-row__meta {
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.audit-badge {
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.audit-badge--insert {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.audit-badge--update {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.audit-badge--delete {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.audit-empty,
+.audit-loading,
+.audit-error {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  padding: 1rem;
+  text-align: center;
+}
+
+.audit-error {
+  color: #991b1b;
 }

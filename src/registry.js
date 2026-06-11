@@ -9,25 +9,23 @@ import {
   nextCommunityPoolSlotName,
   slotsForPoolKind,
 } from './parkingImport.js';
+import { effectiveAllocationType, resolveAllocationTargetLabel } from './allocation.js';
+export { effectiveAllocationType } from './allocation.js';
+import { logVehicleAudit, vehicleAuditSnapshot, refreshAuditBadge } from './vehicleAudit.js';
 
 let activePoolKind = 'car';
 
-/** Resolve allocation including EH/BH pool rows linked via parking_slots. */
-export const effectiveAllocationType = (v) => {
-    const declared = (v.allocation_type || 'BASE').toUpperCase();
-    if (declared === 'COMMON' || declared === 'NEIGHBOR') return declared;
-
-    const poolSlot = portalState.slots.find(
-        (s) => s.assigned_vehicle_id === v.id && getSlotPoolKind(s),
-    );
-    if (poolSlot) return 'COMMON';
-
-    if (v.allocation_target_id) {
-        const slot = portalState.slots.find((s) => s.id === v.allocation_target_id);
-        if (slot && getSlotPoolKind(slot)) return 'COMMON';
-        if (portalState.units.some((u) => u.id === v.allocation_target_id)) return 'NEIGHBOR';
+const findVehicleContext = (vid) => {
+    for (const u of portalState.units) {
+        const v = u.vehicles.find((veh) => veh.id === vid);
+        if (v) return { unit: u, vehicle: v };
     }
-    return 'BASE';
+    return null;
+};
+
+const auditVehicleChange = async (opts) => {
+    await logVehicleAudit(opts);
+    void refreshAuditBadge();
 };
 
 /** Active vehicles consuming this unit's base car/bike quota (excludes pool + neighbor). */
@@ -480,11 +478,27 @@ const renderPoolSearchResults = (slotId, query = '') => {
         `;
         row.onclick = async () => {
             if (!supabase) return;
+            const slot = portalState.slots.find((s) => s.id === slotId);
+            const before = vehicleAuditSnapshot(vehicle, unit.number);
             await supabase.from('parking_slots').update({ assigned_vehicle_id: vehicle.id }).eq('id', slotId);
             await supabase.from('vehicles').update({
                 allocation_type: 'COMMON',
                 allocation_target_id: slotId,
             }).eq('id', vehicle.id);
+            const after = {
+                ...before,
+                allocation_type: 'COMMON',
+                allocation_target: slot?.name || null,
+            };
+            await auditVehicleChange({
+                action: 'update',
+                source: 'ui',
+                vehicleId: vehicle.id,
+                unitNumber: unit.number,
+                plate: vehicle.plate,
+                before,
+                after,
+            });
             document.getElementById('pool-modal').classList.remove('active');
             await pullState();
             renderRegistry();
@@ -525,12 +539,25 @@ export const deallocateSlot = async (id) => {
     if (confirm('Release this community slot?') && supabase) {
         const slot = portalState.slots.find((s) => s.id === id);
         const vid = slot?.assigned_vehicle_id;
+        const ctx = vid ? findVehicleContext(vid) : null;
+        const before = ctx ? vehicleAuditSnapshot(ctx.vehicle, ctx.unit.number) : null;
         await supabase.from('parking_slots').update({ assigned_vehicle_id: null }).eq('id', id);
         if (vid) {
             await supabase.from('vehicles').update({
                 allocation_type: 'BASE',
                 allocation_target_id: null,
             }).eq('id', vid);
+            if (before && ctx) {
+                await auditVehicleChange({
+                    action: 'update',
+                    source: 'ui',
+                    vehicleId: vid,
+                    unitNumber: ctx.unit.number,
+                    plate: ctx.vehicle.plate,
+                    before,
+                    after: { ...before, allocation_type: 'BASE', allocation_target: null },
+                });
+            }
         }
         document.getElementById('pool-modal').classList.remove('active');
         await pullState(); renderRegistry();
@@ -726,15 +753,11 @@ const formatRegistryMetaLine = (v) => {
 
 const parkingAllocationLabel = (v) => {
     const alloc = effectiveAllocationType(v);
-    if (alloc === 'COMMON') {
-        const slot = portalState.slots.find((s) => s.id === v.allocation_target_id);
-        return slot?.name ? `Rented slot ${slot.name}` : '';
-    }
-    if (alloc === 'NEIGHBOR') {
-        const unit = portalState.units.find((u) => u.id === v.allocation_target_id);
-        return unit?.number ? `Rented from ${unit.number}` : '';
-    }
-    return '';
+    const label = resolveAllocationTargetLabel(v);
+    if (!label) return '';
+    if (alloc === 'COMMON') return `Rented slot ${label}`;
+    if (alloc === 'NEIGHBOR') return `Rented from ${label.replace(/^Unit /, '')}`;
+    return label;
 };
 
 const formatParkingAllocLine = (v) => {
@@ -767,7 +790,7 @@ const renderMdlList = (u) => {
           <div class="apt-alloc-vehicle">
             <i class="fa-solid ${icon} vehicle-type-icon ${type}"></i>
             <div class="apt-alloc-vehicle__text">
-              <b>${v.plate}</b>
+              <input type="text" class="vehicle-plate-input" aria-label="Plate number" spellcheck="false" autocomplete="off" />
               ${formatParkingAllocLine(v)}
               ${formatRegistryMetaLine(v)}
             </div>
@@ -797,41 +820,169 @@ const renderMdlList = (u) => {
           </div>
         </div>
         `;
+        const plateInput = d.querySelector('.vehicle-plate-input');
+        if (plateInput) {
+            plateInput.value = v.plate || '';
+            plateInput.dataset.original = v.plate || '';
+            plateInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    plateInput.blur();
+                }
+                if (e.key === 'Escape') {
+                    plateInput.value = plateInput.dataset.original || '';
+                    plateInput.blur();
+                }
+            });
+            plateInput.addEventListener('blur', () => {
+                void window.updateVehiclePlate(u.id, v.id, plateInput);
+            });
+        }
         c.appendChild(d);
     });
 };
 
+window.updateVehiclePlate = async (uid, vid, inputEl) => {
+    if (!supabase || !inputEl) return;
+    const u = portalState.units.find((x) => x.id === uid);
+    const v = u?.vehicles.find((veh) => veh.id === vid);
+    if (!u || !v) return;
+
+    const plate = inputEl.value.trim().toUpperCase();
+    const original = (inputEl.dataset.original || v.plate || '').trim().toUpperCase();
+    if (!plate) {
+        inputEl.value = original;
+        return alert('Plate number cannot be empty.');
+    }
+    if (plate === original) return;
+
+    const duplicate = portalState.units.some((unit) =>
+        unit.vehicles.some((veh) => veh.id !== vid && (veh.plate || '').trim().toUpperCase() === plate),
+    );
+    if (duplicate) {
+        inputEl.value = original;
+        return alert(`Plate ${plate} is already registered in this apartment.`);
+    }
+
+    const before = vehicleAuditSnapshot(v, u.number);
+    const { error } = await supabase.from('vehicles').update({ plate }).eq('id', vid);
+    if (error) {
+        inputEl.value = original;
+        return alert(`Could not update plate: ${error.message}`);
+    }
+
+    await auditVehicleChange({
+        action: 'update',
+        source: 'ui',
+        vehicleId: vid,
+        unitNumber: u.number,
+        plate,
+        before,
+        after: { ...before, plate },
+    });
+
+    inputEl.dataset.original = plate;
+    inputEl.value = plate;
+    await pullState();
+    processAnalytics();
+    renderRegistry();
+    openMdl(uid);
+};
+
 window.updateAllocation = async (vid, uid, type) => {
     if (!supabase) return;
+    const u = portalState.units.find((x) => x.id === uid);
+    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const before = v ? vehicleAuditSnapshot(v, u.number) : null;
     await supabase.from('vehicles').update({ allocation_type: type, allocation_target_id: null }).eq('id', vid);
     if (type !== 'COMMON') {
-        // Clear slot association if moved away from COMMON
         await supabase.from('parking_slots').update({ assigned_vehicle_id: null }).eq('assigned_vehicle_id', vid);
+    }
+    if (before && v) {
+        await auditVehicleChange({
+            action: 'update',
+            source: 'ui',
+            vehicleId: vid,
+            unitNumber: u.number,
+            plate: v.plate,
+            before,
+            after: { ...before, allocation_type: type, allocation_target: null },
+        });
     }
     await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
 };
 
 window.updateAllocationTarget = async (vid, uid, targetId) => {
     if (!supabase || !targetId) return;
-    const v = portalState.units.flatMap(ux => ux.vehicles).find(veh => veh.id === vid);
+    const u = portalState.units.find((x) => x.id === uid);
+    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const before = v ? vehicleAuditSnapshot(v, u.number) : null;
     await supabase.from('vehicles').update({ allocation_target_id: targetId }).eq('id', vid);
 
-    if (v.allocation_type === 'COMMON') {
-        // Update parking_slots table as well for the grid visual
+    if (v?.allocation_type === 'COMMON') {
         await supabase.from('parking_slots').update({ assigned_vehicle_id: null }).eq('assigned_vehicle_id', vid);
         await supabase.from('parking_slots').update({ assigned_vehicle_id: vid }).eq('id', targetId);
+    }
+    if (before && v) {
+        let targetLabel = null;
+        const slot = portalState.slots.find((s) => s.id === targetId);
+        if (slot) targetLabel = slot.name;
+        else {
+            const neighbor = portalState.units.find((ux) => ux.id === targetId);
+            if (neighbor) targetLabel = `Unit ${neighbor.number}`;
+        }
+        await auditVehicleChange({
+            action: 'update',
+            source: 'ui',
+            vehicleId: vid,
+            unitNumber: u.number,
+            plate: v.plate,
+            before,
+            after: { ...before, allocation_target: targetLabel },
+        });
     }
     await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
 };
 
 window.delVeh = async (uid, vid) => {
-    if (supabase) { const { error } = await supabase.from('vehicles').delete().eq('id', vid); if (!error) { await pullState(); processAnalytics(); renderRegistry(); openMdl(uid); } }
+    if (!supabase) return;
+    const u = portalState.units.find((x) => x.id === uid);
+    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const before = v ? vehicleAuditSnapshot(v, u.number) : null;
+    const { error } = await supabase.from('vehicles').delete().eq('id', vid);
+    if (!error) {
+        if (before && v) {
+            await auditVehicleChange({
+                action: 'delete',
+                source: 'ui',
+                vehicleId: vid,
+                unitNumber: u.number,
+                plate: v.plate,
+                before,
+            });
+        }
+        await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
+    }
 };
 
 window.toggleVehicleActive = async (uid, vid, isActive) => {
     if (!supabase) return;
+    const u = portalState.units.find((x) => x.id === uid);
+    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const before = v ? vehicleAuditSnapshot(v, u.number) : null;
     const { error } = await supabase.from('vehicles').update({ is_parking_active: isActive }).eq('id', vid);
     if (!error) {
+        if (before && v) {
+            await auditVehicleChange({
+                action: 'update',
+                source: 'ui',
+                vehicleId: vid,
+                unitNumber: u.number,
+                plate: v.plate,
+                before,
+                after: { ...before, is_parking_active: isActive },
+            });
+        }
         await pullState();
         processAnalytics();
         renderRegistry();
@@ -853,7 +1004,27 @@ export const saveMdlData = async () => {
     await supabase.from('units').update({ car_limit, bike_limit }).eq('id', u.id);
 
     // 2. Insert New Vehicle
-    if (plate) await supabase.from('vehicles').insert({ apartment_id, unit_id: u.id, plate, type, is_parking_active: true });
+    if (plate) {
+        const { data: inserted, error } = await supabase
+            .from('vehicles')
+            .insert({ apartment_id, unit_id: u.id, plate, type, is_parking_active: true })
+            .select('id')
+            .single();
+        if (!error && inserted?.id) {
+            const after = vehicleAuditSnapshot(
+                { plate, type, is_parking_active: true, allocation_type: 'BASE' },
+                u.number,
+            );
+            await auditVehicleChange({
+                action: 'insert',
+                source: 'ui',
+                vehicleId: inserted.id,
+                unitNumber: u.number,
+                plate,
+                after,
+            });
+        }
+    }
 
     document.getElementById('new-v-plate').value = '';
     await pullState(); processAnalytics(); renderRegistry(); persist(); window.closeMdl();
