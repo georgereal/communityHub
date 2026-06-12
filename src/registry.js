@@ -154,26 +154,38 @@ export const renderRegistry = () => {
         const carUsage = `${activeCars.length}/${u.car_limit}`;
         const bikeUsage = `${activeBikes.length}/${u.bike_limit}`;
 
+        const mobilePlateChip = (v) => {
+            const icon = (v.type || 'CAR') === 'CAR' ? 'fa-car' : 'fa-motorcycle';
+            const iconTypeClass = (v.type || 'CAR') === 'CAR' ? 'car' : 'bike';
+            const t = (v.type || 'CAR').toLowerCase();
+            const s = !v.is_parking_active ? 'inactive' : (v.status || 'ALLOWED').toLowerCase();
+            return `<span class="unit-chip unit-chip--compact ${t} ${s}"><i class="fa-solid ${icon} vehicle-type-icon ${iconTypeClass}"></i>${v.plate}</span>`;
+        };
+        const summaryPlates = [...activeFleet, ...dormantFleet];
+        const summaryPlatesHtml = summaryPlates.length
+            ? summaryPlates.map(mobilePlateChip).join('')
+            : `<span class="unit-card__empty">No vehicles</span>`;
+
         if (isMobile) {
             const card = document.createElement('details');
             card.className = `unit-card ${hasViolation ? 'unit-card--violation' : ''}`;
             card.innerHTML = `
               <summary class="unit-card__summary">
-                <div class="unit-card__title">
+                <div class="unit-card__head">
                   <div class="unit-card__unit">Unit ${u.number}</div>
-                  <div class="unit-card__meta">
-                    <span class="unit-card__usage"><i class="fa-solid fa-car"></i> ${carUsage}</span>
-                    <span class="unit-card__usage"><i class="fa-solid fa-motorcycle"></i> ${bikeUsage}</span>
-                    <span class="unit-card__dot">•</span>
-                    <span>${activeFleet.length} active</span>
-                    <span class="unit-card__dot">•</span>
-                    <span>${dormantFleet.length} dormant</span>
+                  <div class="unit-card__right">
+                    <div class="status-pill ${hasViolation ? 'danger' : (activeFleet.length > 0 ? 'success' : 'warning')}"><span>${hasViolation ? 'Violation' : (activeFleet.length > 0 ? 'Pass' : 'Empty')}</span></div>
+                    <button class="btn btn-outline unit-card__manage" type="button" aria-label="Manage unit"><i class="fa-solid fa-gear"></i></button>
                   </div>
                 </div>
-                <div class="unit-card__right">
-                  <div class="status-pill ${hasViolation ? 'danger' : (activeFleet.length > 0 ? 'success' : 'warning')}"><span>${hasViolation ? 'Violation' : (activeFleet.length > 0 ? 'Pass' : 'Empty')}</span></div>
-                  <button class="btn btn-outline unit-card__manage" type="button" aria-label="Manage unit"><i class="fa-solid fa-gear"></i></button>
+                <div class="unit-card__meta">
+                  <span class="unit-card__usage"><i class="fa-solid fa-car"></i> ${carUsage}</span>
+                  <span class="unit-card__usage"><i class="fa-solid fa-motorcycle"></i> ${bikeUsage}</span>
+                  <span class="unit-card__dot">•</span>
+                  <span>${activeFleet.length} active</span>
+                  ${dormantFleet.length ? `<span class="unit-card__dot">•</span><span>${dormantFleet.length} dormant</span>` : ''}
                 </div>
+                <div class="unit-card__plates">${summaryPlatesHtml}</div>
               </summary>
               <div class="unit-card__body">
                 ${hasViolation ? `
