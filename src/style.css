@@ -1268,7 +1268,8 @@ header {
 /* --- Centered dialogs (Accounts / Pool / Receipt) --- */
 #cash-modal.modal-backdrop,
 #pool-modal.modal-backdrop,
-#receipt-modal.modal-backdrop {
+#receipt-modal.modal-backdrop,
+#audit-log-modal.modal-backdrop {
   justify-content: center;
   align-items: center;
   padding: 1.2rem;
@@ -1288,7 +1289,8 @@ header {
 
 #cash-modal .modal-content,
 #pool-modal .modal-content,
-#receipt-modal .modal-content {
+#receipt-modal .modal-content,
+#audit-log-modal .modal-content {
   width: min(520px, 92vw);
   height: auto;
   max-height: 86vh;
@@ -1296,6 +1298,14 @@ header {
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.22);
+}
+
+#audit-log-modal .modal-content {
+  width: min(720px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem !important;
 }
 
 #resident-modal .modal-content {
@@ -1323,7 +1333,8 @@ header {
 
 #cash-modal.modal-backdrop.active .modal-content,
 #pool-modal.modal-backdrop.active .modal-content,
-#receipt-modal.modal-backdrop.active .modal-content {
+#receipt-modal.modal-backdrop.active .modal-content,
+#audit-log-modal.modal-backdrop.active .modal-content {
   transform: translateY(0);
 }
 
@@ -2563,11 +2574,22 @@ header {
 }
 
 .audit-log-list {
-  max-height: min(55vh, 480px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.audit-log-footer {
+  flex-shrink: 0;
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: center;
 }
 
 .audit-row {

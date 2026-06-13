@@ -811,6 +811,7 @@
       </div>
 
       <div id="audit-log-list" class="audit-log-list"></div>
+      <p id="audit-log-footer" class="audit-log-footer"></p>
       <p id="audit-log-empty" class="audit-empty" hidden>No changes recorded yet.</p>
     </div>
   </div>
@@ -876,7 +877,7 @@
         <div>
           <h2 style="font-size: 1.25rem; font-weight: 900;">Reconcile from Excel</h2>
           <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
-            Upload a spreadsheet with Flat, Vehicle_Number, slot counts, and related columns.
+            One file can include cars, bikes, or both — each row is classified from <strong>Vehicle_Type</strong> and <strong>Parking_No</strong>.
           </p>
         </div>
         <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" id="parking-import-close" type="button">&times;</button>
@@ -884,9 +885,10 @@
 
       <div id="parking-import-step-pick">
         <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
-          Expected columns: <strong>Flat</strong>, <strong>Vehicle_Number</strong>, <strong>Vehicle_Type</strong>,
-          <strong>two_wheeler_count</strong>, <strong>four_wheeler_count</strong>, <strong>Parking_No</strong>,
-          <strong>Parking_Sticker</strong>, <strong>RFID_Tag</strong>, <strong>RFID_Number</strong>, etc.
+          No separate car/bike upload needed. Each row is handled individually:
+          <strong>Vehicle_Type</strong> (CAR / BIKE / TWO_WHEELER / FOUR_WHEELER),
+          slot limits via <strong>two_wheeler_count</strong> &amp; <strong>four_wheeler_count</strong>,
+          and pool/neighbor slots via <strong>Parking_No</strong> (EH/BH or another flat).
         </p>
         <div style="display: flex; flex-direction: column; gap: 0.75rem;">
           <label style="font-size: 0.65rem; font-weight: 900; color: var(--text-dim); text-transform: uppercase;">Import mode</label>

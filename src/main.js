@@ -1091,7 +1091,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><strong>Mode:</strong> ${mode === 'overwrite' ? 'Overwrite' : 'Merge'}</div>
         <div><strong>Rows parsed:</strong> ${preview.rowCount}</div>
         <div><strong>Units:</strong> ${preview.unitCount} (${preview.newUnits} new, ${preview.updatedUnits} updated)</div>
-        <div><strong>Vehicles:</strong> ${preview.vehicleCount} (${preview.newVehicles} new, ${preview.updatedVehicles} to update)</div>
+        <div><strong>Vehicles:</strong> ${preview.vehicleCount} (${preview.carCount ?? 0} cars, ${preview.bikeCount ?? 0} bikes)</div>
+        <div><strong>Changes:</strong> ${preview.newVehicles} new, ${preview.updatedVehicles} to update</div>
         <div><strong>Sticker / RFID rows:</strong> ${preview.withSticker ?? 0} with sticker, ${preview.withRfid ?? 0} with RFID data</div>
         <div><strong>Rented / external parking:</strong> ${preview.rentedParking ?? 0} vehicle(s) with Parking_No ≠ Flat</div>
         ${mode === 'overwrite' && preview.removedVehicles > 0

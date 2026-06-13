@@ -132,26 +132,38 @@ export const logVehicleAudit = async ({
   return { id: data?.id };
 };
 
-export const fetchVehicleAuditLog = async ({ pendingOnly = true, limit = 200 } = {}) => {
+export const fetchVehicleAuditLog = async ({ pendingOnly = true, limit = 5000 } = {}) => {
   if (!supabase) return [];
   const apartment_id = portalState.access?.activeApartmentId;
   if (!apartment_id) return [];
 
-  let q = supabase
-    .from('vehicle_audit_log')
-    .select('*')
-    .eq('apartment_id', apartment_id)
-    .order('changed_at', { ascending: false })
-    .limit(limit);
+  const pageSize = 100;
+  let all = [];
+  let from = 0;
 
-  if (pendingOnly) q = q.is('synced_at', null);
+  while (all.length < limit) {
+    let q = supabase
+      .from('vehicle_audit_log')
+      .select('*')
+      .eq('apartment_id', apartment_id)
+      .order('changed_at', { ascending: false })
+      .range(from, from + pageSize - 1);
 
-  const { data, error } = await q;
-  if (error) {
-    if (/vehicle_audit_log/i.test(error.message)) return [];
-    throw error;
+    if (pendingOnly) q = q.is('synced_at', null);
+
+    const { data, error } = await q;
+    if (error) {
+      if (/vehicle_audit_log/i.test(error.message)) return [];
+      throw error;
+    }
+    if (!data?.length) break;
+
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
   }
-  return data || [];
+
+  return all.slice(0, limit);
 };
 
 export const countPendingVehicleAudit = async () => {
@@ -189,6 +201,15 @@ export const markAllPendingVehicleAuditSynced = async () => {
     .is('synced_at', null);
 
   return { error };
+};
+
+const escapeHtml = (val) => {
+  if (val == null) return '';
+  return String(val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 };
 
 const formatChangeSummary = (entry) => {
@@ -278,20 +299,31 @@ const actionBadge = (action) => {
 export const renderVehicleAuditModal = async () => {
   const list = document.getElementById('audit-log-list');
   const empty = document.getElementById('audit-log-empty');
+  const footer = document.getElementById('audit-log-footer');
   const pendingOnly = document.getElementById('audit-pending-only')?.checked ?? true;
   if (!list) return;
 
   list.innerHTML = '<div class="audit-loading">Loading…</div>';
+  if (footer) footer.textContent = '';
   let entries;
+  let totalPending = 0;
   try {
-    entries = await fetchVehicleAuditLog({ pendingOnly, limit: 200 });
+    if (pendingOnly) totalPending = await countPendingVehicleAudit();
+    entries = await fetchVehicleAuditLog({ pendingOnly, limit: 5000 });
   } catch (err) {
-    list.innerHTML = `<div class="audit-error">${err.message || 'Could not load audit log.'}</div>`;
+    list.innerHTML = `<div class="audit-error">${escapeHtml(err.message || 'Could not load audit log.')}</div>`;
     return;
   }
 
   const countEl = document.getElementById('audit-pending-count');
-  if (countEl && pendingOnly) countEl.textContent = entries.length ? `${entries.length} pending` : 'None pending';
+  if (countEl) {
+    if (pendingOnly) {
+      const n = totalPending || entries.length;
+      countEl.textContent = n ? `${n} pending` : 'None pending';
+    } else {
+      countEl.textContent = entries.length ? `${entries.length} shown` : 'None';
+    }
+  }
 
   if (!entries.length) {
     list.innerHTML = '';
@@ -303,18 +335,24 @@ export const renderVehicleAuditModal = async () => {
   list.innerHTML = entries
     .map(
       (e) => `
-    <div class="audit-row" data-id="${e.id}">
+    <div class="audit-row" data-id="${escapeHtml(e.id)}">
       <div class="audit-row__head">
         ${actionBadge(e.action)}
-        <strong>${e.plate}</strong>
-        <span class="audit-row__unit">${e.unit_number || '—'}</span>
-        <span class="audit-row__when">${formatWhen(e.changed_at)}</span>
+        <strong>${escapeHtml(e.plate)}</strong>
+        <span class="audit-row__unit">${escapeHtml(e.unit_number || '—')}</span>
+        <span class="audit-row__when">${escapeHtml(formatWhen(e.changed_at))}</span>
       </div>
-      <div class="audit-row__delta">${formatChangeSummary(e)}</div>
-      <div class="audit-row__meta">${e.source} · ${e.changed_by || 'unknown'}${e.synced_at ? ` · synced ${formatWhen(e.synced_at)}` : ''}</div>
+      <div class="audit-row__delta">${escapeHtml(formatChangeSummary(e))}</div>
+      <div class="audit-row__meta">${escapeHtml(e.source)} · ${escapeHtml(e.changed_by || 'unknown')}${e.synced_at ? ` · synced ${escapeHtml(formatWhen(e.synced_at))}` : ''}</div>
     </div>`,
     )
     .join('');
+
+  if (footer) {
+    footer.textContent = pendingOnly && totalPending > entries.length
+      ? `Showing ${entries.length} of ${totalPending} pending — scroll for more`
+      : `Showing ${entries.length} ${pendingOnly ? 'pending ' : ''}${entries.length === 1 ? 'entry' : 'entries'}`;
+  }
 };
 
 export const openVehicleAuditModal = async () => {

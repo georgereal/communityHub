@@ -120,10 +120,13 @@ export function buildReconcileExportRows(units, slots) {
   return rows;
 }
 
-const mapVehicleType = (raw) => {
+const mapVehicleType = (raw, parkingNo = '') => {
   const t = String(raw ?? '').trim().toUpperCase();
   if (t.includes('TWO') || t.includes('BIKE') || t.includes('2')) return 'BIKE';
   if (t.includes('FOUR') || t.includes('CAR') || t.includes('4')) return 'CAR';
+  const p = String(parkingNo ?? '').trim().toUpperCase().replace(/-/g, '');
+  if (/^BH\d/.test(p)) return 'BIKE';
+  if (/^EH\d/.test(p)) return 'CAR';
   return 'CAR';
 };
 
@@ -201,7 +204,7 @@ export function parseParkingWorksheet(ws) {
     vehicles.push({
       unitNumber: flat,
       plate,
-      type: mapVehicleType(cellText(row, cols.vehicleType)),
+      type: mapVehicleType(cellText(row, cols.vehicleType), cellText(row, cols.parkingNo)),
       parkingNo: cellText(row, cols.parkingNo).toUpperCase() || flat,
       meta: {
         block: cellText(row, cols.block),
@@ -256,35 +259,40 @@ export function buildImportPreview(parsed, mode) {
 
   let newVehicles = 0;
   let updatedVehicles = 0;
+  let withSticker = 0;
+  let withRfid = 0;
+  let rentedParking = 0;
+  let carCount = 0;
+  let bikeCount = 0;
   const seenPlates = new Set();
   parsed.vehicles.forEach((v) => {
     if (seenPlates.has(v.plate)) return;
     seenPlates.add(v.plate);
+
     const ex = existingPlates.get(v.plate);
     if (!ex) newVehicles++;
-    else if (ex.unit !== v.unitNumber) updatedVehicles++;
     else updatedVehicles++;
-  });
 
-  const existingVehicleCount = portalState.units.reduce((n, u) => n + u.vehicles.length, 0);
-  const removedVehicles =
-    mode === 'overwrite' ? Math.max(0, existingVehicleCount - seenPlates.size) : 0;
+    if ((v.type || 'CAR').toUpperCase() === 'CAR') carCount++;
+    else bikeCount++;
 
-  let withSticker = 0;
-  let withRfid = 0;
-  let rentedParking = 0;
-  parsed.vehicles.forEach((v) => {
     const fields = vehicleRegistryFieldsFromMeta(v.meta);
     if (fields.parking_sticker) withSticker++;
     if (fields.rfid_number || fields.rfid_tag) withRfid++;
     if (slotMatchKey(v.parkingNo) !== slotMatchKey(v.unitNumber)) rentedParking++;
   });
 
+  const existingVehicleCount = portalState.units.reduce((n, u) => n + u.vehicles.length, 0);
+  const removedVehicles =
+    mode === 'overwrite' ? Math.max(0, existingVehicleCount - seenPlates.size) : 0;
+
   return {
     mode,
     rowCount: parsed.rowCount,
     unitCount: unitNumbers.size,
     vehicleCount: seenPlates.size,
+    carCount,
+    bikeCount,
     newUnits,
     updatedUnits,
     newVehicles,
