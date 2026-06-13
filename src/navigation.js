@@ -18,7 +18,7 @@ export const NAV_MODULES = [
             },
             {
                 route: 'property-residents',
-                label: 'Owners & Tenants',
+                label: 'Residents',
                 icon: 'fa-user-group',
                 view: 'apartment',
                 permission: 'apartment_mgmt.view',

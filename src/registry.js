@@ -2,6 +2,7 @@
  * Sentry Registry Engine (Relational)
  */
 import { portalState, persist, supabase, pullState, upsertSocietyConfig } from './store.js';
+import { getSelectedBlock, unitMatchesBlock } from './blockFilter.js';
 import {
   RECONCILE_EXPORT_HEADERS,
   buildReconcileExportRows,
@@ -115,7 +116,10 @@ export const renderRegistry = () => {
     const filter = document.body.dataset.registryFilter || 'ALL';
     const isMobile = window.matchMedia && window.matchMedia('(max-width: 520px)').matches;
 
+    const block = getSelectedBlock();
+
     let filtered = portalState.units.filter(u => {
+        if (block && !unitMatchesBlock(u.id, block)) return false;
         const unitMatch = (u.number || '').toString().toLowerCase().includes(search);
         const plateMatch = u.vehicles.some(v => (v.plate || '').toString().toLowerCase().includes(search));
         return unitMatch || plateMatch;

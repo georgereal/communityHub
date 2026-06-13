@@ -4,6 +4,13 @@
 import { portalState, supabase, pullState } from './store.js';
 import { deriveBlockFromFlat } from './parkingImport.js';
 import {
+    importResidentsFromSheet,
+    deleteResident,
+    loadResidents,
+    fetchResidentsForApartment,
+} from './residents.js';
+import { renderBlockFilterSelect, unitMatchesBlock, initBlockFilterListener } from './blockFilter.js';
+import {
     getOpenInvoicesForUnit,
     invoiceBalance,
     invoiceStatus,
@@ -200,17 +207,6 @@ export const buildResidentsSheetRows = (units, residents = []) => {
         ]);
 };
 
-export async function fetchResidentsForApartment(apartmentId) {
-    if (!supabase || !apartmentId) return [];
-    const { data, error } = await supabase
-        .from('residents')
-        .select('id, unit_number, kind, full_name, phone, email, notes')
-        .eq('apartment_id', apartmentId)
-        .order('unit_number');
-    if (error) throw new Error(error.message);
-    return data || [];
-}
-
 export async function downloadUnitDirectoryTemplate() {
     await pullState();
     const ExcelJS = (await import('exceljs')).default;
@@ -381,7 +377,7 @@ function buildUnitPatch(row) {
     return patch;
 }
 
-export async function applyUnitDirectoryImport(parsed, { createMissing = true } = {}) {
+export async function applyUnitDirectoryImport(parsed, { createMissing = true, residentImportMode = 'update_listed' } = {}) {
     if (!supabase) throw new Error('Supabase is not configured.');
     const apartment_id = portalState.access?.activeApartmentId;
     if (!apartment_id) throw new Error('No active apartment selected.');
@@ -431,39 +427,11 @@ export async function applyUnitDirectoryImport(parsed, { createMissing = true } 
     }
 
     if (parsed.residents?.length) {
-        const byUnit = new Map();
-        parsed.residents.forEach((r) => {
-            const key = normUnit(r.unitNumber);
-            if (!byUnit.has(key)) byUnit.set(key, []);
-            byUnit.get(key).push(r);
-        });
-
-        for (const [unitKey, people] of byUnit) {
-            const unitLabel = people[0]?.unitNumber || unitKey;
-            try {
-                const { error: delErr } = await supabase
-                    .from('residents')
-                    .delete()
-                    .eq('apartment_id', apartment_id)
-                    .eq('unit_number', unitLabel);
-                if (delErr) throw formatDbError(delErr, unitLabel);
-
-                const payload = people.map((p) => ({
-                    id: crypto.randomUUID(),
-                    apartment_id,
-                    unit_number: p.unitNumber,
-                    kind: p.kind,
-                    full_name: p.fullName,
-                    phone: p.phone || null,
-                    email: p.email || null,
-                    notes: p.notes || null,
-                }));
-                const { error: insErr } = await supabase.from('residents').insert(payload);
-                if (insErr) throw formatDbError(insErr, unitLabel);
-                stats.residents += payload.length;
-            } catch (err) {
-                stats.errors.push(`Residents ${unitLabel}: ${err?.message || 'failed'}`);
-            }
+        try {
+            const { count } = await importResidentsFromSheet(parsed.residents, residentImportMode);
+            stats.residents = count;
+        } catch (err) {
+            stats.errors.push(`Residents: ${err?.message || 'import failed'}`);
         }
     }
 
@@ -658,7 +626,7 @@ const renderUnitDetailResidents = (u) => {
     el.querySelectorAll('.unit-detail-del-resident').forEach((btn) => {
         btn.addEventListener('click', async () => {
             if (!confirm('Delete this resident record?')) return;
-            await supabase.from('residents').delete().eq('id', btn.dataset.id);
+            await deleteResident(btn.dataset.id);
             editingUnitResidents = await fetchResidentsForApartment(portalState.access?.activeApartmentId);
             renderUnitDetailResidents(u);
             renderUnitDetailKpis(u);
@@ -909,6 +877,7 @@ export const renderUnitDirectory = async () => {
     const resIndex = indexResidents(residents);
 
     const units = directoryUnits()
+        .filter((u) => unitMatchesBlock(u.id))
         .filter((u) => !filterQ || String(u.number).toUpperCase().includes(filterQ));
 
     list.innerHTML = '';
@@ -951,6 +920,8 @@ export const renderUnitDirectory = async () => {
 };
 
 export const initUnitDirectory = () => {
+    renderBlockFilterSelect('unit-directory-block-filter', () => void renderUnitDirectory());
+    initBlockFilterListener(() => void renderUnitDirectory());
     document.getElementById('unit-directory-filter')?.addEventListener('input', () => void renderUnitDirectory());
 
     document.querySelectorAll('.unit-detail-tab').forEach((btn) => {
@@ -1046,10 +1017,12 @@ export const initUnitDirectory = () => {
 
     document.getElementById('unit-directory-import-apply')?.addEventListener('click', async () => {
         if (!pendingImport) return;
+        const mode = document.querySelector('input[name="resident-import-mode"]:checked')?.value || 'update_listed';
+        if (mode === 'full_replace' && !confirm('This will delete ALL residents for this apartment before importing. Continue?')) return;
         const btn = document.getElementById('unit-directory-import-apply');
         if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
         try {
-            const stats = await applyUnitDirectoryImport(pendingImport);
+            const stats = await applyUnitDirectoryImport(pendingImport, { residentImportMode: mode });
             closeImportModal();
             await renderUnitDirectory();
             const errNote = stats.errors.length
