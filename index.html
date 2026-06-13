@@ -402,9 +402,16 @@
           </div>
         </section>
 
+        <div id="billing-block-kpi" class="billing-block-kpi-wrap" hidden></div>
+        <div class="invoice-toolbar billing-block-toolbar">
+          <div id="billing-block-filter"></div>
+        </div>
+
         <nav class="subview-tabs invoice-subview-tabs">
           <button id="btn-invoice-list" type="button" onclick="window.switchInvoiceSubView('list')">Invoice Register</button>
           <button id="btn-invoice-by-flat" type="button" onclick="window.switchInvoiceSubView('by-flat')">Flat Summary</button>
+          <button id="btn-invoice-batches" type="button" onclick="window.switchInvoiceSubView('batches')">Billing Runs</button>
+          <button id="btn-invoice-aging" type="button" onclick="window.switchInvoiceSubView('aging')">Aging &amp; Reminders</button>
           <button id="btn-invoice-collections" type="button" onclick="window.switchInvoiceSubView('collections')">Payment Collections</button>
         </nav>
 
@@ -452,6 +459,34 @@
             <div id="invoice-collections-items"></div>
           </div>
         </div>
+
+        <div id="invoice-subview-batches" class="invoice-subview" style="display:none;">
+          <div class="registry-list">
+            <div class="registry-header billing-runs-header">
+              <span>Period</span><span>Due</span><span>Created</span>
+              <span style="text-align:right;">Invoices</span><span style="text-align:right;">Total</span>
+              <span style="text-align:center;">Skipped</span><span style="text-align:right;">Action</span>
+            </div>
+            <div id="billing-runs-list"></div>
+          </div>
+        </div>
+
+        <div id="invoice-subview-aging" class="invoice-subview" style="display:none;">
+          <p id="aging-block-note" class="maintenance-alloc-hint" hidden></p>
+          <section class="dashboard-metrics aging-metrics">
+            <div class="metric-card aging-metric"><span class="label">Current</span><span class="value" id="aging-sum-current">₹ 0</span></div>
+            <div class="metric-card aging-metric"><span class="label">1–30 days</span><span class="value" id="aging-sum-30">₹ 0</span></div>
+            <div class="metric-card aging-metric"><span class="label">31–60 days</span><span class="value" id="aging-sum-60">₹ 0</span></div>
+            <div class="metric-card aging-metric"><span class="label">61–90 days</span><span class="value" id="aging-sum-90">₹ 0</span></div>
+            <div class="metric-card aging-metric"><span class="label">90+ days</span><span class="value" id="aging-sum-90plus" style="color:var(--danger);">₹ 0</span></div>
+          </section>
+          <div class="invoice-toolbar aging-toolbar">
+            <button type="button" class="btn btn-outline btn--small" id="aging-select-all">Select all</button>
+            <button type="button" class="btn btn-outline btn--small" id="aging-export-btn">Export Excel</button>
+            <button type="button" class="btn btn-primary btn--small" id="aging-bulk-send-btn">Send reminders</button>
+          </div>
+          <div id="aging-reminder-list" class="aging-reminder-list"></div>
+        </div>
       </section>
 
       <!-- VIEW: UNITS -->
@@ -476,6 +511,7 @@
             <i class="fa-solid fa-magnifying-glass"></i>
             <input type="search" id="unit-directory-filter" placeholder="Search flat, block, BHK…" autocomplete="off" />
           </form>
+          <div id="unit-directory-block-filter"></div>
         </div>
         <div class="registry-list unit-directory-list">
           <div class="registry-header unit-directory-header">
@@ -491,15 +527,28 @@
       <section id="view-apartment" class="content-view">
         <header>
           <div class="header-title">
-            <h2>Owners & Tenants</h2>
-            <p>Resident directory — owners, tenants and contact details per flat</p>
+            <h2>Residents</h2>
+            <p>Owner and tenant directory — used for billing emails and notices</p>
           </div>
-          <div style="display:flex; gap:0.5rem;">
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button class="btn btn-outline" id="resident-export-btn"><i class="fa-solid fa-download"></i> <span>Export</span></button>
             <button class="btn btn-outline" id="resident-refresh-btn"><i class="fa-solid fa-rotate"></i> <span>Refresh</span></button>
             <button class="btn btn-primary" id="resident-add-btn"><i class="fa-solid fa-plus"></i> <span>Add</span></button>
           </div>
         </header>
-        <div style="padding: 1rem 1.6rem 1.6rem;">
+        <div style="padding: 0 1.6rem 0.75rem;">
+          <div class="invoice-toolbar">
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="resident-filter" placeholder="Search name, flat, email…" autocomplete="off" />
+            </form>
+            <label class="invoice-filter-status">
+              <span>Block</span>
+              <select id="resident-block-filter"><option value="">All blocks</option></select>
+            </label>
+          </div>
+        </div>
+        <div style="padding: 0 1.6rem 1.6rem;">
           <div class="registry-list">
             <div class="registry-header" style="grid-template-columns: 120px 110px 1fr 160px 220px 90px;">
               <span>Unit</span><span>Type</span><span>Name</span><span>Phone</span><span>Email</span><span style="text-align:right;">Action</span>
@@ -1358,6 +1407,29 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="batch-detail-modal">
+    <div class="modal-content expense-modal invoice-detail-modal" style="max-width: 720px;">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="batch-detail-title">Billing run</h2>
+          <p id="batch-detail-subtitle"></p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" id="batch-detail-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="invoice-detail-body">
+        <h4 class="invoice-detail-section-title">Invoices in this run</h4>
+        <div id="batch-detail-invoices"></div>
+        <h4 class="invoice-detail-section-title">Skipped flats</h4>
+        <div id="batch-detail-skips"></div>
+      </div>
+      <div class="expense-modal__footer invoice-detail-footer">
+        <button type="button" class="btn btn-outline" id="batch-detail-cancel">Close</button>
+        <button type="button" class="btn btn-outline" id="batch-detail-download-zip"><i class="fa-solid fa-file-zipper"></i> Download PDFs</button>
+        <button type="button" class="btn btn-primary" id="batch-detail-send">Send invoices</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="send-invoices-modal">
     <div class="modal-content expense-modal bulk-invoice-modal" style="max-width: 720px;">
       <div class="expense-modal__header">
@@ -1841,6 +1913,20 @@
           <strong>Residents</strong> sheet: one row per owner/tenant (multiple per flat).
           Blank cells keep existing values. Re-download template if columns changed.
         </p>
+        <div class="import-mode-options" style="margin-bottom: 0.75rem;">
+          <label class="import-mode-option">
+            <input type="radio" name="resident-import-mode" value="update_listed" checked />
+            <span><strong>Update listed flats</strong> — merge residents on flats in sheet only</span>
+          </label>
+          <label class="import-mode-option">
+            <input type="radio" name="resident-import-mode" value="replace_listed" />
+            <span><strong>Replace listed flats</strong> — remove &amp; re-import residents for flats in sheet</span>
+          </label>
+          <label class="import-mode-option">
+            <input type="radio" name="resident-import-mode" value="full_replace" />
+            <span><strong>Full replace</strong> — delete all residents, then import sheet</span>
+          </label>
+        </div>
         <div style="display: flex; gap: 0.75rem;">
           <button type="button" class="btn btn-outline" style="flex: 1;" id="unit-directory-import-cancel">Cancel</button>
           <button type="button" class="btn btn-primary" style="flex: 1;" id="unit-directory-import-choose">

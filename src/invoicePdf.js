@@ -8,15 +8,17 @@ import { portalState, supabase } from './store.js';
 import { calcTypeLabel, getInvoiceLines } from './billingHeads.js';
 import { ruleTypeLabel } from './penaltyRules.js';
 import { getGroupById, getInvoiceGroupLabel, getUnitIdsForGroup } from './billingGroups.js';
-
-let residentsCache = null;
-
-const normUnit = (n) => String(n || '').trim().toUpperCase();
+import {
+    clearResidentsCache,
+    fetchResidentsForApartment,
+    getBillToForInvoice,
+    loadResidents,
+} from './residents.js';
 
 const getUnitLabel = (unitId) =>
     portalState.units.find((u) => u.id === unitId)?.number || '—';
 
-const getInvoiceDisplayLabel = (inv) => {
+export const getInvoiceDisplayLabelForPdf = (inv) => {
     if (inv?.billing_group_id) {
         return getInvoiceGroupLabel(inv, getUnitLabel) || 'Combined invoice';
     }
@@ -45,61 +47,11 @@ const formatDate = (iso) => {
 
 const sanitizeFilename = (s) => String(s || 'invoice').replace(/[^\w.-]+/g, '_').replace(/_+/g, '_');
 
-export const clearResidentsCache = () => { residentsCache = null; };
+export { clearResidentsCache };
 
 export async function fetchResidentsForBilling() {
-    if (residentsCache) return residentsCache;
-    const apartmentId = portalState.access?.activeApartmentId;
-    if (!supabase || !apartmentId) return [];
-    const { data } = await supabase
-        .from('residents')
-        .select('id, unit_number, kind, full_name, phone, email')
-        .eq('apartment_id', apartmentId);
-    residentsCache = data || [];
-    return residentsCache;
+    return loadResidents(true);
 }
-
-const unitNumbersForInvoice = (inv) => {
-    const nums = new Set();
-    if (inv.billing_group_id) {
-        getUnitIdsForGroup(inv.billing_group_id).forEach((id) => {
-            const n = getUnitLabel(id);
-            if (n !== '—') nums.add(normUnit(n));
-        });
-    } else if (inv.unit_id) {
-        nums.add(normUnit(getUnitLabel(inv.unit_id)));
-    }
-    return nums;
-};
-
-export const getBillToForInvoice = (inv, residents = []) => {
-    const unitNums = unitNumbersForInvoice(inv);
-    const group = inv.billing_group_id ? getGroupById(inv.billing_group_id) : null;
-
-    const matches = residents.filter((r) => unitNums.has(normUnit(r.unit_number)));
-    const owners = matches.filter((r) => (r.kind || '').toUpperCase() === 'OWNER');
-    const tenants = matches.filter((r) => (r.kind || '').toUpperCase() === 'TENANT');
-    const primary = owners[0] || tenants[0] || matches[0];
-
-    const emails = [...new Set(matches.map((r) => r.email?.trim()).filter(Boolean))];
-    const name = group?.contact_name || group?.name || primary?.full_name || 'Resident';
-    const flats = [...unitNums]
-        .map((n) => {
-            const u = portalState.units.find((x) => normUnit(x.number) === n);
-            return u?.number || n;
-        })
-        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))
-        .join(', ');
-
-    return {
-        name,
-        phone: primary?.phone || '',
-        email: emails[0] || '',
-        allEmails: emails,
-        flats,
-        groupName: group?.name || null,
-    };
-};
 
 const lineDescription = (line) => {
     if (line.penalty_rule_id || String(line.calc_type || '').startsWith('PENALTY_')) {
@@ -138,13 +90,13 @@ export const buildInvoicePdfData = async (invoiceId) => {
         bank,
         balance: bal,
         status,
-        displayLabel: getInvoiceDisplayLabel(inv),
-        invoiceNo: `${inv.period_label || 'Invoice'} · ${getInvoiceDisplayLabel(inv)}`,
+        displayLabel: getInvoiceDisplayLabelForPdf(inv),
+        invoiceNo: `${inv.period_label || 'Invoice'} · ${getInvoiceDisplayLabelForPdf(inv)}`,
     };
 };
 
 export const invoicePdfFilename = (inv) => {
-    const label = sanitizeFilename(getInvoiceDisplayLabel(inv));
+    const label = sanitizeFilename(getInvoiceDisplayLabelForPdf(inv));
     const period = sanitizeFilename(inv.period_label || 'invoice');
     return `Invoice_${period}_${label}.pdf`;
 };
@@ -368,6 +320,113 @@ export async function emailInvoicePdf(invoiceId) {
     return { method: 'mailto', email: to };
 }
 
+export async function generateReminderPdfBlob(invoiceId) {
+    const data = await buildInvoicePdfData(invoiceId);
+    const { inv, billTo, societyName, bank, balance } = data;
+    const daysOd = Math.max(0, Math.floor(
+        (new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00`)
+            - new Date(`${inv.due_date || new Date().toISOString().slice(0, 10)}T12:00:00`)) / 86400000,
+    ));
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    let y = margin;
+
+    doc.setFillColor(185, 28, 28);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PAYMENT REMINDER', margin, 14);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(societyName, margin, 22);
+
+    y = 36;
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(11);
+    doc.text(`Dear ${billTo.name},`, margin, y);
+    y += 8;
+    doc.setFontSize(9);
+    const lines = [
+        `This is a friendly reminder that maintenance dues for ${billTo.flats || data.displayLabel} remain outstanding.`,
+        '',
+        `Period: ${inv.period_label}`,
+        `Due date: ${formatDate(inv.due_date)}`,
+        daysOd > 0 ? `Days overdue: ${daysOd}` : 'Status: Due soon',
+        `Amount billed: ${formatInr(inv.amount)}`,
+        `Amount paid: ${formatInr(inv.amount_paid)}`,
+        `Balance due: ${formatInr(balance)}`,
+    ];
+    lines.forEach((line) => {
+        if (line === '') { y += 3; return; }
+        doc.text(line, margin, y);
+        y += 5;
+    });
+
+    y += 4;
+    if (bank?.bank_name) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Please pay to:', margin, y);
+        y += 5;
+        doc.setFont('helvetica', 'normal');
+        [bank.bank_name, bank.account_number ? `A/c: ${bank.account_number}` : null, bank.ifsc ? `IFSC: ${bank.ifsc}` : null, bank.upi_id ? `UPI: ${bank.upi_id}` : null]
+            .filter(Boolean)
+            .forEach((line) => { doc.text(line, margin, y); y += 4; });
+    }
+
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Thank you for your prompt attention.', margin, y + 6);
+
+    return doc.output('blob');
+}
+
+export async function downloadReminderPdf(invoiceId) {
+    const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === invoiceId);
+    if (!inv) throw new Error('Invoice not found.');
+    const blob = await generateReminderPdfBlob(invoiceId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Reminder_${sanitizeFilename(inv.period_label)}_${sanitizeFilename(getInvoiceDisplayLabelForPdf(inv))}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+export async function emailReminderPdf(invoiceId) {
+    const data = await buildInvoicePdfData(invoiceId);
+    const { inv, billTo, balance, societyName } = data;
+    const blob = await generateReminderPdfBlob(invoiceId);
+    const filename = `Reminder_${sanitizeFilename(inv.period_label)}.pdf`;
+    const file = new File([blob], filename, { type: 'application/pdf' });
+    const subject = encodeURIComponent(`Payment Reminder — ${inv.period_label} — ${data.displayLabel}`);
+    const body = encodeURIComponent([
+        `Dear ${billTo.name},`,
+        '',
+        `Please find attached a payment reminder for ${billTo.flats || data.displayLabel}.`,
+        `Balance due: ${formatInr(balance)}`,
+        '',
+        'Thank you,',
+        societyName,
+    ].join('\n'));
+
+    if (navigator.canShare?.({ files: [file] })) {
+        try {
+            await navigator.share({ title: 'Payment reminder', files: [file] });
+            return { method: 'share' };
+        } catch (err) {
+            if (err?.name === 'AbortError') return { method: 'cancelled' };
+        }
+    }
+
+    await downloadReminderPdf(invoiceId);
+    const to = billTo.allEmails.length ? billTo.allEmails.join(',') : '';
+    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+    return { method: 'mailto', email: to };
+}
+
 export async function downloadInvoicePdfsZip(invoiceIds) {
     if (!invoiceIds?.length) throw new Error('Select at least one invoice.');
     const zip = new JSZip();
@@ -397,7 +456,7 @@ export const openSendInvoicesModal = async () => {
     const onlyOpen = document.getElementById('send-invoices-open-only');
     if (onlyOpen) onlyOpen.checked = true;
 
-    renderSendInvoicesList();
+    await renderSendInvoicesList();
     modal.classList.add('active');
 };
 
@@ -420,7 +479,7 @@ const sendableInvoices = () => {
     return invoices;
 };
 
-export const renderSendInvoicesList = () => {
+export const renderSendInvoicesList = async () => {
     const container = document.getElementById('send-invoices-list');
     if (!container) return;
 
@@ -430,8 +489,9 @@ export const renderSendInvoicesList = () => {
         return;
     }
 
+    const residents = await loadResidents();
     container.innerHTML = invoices.map((inv) => {
-        const billTo = getBillToForInvoice(inv, residentsCache || []);
+        const billTo = getBillToForInvoice(inv, residents);
         const emailHint = billTo.email
             ? billTo.email
             : '<span style="color:var(--danger);">No email on file</span>';
@@ -449,7 +509,7 @@ const getSelectedSendInvoiceIds = () =>
     [...document.querySelectorAll('.send-invoice-checkbox:checked')].map((el) => el.value);
 
 export const initInvoicePdfUi = () => {
-    document.getElementById('send-invoices-open-only')?.addEventListener('change', renderSendInvoicesList);
+    document.getElementById('send-invoices-open-only')?.addEventListener('change', () => void renderSendInvoicesList());
     document.getElementById('send-invoices-select-all')?.addEventListener('click', () => {
         document.querySelectorAll('.send-invoice-checkbox').forEach((el) => { el.checked = true; });
     });

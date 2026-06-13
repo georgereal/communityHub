@@ -50,6 +50,16 @@ import {
     initInvoicePdfUi,
     openSendInvoicesModal,
 } from './invoicePdf.js';
+import { initBillingBatchesUi, renderBillingRunsList } from './billingBatches.js';
+import { initDuesAgingUi, renderAgingPage } from './duesAging.js';
+import {
+    initBlockFilterListener,
+    invoiceMatchesBlock,
+    renderBlockFilterSelect,
+    renderBlockKpiStrip,
+    unitMatchesBlock,
+} from './blockFilter.js';
+import { clearResidentsCache } from './residents.js';
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -414,6 +424,32 @@ export async function createBulkMaintenanceInvoices({
     const batch_id = crypto.randomUUID();
     const invoiceCount = toCreateIndividual.length + groupsToCreate.length;
 
+    const createdUnitIds = new Set();
+    toCreateIndividual.forEach((r) => createdUnitIds.add(r.unit.id));
+    groupsToCreate.forEach((g) => g.rows.forEach((r) => createdUnitIds.add(r.unit.id)));
+
+    const skipEntries = [];
+    preview.rows.forEach((row) => {
+        if (createdUnitIds.has(row.unit.id)) return;
+        let reason = `Skipped for period "${period_label}"`;
+        if (existingUnitPeriods.has(row.unit.id)) {
+            reason = `Invoice already exists for period "${period_label}"`;
+        } else {
+            const group = unitToGroup.get(row.unit.id);
+            if (group && existingGroupPeriods.has(group.id)) {
+                reason = `Combined invoice already exists for group "${group.name}"`;
+            } else {
+                const pen = penaltyByUnit.get(row.unit.id);
+                const total = row.total + (pen?.penaltyTotal || 0);
+                if (total <= 0) reason = 'Zero amount after calculation';
+            }
+        }
+        skipEntries.push({ unit_id: row.unit.id, reason });
+    });
+
+    let totalAmount = 0;
+    const { data: { user } } = supabase.auth.getUser ? await supabase.auth.getUser() : { data: {} };
+
     const { error: batchErr } = await supabase.from('maintenance_billing_batches').insert({
         id: batch_id,
         apartment_id,
@@ -421,6 +457,9 @@ export async function createBulkMaintenanceInvoices({
         due_date: dueDate || null,
         notes: notes?.trim() || null,
         unit_count: toCreateIndividual.length + groupsToCreate.reduce((s, g) => s + g.rows.length, 0),
+        skipped_count: skipEntries.length,
+        total_amount: 0,
+        created_by: user?.id || null,
     });
     if (batchErr && !/maintenance_billing_batches/i.test(batchErr.message)) {
         throw new Error(batchErr.message);
@@ -497,6 +536,7 @@ export async function createBulkMaintenanceInvoices({
     for (const row of toCreateIndividual) {
         const penRow = penaltyByUnit.get(row.unit.id);
         const invoiceTotal = roundMoney(row.total + (penRow?.penaltyTotal || 0));
+        totalAmount += invoiceTotal;
         await insertInvoiceWithLines({
             unit_id: row.unit.id,
             billing_group_id: null,
@@ -511,6 +551,7 @@ export async function createBulkMaintenanceInvoices({
             const pen = penaltyByUnit.get(row.unit.id);
             return s + row.total + (pen?.penaltyTotal || 0);
         }, 0));
+        totalAmount += invoiceTotal;
         const primaryUnit = rows[0]?.unit?.id || null;
         await insertInvoiceWithLines({
             unit_id: primaryUnit,
@@ -521,6 +562,27 @@ export async function createBulkMaintenanceInvoices({
         });
     }
 
+    if (!batchErr && batch_id) {
+        await supabase.from('maintenance_billing_batches')
+            .update({ total_amount: roundMoney(totalAmount) })
+            .eq('id', batch_id);
+
+        if (skipEntries.length) {
+            const skipPayload = skipEntries.map((s) => ({
+                id: crypto.randomUUID(),
+                batch_id,
+                apartment_id,
+                unit_id: s.unit_id,
+                reason: s.reason,
+            }));
+            const { error: skipErr } = await supabase.from('maintenance_billing_batch_skips').insert(skipPayload);
+            if (skipErr && !/maintenance_billing_batch_skips/i.test(skipErr.message)) {
+                console.warn('Batch skips not saved:', skipErr.message);
+            }
+        }
+    }
+
+    clearResidentsCache();
     await pullState();
     renderInvoicesPage();
 
@@ -749,9 +811,11 @@ const filteredInvoices = () => {
 
     if (statusFilter === 'open') {
         invoices = invoices.filter((inv) => invoiceStatus(inv) !== 'PAID');
-    } else if (statusFilter === 'paid') {
+    } else     if (statusFilter === 'paid') {
         invoices = invoices.filter((inv) => invoiceStatus(inv) === 'PAID');
     }
+
+    invoices = invoices.filter((inv) => invoiceMatchesBlock(inv));
 
     invoices.sort((a, b) => {
         const fa = getUnitLabel(a.unit_id);
@@ -771,6 +835,7 @@ export const renderInvoiceMetrics = () => {
     const flatsWithDues = new Set();
 
     invoices.forEach((inv) => {
+        if (!invoiceMatchesBlock(inv)) return;
         const bal = invoiceBalance(inv);
         const status = invoiceStatus(inv);
         if (bal > 0.001) {
@@ -862,6 +927,7 @@ export const renderInvoicesByFlat = () => {
 
     let units = portalState.units
         .filter((u) => byUnit.has(u.id))
+        .filter((u) => unitMatchesBlock(u.id))
         .map((u) => ({ unit: u, ...byUnit.get(u.id) }));
 
     if (filterQ) {
@@ -942,15 +1008,24 @@ export const renderInvoiceCollections = () => {
 };
 
 export const renderInvoicesPage = () => {
+    renderBlockKpiStrip('billing-block-kpi');
     renderInvoiceMetrics();
     if (activeInvoiceSubView === 'list') renderInvoiceList();
     else if (activeInvoiceSubView === 'by-flat') renderInvoicesByFlat();
+    else if (activeInvoiceSubView === 'batches') renderBillingRunsList();
+    else if (activeInvoiceSubView === 'aging') void renderAgingPage();
     else renderInvoiceCollections();
 };
 
 export const switchInvoiceSubView = (sv) => {
     activeInvoiceSubView = sv;
-    const views = { list: 'invoice-subview-list', 'by-flat': 'invoice-subview-by-flat', collections: 'invoice-subview-collections' };
+    const views = {
+        list: 'invoice-subview-list',
+        'by-flat': 'invoice-subview-by-flat',
+        collections: 'invoice-subview-collections',
+        batches: 'invoice-subview-batches',
+        aging: 'invoice-subview-aging',
+    };
     Object.entries(views).forEach(([key, id]) => {
         const el = document.getElementById(id);
         if (el) el.style.display = key === sv ? 'block' : 'none';
@@ -958,7 +1033,13 @@ export const switchInvoiceSubView = (sv) => {
 
     const dim = 'var(--text-dim)';
     const active = '#111827';
-    const tabs = { list: 'btn-invoice-list', 'by-flat': 'btn-invoice-by-flat', collections: 'btn-invoice-collections' };
+    const tabs = {
+        list: 'btn-invoice-list',
+        'by-flat': 'btn-invoice-by-flat',
+        collections: 'btn-invoice-collections',
+        batches: 'btn-invoice-batches',
+        aging: 'btn-invoice-aging',
+    };
     Object.entries(tabs).forEach(([key, id]) => {
         const btn = document.getElementById(id);
         if (btn) btn.style.color = key === sv ? active : dim;
@@ -1436,6 +1517,10 @@ export const initMaintenanceBilling = () => {
     initPenaltyRulesUi();
     initBillingGroupsUi();
     initInvoicePdfUi();
+    initBillingBatchesUi();
+    initDuesAgingUi();
+    renderBlockFilterSelect('billing-block-filter', () => renderInvoicesPage());
+    initBlockFilterListener(() => renderInvoicesPage());
 
     document.getElementById('invoice-list-filter')?.addEventListener('input', renderInvoiceList);
     document.getElementById('invoice-status-filter')?.addEventListener('change', renderInvoiceList);

@@ -6010,3 +6010,119 @@ header {
     grid-template-columns: 1fr;
   }
 }
+
+/* Phase 1 — billing runs, aging, block filter */
+.billing-block-toolbar {
+  padding: 0 1.6rem 0.75rem;
+}
+
+.billing-block-kpi-wrap {
+  padding: 0 1.6rem 0.75rem;
+}
+
+.block-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.block-filter-select {
+  min-width: 8rem;
+}
+
+.block-kpi-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.block-kpi-strip__title {
+  font-weight: 900;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.block-kpi-strip__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+}
+
+.block-kpi-strip__stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.block-kpi-strip__stats strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.billing-runs-header {
+  grid-template-columns: 1.2fr 0.9fr 1.1fr 0.6fr 0.9fr 0.5fr 0.6fr;
+}
+
+.billing-run-row {
+  grid-template-columns: 1.2fr 0.9fr 1.1fr 0.6fr 0.9fr 0.5fr 0.6fr;
+  align-items: center;
+}
+
+.batch-skip-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.aging-metrics {
+  margin: 0 1.6rem 1rem;
+}
+
+.aging-toolbar {
+  padding: 0 1.6rem 0.75rem;
+}
+
+.aging-reminder-list {
+  padding: 0 1.6rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.aging-reminder-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.aging-reminder-row .bulk-head-check__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.aging-row-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}

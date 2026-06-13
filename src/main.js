@@ -43,6 +43,18 @@ import {
   markAllPendingVehicleAuditSynced,
   refreshAuditBadge,
 } from './vehicleAudit.js';
+import {
+  loadResidents,
+  saveResident as persistResident,
+  deleteResident,
+  getResidents,
+} from './residents.js';
+import {
+  getBlockOptions,
+  getSelectedBlock,
+  setSelectedBlock,
+  unitNumberMatchesBlock,
+} from './blockFilter.js';
 
 const showAuth = (msg = '') => {
   const modal = document.getElementById('auth-modal');
@@ -511,16 +523,32 @@ const renderResidents = async () => {
     return;
   }
 
-  const { data, error } = await supabase.from('residents')
-    .select('id, unit_number, kind, full_name, phone, email, notes')
-    .eq('apartment_id', apartmentId)
-    .order('unit_number');
-  if (error) {
-    list.innerHTML = `<div style="padding:0.9rem; color:var(--danger); font-weight:800;">${error.message}</div>`;
+  let data;
+  try {
+    data = await loadResidents(true);
+  } catch (err) {
+    list.innerHTML = `<div style="padding:0.9rem; color:var(--danger); font-weight:800;">${err?.message || 'Could not load residents.'}</div>`;
     return;
   }
 
-  (data || []).forEach(r => {
+  const filterQ = (document.getElementById('resident-filter')?.value || '').trim().toLowerCase();
+  const block = getSelectedBlock();
+
+  const filtered = (data || []).filter((r) => {
+    if (block && !unitNumberMatchesBlock(r.unit_number, block)) return false;
+    if (!filterQ) return true;
+    const hay = [r.unit_number, r.kind, r.full_name, r.phone, r.email, r.notes]
+      .map((x) => String(x || '').toLowerCase())
+      .join(' ');
+    return hay.includes(filterQ);
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = '<p class="maintenance-dues-empty">No residents match your filters.</p>';
+    return;
+  }
+
+  filtered.forEach(r => {
     const row = document.createElement('div');
     row.className = 'apt-row';
     row.style = "grid-template-columns: 120px 110px 1fr 160px 220px 90px; padding: 0.75rem 0.95rem; align-items: center;";
@@ -538,11 +566,65 @@ const renderResidents = async () => {
     row.querySelector('[data-action="edit"]').onclick = () => openResidentModal(r);
     row.querySelector('[data-action="del"]').onclick = async () => {
       if (!confirm('Delete resident record?')) return;
-      await supabase.from('residents').delete().eq('id', r.id);
-      renderResidents();
+      try {
+        await deleteResident(r.id);
+        renderResidents();
+        window.refreshUnitDetailIfOpen?.();
+      } catch (err) {
+        alert(err?.message || 'Could not delete resident.');
+      }
     };
     list.appendChild(row);
   });
+};
+
+const populateResidentBlockFilter = () => {
+  const sel = document.getElementById('resident-block-filter');
+  if (!sel) return;
+  const blocks = getBlockOptions();
+  const selected = getSelectedBlock();
+  sel.innerHTML = `<option value="">All blocks</option>${blocks.map((b) =>
+    `<option value="${b}" ${b === selected ? 'selected' : ''}>${b}</option>`,
+  ).join('')}`;
+  sel.onchange = (e) => {
+    setSelectedBlock(e.target.value);
+    renderResidents();
+  };
+};
+
+const exportResidentsExcel = async () => {
+  const ExcelJS = (await import('exceljs')).default;
+  await loadResidents(true);
+  const filterQ = (document.getElementById('resident-filter')?.value || '').trim().toLowerCase();
+  const block = getSelectedBlock();
+  const rows = getResidents().filter((r) => {
+    if (block && !unitNumberMatchesBlock(r.unit_number, block)) return false;
+    if (!filterQ) return true;
+    const hay = [r.unit_number, r.kind, r.full_name, r.phone, r.email, r.notes]
+      .map((x) => String(x || '').toLowerCase())
+      .join(' ');
+    return hay.includes(filterQ);
+  });
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Residents');
+  ws.addRow(['Flat', 'Type', 'Name', 'Phone', 'Email', 'Notes']);
+  rows.forEach((r) => ws.addRow([
+    r.unit_number,
+    r.kind,
+    r.full_name,
+    r.phone || '',
+    r.email || '',
+    r.notes || '',
+  ]));
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Residents_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 let editingResidentId = null;
@@ -565,26 +647,22 @@ window.openResidentModal = openResidentModal;
 window.closeResidentModal = closeResidentModal;
 
 const saveResident = async () => {
-  if (!supabase) return;
-  const apartmentId = portalState.access?.activeApartmentId;
   const payload = {
-    apartment_id: apartmentId,
     unit_number: document.getElementById('resident-unit').value.trim(),
     kind: document.getElementById('resident-kind').value,
     full_name: document.getElementById('resident-name').value.trim(),
     phone: document.getElementById('resident-phone').value.trim(),
     email: document.getElementById('resident-email').value.trim(),
-    notes: document.getElementById('resident-notes').value.trim()
+    notes: document.getElementById('resident-notes').value.trim(),
   };
-  if (!payload.unit_number || !payload.full_name) return alert('Unit + name required.');
-  const q = editingResidentId
-    ? supabase.from('residents').update(payload).eq('id', editingResidentId)
-    : supabase.from('residents').insert(payload);
-  const { error } = await q;
-  if (error) return alert(error.message);
-  closeResidentModal();
-  renderResidents();
-  window.refreshUnitDetailIfOpen?.();
+  try {
+    await persistResident(payload, editingResidentId);
+    closeResidentModal();
+    renderResidents();
+    window.refreshUnitDetailIfOpen?.();
+  } catch (err) {
+    alert(err?.message || 'Could not save resident.');
+  }
 };
 
 /**
@@ -1028,12 +1106,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const resRefresh = document.getElementById('resident-refresh-btn');
   if (resRefresh) resRefresh.onclick = () => renderResidents();
+  const resExport = document.getElementById('resident-export-btn');
+  if (resExport) resExport.onclick = () => exportResidentsExcel().catch((err) => alert(err?.message || 'Export failed.'));
   const resAdd = document.getElementById('resident-add-btn');
   if (resAdd) resAdd.onclick = () => openResidentModal(null);
   const resCancel = document.getElementById('resident-cancel-btn');
   if (resCancel) resCancel.onclick = () => closeResidentModal();
   const resSave = document.getElementById('resident-save-btn');
   if (resSave) resSave.onclick = () => saveResident();
+  populateResidentBlockFilter();
+  document.getElementById('resident-filter')?.addEventListener('input', () => renderResidents());
+  document.addEventListener('block-filter-change', () => {
+    const sel = document.getElementById('resident-block-filter');
+    if (sel) sel.value = getSelectedBlock();
+    if (document.getElementById('view-apartment')?.classList.contains('active')) renderResidents();
+  });
 
   const logoutBtn = document.getElementById('user-menu-logout');
   if (logoutBtn) logoutBtn.onclick = () => {
