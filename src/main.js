@@ -20,6 +20,20 @@ import { processFinances, renderCashLedger, saveCashData, initExpenseModal, rend
 import { initMaintenanceBilling } from './maintenanceBilling.js';
 import { initUnitDirectory, renderUnitDirectory } from './unitDirectory.js';
 import { initSetupAdmin, switchSetupSubView } from './admin.js';
+import { initActivityAuditUi, renderActivityLogPage } from './activityAudit.js';
+import { initBankReconciliationUi, renderBankReconciliation } from './bankReconciliation.js';
+import {
+    ROLE_OPTIONS,
+    refreshAuthPermissions,
+    resolveEffectivePermissions,
+    hasClientPermission,
+    routeIsAllowed,
+    saveUserAccess,
+    loadUserRoleAssignments,
+    primaryRoleFromAssignments,
+    v2KeyToLabel,
+    v1RoleToV2Key,
+} from './rbac.js';
 import {
     DEFAULT_ROUTE,
     applyNavPermissions,
@@ -89,60 +103,10 @@ const getProfile = async (userId) => {
   }
 };
 
-const ROLE_OPTIONS = [
-  { key: 'admin', label: 'Admin' },
-  { key: 'property_manager', label: 'Property Manager' },
-  { key: 'accounts_manager', label: 'Accounts Manager' },
-  { key: 'security', label: 'Security' },
-  { key: 'resident_viewer', label: 'Resident Viewer' }
-];
-
-const hasPermission = (role, perm) => {
-  const r = role || 'resident_viewer';
-  const matrix = {
-    admin: new Set(['registry.view', 'registry.edit', 'accounts.view', 'accounts.edit', 'setup.view', 'setup.edit', 'users.manage']),
-    property_manager: new Set(['registry.view', 'registry.edit', 'accounts.view', 'setup.view']),
-    accounts_manager: new Set(['accounts.view', 'accounts.edit']),
-    security: new Set(['registry.view', 'registry.edit']),
-    resident_viewer: new Set(['registry.view', 'accounts.view'])
-  };
-  return (matrix[r] || matrix.resident_viewer).has(perm);
-};
-
-const can = (perm) => {
-  const role = portalState.auth?.role || 'resident_viewer';
-  // v1 fallback permissions mapping until v2 tables are enabled
-  return hasPermission(role, perm);
-};
-
-const fetchEffectivePermissions = async (apartmentId) => {
-  if (!supabase) return null;
-  const { data: s } = await supabase.auth.getSession();
-  const uid = s?.session?.user?.id;
-  if (!uid) return null;
-
-  // Pull scoped user roles for this apartment + system roles
-  const { data: roles } = await supabase.from('user_role_assignments')
-    .select('role_key, scope, apartment_id')
-    .eq('user_id', uid);
-
-  if (!roles) return [];
-
-  const isSystemAdmin = roles.some(r => r.scope === 'system' && r.role_key === 'system_admin');
-  if (isSystemAdmin) {
-    const { data: perms } = await supabase.from('permissions').select('key');
-    return (perms || []).map(p => p.key);
-  }
-
-  const aptRoleKeys = roles.filter(r => r.scope === 'apartment' && r.apartment_id === apartmentId).map(r => r.role_key);
-  if (!aptRoleKeys.length) return [];
-
-  const { data: rp } = await supabase.from('role_permissions').select('permission_key, role_key').in('role_key', aptRoleKeys);
-  return Array.from(new Set((rp || []).map(x => x.permission_key)));
-};
+const can = (perm) => hasClientPermission(perm, resolveEffectivePermissions());
 
 const applyPermissionsToNav = (perms) => {
-    applyNavPermissions(new Set(perms || []), !supabase);
+    applyNavPermissions(new Set(perms || resolveEffectivePermissions()), !supabase);
 };
 
 const applyAuthToUI = async (session) => {
@@ -170,10 +134,8 @@ const applyAuthToUI = async (session) => {
 
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
-  if (manageBtn) manageBtn.style.display = hasPermission(role, 'users.manage') ? 'flex' : 'none';
-  if (portalState.authPermissions?.length) {
-    applyPermissionsToNav(portalState.authPermissions);
-  }
+  if (manageBtn) manageBtn.style.display = can('rbac.view') || can('setup.view') ? 'flex' : 'none';
+  applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
 
   // Show "Make me admin" only if no admin exists yet and user isn't admin.
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
@@ -226,6 +188,8 @@ const setActiveApartment = async (apartmentId) => {
   // 🔄 Pull new data partition from Supabase and refresh all views
   const success = await pullState();
   if (success) {
+    await refreshAuthPermissions(apartmentId);
+    applyPermissionsToNav(portalState.authPermissions);
     renderAccessMappings();
     renderRegistry();
     // Refresh other view-specific components if they exist
@@ -274,7 +238,8 @@ const renderAccessMappings = () => {
       const mappedApts = apartments.filter(a => (u.apartment_ids || []).includes(a.id));
       const aptChips = mappedApts.map(a => `<span class="apt-chip">${a.name}</span>`).join('') || '<span style="color:var(--text-dim); font-style:italic;">No access</span>';
       const initials = (u.name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
-      const roleLabel = ROLE_OPTIONS.find(r => r.key === u.role)?.label || u.role || 'Viewer';
+      const roleLabel = ROLE_OPTIONS.find((r) => r.key === u.role || r.v1Key === u.role)?.label
+        || v2KeyToLabel(u.role) || u.role || 'Viewer';
 
       return `
         <div class="user-row">
@@ -373,16 +338,9 @@ const syncAccessFromSupabase = async () => {
     await setActiveApartment(portalState.access.activeApartmentId);
   }
 
-  // Apply scoped permissions if RBAC v2 tables exist
-  try {
-    const perms = await fetchEffectivePermissions(portalState.access.activeApartmentId);
-    if (perms && perms.length > 0) {
-      portalState.authPermissions = perms;
-      applyPermissionsToNav(perms);
-    }
-  } catch {
-    // ignore
-  }
+  // Apply scoped permissions (v2 assignments with v1 fallback)
+  await refreshAuthPermissions(portalState.access.activeApartmentId);
+  applyPermissionsToNav(portalState.authPermissions);
 
   // Current user's apartment mappings (always allowed under current RLS).
   const { data: selfMappings } = await supabase.from('user_apartments').select('apartment_id').eq('user_id', uid);
@@ -468,6 +426,12 @@ window.initializeSeedData = initializeSeedData;
  */
 window.switchView = (v) => {
   const route = resolveRoute(v);
+  if (!routeIsAllowed(route, !supabase)) {
+    alert('You do not have permission to access this page.');
+    window.switchView(DEFAULT_ROUTE);
+    return;
+  }
+
   const meta = findPage(route);
   if (!meta) {
     console.warn(`Unknown route: ${v}`);
@@ -495,6 +459,8 @@ window.switchView = (v) => {
   if (page.view === 'accounts') {
     window.switchSubView(page.subview || 'ledger');
     if (page.subview === 'reports') renderAuditReports();
+    else if (page.subview === 'bank-recon') renderBankReconciliation();
+    else if (page.subview === 'activity') void renderActivityLogPage();
     else renderCashLedger();
   }
   if (page.view === 'invoices') window.switchInvoiceSubView('list');
@@ -942,12 +908,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // User & Apartment Management Modals
   let activeUserIdForEdit = null;
-  window.openUserModal = (userId = null) => {
+  window.openUserModal = async (userId = null) => {
     activeUserIdForEdit = userId;
     const user = portalState.access.users.find(u => u.id === userId);
     document.getElementById('access-user-name-v2').value = user?.name || '';
     document.getElementById('access-user-email-v2').value = user?.email || '';
-    document.getElementById('access-user-role-v2').value = user?.role || 'resident_viewer';
+    let roleVal = v1RoleToV2Key(user?.role || 'resident_viewer');
+    if (userId && supabase) {
+      const assignments = await loadUserRoleAssignments(userId);
+      if (assignments.length) roleVal = primaryRoleFromAssignments(assignments);
+    }
+    document.getElementById('access-user-role-v2').value = roleVal;
     const aptSelect = document.getElementById('access-user-apartments-v2');
     Array.from(aptSelect.options).forEach(opt => {
       opt.selected = (user?.apartment_ids || []).includes(opt.value);
@@ -978,12 +949,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (supabase) {
       const { data: prof, error: pErr } = await supabase.from('profiles').select('id, full_name, email, role').eq('email', email).single();
       if (pErr || !prof) return alert('User not found. Ask them to sign up first.');
-      await supabase.from('profiles').update({ full_name: name || prof.full_name, role }).eq('id', prof.id);
-      
-      // Delete existing mappings for this user and re-insert (simple approach)
-      await supabase.from('user_apartments').delete().eq('user_id', prof.id);
-      for (const aid of apartment_ids) {
-        await supabase.from('user_apartments').upsert({ user_id: prof.id, apartment_id: aid });
+      const previousAssignments = await loadUserRoleAssignments(prof.id);
+      try {
+        await saveUserAccess({
+          userId: prof.id,
+          name: name || prof.full_name,
+          email,
+          roleKey: role,
+          apartmentIds: apartment_ids,
+          previousAssignments,
+        });
+      } catch (err) {
+        return alert(err?.message || 'Could not save user access.');
       }
       await syncAccessFromSupabase();
     } else {
@@ -1153,6 +1130,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('save-cash-btn').onclick = () => saveCashData();
   initExpenseModal();
   initMaintenanceBilling();
+  initActivityAuditUi();
+  initBankReconciliationUi();
   initUnitDirectory();
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));

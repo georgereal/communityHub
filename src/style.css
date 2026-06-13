@@ -6126,3 +6126,151 @@ header {
   gap: 0.35rem;
   flex-shrink: 0;
 }
+
+/* Phase 2 — activity log, bank reconciliation, ledger badges */
+.activity-log-header {
+  grid-template-columns: 140px 120px 1fr;
+}
+
+.activity-log-row {
+  grid-template-columns: 140px 120px 1fr;
+  align-items: start;
+  padding: 0.75rem 0.95rem;
+}
+
+.activity-log-row__when {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.activity-log-row__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+}
+
+.activity-log-row__summary span {
+  color: var(--text-dim);
+}
+
+.activity-entity-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  background: #f1f5f9;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+}
+
+.activity-log-toolbar,
+.bank-recon-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.bank-recon-metrics {
+  margin-bottom: 1rem;
+}
+
+.bank-recon-split {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1rem;
+}
+
+.bank-recon-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.85rem;
+  min-height: 320px;
+}
+
+.bank-recon-panel__title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
+.bank-recon-line {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.bank-recon-line__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+
+.bank-recon-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.bank-recon-line__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.bank-recon-txn {
+  display: grid;
+  grid-template-columns: 90px 100px 1fr;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ledger-recon-badge {
+  display: inline-block;
+  font-size: 0.55rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #166534;
+  vertical-align: middle;
+}
+
+.ledger-recon-badge--open {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.invoice-detail-history-wrap {
+  margin-top: 1rem;
+}
+
+.invoice-detail-history-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.invoice-history-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .bank-recon-split {
+    grid-template-columns: 1fr;
+  }
+}

@@ -60,6 +60,7 @@ import {
     unitMatchesBlock,
 } from './blockFilter.js';
 import { clearResidentsCache } from './residents.js';
+import { logActivity, renderInvoiceActivityHistory } from './activityAudit.js';
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -327,6 +328,15 @@ export async function saveMaintenanceAllocations(apartment_id, txnId, catKey) {
 
     const { error } = await supabase.from('maintenance_payment_allocations').insert(payload);
     if (error) return { ok: false, error: error.message };
+
+    await logActivity({
+        entityType: 'ALLOCATION',
+        entityId: txnId,
+        action: 'CREATE',
+        summary: `Applied ${rows.length} payment allocation(s) to maintenance invoices`,
+        newData: { transaction_id: txnId, rows },
+    });
+
     return { ok: true };
 }
 
@@ -586,6 +596,16 @@ export async function createBulkMaintenanceInvoices({
     await pullState();
     renderInvoicesPage();
 
+    if (batch_id) {
+        await logActivity({
+            entityType: 'INVOICE',
+            entityId: batch_id,
+            action: 'CREATE',
+            summary: `Bulk raise: ${invoiceCount} invoice(s), ${skipped} skipped — ${period_label}`,
+            newData: { batch_id, invoice_count: invoiceCount, skipped, period_label, total_amount: totalAmount },
+        });
+    }
+
     return { created: invoiceCount, skipped };
 }
 
@@ -788,8 +808,18 @@ export async function deleteMaintenanceInvoice(id) {
     }
     if (!confirm(`Delete invoice ${inv.period_label} for ${getUnitLabel(inv.unit_id)}?`)) return;
 
+    const snapshot = { ...inv };
     const { error } = await supabase.from('maintenance_invoices').delete().eq('id', id);
     if (error) return alert(error.message);
+
+    await logActivity({
+        entityType: 'INVOICE',
+        entityId: id,
+        action: 'DELETE',
+        summary: `Deleted invoice ${inv.period_label} for ${getInvoiceDisplayLabel(inv)}`,
+        oldData: snapshot,
+    });
+
     await pullState();
     renderInvoicesPage();
 }
@@ -1479,8 +1509,14 @@ export const viewInvoiceDetail = (invoiceId) => {
           ${linesHtml ? `<h4 class="invoice-detail-section-title">Charge breakdown</h4>${linesHtml}` : ''}
           ${inv.notes ? `<p class="invoice-detail-notes">${inv.notes}</p>` : ''}
           <h4 class="invoice-detail-section-title">Payments applied</h4>
-          ${paymentsHtml}`;
+          ${paymentsHtml}
+          <details class="invoice-detail-history-wrap">
+            <summary class="invoice-detail-section-title invoice-detail-history-summary">History</summary>
+            <div id="invoice-detail-history"></div>
+          </details>`;
     }
+
+    void renderInvoiceActivityHistory(invoiceId);
 
     if (collectBtn) {
         collectBtn.style.display = bal > 0.001 ? 'inline-flex' : 'none';
