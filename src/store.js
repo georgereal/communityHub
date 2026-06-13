@@ -11,7 +11,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_U
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -19,6 +19,7 @@ export let portalState = {
         activeApartmentId: 'apt-default',
         activeUserId: 'usr-default'
     },
+    admin: { bankAccount: null, staff: [] },
     activeUnitId: null,
     editingTxnId: null
 };
@@ -32,12 +33,23 @@ export const pullState = async () => {
         const activeApartmentId = portalState.access?.activeApartmentId;
         if (!activeApartmentId) throw new Error('No active apartment selected');
 
-        const [u, v, t, s, p] = await Promise.all([
+        const [u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu] = await Promise.all([
             supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
             supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
             supabase.from('society_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('parking_slots').select('*').eq('apartment_id', activeApartmentId).order('name')
+            supabase.from('parking_slots').select('*').eq('apartment_id', activeApartmentId).order('name'),
+            supabase.from('expense_vendors').select('*').eq('apartment_id', activeApartmentId).order('last_used_at', { ascending: false }),
+            supabase.from('expense_sub_categories').select('*').eq('apartment_id', activeApartmentId).order('last_used_at', { ascending: false }),
+            supabase.from('apartment_bank_accounts').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
+            supabase.from('staff_members').select('*').eq('apartment_id', activeApartmentId).order('full_name'),
+            supabase.from('maintenance_invoices').select('*').eq('apartment_id', activeApartmentId).order('due_date'),
+            supabase.from('maintenance_payment_allocations').select('*').eq('apartment_id', activeApartmentId),
+            supabase.from('maintenance_charge_heads').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
+            supabase.from('maintenance_invoice_lines').select('*').eq('apartment_id', activeApartmentId),
+            supabase.from('maintenance_penalty_rules').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
+            supabase.from('maintenance_billing_groups').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
+            supabase.from('maintenance_billing_group_units').select('*').eq('apartment_id', activeApartmentId),
         ]);
 
         if (s.data) {
@@ -54,6 +66,17 @@ export const pullState = async () => {
         const vehicles = v.data || [];
         portalState.units = units.map(unit => ({ ...unit, vehicles: vehicles.filter(veh => veh.unit_id === unit.id) }));
         portalState.finances.txns = t.data || [];
+        portalState.finances.vendors = ev.error ? [] : (ev.data || []);
+        portalState.finances.subCategories = esc.error ? [] : (esc.data || []);
+        portalState.finances.maintenanceInvoices = mi.error ? [] : (mi.data || []);
+        portalState.finances.maintenanceAllocations = ma.error ? [] : (ma.data || []);
+        portalState.finances.maintenanceChargeHeads = mch.error ? [] : (mch.data || []);
+        portalState.finances.maintenanceInvoiceLines = mil.error ? [] : (mil.data || []);
+        portalState.finances.maintenancePenaltyRules = mpr.error ? [] : (mpr.data || []);
+        portalState.finances.maintenanceBillingGroups = mbg.error ? [] : (mbg.data || []);
+        portalState.finances.maintenanceBillingGroupUnits = mbgu.error ? [] : (mbgu.data || []);
+        portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
+        portalState.admin.staff = staff.error ? [] : (staff.data || []);
 
         // Hydrate slots with vehicle plate numbers
         portalState.slots = (p.data || []).map(slot => {

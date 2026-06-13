@@ -16,7 +16,20 @@ import {
   saveCapacityAllocation,
   refreshCapacityUnitList,
 } from './registry.js';
-import { processFinances, renderCashLedger, saveCashData } from './finances.js';
+import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports } from './finances.js';
+import { initMaintenanceBilling } from './maintenanceBilling.js';
+import { initUnitDirectory, renderUnitDirectory } from './unitDirectory.js';
+import { initSetupAdmin, switchSetupSubView } from './admin.js';
+import {
+    DEFAULT_ROUTE,
+    applyNavPermissions,
+    findPage,
+    initNavInteraction,
+    renderNavModules,
+    resolveRoute,
+    updateNavActiveState,
+    updateNavBreadcrumb,
+} from './navigation.js';
 import {
   parseParkingExcelFile,
   buildImportPreview,
@@ -117,15 +130,7 @@ const fetchEffectivePermissions = async (apartmentId) => {
 };
 
 const applyPermissionsToNav = (perms) => {
-  const arr = perms || [];
-  // If we couldn't resolve permissions yet, don't hide navigation.
-  if (!Array.isArray(arr) || arr.length === 0) return;
-  const set = new Set(arr);
-  const show = (route, ok) => document.querySelectorAll(`.nav-link-btn[data-route="${route}"]`).forEach(b => b.style.display = ok ? 'flex' : 'none');
-  show('registry', set.has('vehicle_registry.view') || !supabase); // keep visible in offline
-  show('accounts', set.has('accounts.view'));
-  show('setup', set.has('setup.view') || set.has('rbac.view') || set.has('system.apartments.manage'));
-  show('apartment', set.has('apartment_mgmt.view'));
+    applyNavPermissions(new Set(perms || []), !supabase);
 };
 
 const applyAuthToUI = async (session) => {
@@ -154,12 +159,9 @@ const applyAuthToUI = async (session) => {
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
   if (manageBtn) manageBtn.style.display = hasPermission(role, 'users.manage') ? 'flex' : 'none';
-  document.querySelectorAll('.nav-link-btn[data-route="setup"]').forEach(btn => {
-    btn.style.display = hasPermission(role, 'setup.view') ? 'flex' : 'none';
-  });
-  document.querySelectorAll('.nav-link-btn[data-route="accounts"]').forEach(btn => {
-    btn.style.display = hasPermission(role, 'accounts.view') ? 'flex' : 'none';
-  });
+  if (portalState.authPermissions?.length) {
+    applyPermissionsToNav(portalState.authPermissions);
+  }
 
   // Show "Make me admin" only if no admin exists yet and user isn't admin.
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
@@ -217,6 +219,7 @@ const setActiveApartment = async (apartmentId) => {
     // Refresh other view-specific components if they exist
     if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
     if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
+    if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
   }
 };
 
@@ -437,7 +440,7 @@ const boot = async () => {
   processFinances();
   renderRegistry();
 
-  const route = window.location.hash.slice(1) || 'registry';
+  const route = resolveRoute(window.location.hash.slice(1));
   window.switchView(route);
 };
 
@@ -452,12 +455,17 @@ window.initializeSeedData = initializeSeedData;
  * View & SubView Navigation logic (Sentry Strategic Router)
  */
 window.switchView = (v) => {
-  // Validate route and fallback to registry
-  const routes = ['registry', 'accounts', 'units', 'setup', 'apartment'];
-  const route = routes.includes(v) ? v : 'registry';
+  const route = resolveRoute(v);
+  const meta = findPage(route);
+  if (!meta) {
+    console.warn(`Unknown route: ${v}`);
+    window.switchView(DEFAULT_ROUTE);
+    return;
+  }
 
-  document.querySelectorAll('.content-view').forEach(x => x.classList.remove('active'));
-  const viewNode = document.getElementById(`view-${route}`);
+  const { page } = meta;
+  document.querySelectorAll('.content-view').forEach((x) => x.classList.remove('active'));
+  const viewNode = document.getElementById(`view-${page.view}`);
   if (!viewNode) {
     console.warn(`Missing view section for route: ${route}`);
     document.getElementById('view-registry')?.classList.add('active');
@@ -465,19 +473,32 @@ window.switchView = (v) => {
   }
   viewNode.classList.add('active');
 
-  // Breadcrumb menu replaces sidebar nav links.
+  if (window.location.hash.slice(1) !== route) {
+    window.location.hash = `#${route}`;
+  }
 
-  if (route === 'accounts') { window.switchSubView('ledger'); renderCashLedger(); }
-  if (route === 'registry') {
+  updateNavActiveState(route);
+  updateNavBreadcrumb(route);
+
+  if (page.view === 'accounts') {
+    window.switchSubView(page.subview || 'ledger');
+    if (page.subview === 'reports') renderAuditReports();
+    else renderCashLedger();
+  }
+  if (page.view === 'invoices') window.switchInvoiceSubView('list');
+  if (page.view === 'registry') {
     renderRegistry();
     void refreshAuditBadge();
   }
-  if (route === 'setup') {
+  if (page.view === 'setup') {
     document.getElementById('setup-name').value = portalState.community.name;
     document.getElementById('setup-car').value = portalState.community.defaults.cars;
     document.getElementById('setup-bike').value = portalState.community.defaults.bikes;
     renderAccessMappings();
+    switchSetupSubView('society');
   }
+  if (page.view === 'apartment') renderResidents();
+  if (page.view === 'units') void renderUnitDirectory();
 };
 
 const renderResidents = async () => {
@@ -540,6 +561,8 @@ const closeResidentModal = () => {
   document.getElementById('resident-modal').classList.remove('active');
   editingResidentId = null;
 };
+window.openResidentModal = openResidentModal;
+window.closeResidentModal = closeResidentModal;
 
 const saveResident = async () => {
   if (!supabase) return;
@@ -561,6 +584,7 @@ const saveResident = async () => {
   if (error) return alert(error.message);
   closeResidentModal();
   renderResidents();
+  window.refreshUnitDetailIfOpen?.();
 };
 
 /**
@@ -593,8 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // On mobile, keep heavy sections collapsed by default (desktop stays open via HTML).
   try {
     if (window.matchMedia && window.matchMedia('(max-width: 520px)').matches) {
-      document.getElementById('registry-overview')?.removeAttribute('open');
-      document.getElementById('pool-visualiser')?.removeAttribute('open');
+      document.getElementById('registry-summaries')?.removeAttribute('open');
     }
   } catch {
     // ignore
@@ -652,8 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Global View Router
   window.addEventListener('hashchange', () => {
-    const route = window.location.hash.slice(1);
-    window.switchView(route);
+    window.switchView(window.location.hash.slice(1));
   });
 
   // Registry Tactical controls
@@ -710,6 +732,75 @@ document.addEventListener('DOMContentLoaded', () => {
   bindKpi('kpi-overlimit-bikes', 'OVERLIMIT_BIKES');
   bindKpi('kpi-cars', 'CARS');
   bindKpi('kpi-bikes', 'BIKES');
+
+  // Summary bar: EH / BH / rent pills open focused pool views
+  const summaryFocusLabels = {
+    cars: 'Community pool — Cars (EH)',
+    bikes: 'Community pool — Bikes (BH)',
+    rentals: 'Flat-to-flat rentals',
+  };
+  const summaryFocusTargets = {
+    cars: 'pool-visualiser',
+    bikes: 'bike-pool-visualiser',
+    rentals: 'flat-rental-visualiser',
+  };
+
+  const initSummaryFocus = () => {
+    const summaries = document.getElementById('registry-summaries');
+    const body = summaries?.querySelector('.page-section__body--summaries');
+    const focusBar = document.getElementById('summary-focus-bar');
+    const focusLabel = document.getElementById('summary-focus-label');
+    const showAllBtn = document.getElementById('summary-show-all');
+    if (!summaries || !body) return;
+
+    const setSummaryFocus = (focus) => {
+      if (!focus || focus === 'all') {
+        body.removeAttribute('data-focus');
+        focusBar?.setAttribute('hidden', '');
+        document.querySelectorAll('.ms-pill--jump').forEach((p) => p.classList.remove('is-active'));
+        return;
+      }
+      body.dataset.focus = focus;
+      if (focusBar) focusBar.removeAttribute('hidden');
+      if (focusLabel) focusLabel.textContent = summaryFocusLabels[focus] || '';
+      document.querySelectorAll('.ms-pill--jump').forEach((p) => {
+        p.classList.toggle('is-active', p.dataset.summaryFocus === focus);
+      });
+    };
+
+    const openSummaryFocus = (focus) => {
+      summaries.setAttribute('open', '');
+      setSummaryFocus(focus);
+      requestAnimationFrame(() => {
+        document.getElementById(summaryFocusTargets[focus])?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    };
+
+    document.querySelectorAll('.ms-pill--jump').forEach((btn) => {
+      const stop = (e) => e.stopPropagation();
+      btn.addEventListener('mousedown', stop);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const focus = btn.dataset.summaryFocus;
+        const isActive = btn.classList.contains('is-active') && summaries.open && body.dataset.focus === focus;
+        if (isActive) setSummaryFocus('all');
+        else openSummaryFocus(focus);
+      });
+    });
+
+    showAllBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSummaryFocus('all');
+    });
+
+    summaries.addEventListener('toggle', () => {
+      if (!summaries.open) setSummaryFocus('all');
+    });
+  };
+
+  initSummaryFocus();
 
   // Bulk Import Hook
   const csvFile = document.getElementById('csv-file');
@@ -906,34 +997,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  document.querySelectorAll('.nav-link-btn').forEach(btn => {
-    btn.onclick = () => {
-      const route = btn.dataset.route;
-      document.body.classList.remove('nav-expanded');
-      window.location.hash = `#${route}`;
-      window.switchView(route);
-      const viewName = document.getElementById('topbar-view-name');
-      if (viewName) viewName.textContent = route;
-      if (route === 'apartment') renderResidents();
-    };
-  });
-
-  // Defensive routing: delegated handler ensures nav always works (even if individual handlers are lost/overwritten).
-  document.addEventListener('click', (e) => {
-    const btn = e.target?.closest?.('.nav-link-btn');
-    if (!btn) return;
-    const route = btn.dataset.route;
-    if (!route) return;
-    e.preventDefault();
-    e.stopPropagation();
-    document.body.classList.remove('nav-expanded');
-    window.location.hash = `#${route}`;
-    window.switchView(route);
-    const viewName = document.getElementById('topbar-view-name');
-    if (viewName) viewName.textContent = route;
-    if (route === 'apartment') renderResidents();
-  }, true);
-
   const userBtn = document.getElementById('topbar-user-btn');
   const userMenu = document.getElementById('topbar-user-menu');
   const hideUserMenu = () => { if (userMenu) userMenu.style.display = 'none'; };
@@ -959,8 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const manageBtn = document.getElementById('user-menu-manage');
   if (manageBtn) manageBtn.onclick = () => {
     hideUserMenu();
-    window.location.hash = '#setup';
-    window.switchView('setup');
+    window.switchView('admin-settings');
     setTimeout(() => document.getElementById('access-users-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
@@ -1002,6 +1064,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modal Unified Button Hooks
   document.getElementById('save-mdl-btn').onclick = () => saveMdlData();
   document.getElementById('save-cash-btn').onclick = () => saveCashData();
+  initExpenseModal();
+  initMaintenanceBilling();
+  initUnitDirectory();
+  renderNavModules();
+  initNavInteraction((route) => window.switchView(route));
+  applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
+  initSetupAdmin();
 
   const registryDownload = document.getElementById('registry-download-xlsx');
   if (registryDownload) {
@@ -1188,8 +1257,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize Router State
   boot();
-  const currentRoute = window.location.hash.slice(1) || 'registry';
+  const currentRoute = resolveRoute(window.location.hash.slice(1));
   window.switchView(currentRoute);
-  const viewName = document.getElementById('topbar-view-name');
-  if (viewName) viewName.textContent = currentRoute;
 });

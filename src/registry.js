@@ -582,6 +582,8 @@ export const openMdl = (id) => {
     document.getElementById('mdl-apt-name').textContent = u.number;
     document.getElementById('mdl-car-slots').value = u.car_limit;
     document.getElementById('mdl-bike-slots').value = u.bike_limit;
+    const areaEl = document.getElementById('mdl-area-sqft');
+    if (areaEl) areaEl.value = u.area_sqft ?? '';
     renderMdlList(u);
     document.getElementById('apt-modal').classList.add('active');
 };
@@ -1013,7 +1015,9 @@ export const saveMdlData = async () => {
     // 1. Update Unit Policy
     const car_limit = parseInt(document.getElementById('mdl-car-slots').value);
     const bike_limit = parseInt(document.getElementById('mdl-bike-slots').value);
-    await supabase.from('units').update({ car_limit, bike_limit }).eq('id', u.id);
+    const areaRaw = document.getElementById('mdl-area-sqft')?.value;
+    const area_sqft = areaRaw === '' || areaRaw == null ? null : parseFloat(areaRaw);
+    await supabase.from('units').update({ car_limit, bike_limit, area_sqft }).eq('id', u.id);
 
     // 2. Insert New Vehicle
     if (plate) {

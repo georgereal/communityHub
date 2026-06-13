@@ -4,12 +4,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CommunityHub | Unified Accounts & Registry</title>
+  <title>CommunityHub | Society Operations Portal</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
-    rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -28,22 +27,17 @@
       </div>
 
       <div class="sidebar-body">
-        <label class="nav-drawer-label">Apartment</label>
+        <label class="nav-drawer-label">Workspace</label>
         <select id="nav-apartment-switch" class="nav-drawer-select"></select>
 
-        <div class="nav-drawer-links">
-          <button class="nav-link-btn" type="button" data-route="registry"><i class="fa-solid fa-car"></i><span>Vehicle Registry</span></button>
-          <button class="nav-link-btn" type="button" data-route="accounts"><i class="fa-solid fa-file-invoice-dollar"></i><span>Accounts</span></button>
-          <button class="nav-link-btn" type="button" data-route="apartment"><i class="fa-solid fa-address-card"></i><span>Apartment Mgmt</span></button>
-          <button class="nav-link-btn" type="button" data-route="units"><i class="fa-solid fa-building"></i><span>Units</span></button>
-          <button class="nav-link-btn" type="button" data-route="setup"><i class="fa-solid fa-sliders"></i><span>Setup</span></button>
-        </div>
+        <p class="nav-section-label">Menu</p>
+        <div id="nav-modules" class="nav-modules" aria-label="Application modules"></div>
       </div>
 
-      <div style="margin-top:auto; padding: 0.75rem; border-top: 1px solid rgba(255,255,255,0.08); width:100%;">
+      <div class="sidebar-foot">
         <div style="display:flex; align-items:center; gap:0.6rem;">
           <div id="sidebar-user-initials" class="rail-avatar">CH</div>
-          <div style="min-width:0;">
+          <div class="sidebar-user-meta" style="min-width:0;">
             <p id="sidebar-user-name" class="rail-user">Property Lead</p>
             <p id="sidebar-user-role" class="rail-role">Apartment Manager</p>
           </div>
@@ -65,6 +59,11 @@
               <span class="brand-lockup__sep">for</span>
               <span id="topbar-apartment-name" class="brand-lockup__workspace">CommunityHub</span>
             </div>
+            <nav class="topbar-breadcrumb" aria-label="Current page">
+              <span id="topbar-nav-module">Property</span>
+              <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+              <span id="topbar-nav-page">Parking & Vehicles</span>
+            </nav>
           </div>
         </div>
         <div class="topbar-right">
@@ -89,8 +88,8 @@
       <section id="view-registry" class="content-view active">
         <header>
           <div class="header-title">
-            <h2 id="complex-title" class="page-title"><span class="page-title__accent">Vehicle</span> Command Center</h2>
-            <p>Vehicle Allocation & Compliance Management</p>
+            <h2 id="complex-title" class="page-title">Parking & <span class="page-title__accent">Vehicles</span></h2>
+            <p>Parking slots, vehicle registry, stickers & compliance</p>
           </div>
           <div style="display: flex; gap: 0.5rem;">
             <button class="btn btn-outline btn--with-badge" type="button" id="registry-change-log">
@@ -117,79 +116,97 @@
           </div>
         </header>
 
-        <details class="mobile-disclosure mobile-disclosure--light" id="registry-overview" open style="padding: 0 1.6rem;">
-          <summary class="mobile-summary">
-            <span>Overview</span>
+        <div class="page-sections">
+        <details class="page-section page-section--summaries mobile-disclosure" id="registry-summaries">
+          <summary class="page-section__header mobile-summary">
+            <span class="page-section__title">
+              <span class="page-section__icon" aria-hidden="true"><i class="fa-solid fa-chart-simple"></i></span>
+              Summary & pools
+            </span>
             <span class="mobile-summary__stats">
               <span class="ms-pill bad"><b id="ms-over-cars">0</b> Car+</span>
               <span class="ms-pill bad"><b id="ms-over-bikes">0</b> Bike+</span>
-              <span class="ms-pill"><b id="ms-occ">—</b> Occ</span>
+              <span class="ms-pill ms-pill--occ"><b id="ms-occ">—</b> Occ</span>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="cars" title="Show car pool (EH) only">
+                <b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> EH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="bikes" title="Show bike pool (BH) only">
+                <b id="ms-bike-pool-occ">0</b>/<b id="ms-bike-pool-total">0</b> BH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="rentals" title="Show flat-to-flat rentals only">
+                <b id="ms-flat-rent-count">0</b> rent
+              </button>
             </span>
           </summary>
-          <section class="dashboard-metrics" style="padding-left:0; padding-right:0;">
-          <div class="metric-card"><span class="label">Overlimit Cars</span><span class="value" style="color: var(--danger)"
-              id="kpi-overlimit-cars">0</span></div>
-          <div class="metric-card"><span class="label">Overlimit Bikes</span><span class="value" style="color: var(--danger)"
-              id="kpi-overlimit-bikes">0</span></div>
-          <div class="metric-card"><span class="label">Active Cars</span><span class="value"
-              style="color: var(--accent);" id="kpi-cars">0</span></div>
-          <div class="metric-card"><span class="label">Active Bikes</span><span class="value"
-              style="color: var(--success);" id="kpi-bikes">0</span></div>
-          <div class="metric-card" title="Active vehicles vs total base slot capacity (car + bike limits)"><span class="label">Occupancy</span><span class="value" style="color: var(--accent)"
-              id="kpi-occupancy">—</span></div>
-          </section>
-        </details>
-
-        <details id="pool-visualiser" class="mobile-disclosure" open style="margin-bottom: 1rem; padding: 0 1.6rem;">
-          <summary class="mobile-summary">
-            <span>Community Pool — Cars (EH)</span>
-            <span class="mobile-summary__stats">
-              <span class="ms-pill"><b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> occupied</span>
-            </span>
-          </summary>
-          <div class="pool-section-toolbar">
-            <button type="button" class="btn btn-outline btn--small" id="pool-add-car">
-              <i class="fa-solid fa-plus"></i> Add EH slot
-            </button>
+          <div class="page-section__body page-section__body--summaries">
+          <div class="summary-focus-bar" id="summary-focus-bar" hidden>
+            <span class="summary-focus-bar__label" id="summary-focus-label"></span>
+            <button type="button" class="btn btn-outline btn--small" id="summary-show-all">Show all</button>
           </div>
-          <div id="pool-grid" class="pool-slot-grid"></div>
-        </details>
 
-        <details id="bike-pool-visualiser" class="mobile-disclosure mobile-disclosure--light" style="margin-bottom: 1rem; padding: 0 1.6rem;">
-          <summary class="mobile-summary">
-            <span>Community Pool — Bikes (BH)</span>
-            <span class="mobile-summary__stats">
-              <span class="ms-pill"><b id="ms-bike-pool-occ">0</b>/<b id="ms-bike-pool-total">0</b> occupied</span>
-            </span>
-          </summary>
-          <div class="pool-section-toolbar">
-            <button type="button" class="btn btn-outline btn--small" id="pool-add-bike">
-              <i class="fa-solid fa-plus"></i> Add BH slot
-            </button>
+          <div class="summary-block" id="registry-overview">
+            <h3 class="summary-block__label">Overview</h3>
+            <section class="dashboard-metrics dashboard-metrics--compact">
+              <div class="metric-card"><span class="label">Overlimit Cars</span><span class="value value--danger"
+                  id="kpi-overlimit-cars">0</span></div>
+              <div class="metric-card"><span class="label">Overlimit Bikes</span><span class="value value--danger"
+                  id="kpi-overlimit-bikes">0</span></div>
+              <div class="metric-card"><span class="label">Active Cars</span><span class="value value--accent"
+                  id="kpi-cars">0</span></div>
+              <div class="metric-card"><span class="label">Active Bikes</span><span class="value value--success"
+                  id="kpi-bikes">0</span></div>
+              <div class="metric-card" title="Active vehicles vs total base slot capacity (car + bike limits)"><span class="label">Occupancy</span><span class="value value--accent"
+                  id="kpi-occupancy">—</span></div>
+            </section>
           </div>
-          <div id="bike-pool-grid" class="pool-slot-grid"></div>
-          <p id="bike-pool-empty" class="pool-section-empty" hidden>No bike pool slots yet — add a BH slot to start.</p>
+
+          <div class="summary-block" id="pool-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Community Pool — Cars (EH)</h3>
+              <div class="summary-block__actions">
+                <button type="button" class="btn btn-outline btn--small" id="pool-add-car">
+                  <i class="fa-solid fa-plus"></i> Add EH slot
+                </button>
+              </div>
+            </div>
+            <div id="pool-grid" class="pool-slot-grid"></div>
+          </div>
+
+          <div class="summary-block" id="bike-pool-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Community Pool — Bikes (BH)</h3>
+              <div class="summary-block__actions">
+                <button type="button" class="btn btn-outline btn--small" id="pool-add-bike">
+                  <i class="fa-solid fa-plus"></i> Add BH slot
+                </button>
+              </div>
+            </div>
+            <div id="bike-pool-grid" class="pool-slot-grid"></div>
+            <p id="bike-pool-empty" class="pool-section-empty" hidden>No bike pool slots yet — add a BH slot to start.</p>
+          </div>
+
+          <div class="summary-block" id="flat-rental-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Flat-to-flat rentals</h3>
+            </div>
+            <p class="pool-section-hint">One flat renting parking from another flat (e.g. D-005 slot used by D-006).</p>
+            <div id="flat-rental-grid" class="pool-slot-grid"></div>
+            <p id="flat-rental-empty" class="pool-section-empty" hidden>No flat-to-flat rentals.</p>
+          </div>
+
+          </div>
         </details>
 
-        <details id="flat-rental-visualiser" class="mobile-disclosure mobile-disclosure--light" style="margin-bottom: 1rem; padding: 0 1.6rem;">
-          <summary class="mobile-summary">
-            <span>Flat-to-flat rentals</span>
-            <span class="mobile-summary__stats">
-              <span class="ms-pill"><b id="ms-flat-rent-count">0</b> active</span>
+        <details class="page-section page-section--primary mobile-disclosure" id="registry-units" open>
+          <summary class="page-section__header mobile-summary">
+            <span class="page-section__title">
+              <span class="page-section__icon" aria-hidden="true"><i class="fa-solid fa-building"></i></span>
+              Units
             </span>
           </summary>
-          <p class="pool-section-hint">One flat renting parking from another flat (e.g. D-005 slot used by D-006).</p>
-          <div id="flat-rental-grid" class="pool-slot-grid"></div>
-          <p id="flat-rental-empty" class="pool-section-empty" hidden>No flat-to-flat rentals.</p>
-        </details>
-
-        <details class="mobile-disclosure mobile-disclosure--light" id="registry-units" open style="padding: 0 1.6rem;">
-          <summary class="mobile-summary">
-            <span>Units</span>
-          </summary>
-          <section class="explorer-controls" style="padding:0;">
-          <div
-            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; gap: 0.75rem;">
+          <div class="page-section__body">
+          <section class="explorer-controls explorer-controls--inset">
+          <div class="explorer-controls__row">
             <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
               <i class="fa-solid fa-magnifying-glass"></i>
               <input
@@ -207,23 +224,22 @@
                 placeholder="Search by unit or plate..."
               />
             </form>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
-              <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-dim);">SORT:</span>
-              <select id="registry-sort"
-                style="padding: 0.35rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); font-size: 0.8rem; font-weight: 600;">
+            <div class="explorer-sort">
+              <span class="explorer-sort__label">Sort</span>
+              <select id="registry-sort" class="explorer-sort__select">
                 <option value="AZ">Unit (A-Z)</option>
                 <option value="OVERLIMIT">Violation Cases</option>
               </select>
             </div>
           </div>
-          <div class="filter-bar" style="display: flex; gap: 0.45rem; margin-bottom: 0.8rem;">
+          <div class="filter-bar">
             <button class="filter-pill active" data-filter="ALL">All Units</button>
             <button class="filter-pill" data-filter="OVERLIMIT">Overlimit</button>
             <button class="filter-pill" data-filter="FREE_SLOTS_CARS">Free Cars</button>
             <button class="filter-pill" data-filter="FREE_SLOTS_BIKES">Free Bikes</button>
             <button class="filter-pill" data-filter="UNFILLED">Unfilled</button>
           </div>
-          <div class="registry-list">
+          <div class="registry-list registry-list--inset">
             <div class="registry-header"><span>Unit</span><span>Active Fleet</span><span>Dormant
                 Registry</span><span>Pool Allocated</span><span>Base Slots</span><span>Status</span><span
                 style="text-align: right;">Detail</span>
@@ -231,47 +247,34 @@
             <div id="registry-items"></div>
           </div>
           </section>
+          </div>
         </details>
+        </div>
       </section>
 
       <!-- VIEW: ACCOUNTS -->
       <section id="view-accounts" class="content-view">
         <header>
           <div class="header-title">
-            <h2>Accounts Office</h2>
-            <p>Unified treasury & financial audit control</p>
+            <h2>Cash & Bank Ledger</h2>
+            <p>Petty cash desk, bank passbook, expenses & other income</p>
           </div>
           <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
-            <div style="display:flex; gap:0.25rem;">
-              <button class="btn btn-outline"
-                onclick="window.openCash('OUT','CASH')">
-                <i class="fa-solid fa-arrow-up-from-bracket"></i> <span>Cash Out</span>
-              </button>
-              <button class="btn btn-outline"
-                onclick="window.openCash('IN','CASH')">
-                <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Cash In</span>
-              </button>
-            </div>
-            <div style="display:flex; gap:0.25rem;">
-              <button class="btn btn-primary" style="background:#374151; border-color:#374151;" onclick="window.openCash('OUT','BANK')">
-                <i class="fa-solid fa-building-columns"></i> <span>Bank Out</span>
-              </button>
-              <button class="btn btn-primary" style="background:#4b5563; border-color:#4b5563;"
-                onclick="window.openBankSnapshot()">
-                <i class="fa-solid fa-sync"></i> <span>Bank Sync</span>
-              </button>
-            </div>
+            <button class="btn btn-primary" type="button" onclick="window.openExpense('CASH')">
+              <i class="fa-solid fa-plus"></i> <span>Add Expense</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openIncome('CASH')">
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record Income</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openBankSnapshot()">
+              <i class="fa-solid fa-building-columns"></i> <span>Bank Sync</span>
+            </button>
           </div>
         </header>
 
-        <nav class="subview-tabs"
-          style="margin-bottom: 1rem; display: flex; gap: 1rem; border-bottom: 1px solid var(--border); padding: 0 1.6rem 0.6rem;">
-          <button id="btn-show-ledger"
-            style="background:none; border:none; color:#111827; font-weight:800; font-size:0.8rem; cursor:pointer;"
-            onclick="window.switchSubView('ledger')">Daily Ledger</button>
-          <button id="btn-show-reports"
-            style="background:none; border:none; color:var(--text-dim); font-weight:800; font-size:0.8rem; cursor:pointer;"
-            onclick="window.switchSubView('reports')">Audit Reports</button>
+        <nav class="subview-tabs treasury-subview-tabs" id="treasury-subview-tabs" hidden aria-hidden="true">
+          <button id="btn-show-ledger" type="button" onclick="window.switchSubView('ledger')">Cash & Bank Ledger</button>
+          <button id="btn-show-reports" type="button" onclick="window.switchSubView('reports')">Financial Reports</button>
         </nav>
 
         <div id="subview-ledger">
@@ -286,7 +289,7 @@
               <span class="label">Main Bank Balance (Passbook)</span>
               <span class="value" id="bank-balance" style="font-size: 1.75rem; line-height: 1.1;">₹ 0.00</span>
             </div>
-            <div class="metric-card" style="padding: 0.65rem 0.8rem;"><span class="label">Today's Spend</span><span class="value" id="cash-today-out"
+            <div class="metric-card" style="padding: 0.65rem 0.8rem;"><span class="label">Today's Expenses</span><span class="value" id="cash-today-out"
                 style="color: var(--danger); font-size: 1.65rem; line-height: 1.1;">₹ 0.00</span></div>
             <div class="metric-card" style="padding: 0.65rem 0.8rem;"><span class="label">Total Liquidity</span><span class="value" id="total-wealth"
                 style="font-weight: 800; color:#111827; font-size: 1.65rem; line-height: 1.1;">₹ 0.00</span></div>
@@ -348,19 +351,139 @@
         </div>
       </section>
 
-      <!-- VIEW: UNITS (placeholder to prevent routing errors) -->
+      <!-- VIEW: FLAT INVOICES -->
+      <section id="view-invoices" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Maintenance Billing</h2>
+            <p>Raise flat invoices, track dues, and reconcile maintenance collections</p>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+            <button class="btn btn-primary" type="button" onclick="window.openRaiseInvoiceModal()">
+              <i class="fa-solid fa-file-circle-plus"></i> <span>Raise Invoices</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openChargeHeadsModal()">
+              <i class="fa-solid fa-tags"></i> <span>Charge Heads</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openPenaltyRulesModal()">
+              <i class="fa-solid fa-gavel"></i> <span>Penalty Rules</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openBillingGroupsModal()">
+              <i class="fa-solid fa-object-group"></i> <span>Billing Groups</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openApplyPenaltiesModal()">
+              <i class="fa-solid fa-clock-rotate-left"></i> <span>Apply Penalties</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openSendInvoicesModal()">
+              <i class="fa-solid fa-paper-plane"></i> <span>Send Invoices</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openMaintenanceCollection()">
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record Collection</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="dashboard-metrics invoice-metrics" style="grid-template-columns: repeat(4, 1fr); padding: 0 1.6rem 0.2rem;">
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Total Outstanding</span>
+            <span class="value" id="invoice-kpi-outstanding" style="color: var(--danger); font-size: 1.55rem;">₹ 0.00</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Collected This Month</span>
+            <span class="value" id="invoice-kpi-collected" style="color: var(--success); font-size: 1.55rem;">₹ 0.00</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Open Invoices</span>
+            <span class="value" id="invoice-kpi-open" style="font-size: 1.55rem;">0</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Flats with Dues</span>
+            <span class="value" id="invoice-kpi-flats" style="font-size: 1.55rem;">0</span>
+          </div>
+        </section>
+
+        <nav class="subview-tabs invoice-subview-tabs">
+          <button id="btn-invoice-list" type="button" onclick="window.switchInvoiceSubView('list')">Invoice Register</button>
+          <button id="btn-invoice-by-flat" type="button" onclick="window.switchInvoiceSubView('by-flat')">Flat Summary</button>
+          <button id="btn-invoice-collections" type="button" onclick="window.switchInvoiceSubView('collections')">Payment Collections</button>
+        </nav>
+
+        <div id="invoice-subview-list" class="invoice-subview">
+          <div class="invoice-toolbar">
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="invoice-list-filter" placeholder="Filter flat or period…" autocomplete="off" />
+            </form>
+            <label class="invoice-filter-status">
+              <span>Show</span>
+              <select id="invoice-status-filter">
+                <option value="all">All statuses</option>
+                <option value="open">Open & partial</option>
+                <option value="paid">Paid only</option>
+              </select>
+            </label>
+          </div>
+          <div class="registry-list">
+            <div class="registry-header maintenance-dues-header">
+              <span>Flat</span><span>Period</span><span>Due</span>
+              <span style="text-align:right;">Billed</span><span style="text-align:right;">Paid</span>
+              <span style="text-align:right;">Balance</span><span>Status</span><span style="text-align:right;">Action</span>
+            </div>
+            <div id="invoice-list-items"></div>
+          </div>
+        </div>
+
+        <div id="invoice-subview-by-flat" class="invoice-subview" style="display:none;">
+          <div class="invoice-toolbar">
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="invoice-flat-filter" placeholder="Search flat…" autocomplete="off" />
+            </form>
+          </div>
+          <div id="invoice-by-flat-items" class="invoice-flat-grid"></div>
+        </div>
+
+        <div id="invoice-subview-collections" class="invoice-subview" style="display:none;">
+          <div class="registry-list">
+            <div class="registry-header invoice-collections-header">
+              <span>Date</span><span>Flat</span><span>Applied to</span><span>Wallet</span>
+              <span style="text-align:right;">Amount</span><span style="text-align:right;">Action</span>
+            </div>
+            <div id="invoice-collections-items"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: UNITS -->
       <section id="view-units" class="content-view">
         <header>
           <div class="header-title">
-            <h2>Units</h2>
-            <p>Unit directory & occupancy controls (coming next)</p>
+            <h2>Unit Directory</h2>
+            <p>Flat master data — area, slots, owners & tenants (bulk update via Excel)</p>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+            <button class="btn btn-outline" type="button" id="unit-directory-download">
+              <i class="fa-solid fa-download"></i> <span>Download template</span>
+            </button>
+            <button class="btn btn-primary" type="button" id="unit-directory-import-btn">
+              <i class="fa-solid fa-file-excel"></i> <span>Import Excel</span>
+            </button>
+            <input type="file" id="unit-directory-xlsx" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
           </div>
         </header>
-        <div style="padding: 1.2rem 1.6rem;">
-          <div class="metric-card" style="padding:1rem;">
-            <div style="font-weight:900; margin-bottom:0.25rem;">Units module not implemented yet</div>
-            <div style="color:var(--text-dim); font-size:0.85rem;">This placeholder keeps navigation stable while we finish RBAC and admin tooling.</div>
+        <div class="invoice-toolbar">
+          <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="search" id="unit-directory-filter" placeholder="Search flat, block, BHK…" autocomplete="off" />
+          </form>
+        </div>
+        <div class="registry-list unit-directory-list">
+          <div class="registry-header unit-directory-header">
+            <span>Flat</span><span>Block</span><span>BHK</span>
+            <span style="text-align:right;">Sq ft</span><span style="text-align:center;">Car / Bike</span>
+            <span>Occupancy</span><span>Owners</span><span>Tenants</span><span style="text-align:right;">View</span>
           </div>
+          <div id="unit-directory-items"></div>
         </div>
       </section>
 
@@ -368,8 +491,8 @@
       <section id="view-apartment" class="content-view">
         <header>
           <div class="header-title">
-            <h2>Apartment Management</h2>
-            <p>Owners & tenants directory for the active apartment</p>
+            <h2>Owners & Tenants</h2>
+            <p>Resident directory — owners, tenants and contact details per flat</p>
           </div>
           <div style="display:flex; gap:0.5rem;">
             <button class="btn btn-outline" id="resident-refresh-btn"><i class="fa-solid fa-rotate"></i> <span>Refresh</span></button>
@@ -390,11 +513,20 @@
       <section id="view-setup" class="content-view">
         <header>
           <div class="header-title">
-            <h2>Admin Command Center</h2>
-            <p>Global registry policies & tactical database maintenance</p>
+            <h2>Society Administration</h2>
+            <p>Society profile, bank account, expense references, and staff directory</p>
           </div>
         </header>
 
+        <nav class="subview-tabs setup-subview-tabs">
+          <button type="button" class="setup-tab--active" data-setup-tab="society" onclick="window.switchSetupSubView('society')">Society</button>
+          <button type="button" data-setup-tab="bank" onclick="window.switchSetupSubView('bank')">Bank Account</button>
+          <button type="button" data-setup-tab="vendors" onclick="window.switchSetupSubView('vendors')">Vendors</button>
+          <button type="button" data-setup-tab="subcats" onclick="window.switchSetupSubView('subcats')">Sub-categories</button>
+          <button type="button" data-setup-tab="staff" onclick="window.switchSetupSubView('staff')">Staff</button>
+        </nav>
+
+        <div id="setup-subview-society">
         <div class="setup-grid" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 2rem; margin-top: 1rem;">
           <div style="background:#fff; border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px;">
             <h3
@@ -490,6 +622,106 @@
             <!-- Rendered by JS -->
           </div>
         </div>
+        </div>
+
+        <div id="setup-subview-bank" class="setup-admin-panel" hidden>
+          <div class="admin-card">
+            <h3 class="admin-card__title">Society Bank Account</h3>
+            <p class="admin-card__desc">Official account used for maintenance collections and vendor payments. Shown for reference when recording bank expenses.</p>
+            <div class="admin-form-grid">
+              <div class="admin-field admin-field--span2">
+                <label class="expense-label" for="admin-bank-name">Bank name</label>
+                <input type="text" id="admin-bank-name" class="expense-combobox" placeholder="e.g. HDFC Bank" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-branch">Branch</label>
+                <input type="text" id="admin-bank-branch" class="expense-combobox" placeholder="e.g. Whitefield" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-holder">Account holder</label>
+                <input type="text" id="admin-bank-holder" class="expense-combobox" placeholder="Association name" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-number">Account number</label>
+                <input type="text" id="admin-bank-number" class="expense-combobox" autocomplete="off" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-ifsc">IFSC</label>
+                <input type="text" id="admin-bank-ifsc" class="expense-combobox" placeholder="HDFC0001234" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-upi">UPI ID <span class="expense-optional">(optional)</span></label>
+                <input type="text" id="admin-bank-upi" class="expense-combobox" placeholder="society@hdfcbank" />
+              </div>
+              <div class="admin-field admin-field--span2">
+                <label class="expense-label" for="admin-bank-notes">Notes <span class="expense-optional">(optional)</span></label>
+                <textarea id="admin-bank-notes" class="expense-textarea" rows="2" placeholder="Signatories, payment instructions, etc."></textarea>
+              </div>
+            </div>
+            <p id="admin-bank-hint" class="admin-hint"></p>
+            <button type="button" class="btn btn-primary" id="admin-bank-save">Save Bank Details</button>
+          </div>
+        </div>
+
+        <div id="setup-subview-vendors" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Vendor Directory</h3>
+              <p class="admin-panel-desc">Manage payees used in expense entries. Autocomplete pulls from this list.</p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="window.openVendorModal()"><i class="fa-solid fa-plus"></i> Add Vendor</button>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--vendors">
+              <span>Vendor</span><span>Phone</span><span>Email</span><span>Use count</span><span></span>
+            </div>
+            <div id="admin-vendors-list"></div>
+          </div>
+        </div>
+
+        <div id="setup-subview-subcats" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Expense Sub-categories</h3>
+              <p class="admin-panel-desc">Finer labels grouped under each expense category.</p>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <select id="admin-subcat-filter" class="expense-combobox" style="width:auto; min-width:10rem;">
+                <option value="">All categories</option>
+                <option value="Maintenance">Maintenance</option>
+                <option value="Security">Security</option>
+                <option value="Plumbing">Plumbing</option>
+                <option value="Electrical">Electrical</option>
+                <option value="Stationery">Stationery</option>
+                <option value="Other">Other</option>
+              </select>
+              <button type="button" class="btn btn-primary" onclick="window.openSubCatModal()"><i class="fa-solid fa-plus"></i> Add</button>
+            </div>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--subcats">
+              <span>Category</span><span>Sub-category</span><span>Use count</span><span></span>
+            </div>
+            <div id="admin-subcats-list"></div>
+          </div>
+        </div>
+
+        <div id="setup-subview-staff" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Staff Directory</h3>
+              <p class="admin-panel-desc">Guards, housekeeping, managers, and other non-resident staff.</p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="window.openStaffModal()"><i class="fa-solid fa-plus"></i> Add Staff</button>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--staff">
+              <span>Name</span><span>Role</span><span>Phone</span><span>Email</span><span>Status</span><span></span>
+            </div>
+            <div id="admin-staff-list"></div>
+          </div>
+        </div>
+      </section>
 
     </main>
   </div>
@@ -537,7 +769,7 @@
           <label
             style="display: block; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem;">Base
             Capacity Matrix</label>
-          <div style="display: flex; gap: 1.2rem;">
+          <div style="display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center;">
             <div style="display: flex; align-items: center; gap: 0.75rem; font-weight: 800;">
               <i class="fa-solid fa-car" style="color: var(--text-dim);"></i>
               <input type="number" id="mdl-car-slots"
@@ -547,6 +779,11 @@
               <i class="fa-solid fa-motorcycle" style="color: var(--text-dim);"></i>
               <input type="number" id="mdl-bike-slots"
                 style="width: 60px; text-align: center; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px;" />
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; font-weight: 800;">
+              <i class="fa-solid fa-ruler-combined" style="color: var(--text-dim);"></i>
+              <input type="number" id="mdl-area-sqft" min="0" step="0.01" placeholder="Sq ft"
+                style="width: 90px; text-align: center; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px;" />
             </div>
           </div>
         </section>
@@ -604,58 +841,598 @@
   </div>
 
   <div class="modal-backdrop" id="cash-modal">
-    <div class="modal-content" style="max-width: 400px;">
-      <h2 id="cash-modal-title" style="font-size: 1.25rem;">Log Transaction</h2>
-      <p id="cash-modal-desc" style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 1.5rem;">Unified Ledger
-        Record</p>
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-          <div><label
-              style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Amount
-              (₹)</label><input type="number" id="cash-amt"
-              style="width:100%; padding:0.6rem; border:1px solid var(--border); font-size:1.25rem; font-weight:900;" />
-          </div>
-          <div><label
-              style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Ledger</label><select
-              id="cash-wallet-select" style="width:100%; padding:0.6rem; border:1px solid var(--border);">
-              <option value="CASH">Cash Desk</option>
-              <option value="BANK">Main Bank</option>
-            </select></div>
+    <div class="modal-content expense-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="cash-modal-title">Add Expense</h2>
+          <p id="cash-modal-desc">Record money spent from petty cash or the bank account.</p>
         </div>
-        <div><label
-            style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Category</label>
-          <select id="cash-cat-select" style="width:100%; padding:0.6rem; border:1px solid var(--border);">
-            <option value="Security">Security / Guards</option>
-            <option value="Maintenance">General Maintenance</option>
-            <option value="Plumbing">Plumbing / Water</option>
-            <option value="Electrical">Electrical / Diesel</option>
-            <option value="Stationery">Office / Stationery</option>
-            <option value="Petty Inflow">Petty Cash Top-up</option>
-            <option value="Reconcile">Direct Synchronization</option>
-            <option value="Other">Miscellaneous</option>
-          </select>
-        </div>
-        <div><label
-            style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Description</label><input
-            type="text" id="cash-desc" style="width:100%; padding:0.6rem; border:1px solid var(--border);" /></div>
-        <div id="cash-bill-section"><label
-            style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Receipt
-            Image</label><input type="file" id="cash-bill" accept="image/*" /></div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="document.getElementById('cash-modal').classList.remove('active')">&times;</button>
       </div>
-      <div style="margin-top: 2rem; display: flex; gap: 0.75rem;"><button class="btn btn-outline" style="flex: 1;"
-          onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button><button
-          class="btn btn-primary" style="flex: 1;" id="save-cash-btn">Save Entry</button></div>
+
+      <div id="expense-form-view" class="expense-form">
+        <div class="expense-form__section expense-form__section--wallet">
+          <label class="expense-label">Paid from</label>
+          <div class="expense-wallet-pills" id="expense-wallet-pills">
+            <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
+              <i class="fa-solid fa-wallet"></i> Petty Cash
+            </button>
+            <button type="button" class="expense-wallet-pill" data-wallet="BANK">
+              <i class="fa-solid fa-building-columns"></i> Bank
+            </button>
+          </div>
+        </div>
+
+        <div id="expense-bank-section" class="expense-form__section expense-form__section--bank" hidden>
+          <div class="expense-bank-panel">
+            <label class="expense-label">Bank payment</label>
+            <div class="expense-bank-pills" id="expense-bank-type-pills">
+              <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
+            </div>
+            <label class="expense-label" for="expense-bank-ref" id="expense-bank-ref-label">Cheque number</label>
+            <input type="text" id="expense-bank-ref" class="expense-combobox"
+              placeholder="e.g. 004521" autocomplete="off" />
+            <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
+            <div class="expense-receipt-box">
+              <input type="file" id="cash-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
+              <p class="expense-receipt-hint">Passbook entry, bank statement, or payment screenshot.</p>
+              <ul id="cash-bank-proof-list" class="expense-receipt-list" hidden></ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="expense-form__section expense-form__section--amount">
+          <label class="expense-label" for="cash-amt">Amount (₹)</label>
+          <input type="number" id="cash-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--date">
+          <label class="expense-label" for="cash-date">Date</label>
+          <input type="date" id="cash-date" class="expense-date" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--invoice">
+          <label class="expense-label" for="expense-invoice-input">Invoice # <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="expense-invoice-input" class="expense-combobox"
+            placeholder="e.g. INV-4821" autocomplete="off" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--cats">
+          <label class="expense-label" for="expense-cat-input">Category</label>
+          <input type="text" id="expense-cat-input" class="expense-combobox" list="expense-cat-datalist"
+            placeholder="Type to search… e.g. Maintenance" autocomplete="off" />
+          <datalist id="expense-cat-datalist"></datalist>
+        </div>
+
+        <div class="expense-form__section expense-form__section--subcat">
+          <label class="expense-label" for="expense-subcat-input">Sub-category <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="expense-subcat-input" class="expense-combobox" list="expense-subcat-datalist"
+            placeholder="e.g. Lift motor, Guard uniforms" autocomplete="off" />
+          <datalist id="expense-subcat-datalist"></datalist>
+        </div>
+
+        <div class="expense-form__section expense-form__section--vendor">
+          <label class="expense-label" for="expense-vendor-input">Vendor</label>
+          <input type="text" id="expense-vendor-input" class="expense-combobox" list="expense-vendor-datalist"
+            placeholder="e.g. ABC Elevators, Sharma Plumbing" autocomplete="off" />
+          <datalist id="expense-vendor-datalist"></datalist>
+        </div>
+
+        <div class="expense-form__section expense-form__section--desc">
+          <label class="expense-label" for="cash-desc">Notes <span class="expense-optional">(optional)</span></label>
+          <textarea id="cash-desc" class="expense-desc expense-textarea" rows="2"
+            placeholder="Work done, payment terms, or other details"></textarea>
+        </div>
+
+        <div class="expense-form__section expense-form__section--receipt">
+          <label class="expense-label">Receipt <span class="expense-optional">(optional)</span></label>
+          <div class="expense-receipt-box">
+            <input type="file" id="cash-bill" accept="image/*,.pdf,application/pdf" multiple />
+            <p class="expense-receipt-hint">Upload one or more images or PDFs. Stored in Supabase and linked to this expense.</p>
+            <ul id="cash-receipt-list" class="expense-receipt-list" hidden></ul>
+          </div>
+        </div>
+      </div>
+
+      <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
+        <div class="expense-form__section expense-form__section--wallet">
+          <label class="expense-label">Received into</label>
+          <div class="expense-wallet-pills" id="income-wallet-pills">
+            <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
+              <i class="fa-solid fa-wallet"></i> Petty Cash
+            </button>
+            <button type="button" class="expense-wallet-pill" data-wallet="BANK">
+              <i class="fa-solid fa-building-columns"></i> Bank
+            </button>
+          </div>
+        </div>
+
+        <div id="income-bank-section" class="expense-form__section expense-form__section--bank" hidden>
+          <div class="expense-bank-panel">
+            <label class="expense-label">Bank receipt</label>
+            <div class="expense-bank-pills" id="income-bank-type-pills">
+              <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
+            </div>
+            <label class="expense-label" for="income-bank-ref" id="income-bank-ref-label">Cheque number</label>
+            <input type="text" id="income-bank-ref" class="expense-combobox"
+              placeholder="e.g. 004521" autocomplete="off" />
+            <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
+            <div class="expense-receipt-box">
+              <input type="file" id="cash-income-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
+              <p class="expense-receipt-hint">Deposit slip, passbook entry, or payment confirmation.</p>
+              <ul id="cash-income-bank-proof-list" class="expense-receipt-list" hidden></ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="expense-form__section expense-form__section--amount">
+          <label class="expense-label" for="income-amt">Amount (₹)</label>
+          <input type="number" id="income-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--date">
+          <label class="expense-label" for="income-date">Date</label>
+          <input type="date" id="income-date" class="expense-date" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--cats">
+          <label class="expense-label" for="income-cat-input">Income type</label>
+          <input type="text" id="income-cat-input" class="expense-combobox" list="income-cat-datalist"
+            placeholder="Type to search… e.g. Maintenance collection" autocomplete="off" />
+          <datalist id="income-cat-datalist"></datalist>
+        </div>
+
+        <div id="income-maintenance-section" class="expense-form__section expense-form__section--maintenance" hidden>
+          <label class="expense-label" for="maintenance-unit-input">Flat / unit</label>
+          <input type="text" id="maintenance-unit-input" class="expense-combobox" list="maintenance-unit-datalist"
+            placeholder="e.g. A-101" autocomplete="off" />
+          <datalist id="maintenance-unit-datalist"></datalist>
+          <div class="maintenance-alloc-toolbar">
+            <span class="expense-label" style="margin:0;">Apply to past dues</span>
+            <button type="button" class="btn btn-outline" id="maintenance-auto-apply-btn" style="padding:0.25rem 0.55rem; font-size:0.72rem;">
+              Oldest first
+            </button>
+          </div>
+          <div id="maintenance-allocation-rows" class="maintenance-allocation-rows"></div>
+          <p id="maintenance-allocation-summary" class="maintenance-alloc-summary"></p>
+        </div>
+
+        <div class="expense-form__section expense-form__section--desc">
+          <label class="expense-label" for="income-desc">Notes <span class="expense-optional">(optional)</span></label>
+          <textarea id="income-desc" class="expense-desc expense-textarea" rows="2"
+            placeholder="e.g. Monthly maintenance collection from Block A"></textarea>
+        </div>
+      </div>
+
+      <!-- kept for save logic -->
+      <select id="cash-cat-select" hidden aria-hidden="true" tabindex="-1">
+        <option value="Security">Security / Guards</option>
+        <option value="Maintenance">General Maintenance</option>
+        <option value="Plumbing">Plumbing / Water</option>
+        <option value="Electrical">Electrical / Diesel</option>
+        <option value="Stationery">Office / Stationery</option>
+        <option value="Maintenance Collection">Maintenance Collection</option>
+        <option value="Marketing">Marketing / Events</option>
+        <option value="Promotion">Promotion / Sponsorship</option>
+        <option value="Interest">Bank Interest</option>
+        <option value="Petty Inflow">Petty Cash Top-up</option>
+        <option value="Reconcile">Direct Synchronization</option>
+        <option value="Other Income">Other Income</option>
+        <option value="Other">Miscellaneous</option>
+      </select>
+      <select id="cash-wallet-select" hidden aria-hidden="true" tabindex="-1">
+        <option value="CASH">Cash Desk</option>
+        <option value="BANK">Main Bank</option>
+      </select>
+
+      <div class="expense-modal__footer">
+        <button class="btn btn-outline" type="button"
+          onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button>
+        <button class="btn btn-primary" type="button" id="save-cash-btn">Save Expense</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="raise-invoice-modal">
+    <div class="modal-content expense-modal bulk-invoice-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Raise Invoices</h2>
+          <p>Bulk bill flats using charge heads — configure here or import from Excel</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closeRaiseInvoiceModal()">&times;</button>
+      </div>
+
+      <div class="bulk-invoice-layout">
+        <div class="bulk-invoice-config">
+          <form id="raise-invoice-form" class="bulk-invoice-form">
+            <div class="bulk-invoice-excel-toolbar">
+              <button type="button" class="btn btn-outline btn--small" id="bulk-invoice-download">
+                <i class="fa-solid fa-download"></i> Download template
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="bulk-invoice-import-btn">
+                <i class="fa-solid fa-file-arrow-up"></i> Import Excel
+              </button>
+              <input type="file" id="bulk-invoice-xlsx" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+            </div>
+
+            <div class="bulk-invoice-section bulk-invoice-section--period">
+              <label class="expense-label" for="raise-invoice-period">Period / label</label>
+              <input type="text" id="raise-invoice-period" class="expense-combobox" placeholder="e.g. Apr 2026" required autocomplete="off" />
+              <label class="expense-label" for="raise-invoice-due">Due date</label>
+              <input type="date" id="raise-invoice-due" class="expense-date" />
+            </div>
+
+            <div class="bulk-invoice-section">
+              <div class="bulk-invoice-section__head">
+                <h3 class="bulk-invoice-section__title">Flats</h3>
+                <div class="bulk-unit-scope">
+                  <label><input type="radio" name="bulk-unit-scope" value="all" checked /> All flats</label>
+                  <label><input type="radio" name="bulk-unit-scope" value="selected" /> Select flats</label>
+                </div>
+              </div>
+              <div id="bulk-unit-grid-wrap" hidden>
+                <input type="search" id="bulk-unit-search" class="expense-combobox" placeholder="Search flats…" autocomplete="off" />
+                <div id="bulk-unit-grid" class="bulk-unit-grid"></div>
+              </div>
+            </div>
+
+            <div class="bulk-invoice-section">
+              <div class="bulk-invoice-section__head">
+                <h3 class="bulk-invoice-section__title">Charge heads</h3>
+                <button type="button" class="btn btn-outline btn--small" id="bulk-open-heads-btn">
+                  <i class="fa-solid fa-tags"></i> Manage heads
+                </button>
+              </div>
+              <div id="bulk-invoice-heads" class="bulk-invoice-heads"></div>
+            </div>
+
+            <div class="bulk-invoice-section bulk-invoice-section--combine">
+              <label class="bulk-combine-groups-label charge-head-active-label">
+                <input type="checkbox" id="bulk-combine-groups" />
+                Combine flats in billing groups (one invoice per group)
+              </label>
+              <p class="bulk-penalty-hint">Set up groups for multi-flat owners or caretakers. Ungrouped flats still get individual invoices.</p>
+              <button type="button" class="btn btn-outline btn--small" id="bulk-open-billing-groups-btn">
+                <i class="fa-solid fa-object-group"></i> Manage groups
+              </button>
+            </div>
+
+            <div class="bulk-invoice-section bulk-invoice-section--penalties">
+              <div class="bulk-invoice-section__head">
+                <h3 class="bulk-invoice-section__title">Late fees &amp; penalties</h3>
+                <button type="button" class="btn btn-outline btn--small" id="bulk-open-penalties-btn">
+                  <i class="fa-solid fa-gavel"></i> Manage rules
+                </button>
+              </div>
+              <p class="bulk-penalty-hint">Optional — applied to flats with prior overdue invoices. Override amounts in preview.</p>
+              <div id="bulk-invoice-penalties" class="bulk-invoice-heads"></div>
+            </div>
+
+            <label class="expense-label" for="raise-invoice-notes">Notes <span class="expense-optional">(optional, all flats)</span></label>
+            <textarea id="raise-invoice-notes" class="expense-desc expense-textarea" rows="2" placeholder="e.g. Apr 2026 maintenance cycle"></textarea>
+          </form>
+        </div>
+
+        <div class="bulk-invoice-preview-panel">
+          <div id="bulk-invoice-preview-empty" class="bulk-invoice-preview-empty">
+            <i class="fa-solid fa-table"></i>
+            <p>Select flats and charge heads to preview amounts, or import an Excel file.</p>
+          </div>
+          <div class="bulk-invoice-section bulk-invoice-section--preview" id="bulk-invoice-preview-wrap" hidden>
+            <div class="bulk-invoice-section__head">
+              <h3 class="bulk-invoice-section__title">Preview</h3>
+              <span id="bulk-invoice-preview-summary" class="bulk-invoice-preview-summary"></span>
+            </div>
+            <div class="bulk-invoice-preview-scroll">
+              <table id="bulk-invoice-preview" class="bulk-invoice-preview"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="expense-modal__footer bulk-invoice-form__footer">
+        <button type="button" class="btn btn-outline" onclick="window.closeRaiseInvoiceModal()">Cancel</button>
+        <button type="submit" form="raise-invoice-form" class="btn btn-primary" id="raise-invoice-btn">Raise invoices</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="charge-heads-modal">
+    <div class="modal-content expense-modal charge-heads-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Charge Heads</h2>
+          <p>Define billable categories and how amounts are calculated</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closeChargeHeadsModal()">&times;</button>
+      </div>
+      <div class="charge-heads-body">
+        <div class="charge-heads-toolbar">
+          <button type="button" class="btn btn-primary btn--small" id="charge-head-add-btn">
+            <i class="fa-solid fa-plus"></i> Add head
+          </button>
+          <button type="button" class="btn btn-outline btn--small" id="charge-head-seed-btn">Load defaults</button>
+        </div>
+        <div id="charge-heads-list" class="charge-heads-list"></div>
+
+        <div id="charge-head-editor-panel" class="charge-head-editor" hidden>
+          <h3 id="charge-head-editor-title" class="charge-head-editor__title">Add charge head</h3>
+          <form id="charge-head-form" class="charge-head-form">
+            <label class="expense-label" for="charge-head-name">Name</label>
+            <input type="text" id="charge-head-name" class="expense-combobox" required placeholder="e.g. Maintenance, Water" autocomplete="off" />
+            <label class="expense-label" for="charge-head-calc-type">Calculation</label>
+            <select id="charge-head-calc-type" class="expense-combobox" required>
+              <option value="FLAT">Fixed per flat</option>
+              <option value="PER_SQFT">Rate × sq ft</option>
+              <option value="PRO_RATA_AREA">Split total by sq ft</option>
+              <option value="MANUAL">Variable per flat</option>
+              <option value="PER_CAR_SLOT">Rate × car slots (base limit)</option>
+              <option value="PER_BIKE_SLOT">Rate × bike slots (base limit)</option>
+              <option value="PER_PARKING_SLOT">Rate × all parking slots (base)</option>
+              <option value="PER_EXTRA_CAR_ALLOCATION">Rate × extra car pool (EH)</option>
+              <option value="PER_EXTRA_BIKE_ALLOCATION">Rate × extra bike pool (BH)</option>
+            </select>
+            <div id="charge-head-amount-wrap">
+              <label class="expense-label" id="charge-head-amount-label" for="charge-head-default-amount">Amount per flat (₹)</label>
+              <input type="number" id="charge-head-default-amount" class="expense-amount" min="0" step="0.01" inputmode="decimal" />
+            </div>
+            <label class="expense-label" for="charge-head-sort">Sort order</label>
+            <input type="number" id="charge-head-sort" class="expense-combobox" value="0" step="1" />
+            <label class="expense-label" for="charge-head-notes">Notes</label>
+            <input type="text" id="charge-head-notes" class="expense-combobox" autocomplete="off" />
+            <label class="charge-head-active-label">
+              <input type="checkbox" id="charge-head-active" checked /> Active
+            </label>
+            <div class="charge-head-form__actions">
+              <button type="button" class="btn btn-outline btn--small" id="charge-head-cancel-btn">Cancel</button>
+              <button type="submit" class="btn btn-primary btn--small" id="charge-head-save-btn">Save head</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="billing-groups-modal">
+    <div class="modal-content expense-modal charge-heads-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Billing Groups</h2>
+          <p>Combine multiple flats into one invoice — e.g. one owner with several units</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closeBillingGroupsModal()">&times;</button>
+      </div>
+      <div class="charge-heads-body">
+        <div class="charge-heads-toolbar">
+          <button type="button" class="btn btn-primary btn--small" id="billing-group-add-btn">
+            <i class="fa-solid fa-plus"></i> Add group
+          </button>
+          <button type="button" class="btn btn-outline btn--small" id="billing-group-suggest-btn">Suggest from owners</button>
+        </div>
+        <div id="billing-group-suggest-panel" class="billing-group-suggest-panel"></div>
+        <div id="billing-groups-list" class="charge-heads-list"></div>
+
+        <div id="billing-group-editor-panel" class="charge-head-editor" hidden>
+          <h3 id="billing-group-editor-title" class="charge-head-editor__title">Add billing group</h3>
+          <form id="billing-group-form" class="charge-head-form">
+            <label class="expense-label" for="billing-group-name">Group name</label>
+            <input type="text" id="billing-group-name" class="expense-combobox" required placeholder="e.g. Rajesh Kumar" autocomplete="off" />
+            <label class="expense-label" for="billing-group-contact">Contact name <span class="expense-optional">optional</span></label>
+            <input type="text" id="billing-group-contact" class="expense-combobox" autocomplete="off" />
+            <label class="expense-label">Selected flats</label>
+            <div id="billing-group-selected-list" class="billing-group-selected-list">
+              <p class="maintenance-alloc-hint billing-group-selected-empty">No flats selected — pick from the list below.</p>
+            </div>
+            <label class="expense-label" for="billing-group-unit-search">Add flats</label>
+            <input type="search" id="billing-group-unit-search" class="expense-combobox" placeholder="Search flats…" autocomplete="off" />
+            <div id="billing-group-unit-grid" class="bulk-unit-grid billing-group-unit-grid"></div>
+            <label class="expense-label" for="billing-group-notes">Notes</label>
+            <input type="text" id="billing-group-notes" class="expense-combobox" autocomplete="off" />
+            <label class="expense-label" for="billing-group-sort">Sort order</label>
+            <input type="number" id="billing-group-sort" class="expense-combobox" value="0" step="1" />
+            <label class="charge-head-active-label">
+              <input type="checkbox" id="billing-group-active" checked /> Active
+            </label>
+            <div class="charge-head-form__actions">
+              <button type="button" class="btn btn-outline btn--small" id="billing-group-cancel-btn">Cancel</button>
+              <button type="submit" class="btn btn-primary btn--small" id="billing-group-save-btn">Save group</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="penalty-rules-modal">
+    <div class="modal-content expense-modal charge-heads-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Penalty Rules</h2>
+          <p>Late payment fees and interest — applied at invoice generation or on overdue invoices</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closePenaltyRulesModal()">&times;</button>
+      </div>
+      <div class="charge-heads-body">
+        <div class="charge-heads-toolbar">
+          <button type="button" class="btn btn-primary btn--small" id="penalty-rule-add-btn">
+            <i class="fa-solid fa-plus"></i> Add rule
+          </button>
+          <button type="button" class="btn btn-outline btn--small" id="penalty-rule-seed-btn">Load defaults</button>
+        </div>
+        <div id="penalty-rules-list" class="charge-heads-list"></div>
+
+        <div id="penalty-rule-editor-panel" class="charge-head-editor" hidden>
+          <h3 id="penalty-rule-editor-title" class="charge-head-editor__title">Add penalty rule</h3>
+          <form id="penalty-rule-form" class="charge-head-form">
+            <label class="expense-label" for="penalty-rule-name">Rule name</label>
+            <input type="text" id="penalty-rule-name" class="expense-combobox" required placeholder="e.g. Late payment fee" autocomplete="off" />
+            <label class="expense-label" for="penalty-rule-type">Calculation</label>
+            <select id="penalty-rule-type" class="expense-combobox" required>
+              <option value="FLAT">Flat fee</option>
+              <option value="PERCENT_OF_DUE">% of amount due</option>
+              <option value="PERCENT_PER_DAY">% per day overdue</option>
+              <option value="PERCENT_PER_MONTH">% per month overdue</option>
+              <option value="FLAT_AFTER_GRACE">Flat fee after grace period</option>
+            </select>
+            <label class="expense-label" for="penalty-rule-target">Applies to</label>
+            <select id="penalty-rule-target" class="expense-combobox">
+              <option value="PRIOR_OVERDUE">Prior overdue invoices</option>
+              <option value="CURRENT_INVOICE">Current invoice amount</option>
+            </select>
+            <div id="penalty-rule-rate-wrap">
+              <label class="expense-label" id="penalty-rule-rate-label" for="penalty-rule-rate">Percent (%)</label>
+              <input type="number" id="penalty-rule-rate" class="expense-amount" min="0" step="0.001" inputmode="decimal" />
+            </div>
+            <div id="penalty-rule-flat-wrap">
+              <label class="expense-label" for="penalty-rule-flat">Flat amount (₹)</label>
+              <input type="number" id="penalty-rule-flat" class="expense-amount" min="0" step="0.01" inputmode="decimal" />
+            </div>
+            <div id="penalty-rule-grace-wrap">
+              <label class="expense-label" for="penalty-rule-grace">Grace period (days)</label>
+              <input type="number" id="penalty-rule-grace" class="expense-combobox" min="0" step="1" value="0" />
+            </div>
+            <label class="expense-label" for="penalty-rule-min">Minimum (₹) <span class="expense-optional">optional</span></label>
+            <input type="number" id="penalty-rule-min" class="expense-combobox" min="0" step="0.01" inputmode="decimal" />
+            <label class="expense-label" for="penalty-rule-max">Maximum cap (₹) <span class="expense-optional">optional</span></label>
+            <input type="number" id="penalty-rule-max" class="expense-combobox" min="0" step="0.01" inputmode="decimal" />
+            <label class="expense-label" for="penalty-rule-sort">Sort order</label>
+            <input type="number" id="penalty-rule-sort" class="expense-combobox" value="0" step="1" />
+            <label class="expense-label" for="penalty-rule-notes">Notes</label>
+            <input type="text" id="penalty-rule-notes" class="expense-combobox" autocomplete="off" />
+            <label class="charge-head-active-label">
+              <input type="checkbox" id="penalty-rule-active" checked /> Active
+            </label>
+            <div class="charge-head-form__actions">
+              <button type="button" class="btn btn-outline btn--small" id="penalty-rule-cancel-btn">Cancel</button>
+              <button type="submit" class="btn btn-primary btn--small" id="penalty-rule-save-btn">Save rule</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="apply-penalties-modal">
+    <div class="modal-content expense-modal bulk-invoice-modal" style="max-width: 900px;">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Apply Penalties</h2>
+          <p>Add late-fee lines to overdue open invoices</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closeApplyPenaltiesModal()">&times;</button>
+      </div>
+      <div class="charge-heads-body" style="padding: 0 1.15rem 1rem;">
+        <div class="bulk-invoice-section bulk-invoice-section--period" style="margin-bottom: 0.75rem;">
+          <label class="expense-label" for="apply-penalty-asof">As of date</label>
+          <input type="date" id="apply-penalty-asof" class="expense-date" />
+        </div>
+        <div class="bulk-invoice-section" style="margin-bottom: 0.75rem;">
+          <h3 class="bulk-invoice-section__title">Rules to apply</h3>
+          <div id="apply-penalty-rules" class="bulk-invoice-heads"></div>
+        </div>
+        <div class="bulk-invoice-section bulk-invoice-section--preview" id="apply-penalty-preview-wrap" hidden>
+          <div class="bulk-invoice-section__head">
+            <h3 class="bulk-invoice-section__title">Preview</h3>
+            <span id="apply-penalty-preview-summary" class="bulk-invoice-preview-summary"></span>
+          </div>
+          <div class="bulk-invoice-preview-scroll" style="max-height: 320px;">
+            <table id="apply-penalty-preview" class="bulk-invoice-preview"></table>
+          </div>
+        </div>
+        <div class="expense-modal__footer" style="padding: 0.65rem 0 0; background: transparent; border: none;">
+          <button type="button" class="btn btn-outline" onclick="window.closeApplyPenaltiesModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="apply-penalties-submit">Apply to overdue invoices</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="send-invoices-modal">
+    <div class="modal-content expense-modal bulk-invoice-modal" style="max-width: 720px;">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Send Invoices</h2>
+          <p>Download PDF invoices or open emails to owners / tenants</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="window.closeSendInvoicesModal()">&times;</button>
+      </div>
+      <div class="charge-heads-body" style="padding: 0 1.15rem 1rem;">
+        <div class="send-invoices-toolbar">
+          <label class="charge-head-active-label">
+            <input type="checkbox" id="send-invoices-open-only" checked /> Open invoices only
+          </label>
+          <div class="send-invoices-toolbar__actions">
+            <button type="button" class="btn btn-outline btn--small" id="send-invoices-select-all">Select all</button>
+            <button type="button" class="btn btn-outline btn--small" id="send-invoices-select-none">Clear</button>
+          </div>
+        </div>
+        <div id="send-invoices-list" class="send-invoices-list"></div>
+        <p class="maintenance-alloc-hint send-invoices-hint">
+          Email opens your mail client with the recipient pre-filled. The PDF is downloaded first — attach it before sending.
+          On mobile, Share may attach the PDF directly.
+        </p>
+        <div class="expense-modal__footer" style="padding: 0.65rem 0 0; background: transparent; border: none;">
+          <button type="button" class="btn btn-outline" onclick="window.closeSendInvoicesModal()">Close</button>
+          <button type="button" class="btn btn-outline" id="send-invoices-download-zip">Download PDFs (ZIP)</button>
+          <button type="button" class="btn btn-primary" id="send-invoices-email-btn">Email selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="invoice-detail-modal">
+    <div class="modal-content expense-modal invoice-detail-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="invoice-detail-title">Invoice</h2>
+          <p id="invoice-detail-subtitle"></p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" id="invoice-detail-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="invoice-detail-body" class="invoice-detail-body"></div>
+      <div class="expense-modal__footer invoice-detail-footer">
+        <button type="button" class="btn btn-outline" id="invoice-detail-cancel">Close</button>
+        <button type="button" class="btn btn-outline" id="invoice-detail-pdf-btn">
+          <i class="fa-solid fa-file-pdf"></i> Download PDF
+        </button>
+        <button type="button" class="btn btn-outline" id="invoice-detail-email-btn">
+          <i class="fa-solid fa-envelope"></i> Email
+        </button>
+        <button type="button" class="btn btn-primary" id="invoice-detail-collect-btn">Record Collection</button>
+      </div>
     </div>
   </div>
 
   <div class="modal-backdrop" id="receipt-modal">
-    <div class="modal-content" style="max-width: 500px; padding: 1rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="font-size: 0.9rem; font-weight: 800;">Digital Proof</h3>
-        <button class="btn btn-outline"
-          onclick="document.getElementById('receipt-modal').classList.remove('active')">&times;</button>
+    <div class="modal-content receipt-viewer">
+      <div class="receipt-viewer__header">
+        <div>
+          <h3 class="receipt-viewer__title">Digital Proof</h3>
+          <p id="receipt-viewer-caption" class="receipt-viewer__caption"></p>
+        </div>
+        <button type="button" class="btn btn-outline receipt-viewer__close" aria-label="Close"
+          onclick="window.closeReceiptViewer()">&times;</button>
       </div>
-      <img id="receipt-img" style="width: 100%; border-radius: 8px; border: 1px solid var(--border);" />
+      <div id="receipt-nav" class="receipt-viewer__nav" hidden></div>
+      <div id="receipt-viewer-body" class="receipt-viewer__body">
+        <img id="receipt-img" class="receipt-viewer__img" alt="Receipt" hidden />
+        <iframe id="receipt-pdf" class="receipt-viewer__pdf" title="Receipt PDF" hidden></iframe>
+      </div>
+      <div class="receipt-viewer__footer">
+        <a id="receipt-open-tab" class="receipt-viewer__open" href="#" target="_blank" rel="noopener">Open in new tab</a>
+      </div>
     </div>
   </div>
 
@@ -677,6 +1454,73 @@
         <button type="button" id="auth-login-btn" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem;">Sign in</button>
         <button type="button" id="auth-signup-btn" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Create account</button>
       </form>
+    </div>
+  </div>
+
+  <!-- ADMIN MODALS -->
+  <div class="modal-backdrop" id="admin-vendor-modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <h2 id="admin-vendor-modal-title" style="font-size:1.1rem; font-weight:900;">Add Vendor</h2>
+      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+        <div><label class="expense-label" for="admin-vendor-name">Vendor name</label><input type="text" id="admin-vendor-name" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-vendor-phone">Phone</label><input type="text" id="admin-vendor-phone" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-vendor-email">Email</label><input type="email" id="admin-vendor-email" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-vendor-notes">Notes</label><textarea id="admin-vendor-notes" class="expense-textarea" rows="2"></textarea></div>
+      </div>
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+        <button type="button" class="btn btn-outline" onclick="window.closeVendorModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="admin-vendor-save">Save Vendor</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="admin-subcat-modal">
+    <div class="modal-content" style="max-width: 420px;">
+      <h2 id="admin-subcat-modal-title" style="font-size:1.1rem; font-weight:900;">Add Sub-category</h2>
+      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+        <div><label class="expense-label" for="admin-subcat-category">Category</label>
+          <select id="admin-subcat-category" class="expense-combobox">
+            <option value="Maintenance">Maintenance</option>
+            <option value="Security">Security</option>
+            <option value="Plumbing">Plumbing</option>
+            <option value="Electrical">Electrical</option>
+            <option value="Stationery">Stationery</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div><label class="expense-label" for="admin-subcat-name">Sub-category name</label><input type="text" id="admin-subcat-name" class="expense-combobox" placeholder="e.g. Lift motor" /></div>
+      </div>
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+        <button type="button" class="btn btn-outline" onclick="window.closeSubCatModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="admin-subcat-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="admin-staff-modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <h2 id="admin-staff-modal-title" style="font-size:1.1rem; font-weight:900;">Add Staff</h2>
+      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+        <div><label class="expense-label" for="admin-staff-name">Full name</label><input type="text" id="admin-staff-name" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-staff-role">Role</label>
+          <select id="admin-staff-role" class="expense-combobox">
+            <option value="Manager">Manager</option>
+            <option value="Security Guard">Security Guard</option>
+            <option value="Housekeeping">Housekeeping</option>
+            <option value="Maintenance">Maintenance</option>
+            <option value="Accounts">Accounts</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div><label class="expense-label" for="admin-staff-phone">Phone</label><input type="text" id="admin-staff-phone" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-staff-email">Email</label><input type="email" id="admin-staff-email" class="expense-combobox" /></div>
+        <div><label class="expense-label" for="admin-staff-notes">Notes</label><textarea id="admin-staff-notes" class="expense-textarea" rows="2"></textarea></div>
+        <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.85rem; font-weight:700;"><input type="checkbox" id="admin-staff-active" checked /> Active</label>
+      </div>
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+        <button type="button" class="btn btn-outline" onclick="window.closeStaffModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="admin-staff-save">Save Staff</button>
+      </div>
     </div>
   </div>
 
@@ -867,6 +1711,152 @@
         <button type="button" class="btn btn-primary" style="flex: 1;" id="capacity-save">Save allocation</button>
       </div>
       <p id="capacity-error" class="nb-form-error" style="display: none; margin-top: 0.75rem;"></p>
+    </div>
+  </div>
+
+  <!-- UNIT DETAIL (Unit Directory) -->
+  <div class="modal-backdrop" id="unit-detail-modal">
+    <div class="modal-content expense-modal unit-detail-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="unit-detail-title">D-001</h2>
+          <p id="unit-detail-subtitle">Flat details</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" id="unit-detail-close" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="unit-detail-layout">
+        <nav class="unit-detail-tabs" id="unit-detail-tabs" role="tablist" aria-label="Flat sections">
+          <button type="button" class="unit-detail-tab unit-detail-tab--active" data-unit-tab="overview" role="tab" aria-selected="true">
+            <i class="fa-solid fa-building"></i><span>Overview</span>
+          </button>
+          <button type="button" class="unit-detail-tab" data-unit-tab="residents" role="tab" aria-selected="false">
+            <i class="fa-solid fa-user-group"></i><span>Residents</span>
+          </button>
+          <button type="button" class="unit-detail-tab" data-unit-tab="vehicles" role="tab" aria-selected="false">
+            <i class="fa-solid fa-car"></i><span>Vehicles</span>
+          </button>
+          <button type="button" class="unit-detail-tab" data-unit-tab="billing" role="tab" aria-selected="false">
+            <i class="fa-solid fa-file-invoice-dollar"></i><span>Billing</span>
+          </button>
+        </nav>
+
+        <div class="unit-detail-main">
+          <div class="unit-detail-kpis" id="unit-detail-kpis" aria-label="Flat summary"></div>
+
+          <div class="unit-detail-body">
+            <div id="unit-detail-panel-overview" class="unit-detail-panel" role="tabpanel">
+              <form id="unit-edit-form" class="unit-detail-form">
+                <section class="unit-detail-form__section">
+                  <h3 class="unit-detail-form__section-title">Property</h3>
+                  <div class="unit-detail-form__grid">
+                    <div class="unit-detail-form__field">
+                      <label class="expense-label" for="unit-edit-block">Block</label>
+                      <input type="text" id="unit-edit-block" class="expense-combobox" autocomplete="off" />
+                    </div>
+                    <div class="unit-detail-form__field">
+                      <label class="expense-label" for="unit-edit-bhk">BHK</label>
+                      <input type="text" id="unit-edit-bhk" class="expense-combobox" placeholder="e.g. 3BHK" autocomplete="off" />
+                    </div>
+                    <div class="unit-detail-form__field unit-detail-form__field--wide">
+                      <label class="expense-label" for="unit-edit-area">Area (sq ft)</label>
+                      <input type="number" id="unit-edit-area" class="expense-combobox" min="0" step="0.01" inputmode="decimal" />
+                    </div>
+                  </div>
+                </section>
+
+                <section class="unit-detail-form__section">
+                  <h3 class="unit-detail-form__section-title">Parking slots</h3>
+                  <div class="unit-detail-form__grid">
+                    <div class="unit-detail-form__field">
+                      <label class="expense-label" for="unit-edit-car">Car slots</label>
+                      <input type="number" id="unit-edit-car" class="expense-combobox" min="0" step="1" />
+                    </div>
+                    <div class="unit-detail-form__field">
+                      <label class="expense-label" for="unit-edit-bike">Bike slots</label>
+                      <input type="number" id="unit-edit-bike" class="expense-combobox" min="0" step="1" />
+                    </div>
+                  </div>
+                </section>
+
+                <section class="unit-detail-form__section">
+                  <h3 class="unit-detail-form__section-title">Occupancy</h3>
+                  <div class="unit-detail-form__field">
+                    <label class="expense-label" for="unit-edit-occupancy">Status</label>
+                    <select id="unit-edit-occupancy" class="expense-combobox">
+                      <option value="">— Auto from residents —</option>
+                      <option value="OWNER_OCCUPIED">Owner occupied</option>
+                      <option value="TENANT_OCCUPIED">Tenant occupied</option>
+                      <option value="VACANT">Vacant</option>
+                      <option value="UNDER_RENOVATION">Under renovation</option>
+                      <option value="LOCKED">Locked / dispute</option>
+                      <option value="DEVELOPER_HOLD">Developer hold</option>
+                    </select>
+                  </div>
+                </section>
+
+                <section class="unit-detail-form__section unit-detail-form__section--wide">
+                  <h3 class="unit-detail-form__section-title">Notes</h3>
+                  <div class="unit-detail-form__field">
+                    <label class="expense-label" for="unit-edit-notes">Internal notes <span class="expense-optional">(optional)</span></label>
+                    <textarea id="unit-edit-notes" class="expense-desc expense-textarea" rows="3" placeholder="Handover details, special instructions…"></textarea>
+                  </div>
+                </section>
+              </form>
+            </div>
+            <div id="unit-detail-panel-residents" class="unit-detail-panel" role="tabpanel" hidden></div>
+            <div id="unit-detail-panel-vehicles" class="unit-detail-panel" role="tabpanel" hidden></div>
+            <div id="unit-detail-panel-billing" class="unit-detail-panel" role="tabpanel" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="expense-modal__footer unit-detail-footer" id="unit-detail-footer">
+        <button type="button" class="btn btn-outline" id="unit-edit-parking-link">
+          <i class="fa-solid fa-car"></i> Parking registry
+        </button>
+        <div class="unit-detail-footer__actions">
+          <button type="button" class="btn btn-outline" id="unit-edit-cancel">Cancel</button>
+          <button type="submit" form="unit-edit-form" class="btn btn-primary" id="unit-edit-save">Save changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UNIT DIRECTORY EXCEL IMPORT -->
+  <div class="modal-backdrop" id="unit-directory-import-modal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 900;">Bulk update from Excel</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
+            Download the template first, edit flat details, then import. Blank cells keep existing values.
+          </p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" id="unit-directory-import-close" type="button">&times;</button>
+      </div>
+      <div id="unit-directory-import-pick">
+        <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
+          <strong>Units</strong> sheet: flat details + occupancy flag.
+          <strong>Residents</strong> sheet: one row per owner/tenant (multiple per flat).
+          Blank cells keep existing values. Re-download template if columns changed.
+        </p>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="unit-directory-import-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="unit-directory-import-choose">
+            <i class="fa-solid fa-file-arrow-up"></i> Choose Excel file
+          </button>
+        </div>
+      </div>
+      <div id="unit-directory-import-preview" hidden>
+        <div id="unit-directory-import-filename" style="font-weight: 700; margin-bottom: 0.5rem;"></div>
+        <div id="unit-directory-import-summary" class="import-preview-box"></div>
+        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="unit-directory-import-back">Back</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="unit-directory-import-apply">Apply import</button>
+        </div>
+      </div>
+      <p id="unit-directory-import-error" class="nb-form-error" hidden style="margin-top: 1rem;"></p>
     </div>
   </div>
 
