@@ -3,6 +3,7 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { getGroupById, getUnitIdsForGroup } from './billingGroups.js';
+import { logActivity } from './activityAudit.js';
 
 let residentsCache = null;
 
@@ -109,6 +110,13 @@ export async function saveResident(payload, residentId = null) {
 
     clearResidentsCache();
     await loadResidents(true);
+    await logActivity({
+        entityType: 'RESIDENT',
+        entityId: residentId || unit_number,
+        action: residentId ? 'UPDATE' : 'CREATE',
+        summary: `${residentId ? 'Updated' : 'Added'} resident ${full_name} (${unit_number})`,
+        newData: row,
+    });
 }
 
 export async function deleteResident(id) {
@@ -117,6 +125,12 @@ export async function deleteResident(id) {
     if (error) throw error;
     clearResidentsCache();
     await loadResidents(true);
+    await logActivity({
+        entityType: 'RESIDENT',
+        entityId: id,
+        action: 'DELETE',
+        summary: `Deleted resident record`,
+    });
 }
 
 /** @typedef {'update_listed' | 'replace_listed' | 'full_replace'} ResidentImportMode */
@@ -200,6 +214,13 @@ export async function importResidentsFromSheet(residents, mode = 'update_listed'
     clearResidentsCache();
     await pullState();
     await loadResidents(true);
+    await logActivity({
+        entityType: 'RESIDENT',
+        entityId: apartment_id,
+        action: 'IMPORT',
+        summary: `Imported ${count} resident row(s) (${mode})`,
+        newData: { mode, count },
+    });
     return { count };
 }
 

@@ -2,6 +2,7 @@
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist, supabase, pullState } from './store.js';
+import { isTransactionReconciled } from './bankReconciliation.js';
 import {
     formatAllocationSummary,
     saveMaintenanceAllocations,
@@ -566,10 +567,14 @@ export const renderCashLedger = () => {
         const receiptBtn = attachmentPaths.length
             ? `<button class="btn btn-outline" style="padding:0.2rem 0.4rem; position:relative;" title="View attachment${attachmentPaths.length > 1 ? 's' : ''}" onclick="window.viewReceipts('${t.id}')"><i class="fa-solid fa-paperclip"></i>${attachmentPaths.length > 1 ? `<span style="font-size:0.55rem; margin-left:0.15rem;">${attachmentPaths.length}</span>` : ''}</button>`
             : '';
+        const reconciled = isTransactionReconciled(t.id);
+        const reconBadge = reconciled
+            ? '<span class="ledger-recon-badge" title="Reconciled to bank statement">Reconciled</span>'
+            : ((t.wallet || '').toUpperCase() === 'BANK' ? '<span class="ledger-recon-badge ledger-recon-badge--open">Unreconciled</span>' : '');
         const row = document.createElement('div'); row.className = 'apt-row';
         row.style = "grid-template-columns: 100px 100px 140px 1fr 120px 130px; padding: 0.85rem 1rem; align-items: center; border-bottom: 1px solid var(--border);";
         row.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim);">${new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
-           <div><span style="font-size:0.6rem; font-weight:900; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${t.wallet}</span></div>
+           <div><span style="font-size:0.6rem; font-weight:900; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${t.wallet}</span> ${reconBadge}</div>
            <div><span style="font-size:0.6rem; font-weight:800; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:100px;">${getLabel(t.cat)}</span></div>
            <div style="font-size:0.85rem; font-weight:700;">${detail}</div>
            <div style="text-align:right; font-weight:900; color:${t.type === 'IN' ? 'var(--success)' : 'var(--danger)'};">${t.type === 'IN' ? '+' : '-'} ₹${parseFloat(t.amount).toLocaleString('en-IN')}</div>
@@ -1059,17 +1064,31 @@ window.editTxn = (id) => {
 };
 
 window.switchSubView = (sv) => {
-    const isLedger = sv === 'ledger';
-    const isReports = sv === 'reports';
-    document.getElementById('subview-ledger').style.display = isLedger ? 'block' : 'none';
-    document.getElementById('subview-reports').style.display = isReports ? 'block' : 'none';
+    const views = {
+        ledger: 'subview-ledger',
+        reports: 'subview-reports',
+        'bank-recon': 'subview-bank-recon',
+        activity: 'subview-activity',
+    };
+    Object.entries(views).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = key === sv ? 'block' : 'none';
+    });
 
-    const btnLedger = document.getElementById('btn-show-ledger');
-    const btnReports = document.getElementById('btn-show-reports');
+    const tabs = {
+        ledger: 'btn-show-ledger',
+        reports: 'btn-show-reports',
+        'bank-recon': 'btn-show-bank-recon',
+        activity: 'btn-show-activity',
+    };
     const dim = 'var(--text-dim)';
     const active = '#111827';
-    if (btnLedger) btnLedger.style.color = isLedger ? active : dim;
-    if (btnReports) btnReports.style.color = isReports ? active : dim;
+    Object.entries(tabs).forEach(([key, id]) => {
+        const btn = document.getElementById(id);
+        if (btn) btn.style.color = key === sv ? active : dim;
+    });
 
-    if (isReports) renderAuditReports();
+    if (sv === 'reports') renderAuditReports();
+    if (sv === 'bank-recon') window.renderBankReconciliation?.();
+    if (sv === 'activity') window.renderActivityLogPage?.();
 };

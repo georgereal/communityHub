@@ -10,6 +10,7 @@ import {
     loadResidents,
 } from './residents.js';
 import { invoiceMatchesBlock, getSelectedBlock } from './blockFilter.js';
+import { logActivity } from './activityAudit.js';
 import {
     downloadReminderPdf,
     emailReminderPdf,
@@ -139,6 +140,13 @@ export const sendReminderForInvoice = async (invoiceId, { force = false } = {}) 
         channel,
         daysOverdue: daysOverdue(inv),
         sentToEmail: billTo.email,
+    });
+    await logActivity({
+        entityType: 'REMINDER',
+        entityId: invoiceId,
+        action: channel === 'PDF' ? 'SEND_PDF' : 'SEND_EMAIL',
+        summary: `Reminder sent for invoice ${inv?.period_label || invoiceId}`,
+        newData: { sent_to: billTo.email, channel },
     });
     const { pullState } = await import('./store.js');
     await pullState();

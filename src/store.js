@@ -11,7 +11,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_U
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -33,7 +33,7 @@ export const pullState = async () => {
         const activeApartmentId = portalState.access?.activeApartmentId;
         if (!activeApartmentId) throw new Error('No active apartment selected');
 
-        const [u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl] = await Promise.all([
+        const [u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl] = await Promise.all([
             supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
             supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
@@ -53,6 +53,8 @@ export const pullState = async () => {
             supabase.from('maintenance_billing_batches').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('maintenance_billing_batch_skips').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('maintenance_reminder_log').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('bank_statement_imports').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('bank_statement_lines').select('*').eq('apartment_id', activeApartmentId).order('line_date', { ascending: false }),
         ]);
 
         if (s.data) {
@@ -81,6 +83,8 @@ export const pullState = async () => {
         portalState.finances.maintenanceBillingBatches = mbb.error ? [] : (mbb.data || []);
         portalState.finances.maintenanceBillingBatchSkips = mbbs.error ? [] : (mbbs.data || []);
         portalState.finances.maintenanceReminderLog = mrl.error ? [] : (mrl.data || []);
+        portalState.finances.bankStatementImports = bsi.error ? [] : (bsi.data || []);
+        portalState.finances.bankStatementLines = bsl.error ? [] : (bsl.data || []);
         portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
         portalState.admin.staff = staff.error ? [] : (staff.data || []);
 
