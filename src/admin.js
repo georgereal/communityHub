@@ -3,11 +3,12 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { refreshExpenseReferences } from './finances.js';
+import { renderLedgerSyncPanel, renderAdminSyncPanel } from './ledgerSpreadsheetSync.js';
 
 const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
 const STAFF_ROLES = ['Manager', 'Security Guard', 'Housekeeping', 'Maintenance', 'Accounts', 'Other'];
 
-const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff'];
+const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff', 'sync'];
 let editingVendorId = null;
 let editingSubCatId = null;
 let editingStaffId = null;
@@ -16,24 +17,17 @@ const apartmentId = () => portalState.access?.activeApartmentId;
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
-const setTabActive = (id) => {
-    document.querySelectorAll('.setup-subview-tabs [data-setup-tab]').forEach((btn) => {
-        const on = btn.dataset.setupTab === id;
-        btn.classList.toggle('setup-tab--active', on);
-    });
-};
-
 export const switchSetupSubView = (id = 'society') => {
     const view = SETUP_SUBVIEWS.includes(id) ? id : 'society';
     SETUP_SUBVIEWS.forEach((key) => {
         const el = document.getElementById(`setup-subview-${key}`);
         if (el) el.hidden = key !== view;
     });
-    setTabActive(view);
     if (view === 'bank') renderBankAdmin();
     if (view === 'vendors') renderVendorsAdmin();
     if (view === 'subcats') renderSubCatsAdmin();
     if (view === 'staff') renderStaffAdmin();
+    if (view === 'sync') renderSyncAdmin();
 };
 window.switchSetupSubView = switchSetupSubView;
 
@@ -319,4 +313,10 @@ const deleteStaff = async (id) => {
     if (error) return alert(error.message);
     await pullState();
     renderStaffAdmin();
+};
+
+// --- Spreadsheet Sync ---
+
+export const renderSyncAdmin = () => {
+    renderAdminSyncPanel();
 };

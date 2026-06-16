@@ -1061,20 +1061,6 @@ export const switchInvoiceSubView = (sv) => {
         if (el) el.style.display = key === sv ? 'block' : 'none';
     });
 
-    const dim = 'var(--text-dim)';
-    const active = '#111827';
-    const tabs = {
-        list: 'btn-invoice-list',
-        'by-flat': 'btn-invoice-by-flat',
-        collections: 'btn-invoice-collections',
-        batches: 'btn-invoice-batches',
-        aging: 'btn-invoice-aging',
-    };
-    Object.entries(tabs).forEach(([key, id]) => {
-        const btn = document.getElementById(id);
-        if (btn) btn.style.color = key === sv ? active : dim;
-    });
-
     renderInvoicesPage();
 };
 
@@ -1425,11 +1411,26 @@ export const openMaintenanceCollection = (wallet = 'BANK') => {
     if (typeof window.openIncome === 'function') window.openIncome(wallet);
 };
 
-export const openMaintenanceCollectionForFlat = (flatNumber, wallet = 'BANK') => {
+export const openMaintenanceCollectionForFlat = (flatNumber, wallet = 'BANK', options = {}) => {
     openMaintenanceCollection(wallet);
+    const titleEl = document.getElementById('cash-modal-title');
+    const descEl = document.getElementById('cash-modal-desc');
+    if (options.context === 'move-out') {
+        if (titleEl) titleEl.textContent = 'Clear dues for move-out';
+        if (descEl) descEl.textContent = `Record payment for ${flatNumber} and apply to outstanding invoices.`;
+    }
     const unitInput = document.getElementById('maintenance-unit-input');
     if (unitInput) unitInput.value = flatNumber;
+    const amtInput = document.getElementById('income-amt');
+    if (options.amount != null && amtInput) {
+        amtInput.value = typeof options.amount === 'number'
+            ? options.amount.toFixed(2)
+            : String(options.amount);
+    }
+    const descInput = document.getElementById('income-desc');
+    if (options.description && descInput) descInput.value = options.description;
     syncMaintenanceIncomeSection('Maintenance Collection');
+    if (options.autoApply) autoApplyOldestFirst();
 };
 
 export const closeInvoiceDetailModal = () => {

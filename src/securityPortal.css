@@ -1,0 +1,142 @@
+/* Security gate portal — optimized for desk / tablet use */
+
+#view-security .header-title p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.sec-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.security-subview-tabs {
+  margin-bottom: 0;
+}
+
+.sec-gate-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sec-gate-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sec-refresh-btn {
+  flex-shrink: 0;
+}
+
+.sec-purpose-tabs {
+  margin-bottom: 1rem;
+}
+
+.sec-purpose-tabs button {
+  flex: 1;
+  min-width: 5.5rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.sec-entry-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.sec-entry-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sec-entry-form__field--full {
+  grid-column: 1 / -1;
+}
+
+.sec-entry-form__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sec-entry-form .expense-combobox {
+  font-size: 0.95rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.sec-entry-form__actions {
+  grid-column: 1 / -1;
+}
+
+.sec-entry-save {
+  width: 100%;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+}
+
+.sec-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.sec-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.sec-section__head h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.sec-active-list .visitor-row--compact {
+  grid-template-columns: 1.5fr 0.8fr auto;
+  padding: 0.85rem 0.5rem;
+}
+
+.sec-active-list .visitor-row--compact > div:nth-child(3),
+.sec-active-list .visitor-row--compact > div:nth-child(4) {
+  display: none;
+}
+
+.sec-exit-btn,
+.sec-collect-btn {
+  min-width: 4.5rem;
+  padding: 0.45rem 0.85rem;
+}
+
+.sec-log-panel {
+  max-width: 960px;
+}
+
+.sec-passes-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 0.65rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 720px) {
+  .sec-entry-form,
+  .sec-passes-form {
+    grid-template-columns: 1fr;
+  }
+}

@@ -525,14 +525,13 @@ export const initExpenseModal = () => {
 };
 
 export const processFinances = () => {
-    let cash = 0, bank = 0, outToday = 0, outMonth = 0; const now = new Date();
+    let cash = 0, bank = 0, outToday = 0; const now = new Date();
     portalState.finances.txns.forEach(t => {
         const amt = parseFloat(t.amount); const d = new Date(t.date); const wallet = t.wallet || 'CASH';
         if (t.type === 'IN') { if (wallet === 'CASH') cash += amt; else bank += amt; }
         else {
             if (wallet === 'CASH') cash -= amt; else bank -= amt;
             if (d.toDateString() === now.toDateString()) outToday += amt;
-            if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) outMonth += amt;
         }
     });
     const k = (id) => document.getElementById(id);
@@ -541,8 +540,10 @@ export const processFinances = () => {
         k('bank-balance').textContent = `₹ ${bank.toLocaleString('en-IN')}`;
         k('total-wealth').textContent = `₹ ${(cash + bank).toLocaleString('en-IN')}`;
         k('cash-today-out').textContent = `₹ ${outToday.toLocaleString('en-IN')}`;
-        k('cash-month-out').textContent = `₹ ${outMonth.toLocaleString('en-IN')}`;
-        if (k('cash-txn-count')) k('cash-txn-count').textContent = `${portalState.finances.txns.length} Records`;
+        if (k('cash-txn-count')) {
+            const n = portalState.finances.txns.length;
+            k('cash-txn-count').textContent = n ? `· ${n} ${n === 1 ? 'entry' : 'entries'}` : '';
+        }
     }
 };
 
@@ -571,13 +572,17 @@ export const renderCashLedger = () => {
         const reconBadge = reconciled
             ? '<span class="ledger-recon-badge" title="Reconciled to bank statement">Reconciled</span>'
             : ((t.wallet || '').toUpperCase() === 'BANK' ? '<span class="ledger-recon-badge ledger-recon-badge--open">Unreconciled</span>' : '');
+        const amt = parseFloat(t.amount).toLocaleString('en-IN');
+        const dr = t.type === 'OUT' ? `₹${amt}` : '';
+        const cr = t.type === 'IN' ? `₹${amt}` : '';
         const row = document.createElement('div'); row.className = 'apt-row';
-        row.style = "grid-template-columns: 100px 100px 140px 1fr 120px 130px; padding: 0.85rem 1rem; align-items: center; border-bottom: 1px solid var(--border);";
+        row.style = "grid-template-columns: 100px 100px 140px 1fr 90px 90px 100px; padding: 0.85rem 1rem; align-items: center; border-bottom: 1px solid var(--border);";
         row.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim);">${new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
            <div><span style="font-size:0.6rem; font-weight:900; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${t.wallet}</span> ${reconBadge}</div>
            <div><span style="font-size:0.6rem; font-weight:800; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:100px;">${getLabel(t.cat)}</span></div>
            <div style="font-size:0.85rem; font-weight:700;">${detail}</div>
-           <div style="text-align:right; font-weight:900; color:${t.type === 'IN' ? 'var(--success)' : 'var(--danger)'};">${t.type === 'IN' ? '+' : '-'} ₹${parseFloat(t.amount).toLocaleString('en-IN')}</div>
+           <div style="text-align:right; font-weight:900; color:var(--danger);">${dr}</div>
+           <div style="text-align:right; font-weight:900; color:var(--success);">${cr}</div>
            <div style="text-align:right; display:flex; gap:0.4rem; justify-content:flex-end;">${receiptBtn}<button class="btn btn-outline" style="padding:0.2rem 0.4rem;" onclick="window.editTxn('${t.id}')"><i class="fa-solid fa-pen"></i></button><button class="btn btn-outline" style="padding:0.2rem 0.4rem; color:var(--danger);" onclick="window.delTxn('${t.id}')"><i class="fa-solid fa-trash-can"></i></button></div>`;
         list.appendChild(row);
     });
@@ -838,6 +843,9 @@ export const saveCashData = async () => {
             if (allocResult.skipped) {
                 alert('Saved without invoice allocation — run supabase_maintenance_billing.sql in Supabase, then edit to apply to dues.');
             }
+            document.dispatchEvent(new CustomEvent('maintenance-payment-saved', {
+                detail: { unitNumber: document.getElementById('maintenance-unit-input')?.value?.trim() || '' },
+            }));
         }
 
         if (removedPaths.length) await deleteReceiptPaths(removedPaths);
@@ -1069,26 +1077,16 @@ window.switchSubView = (sv) => {
         reports: 'subview-reports',
         'bank-recon': 'subview-bank-recon',
         activity: 'subview-activity',
+        gl: 'subview-gl',
     };
     Object.entries(views).forEach(([key, id]) => {
         const el = document.getElementById(id);
         if (el) el.style.display = key === sv ? 'block' : 'none';
     });
 
-    const tabs = {
-        ledger: 'btn-show-ledger',
-        reports: 'btn-show-reports',
-        'bank-recon': 'btn-show-bank-recon',
-        activity: 'btn-show-activity',
-    };
-    const dim = 'var(--text-dim)';
-    const active = '#111827';
-    Object.entries(tabs).forEach(([key, id]) => {
-        const btn = document.getElementById(id);
-        if (btn) btn.style.color = key === sv ? active : dim;
-    });
-
     if (sv === 'reports') renderAuditReports();
     if (sv === 'bank-recon') window.renderBankReconciliation?.();
     if (sv === 'activity') window.renderActivityLogPage?.();
+    if (sv === 'gl') window.renderGeneralLedger?.();
+    if (sv === 'ledger') window.renderLedgerSyncPanel?.();
 };

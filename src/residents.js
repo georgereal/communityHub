@@ -4,6 +4,8 @@
 import { portalState, supabase, pullState } from './store.js';
 import { getGroupById, getUnitIdsForGroup } from './billingGroups.js';
 import { logActivity } from './activityAudit.js';
+import { getUnitBlock } from './blockFilter.js';
+import { deriveBlockFromFlat } from './parkingImport.js';
 
 let residentsCache = null;
 
@@ -20,7 +22,7 @@ export async function fetchResidentsForApartment(apartmentId) {
     if (!apartmentId || !supabase) return [];
     const { data, error } = await supabase
         .from('residents')
-        .select('id, apartment_id, unit_number, kind, full_name, phone, email, notes, is_primary')
+        .select('id, apartment_id, unit_number, kind, full_name, phone, email, notes, is_primary, is_residing')
         .eq('apartment_id', apartmentId)
         .order('unit_number');
     if (error) return [];
@@ -38,6 +40,53 @@ export async function loadResidents(force = false) {
 
 export const getResidentsForUnit = (unitNumber, residents = residentsCache || []) =>
     residents.filter((r) => normUnit(r.unit_number) === normUnit(unitNumber));
+
+export const residentFingerprint = (r) => [
+    normUnit(r.unit_number),
+    (r.kind || '').toUpperCase(),
+    (r.full_name || '').trim().toLowerCase(),
+    (r.phone || '').trim(),
+    (r.email || '').trim().toLowerCase(),
+].join('|');
+
+/** Collapse identical resident rows (e.g. from double import) for display */
+export const dedupeResidents = (residents) => {
+    const seen = new Map();
+    let hiddenCount = 0;
+    for (const r of residents) {
+        const key = residentFingerprint(r);
+        const existing = seen.get(key);
+        if (!existing) {
+            seen.set(key, r);
+            continue;
+        }
+        hiddenCount += 1;
+        if (r.is_primary && !existing.is_primary) seen.set(key, r);
+    }
+    return { residents: [...seen.values()], hiddenCount };
+};
+
+export const getResidentBlock = (unitNumber) => {
+    const unit = portalState.units.find((u) => normUnit(u.number) === normUnit(unitNumber));
+    if (unit) return getUnitBlock(unit) || deriveBlockFromFlat(unit.number) || '';
+    return deriveBlockFromFlat(unitNumber) || '';
+};
+
+export const groupResidentsByUnit = (residents) => {
+    const groups = new Map();
+    residents.forEach((r) => {
+        const unit = normUnit(r.unit_number);
+        const block = getResidentBlock(r.unit_number) || '—';
+        const key = `${block}|${unit}`;
+        if (!groups.has(key)) groups.set(key, { block, unit, residents: [] });
+        groups.get(key).residents.push(r);
+    });
+    return [...groups.values()].sort((a, b) => {
+        const blockCmp = a.block.localeCompare(b.block, undefined, { numeric: true });
+        if (blockCmp) return blockCmp;
+        return a.unit.localeCompare(b.unit, undefined, { numeric: true });
+    });
+};
 
 const getUnitLabel = (unitId) =>
     portalState.units.find((u) => u.id === unitId)?.number || '—';

@@ -20,15 +20,17 @@ const V1_PERMISSION_MATRIX = {
         'setup.view', 'setup.edit',
         'rbac.view', 'rbac.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
+        'portal.view', 'security.view',
     ],
     property_manager: [
         'vehicle_registry.view', 'vehicle_registry.edit',
         'setup.view', 'setup.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
+        'portal.view', 'security.view',
     ],
-    accounts_manager: ['accounts.view', 'accounts.edit', 'apartment_mgmt.view'],
-    security: ['vehicle_registry.view', 'vehicle_registry.edit'],
-    resident_viewer: ['vehicle_registry.view', 'accounts.view', 'apartment_mgmt.view'],
+    accounts_manager: ['accounts.view', 'accounts.edit', 'apartment_mgmt.view', 'portal.view'],
+    security: ['vehicle_registry.view', 'vehicle_registry.edit', 'security.view'],
+    resident_viewer: ['portal.view'],
 };
 
 export const v1RoleToV2Key = (role) =>
@@ -97,14 +99,16 @@ export function routeIsAllowed(route, offline = !supabase) {
 }
 
 export async function refreshAuthPermissions(apartmentId) {
+    const v1Fallback = permissionsFromV1Role(portalState.auth?.role || 'resident_viewer');
     try {
         const perms = await fetchEffectivePermissions(apartmentId);
         if (perms?.length) {
-            portalState.authPermissions = perms;
-            return perms;
+            // Union with v1 profile role so a profiles.role upgrade isn't blocked by stale v2 assignments.
+            portalState.authPermissions = Array.from(new Set([...v1Fallback, ...perms]));
+            return portalState.authPermissions;
         }
     } catch { /* ignore */ }
-    portalState.authPermissions = permissionsFromV1Role(portalState.auth?.role || 'resident_viewer');
+    portalState.authPermissions = v1Fallback;
     return portalState.authPermissions;
 }
 

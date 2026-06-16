@@ -11,7 +11,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_U
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -20,6 +20,41 @@ export let portalState = {
         activeUserId: 'usr-default'
     },
     admin: { bankAccount: null, staff: [] },
+    portal: {
+        residentLinks: [],
+        portalInvites: [],
+        paymentIntents: [],
+        paymentConfig: null,
+        notices: [],
+        noticeReadLog: [],
+    },
+    operations: {
+        helpdeskTickets: [],
+        unitTransitions: [],
+        unitDocuments: [],
+        societyAssets: [],
+        assetServiceLog: [],
+        amenities: [],
+        amenityBookings: [],
+        visitorLog: [],
+        visitorLogUnits: [],
+        gateParcels: [],
+        staffAttendance: [],
+        payrollRuns: [],
+    },
+    parking: {
+        visitorPasses: [],
+        fineRules: [],
+        violations: [],
+    },
+    ledger: {
+        accounts: [],
+        entries: [],
+        lines: [],
+    },
+    email: {
+        outbox: [],
+    },
     activeUnitId: null,
     editingTxnId: null
 };
@@ -33,7 +68,14 @@ export const pullState = async () => {
         const activeApartmentId = portalState.access?.activeApartmentId;
         if (!activeApartmentId) throw new Error('No active apartment selected');
 
-        const [u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl] = await Promise.all([
+        const { data: { user } } = await supabase.auth.getUser();
+        const uid = user?.id;
+
+        const [
+            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,
+            rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
+            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc,
+        ] = await Promise.all([
             supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
             supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
@@ -55,6 +97,34 @@ export const pullState = async () => {
             supabase.from('maintenance_reminder_log').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('bank_statement_imports').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('bank_statement_lines').select('*').eq('apartment_id', activeApartmentId).order('line_date', { ascending: false }),
+            supabase.from('resident_user_links').select('*').eq('apartment_id', activeApartmentId),
+            supabase.from('payment_intents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('apartment_payment_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
+            supabase.from('society_notices').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('notice_read_log').select('*'),
+            supabase.from('resident_portal_invites').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('helpdesk_tickets').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('unit_transitions').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('unit_documents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('society_assets').select('*').eq('apartment_id', activeApartmentId).order('name'),
+            supabase.from('asset_service_log').select('*').eq('apartment_id', activeApartmentId).order('service_date', { ascending: false }),
+            supabase.from('amenities').select('*').eq('apartment_id', activeApartmentId).order('name'),
+            supabase.from('amenity_bookings').select('*').eq('apartment_id', activeApartmentId).order('starts_at', { ascending: false }),
+            supabase.from('visitor_log').select('*').eq('apartment_id', activeApartmentId).order('entry_at', { ascending: false }),
+            supabase.from('staff_attendance').select('*').eq('apartment_id', activeApartmentId).order('work_date', { ascending: false }),
+            supabase.from('payroll_runs').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('visitor_parking_passes').select('*').eq('apartment_id', activeApartmentId).order('valid_until', { ascending: false }),
+            supabase.from('parking_fine_rules').select('*').eq('apartment_id', activeApartmentId).order('name'),
+            supabase.from('parking_violations').select('*').eq('apartment_id', activeApartmentId).order('violation_date', { ascending: false }),
+            supabase.from('chart_of_accounts').select('*').eq('apartment_id', activeApartmentId).order('code'),
+            supabase.from('journal_entries').select('*').eq('apartment_id', activeApartmentId).order('entry_date', { ascending: false }),
+            supabase.from('journal_lines').select('*').eq('apartment_id', activeApartmentId),
+            supabase.from('email_outbox').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
+            supabase.from('gate_parcels').select('*').eq('apartment_id', activeApartmentId).order('received_at', { ascending: false }),
+            supabase.from('visitor_log_units').select('*').eq('apartment_id', activeApartmentId),
+            supabase.from('ledger_sync_settings').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
+            supabase.from('ledger_sync_oauth_apps').select('id, apartment_id, provider, client_id, tenant_id, redirect_uri, enabled, updated_at').eq('apartment_id', activeApartmentId),
+            supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
         ]);
 
         if (s.data) {
@@ -87,6 +157,45 @@ export const pullState = async () => {
         portalState.finances.bankStatementLines = bsl.error ? [] : (bsl.data || []);
         portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
         portalState.admin.staff = staff.error ? [] : (staff.data || []);
+
+        if (!portalState.portal) portalState.portal = {};
+        portalState.portal.residentLinks = rul.error ? [] : (rul.data || []);
+        portalState.portal.portalInvites = rpi.error ? [] : (rpi.data || []);
+        portalState.portal.paymentIntents = pi.error ? [] : (pi.data || []);
+        portalState.portal.paymentConfig = pc.error ? null : (pc.data || null);
+        portalState.portal.notices = sn.error ? [] : (sn.data || []);
+        portalState.portal.noticeReadLog = nrl.error ? [] : (nrl.data || []);
+
+        if (!portalState.operations) portalState.operations = {};
+        portalState.operations.helpdeskTickets = hd.error ? [] : (hd.data || []);
+        portalState.operations.unitTransitions = ut.error ? [] : (ut.data || []);
+        portalState.operations.unitDocuments = ud.error ? [] : (ud.data || []);
+        portalState.operations.societyAssets = sa.error ? [] : (sa.data || []);
+        portalState.operations.assetServiceLog = asl.error ? [] : (asl.data || []);
+        portalState.operations.amenities = am.error ? [] : (am.data || []);
+        portalState.operations.amenityBookings = ab.error ? [] : (ab.data || []);
+        portalState.operations.visitorLog = vl.error ? [] : (vl.data || []);
+        portalState.operations.visitorLogUnits = vlu.error ? [] : (vlu.data || []);
+        portalState.operations.gateParcels = gp.error ? [] : (gp.data || []);
+        portalState.operations.staffAttendance = att.error ? [] : (att.data || []);
+        portalState.operations.payrollRuns = pr.error ? [] : (pr.data || []);
+
+        if (!portalState.parking) portalState.parking = {};
+        portalState.parking.visitorPasses = vpp.error ? [] : (vpp.data || []);
+        portalState.parking.fineRules = pfr.error ? [] : (pfr.data || []);
+        portalState.parking.violations = pv.error ? [] : (pv.data || []);
+
+        if (!portalState.ledger) portalState.ledger = {};
+        portalState.ledger.accounts = coa.error ? [] : (coa.data || []);
+        portalState.ledger.entries = je.error ? [] : (je.data || []);
+        portalState.ledger.lines = jl.error ? [] : (jl.data || []);
+
+        if (!portalState.email) portalState.email = {};
+        portalState.email.outbox = em.error ? [] : (em.data || []);
+
+        portalState.finances.ledgerSyncSettings = lss.error ? null : (lss.data || null);
+        portalState.finances.ledgerOAuthApps = loa.error ? [] : (loa.data || []);
+        portalState.finances.myOAuthConnections = uoc.error ? [] : (uoc.data || []);
 
         // Hydrate slots with vehicle plate numbers
         portalState.slots = (p.data || []).map(slot => {

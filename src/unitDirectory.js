@@ -19,6 +19,7 @@ import {
     viewInvoiceDetail,
 } from './maintenanceBilling.js';
 import { effectiveAllocationType, resolveAllocationTargetLabel } from './allocation.js';
+import { getDocumentsForUnit, saveUnitDocument, deleteUnitDocument } from './operations.js';
 
 export const OCCUPANCY_STATUSES = {
     OWNER_OCCUPIED: { label: 'Owner occupied', short: 'Owner' },
@@ -559,6 +560,7 @@ const switchUnitDetailTab = (tab) => {
             }
         });
     }
+    if (tab === 'documents') renderUnitDetailDocuments(u);
 };
 
 const renderUnitDetailResidents = (u) => {
@@ -779,6 +781,73 @@ const renderUnitDetailBilling = (u) => {
     });
 };
 
+const renderUnitDetailDocuments = (u) => {
+    const el = document.getElementById('unit-detail-panel-documents');
+    if (!el) return;
+    const docs = getDocumentsForUnit(u.id);
+    const rows = docs.length
+        ? docs.map((d) => `<div class="unit-detail-doc-row">
+          <div><strong>${d.title}</strong> <span class="unit-detail-doc-type">${d.doc_type}</span></div>
+          <div class="unit-detail-doc-meta">
+            ${d.expires_at ? `<span>Expires ${d.expires_at}</span>` : ''}
+            <a href="${d.file_path}" target="_blank" rel="noopener" class="btn btn-outline btn--small">Open</a>
+            <button type="button" class="btn btn-outline btn--small unit-detail-del-doc" data-id="${d.id}" style="color:var(--danger);"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </div>`).join('')
+        : '<p class="unit-detail-empty">No documents uploaded for this flat.</p>';
+
+    el.innerHTML = `
+      <div class="unit-detail-panel__toolbar">
+        <button type="button" class="btn btn-primary btn--small" id="unit-detail-add-doc"><i class="fa-solid fa-plus"></i> Add document</button>
+      </div>
+      <div class="unit-detail-doc-list">${rows}</div>
+      <form id="unit-doc-form" class="unit-doc-form" hidden onsubmit="return false">
+        <input type="text" id="unit-doc-title" class="expense-combobox" placeholder="Title" required />
+        <select id="unit-doc-type" class="expense-combobox">
+          <option value="SALE_DEED">Sale deed</option>
+          <option value="RENTAL_AGREEMENT">Rental agreement</option>
+          <option value="ID">ID</option>
+          <option value="NOC">NOC</option>
+          <option value="OTHER">Other</option>
+        </select>
+        <input type="text" id="unit-doc-path" class="expense-combobox" placeholder="File URL or storage path" required />
+        <input type="date" id="unit-doc-expires" class="expense-combobox" title="Expiry (optional)" />
+        <button type="button" class="btn btn-primary btn--small" id="unit-doc-save">Save</button>
+        <button type="button" class="btn btn-outline btn--small" id="unit-doc-cancel">Cancel</button>
+      </form>`;
+
+    document.getElementById('unit-detail-add-doc')?.addEventListener('click', () => {
+        document.getElementById('unit-doc-form')?.removeAttribute('hidden');
+    });
+    document.getElementById('unit-doc-cancel')?.addEventListener('click', () => {
+        document.getElementById('unit-doc-form')?.setAttribute('hidden', '');
+    });
+    document.getElementById('unit-doc-save')?.addEventListener('click', async () => {
+        try {
+            await saveUnitDocument(u.id, {
+                title: document.getElementById('unit-doc-title')?.value?.trim(),
+                doc_type: document.getElementById('unit-doc-type')?.value,
+                file_path: document.getElementById('unit-doc-path')?.value?.trim(),
+                expires_at: document.getElementById('unit-doc-expires')?.value || null,
+            });
+            renderUnitDetailDocuments(u);
+        } catch (err) {
+            alert(err?.message || 'Could not save document.');
+        }
+    });
+    el.querySelectorAll('.unit-detail-del-doc').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this document record?')) return;
+            try {
+                await deleteUnitDocument(btn.dataset.id);
+                renderUnitDetailDocuments(u);
+            } catch (err) {
+                alert(err?.message || 'Could not delete.');
+            }
+        });
+    });
+};
+
 export const refreshUnitDetailIfOpen = async () => {
     if (!editingUnitId) return;
     const u = portalState.units.find((x) => x.id === editingUnitId);
@@ -789,6 +858,7 @@ export const refreshUnitDetailIfOpen = async () => {
     if (activeUnitDetailTab === 'residents') renderUnitDetailResidents(u);
     if (activeUnitDetailTab === 'vehicles') renderUnitDetailVehicles(u);
     if (activeUnitDetailTab === 'billing') renderUnitDetailBilling(u);
+    if (activeUnitDetailTab === 'documents') renderUnitDetailDocuments(u);
     void renderUnitDirectory();
 };
 

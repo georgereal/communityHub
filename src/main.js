@@ -17,15 +17,29 @@ import {
   refreshCapacityUnitList,
 } from './registry.js';
 import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports } from './finances.js';
+import { renderLedgerSyncPanel, initLedgerSpreadsheetSync } from './ledgerSpreadsheetSync.js';
+import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
 import { initMaintenanceBilling } from './maintenanceBilling.js';
 import { initUnitDirectory, renderUnitDirectory } from './unitDirectory.js';
 import { initSetupAdmin, switchSetupSubView } from './admin.js';
 import { initActivityAuditUi, renderActivityLogPage } from './activityAudit.js';
 import { initBankReconciliationUi, renderBankReconciliation } from './bankReconciliation.js';
+import { initResidentPortal, renderPortalSubview } from './residentPortal.js';
+import { initSecurityPortal, renderSecuritySubview } from './securityPortal.js';
+import { initResidentLinks, renderResidentLinksAdmin, autoLinkResidentByEmail, acceptPendingInvites } from './residentLinks.js';
+import { initPayments } from './payments.js';
+import { initNotices } from './notices.js';
+import { initOperations } from './operations.js';
+import { openTransitionWizard } from './unitTransitions.js';
+import { initParkingOps, renderParkingViolations, refreshParkingUi } from './parkingOps.js';
+import { initPortfolio, renderPortfolioRollup } from './portfolio.js';
+import { initGeneralLedger, renderGeneralLedger } from './generalLedger.js';
+import { initEmailOutbox, renderEmailOutbox } from './emailOutbox.js';
 import {
     ROLE_OPTIONS,
     refreshAuthPermissions,
     resolveEffectivePermissions,
+    permissionsFromV1Role,
     hasClientPermission,
     routeIsAllowed,
     saveUserAccess,
@@ -36,6 +50,7 @@ import {
 } from './rbac.js';
 import {
     DEFAULT_ROUTE,
+    getDefaultRoute,
     applyNavPermissions,
     findPage,
     initNavInteraction,
@@ -62,6 +77,8 @@ import {
   saveResident as persistResident,
   deleteResident,
   getResidents,
+  dedupeResidents,
+  groupResidentsByUnit,
 } from './residents.js';
 import {
   getBlockOptions,
@@ -132,6 +149,14 @@ const applyAuthToUI = async (session) => {
   if (topbarRoleNode) topbarRoleNode.textContent = role;
   if (sidebarRole) sidebarRole.textContent = role;
 
+  portalState.authPermissions = null;
+  const aptId = portalState.access?.activeApartmentId;
+  if (aptId && supabase) {
+    await refreshAuthPermissions(aptId);
+  } else {
+    portalState.authPermissions = permissionsFromV1Role(role);
+  }
+
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
   if (manageBtn) manageBtn.style.display = can('rbac.view') || can('setup.view') ? 'flex' : 'none';
@@ -190,6 +215,9 @@ const setActiveApartment = async (apartmentId) => {
   if (success) {
     await refreshAuthPermissions(apartmentId);
     applyPermissionsToNav(portalState.authPermissions);
+    await autoLinkResidentByEmail();
+    await acceptPendingInvites();
+    document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
     renderAccessMappings();
     renderRegistry();
     // Refresh other view-specific components if they exist
@@ -255,6 +283,7 @@ const renderAccessMappings = () => {
           </div>
           <div class="apt-chips">${aptChips}</div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button class="btn-icon" onclick="window.openResidentLinkModal('${u.id}', '${(u.email || '').replace(/'/g, "\\'")}')" title="Link portal flat"><i class="fa-solid fa-link"></i></button>
             <button class="btn-icon" onclick="window.openUserModal('${u.id}')" title="Edit Access"><i class="fa-solid fa-pen-to-square"></i></button>
             <button class="btn-icon danger" onclick="window.deleteUser('${u.id}')" title="Revoke All Access"><i class="fa-solid fa-user-slash"></i></button>
           </div>
@@ -403,14 +432,14 @@ const boot = async () => {
   document.getElementById('sentry-boot-loader')?.remove();
   if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
   if (!supabase || !bootHasSupabaseSession) ensureAccessState();
-  setActiveApartment(portalState.access.activeApartmentId);
+  await setActiveApartment(portalState.access.activeApartmentId);
   renderAccessMappings();
 
   processAnalytics();
   processFinances();
   renderRegistry();
 
-  const route = resolveRoute(window.location.hash.slice(1));
+  const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
   window.switchView(route);
 };
 
@@ -424,18 +453,28 @@ window.initializeSeedData = initializeSeedData;
 /**
  * View & SubView Navigation logic (Sentry Strategic Router)
  */
+let routingGuard = false;
+
 window.switchView = (v) => {
-  const route = resolveRoute(v);
+  if (routingGuard) return;
+  const route = resolveRoute(v, portalState.auth?.role);
+  const fallback = getDefaultRoute(portalState.auth?.role);
   if (!routeIsAllowed(route, !supabase)) {
+    if (route === fallback) return;
+    routingGuard = true;
     alert('You do not have permission to access this page.');
-    window.switchView(DEFAULT_ROUTE);
+    routingGuard = false;
+    window.switchView(fallback);
     return;
   }
 
   const meta = findPage(route);
   if (!meta) {
     console.warn(`Unknown route: ${v}`);
-    window.switchView(DEFAULT_ROUTE);
+    if (route === fallback) return;
+    routingGuard = true;
+    window.switchView(fallback);
+    routingGuard = false;
     return;
   }
 
@@ -444,7 +483,7 @@ window.switchView = (v) => {
   const viewNode = document.getElementById(`view-${page.view}`);
   if (!viewNode) {
     console.warn(`Missing view section for route: ${route}`);
-    document.getElementById('view-registry')?.classList.add('active');
+    document.getElementById(`view-${page.view === 'portal' ? 'portal' : 'registry'}`)?.classList.add('active');
     return;
   }
   viewNode.classList.add('active');
@@ -456,16 +495,42 @@ window.switchView = (v) => {
   updateNavActiveState(route);
   updateNavBreadcrumb(route);
 
+  if (page.view === 'portal') {
+    document.querySelectorAll('.portal-subview').forEach((el) => {
+      el.hidden = el.id !== `portal-subview-${page.subview}`;
+    });
+    void renderPortalSubview(page.subview || 'home');
+  }
+  if (page.view === 'security') {
+    document.querySelectorAll('.security-subview').forEach((el) => {
+      el.hidden = el.id !== `security-subview-${page.subview}`;
+    });
+    void renderSecuritySubview(page.subview || 'gate');
+  }
+  if (page.view === 'operations') {
+    window.switchOperationsSubView?.(page.subview || 'helpdesk');
+  }
   if (page.view === 'accounts') {
     window.switchSubView(page.subview || 'ledger');
     if (page.subview === 'reports') renderAuditReports();
     else if (page.subview === 'bank-recon') renderBankReconciliation();
     else if (page.subview === 'activity') void renderActivityLogPage();
-    else renderCashLedger();
+    else if (page.subview === 'gl') renderGeneralLedger();
+    else {
+      renderCashLedger();
+      renderLedgerSyncPanel();
+    }
   }
-  if (page.view === 'invoices') window.switchInvoiceSubView('list');
+  if (page.view === 'parking-fines') {
+    renderParkingViolations();
+    refreshParkingUi();
+  }
+  if (page.view === 'portfolio') void renderPortfolioRollup();
+  if (page.view === 'email') renderEmailOutbox();
+  if (page.view === 'invoices') window.switchInvoiceSubView(page.subview || 'list');
   if (page.view === 'registry') {
     renderRegistry();
+    refreshParkingUi();
     void refreshAuditBadge();
   }
   if (page.view === 'setup') {
@@ -473,7 +538,8 @@ window.switchView = (v) => {
     document.getElementById('setup-car').value = portalState.community.defaults.cars;
     document.getElementById('setup-bike').value = portalState.community.defaults.bikes;
     renderAccessMappings();
-    switchSetupSubView('society');
+    void renderResidentLinksAdmin();
+    switchSetupSubView(page.subview || 'society');
   }
   if (page.view === 'apartment') renderResidents();
   if (page.view === 'units') void renderUnitDirectory();
@@ -509,28 +575,66 @@ const renderResidents = async () => {
     return hay.includes(filterQ);
   });
 
-  if (!filtered.length) {
+  const { residents: uniqueResidents, hiddenCount } = dedupeResidents(filtered);
+  const groups = groupResidentsByUnit(uniqueResidents);
+
+  if (!groups.length) {
     list.innerHTML = '<p class="maintenance-dues-empty">No residents match your filters.</p>';
     return;
   }
 
-  filtered.forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'apt-row';
-    row.style = "grid-template-columns: 120px 110px 1fr 160px 220px 90px; padding: 0.75rem 0.95rem; align-items: center;";
-    row.innerHTML = `
-      <div style="font-weight:800;">${r.unit_number}</div>
-      <div style="font-size:0.72rem; font-weight:900; color:var(--text-dim); text-transform:uppercase;">${r.kind}</div>
-      <div style="font-weight:800;">${r.full_name}</div>
-      <div style="color:var(--text-dim); font-weight:700;">${r.phone || '-'}</div>
-      <div style="color:var(--text-dim); font-weight:700;">${r.email || '-'}</div>
-      <div style="text-align:right; display:flex; gap:0.35rem; justify-content:flex-end;">
-        <button class="btn btn-outline" style="padding:0.2rem 0.45rem;" data-action="edit"><i class="fa-solid fa-pen"></i></button>
-        <button class="btn btn-outline" style="padding:0.2rem 0.45rem; color:var(--danger);" data-action="del"><i class="fa-solid fa-trash-can"></i></button>
-      </div>
-    `;
-    row.querySelector('[data-action="edit"]').onclick = () => openResidentModal(r);
-    row.querySelector('[data-action="del"]').onclick = async () => {
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+  list.innerHTML = `
+    ${hiddenCount ? `<p class="resident-dupe-hint"><i class="fa-solid fa-circle-info"></i> ${hiddenCount} duplicate record(s) hidden. Delete extras via the trash icon if they appear after refresh.</p>` : ''}
+    <div class="resident-unit-groups">
+      ${groups.map((g) => {
+        const kindSummary = [...new Set(g.residents.map((r) => r.kind))].join(', ');
+        return `
+        <section class="resident-unit-group">
+          <header class="resident-unit-group__header">
+            <div class="resident-unit-group__title">
+              ${g.block !== '—' ? `<span class="resident-unit-group__block">Block ${esc(g.block)}</span>` : ''}
+              <strong class="resident-unit-group__unit">${esc(g.unit)}</strong>
+            </div>
+            <span class="resident-unit-group__meta">${g.residents.length} resident${g.residents.length === 1 ? '' : 's'} · ${esc(kindSummary)}</span>
+          </header>
+          <div class="resident-unit-group__rows">
+            <div class="registry-header resident-group-header">
+              <span>Type</span><span>Name</span><span>Phone</span><span>Email</span><span style="text-align:right;">Action</span>
+            </div>
+            ${g.residents.map((r) => `
+              <div class="apt-row resident-group-row" data-resident-id="${r.id}">
+                <div class="resident-kind">${esc(r.kind)}</div>
+                <div class="resident-name">${esc(r.full_name)}${r.is_primary ? ' <span class="resident-primary-badge">Primary</span>' : ''}</div>
+                <div class="resident-phone">${esc(r.phone || '—')}</div>
+                <div class="resident-email">${esc(r.email || '—')}</div>
+                <div class="resident-actions">
+                  <button class="btn btn-outline btn--icon" data-action="portal" title="Portal access"><i class="fa-solid fa-link"></i></button>
+                  <button class="btn btn-outline btn--icon" data-action="edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-outline btn--icon btn--danger" data-action="del" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>`;
+      }).join('')}
+    </div>`;
+
+  list.querySelectorAll('.resident-group-row').forEach((row) => {
+    const id = row.dataset.residentId;
+    const r = uniqueResidents.find((x) => x.id === id);
+    if (!r) return;
+    row.querySelector('[data-action="portal"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.openResidentLinkModal(null, r.email || '', r.id, r.email ? 'invite' : 'manual');
+    });
+    row.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openResidentModal(r);
+    });
+    row.querySelector('[data-action="del"]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (!confirm('Delete resident record?')) return;
       try {
         await deleteResident(r.id);
@@ -539,8 +643,7 @@ const renderResidents = async () => {
       } catch (err) {
         alert(err?.message || 'Could not delete resident.');
       }
-    };
-    list.appendChild(row);
+    });
   });
 };
 
@@ -611,6 +714,7 @@ const closeResidentModal = () => {
 };
 window.openResidentModal = openResidentModal;
 window.closeResidentModal = closeResidentModal;
+window.openTransitionWizard = openTransitionWizard;
 
 const saveResident = async () => {
   const payload = {
@@ -634,7 +738,7 @@ const saveResident = async () => {
 /**
  * Event Listener Initialization
  */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Mobile nav: add backdrop + topbar hamburger toggle for off-canvas sidebar.
   const ensureNavBackdrop = () => {
     if (document.querySelector('.nav-backdrop')) return;
@@ -685,12 +789,13 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureAccessState();
     if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
     await syncAccessFromSupabase();
-    setActiveApartment(portalState.access.activeApartmentId);
+    await setActiveApartment(portalState.access.activeApartmentId);
     renderAccessMappings();
     await pullState();
     processAnalytics();
     processFinances();
     renderRegistry();
+    window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
   };
 
   const signUp = async () => {
@@ -706,12 +811,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureAccessState();
     if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
     await syncAccessFromSupabase();
-    setActiveApartment(portalState.access.activeApartmentId);
+    await setActiveApartment(portalState.access.activeApartmentId);
     renderAccessMappings();
-    await pullState();
     processAnalytics();
     processFinances();
     renderRegistry();
+    window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
   };
 
   if (loginBtn) loginBtn.onclick = signIn;
@@ -1133,6 +1238,17 @@ document.addEventListener('DOMContentLoaded', () => {
   initActivityAuditUi();
   initBankReconciliationUi();
   initUnitDirectory();
+  initResidentPortal();
+  initSecurityPortal();
+  initResidentLinks();
+  initPayments();
+  initNotices();
+  initOperations();
+  initParkingOps();
+  initPortfolio();
+  initGeneralLedger();
+  window.renderLedgerSyncPanel = renderLedgerSyncPanel;
+  initEmailOutbox();
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));
   applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
@@ -1322,7 +1438,9 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // Initialize Router State
-  boot();
-  const currentRoute = resolveRoute(window.location.hash.slice(1));
-  window.switchView(currentRoute);
+  console.log('Main: Starting boot sequence...');
+  await boot();
+  console.log('Main: Boot complete. Initializing ledger sync...');
+  await initLedgerSpreadsheetSync();
+  console.log('Main: Ledger sync initialized.');
 });
