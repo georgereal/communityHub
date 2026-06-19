@@ -296,9 +296,8 @@ async function performSync(supabase, settings) {
 
     // 6. Import to DB
     const { data: allTxns } = await supabase.from('transactions').select('*').eq('apartment_id', apartment_id);
-    const { imported, updated, skipped } = await importExcelRows(
+    const { imported, updated, skipped, deleted } = await importExcelRows(
         supabase, apartment_id, rows, allTxns || [], settings.column_mapping,
-        { last_sync_at: settings.last_synced_at },
     );
 
     // 7. Update Settings
@@ -306,16 +305,17 @@ async function performSync(supabase, settings) {
         ? ` (${pullStats.skipped} Excel row(s) skipped — missing date/type/amount)`
         : '';
     const reconcileMsg = skipped > 0 ? ` ${skipped} unchanged.` : '';
+    const deletedMsg = deleted > 0 ? ` ${deleted} removed.` : '';
     await supabase.from('ledger_sync_settings').update({
         last_synced_at: new Date().toISOString(),
         last_sync_status: 'OK',
-        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated. Pushed ${pushed} new.${pullMsg}${reconcileMsg}`,
+        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated, ${deleted} removed. Pushed ${pushed} new.${pullMsg}${reconcileMsg}${deletedMsg}`,
         last_sync_imported: imported,
         last_sync_pushed: pushed,
         last_sync_etag: etag
     }).eq('apartment_id', apartment_id);
 
-    return { imported, updated, pushed, skipped, ...pullStats };
+    return { imported, updated, pushed, skipped, deleted, ...pullStats };
 }
 
 async function refreshToken(supabase, conn, app, connTable = 'user_oauth_connections') {

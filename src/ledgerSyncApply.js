@@ -6,6 +6,7 @@ export async function executeImportActions(supabase, apartment_id, actions, colu
     let imported = 0;
     let updated = 0;
     let skipped = 0;
+    let deleted = 0;
     const conflicts = [];
 
     for (const act of actions) {
@@ -35,8 +36,10 @@ export async function executeImportActions(supabase, apartment_id, actions, colu
             continue;
         }
 
-        if (act.action === 'deleted_in_excel') {
-            conflicts.push({ type: 'DELETED_IN_EXCEL', existing: act.db });
+        if (act.action === 'delete') {
+            const { error } = await supabase.from('transactions').delete().eq('id', act.db.id);
+            if (error) throw new Error(`Delete txn ${act.db.id}: ${error.message}`);
+            deleted += 1;
             continue;
         }
 
@@ -64,11 +67,11 @@ export async function executeImportActions(supabase, apartment_id, actions, colu
         }
     }
 
-    return { imported, updated, skipped, conflicts };
+    return { imported, updated, skipped, deleted, conflicts };
 }
 
-export async function importExcelRows(supabase, apartment_id, excelRows, dbTxns, columnMapping, { last_sync_at = null } = {}) {
-    const actions = reconcileExcelRows(excelRows, dbTxns, { last_sync_at, columnMapping });
+export async function importExcelRows(supabase, apartment_id, excelRows, dbTxns, columnMapping, opts = {}) {
+    const actions = reconcileExcelRows(excelRows, dbTxns, { columnMapping });
     const result = await executeImportActions(supabase, apartment_id, actions, columnMapping);
     return { ...result, actions };
 }

@@ -926,21 +926,21 @@ export async function importLedgerRows(rows, last_sync_at = null) {
     const columnMapping = getSyncSettings()?.column_mapping;
 
     const allLocalTxns = portalState.finances.txns || [];
-    const { imported, updated, skipped, conflicts } = await importExcelRows(
-        supabase, apartment_id, rows, allLocalTxns, columnMapping, { last_sync_at },
+    const { imported, updated, skipped, deleted, conflicts } = await importExcelRows(
+        supabase, apartment_id, rows, allLocalTxns, columnMapping,
     );
 
-    if (imported > 0 || updated > 0) {
+    if (imported > 0 || updated > 0 || deleted > 0) {
         await logActivity({
             entityType: 'LEDGER_SYNC',
             entityId: apartment_id,
             action: 'IMPORT',
-            summary: `Spreadsheet sync: ${imported} imported, ${updated} updated, ${skipped} skipped`,
+            summary: `Spreadsheet sync: ${imported} imported, ${updated} updated, ${deleted} removed, ${skipped} skipped`,
         });
         await pullState();
     }
 
-    return { imported, skipped, updated, conflicts };
+    return { imported, skipped, updated, deleted, conflicts };
 }
 
 async function updateMicrosoftRow({ driveId, itemId, shareId, useSharesApi, sheetName, rowIndex, values, rangeAddress }) {
@@ -1207,13 +1207,13 @@ async function runSync() {
         throw new Error('Choose Google Sheets or Microsoft Excel, or upload a file.');
     }
 
-    const { imported, skipped, updated, conflicts } = await importLedgerRows(rows, settings?.last_synced_at);
+    const { imported, skipped, updated, deleted, conflicts } = await importLedgerRows(rows, settings?.last_synced_at);
 
     const { data: { user } } = await supabase.auth.getUser();
     
     const statusMsg = conflicts.length > 0 
-        ? `Pulled: ${imported} new, ${updated} updated. Pushed: ${pushed} new. ${conflicts.length} CONFLICTS.`
-        : `Pulled: ${imported} new, ${updated} updated. Pushed: ${pushed} new.`;
+        ? `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new. ${conflicts.length} CONFLICTS.`
+        : `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new.`;
 
     refreshFinancesView();
     
