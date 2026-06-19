@@ -1,13 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import {
     parseLedgerSheet,
-    buildDbSyncPayload,
-    buildImportTxnPayload,
     computeSyncHash,
+    computeAnchorHash,
     normalizeMapping,
     colForField,
 } from '../src/ledgerColumnMapping.js';
-import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
 
 // Vercel Serverless Function for background ledger sync
 export default async function handler(req, res) {
@@ -278,12 +276,16 @@ async function performSync(supabase, settings) {
                 sheetName: settings.sheet_name,
                 rowsToPush: localTxns,
                 columnMapping: settings.column_mapping,
-                onRowPushed: async (txn) => {
+                onRowPushed: async (txn, excelRowIndex) => {
                     const syncKey = `app:txn:${txn.id}`;
-                    const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, settings.column_mapping);
+                    const withKey = { ...txn, external_sync_key: syncKey };
+                    const syncHash = computeSyncHash(withKey, settings.column_mapping);
+                    const syncAnchorHash = computeAnchorHash(withKey, settings.column_mapping);
                     const { error } = await supabase.from('transactions').update({
                         external_sync_key: syncKey,
                         sync_hash: syncHash,
+                        sync_anchor_hash: syncAnchorHash,
+                        excel_row_index: excelRowIndex,
                     }).eq('id', txn.id);
                     if (error) throw new Error(error.message);
                 },
@@ -291,22 +293,27 @@ async function performSync(supabase, settings) {
     }
 
     // 6. Import to DB
-    const { imported, updated } = await importToDatabase(supabase, apartment_id, rows, settings.last_synced_at, settings.column_mapping);
+    const { data: allTxns } = await supabase.from('transactions').select('*').eq('apartment_id', apartment_id);
+    const { imported, updated, skipped } = await importExcelRows(
+        supabase, apartment_id, rows, allTxns || [], settings.column_mapping,
+        { last_sync_at: settings.last_synced_at },
+    );
 
     // 7. Update Settings
     const pullMsg = pullStats.skipped > 0
         ? ` (${pullStats.skipped} Excel row(s) skipped — missing date/type/amount)`
         : '';
+    const reconcileMsg = skipped > 0 ? ` ${skipped} unchanged.` : '';
     await supabase.from('ledger_sync_settings').update({
         last_synced_at: new Date().toISOString(),
         last_sync_status: 'OK',
-        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated. Pushed ${pushed} new.${pullMsg}`,
+        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated. Pushed ${pushed} new.${pullMsg}${reconcileMsg}`,
         last_sync_imported: imported,
         last_sync_pushed: pushed,
         last_sync_etag: etag
     }).eq('apartment_id', apartment_id);
 
-    return { imported, updated, pushed, ...pullStats };
+    return { imported, updated, pushed, skipped, ...pullStats };
 }
 
 async function refreshToken(supabase, conn, app, connTable = 'user_oauth_connections') {
@@ -395,44 +402,4 @@ async function getUnsyncedTransactions(supabase, apartment_id) {
         .is('external_sync_key', null);
     if (error) throw error;
     return data || [];
-}
-
-async function importToDatabase(supabase, apartment_id, rows, last_sync_at, columnMapping) {
-    const { data: existingTxns, error: loadErr } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('apartment_id', apartment_id)
-        .not('external_sync_key', 'is', null);
-    if (loadErr) throw new Error(loadErr.message);
-
-    const existingMap = new Map((existingTxns || []).map((t) => [t.external_sync_key, t]));
-    let imported = 0;
-    let updated = 0;
-
-    for (const row of rows) {
-        const existing = existingMap.get(row.external_sync_key);
-        if (existing) {
-            if (existing.sync_hash !== row.sync_hash) {
-                const dbChangedLocally = last_sync_at && existing.updated_at && new Date(existing.updated_at) > new Date(last_sync_at);
-                if (!dbChangedLocally) {
-                    const { error } = await supabase.from('transactions').update({
-                        ...buildDbSyncPayload(row, columnMapping),
-                        updated_at: new Date().toISOString(),
-                    }).eq('id', existing.id);
-                    if (error) throw new Error(`Update row ${row.row_index}: ${error.message}`);
-                    updated++;
-                }
-            }
-        } else {
-            const { error } = await supabase.from('transactions').insert({
-                id: crypto.randomUUID(),
-                apartment_id,
-                ...buildImportTxnPayload(row, columnMapping),
-                external_sync_key: row.external_sync_key,
-            });
-            if (error) throw new Error(`Import row ${row.row_index}: ${error.message}`);
-            imported++;
-        }
-    }
-    return { imported, updated };
 }

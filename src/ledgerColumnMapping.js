@@ -23,6 +23,9 @@ import {
 
 /** @typedef {'sync'|'db_only'|'internal'|'excel_import'|'excel_export'} FieldMode */
 
+/** Columns used to identify the same Excel row across syncs (DB-only anchor hash). */
+export const DEFAULT_SYNC_ANCHOR_FIELDS = ['date', 'type', 'amount', 'wallet'];
+
 /**
  * Field catalog — single source of truth for mapping UI and sync engine.
  * dbColumn: null = virtual Excel helper (not a DB column).
@@ -142,12 +145,16 @@ export function normalizeMapping(stored) {
         ? stored.excelHeaders.map((h) => String(h ?? ''))
         : [];
 
+    const syncAnchorFields = Array.isArray(stored?.syncAnchorFields) && stored.syncAnchorFields.length
+        ? stored.syncAnchorFields.filter((k) => FIELD_BY_KEY[k])
+        : [...DEFAULT_SYNC_ANCHOR_FIELDS];
+
     if (stored?.v >= 2 && stored.fields) {
         for (const [key, val] of Object.entries(stored.fields)) {
             if (!FIELD_BY_KEY[key]) continue;
             fields[key] = enrichField(key, val);
         }
-        return { v: 3, fields, formulaSnippets, excelHeaders };
+        return { v: 3, fields, formulaSnippets, excelHeaders, syncAnchorFields };
     }
 
     // Legacy v1: { date: 0, type: 1, category: 3, ... }
@@ -162,7 +169,7 @@ export function normalizeMapping(stored) {
             });
         }
     }
-    return { v: 3, fields, formulaSnippets, excelHeaders };
+    return { v: 3, fields, formulaSnippets, excelHeaders, syncAnchorFields };
 }
 
 function headerMatches(header, alias) {
@@ -310,6 +317,17 @@ export function computeSyncHash(record, mapping) {
     return safeHash(parts.join('|'));
 }
 
+/** Identity hash from pre-selected anchor columns (stored in DB only, never in Excel). */
+export function computeAnchorHash(record, mapping) {
+    const m = normalizeMapping(mapping);
+    const parts = (m.syncAnchorFields || DEFAULT_SYNC_ANCHOR_FIELDS).map((key) => {
+        const def = FIELD_BY_KEY[key];
+        const col = def?.dbColumn || key;
+        return String(record[col] ?? '');
+    });
+    return safeHash(parts.join('|'));
+}
+
 /** DB insert/update payload — only fields explicitly marked sync in mapping. */
 export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
     const m = normalizeMapping(mapping);
@@ -320,6 +338,8 @@ export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
         if (row[def.dbColumn] !== undefined) payload[def.dbColumn] = row[def.dbColumn];
     }
     if (includeHash && row.sync_hash) payload.sync_hash = row.sync_hash;
+    if (row.sync_anchor_hash) payload.sync_anchor_hash = row.sync_anchor_hash;
+    if (row.excel_row_index != null) payload.excel_row_index = row.excel_row_index;
     return payload;
 }
 
@@ -410,11 +430,14 @@ export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
     record.wallet = record.wallet || 'CASH';
     record.description = record.description || '';
 
+    // DB-only sync metadata — never written to Excel
+    record.sync_anchor_hash = computeAnchorHash(record, m);
+    record.sync_hash = computeSyncHash(record, m);
+
+    // Optional: detect app-pushed rows still listed in a legacy Sync ID column
     const syncIdCol = colForField(m, 'external_sync_key');
     const syncId = syncIdCol >= 0 ? cellStr(row[syncIdCol]) : '';
-    record.external_sync_key = syncId || `${sourceKey}:row:${rowIndex}`;
-
-    record.sync_hash = computeSyncHash(record, m);
+    record.excel_app_ref = syncId.startsWith('app:txn:') ? syncId : null;
 
     return {
         row_index: rowIndex,

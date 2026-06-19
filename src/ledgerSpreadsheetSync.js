@@ -35,13 +35,14 @@ import {
     renderLedgerMappingUI,
     wireMappingFormInteractions,
     computeSyncHash,
+    computeAnchorHash,
     colForField,
     buildDbSyncPayload,
-    buildImportTxnPayload,
     buildHeadersFromMapping,
     TEMPLATE_HEADERS,
 } from './ledgerColumnMapping.js';
 import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPush.js';
+import { importExcelRows } from './ledgerSyncApply.js';
 
 export { parseLedgerRowsFromAoA };
 
@@ -335,7 +336,12 @@ async function resetSyncState() {
 
     const { error: txnErr } = await supabase
         .from('transactions')
-        .update({ external_sync_key: null, sync_hash: null })
+        .update({
+            external_sync_key: null,
+            sync_hash: null,
+            sync_anchor_hash: null,
+            excel_row_index: null,
+        })
         .eq('apartment_id', apartment_id);
     if (txnErr) throw new Error(txnErr.message);
 
@@ -920,89 +926,9 @@ export async function importLedgerRows(rows, last_sync_at = null) {
     const columnMapping = getSyncSettings()?.column_mapping;
 
     const allLocalTxns = portalState.finances.txns || [];
-    const existingMap = new Map(
-        allLocalTxns
-            .filter((t) => t.external_sync_key)
-            .map((t) => [t.external_sync_key, t]),
+    const { imported, updated, skipped, conflicts } = await importExcelRows(
+        supabase, apartment_id, rows, allLocalTxns, columnMapping, { last_sync_at },
     );
-
-    let imported = 0;
-    let skipped = 0;
-    let updated = 0;
-    const conflicts = [];
-
-    // Track which local transactions were seen in Excel
-    const seenKeys = new Set();
-
-    if (rows && rows.length > 0) {
-        for (const row of rows) {
-            seenKeys.add(row.external_sync_key);
-            const existing = existingMap.get(row.external_sync_key);
-            
-            if (existing) {
-                // Check if content changed (via hash)
-                if (existing.sync_hash !== row.sync_hash) {
-                    console.log(`Sync Change Found: Row ${row.row_index} (Key: ${row.external_sync_key})`);
-                    console.log(`  Excel Hash: ${row.sync_hash}`);
-                    console.log(`  App Hash:   ${existing.sync_hash}`);
-                    
-                    // Potential conflict: Did DB change locally since last sync?
-                    const dbChangedLocally = last_sync_at && existing.updated_at && new Date(existing.updated_at) > new Date(last_sync_at);
-                    
-                    if (dbChangedLocally) {
-                        console.warn(`  CONFLICT: App version was updated locally at ${existing.updated_at} (Last sync was ${last_sync_at})`);
-                        conflicts.push({
-                            type: 'UPDATE_CONFLICT',
-                            existing,
-                            incoming: row
-                        });
-                    } else {
-                        console.log(`  Updating DB record ${existing.id} with Excel changes.`);
-                        const { error } = await supabase.from('transactions').update({
-                            ...buildDbSyncPayload(row, columnMapping),
-                            updated_at: new Date().toISOString(),
-                        }).eq('id', existing.id);
-                        if (error) throw new Error(error.message);
-                        updated += 1;
-                    }
-                } else {
-                    skipped += 1;
-                }
-                continue;
-            }
-
-            // If it has an app:txn key but isn't in our DB, it was deleted in the App
-            if (String(row.external_sync_key).startsWith('app:txn:')) {
-                conflicts.push({
-                    type: 'DELETED_IN_APP',
-                    incoming: row
-                });
-                continue;
-            }
-
-            console.log(`Sync New Row: Row ${row.row_index} (Key: ${row.external_sync_key}) - Importing to DB.`);
-            const { error } = await supabase.from('transactions').insert({
-                id: crypto.randomUUID(),
-                apartment_id,
-                ...buildImportTxnPayload(row, columnMapping),
-                external_sync_key: row.external_sync_key,
-            });
-            if (error) throw new Error(error.message);
-            imported += 1;
-        }
-    }
-
-    // Check for "Deleted in Excel" (Keys in DB but missing from Excel)
-    // ONLY if we actually pulled some data or had a successful connection
-    for (const [key, txn] of existingMap.entries()) {
-        if (!seenKeys.has(key)) {
-            console.log(`Sync Deletion: Key ${key} missing from Excel. Adding to conflicts.`);
-            conflicts.push({
-                type: 'DELETED_IN_EXCEL',
-                existing: txn
-            });
-        }
-    }
 
     if (imported > 0 || updated > 0) {
         await logActivity({
@@ -1261,12 +1187,16 @@ async function runSync() {
                 sheetName,
                 rowsToPush: localTxns,
                 columnMapping: customMapping,
-                onRowPushed: async (txn) => {
+                onRowPushed: async (txn, excelRowIndex) => {
                     const syncKey = `app:txn:${txn.id}`;
-                    const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, customMapping);
+                    const withKey = { ...txn, external_sync_key: syncKey };
+                    const syncHash = computeSyncHash(withKey, customMapping);
+                    const syncAnchorHash = computeAnchorHash(withKey, customMapping);
                     const { error } = await supabase.from('transactions').update({
                         external_sync_key: syncKey,
                         sync_hash: syncHash,
+                        sync_anchor_hash: syncAnchorHash,
+                        excel_row_index: excelRowIndex,
                     }).eq('id', txn.id);
                     if (error) throw new Error(error.message);
                 },
@@ -1281,6 +1211,7 @@ async function runSync() {
     }
 
     const { imported, skipped, updated, conflicts } = await importLedgerRows(rows, settings?.last_synced_at);
+
     const { data: { user } } = await supabase.auth.getUser();
     
     const statusMsg = conflicts.length > 0 

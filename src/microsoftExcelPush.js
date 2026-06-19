@@ -1,4 +1,4 @@
-import { transactionToExcelRow, maxMappedColumn } from './ledgerColumnMapping.js';
+import { transactionToExcelRow, maxMappedColumn, colForField, normalizeMapping } from './ledgerColumnMapping.js';
 
 function colLetter(n) {
     let letter = '';
@@ -151,4 +151,49 @@ export async function pushMicrosoftRows({
     }
 
     return pushed;
+}
+
+/** Write Sync ID values back to the mapped Excel column (one cell per row). */
+export async function writeExcelSyncIds({
+    accessToken,
+    driveId,
+    itemId,
+    shareId,
+    useSharesApi,
+    sheetName,
+    columnMapping,
+    assignments = [],
+}) {
+    if (!assignments.length || !driveId || !itemId) return 0;
+
+    const syncCol = colForField(normalizeMapping(columnMapping), 'external_sync_key');
+    if (syncCol < 0) return 0;
+
+    const safeSheet = String(sheetName || 'Transactions').replace(/'/g, "''");
+    const { base, sharesBase, driveBase } = await resolveWorkbookBase({
+        accessToken,
+        driveId,
+        itemId,
+        shareId,
+        useSharesApi,
+        safeSheet,
+    });
+
+    const col = colLetter(syncCol);
+    let written = 0;
+    for (const { rowIndex, syncKey } of assignments) {
+        if (!rowIndex || !syncKey) continue;
+        const rangeAddress = `${col}${rowIndex}:${col}${rowIndex}`;
+        await patchExcelRow({
+            base,
+            sharesBase,
+            driveBase,
+            accessToken,
+            safeSheet,
+            rangeAddress,
+            values: [syncKey],
+        });
+        written += 1;
+    }
+    return written;
 }

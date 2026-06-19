@@ -6,6 +6,12 @@ alter table public.transactions
 alter table public.transactions
   add column if not exists sync_hash text;
 
+alter table public.transactions
+  add column if not exists sync_anchor_hash text;
+
+alter table public.transactions
+  add column if not exists excel_row_index int;
+
 create unique index if not exists idx_transactions_external_sync_key
   on public.transactions (apartment_id, external_sync_key)
   where external_sync_key is not null;
