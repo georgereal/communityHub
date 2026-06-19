@@ -6,6 +6,8 @@ import {
     normalizeMapping,
     colForField,
 } from '../src/ledgerColumnMapping.js';
+import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
+import { importExcelRows } from '../src/ledgerSyncApply.js';
 
 // Vercel Serverless Function for background ledger sync
 export default async function handler(req, res) {
