@@ -1,7 +1,18 @@
 /**
  * Explicit DB ↔ Excel column mapping for public.transactions sync.
- * Mapping is stored in ledger_sync_settings.column_mapping as { v: 2, fields: { ... } }.
+ * Mapping is stored in ledger_sync_settings.column_mapping as { v: 3, fields: { ... } }.
+ * Each field may define importExpr (Excel→DB) and exportExpr (DB→Excel).
  */
+
+import {
+    getDefaultImportExpr,
+    getDefaultExportExpr,
+    runImportTransform,
+    runExportTransform,
+    FORMULA_PRESETS,
+    detectPreset,
+    presetById,
+} from './ledgerTransform.js';
 
 /** @typedef {'sync'|'db_only'|'internal'|'excel_import'|'excel_export'} FieldMode */
 
@@ -12,10 +23,10 @@
  */
 export const TRANSACTION_FIELD_DEFS = [
     { key: 'date', dbColumn: 'date', label: 'Date', required: true, role: 'sync' },
-    { key: 'type', dbColumn: 'type', label: 'Type (IN / OUT)', required: false, role: 'sync', hint: 'Or use Debit/Cr columns below' },
-    { key: 'amount', dbColumn: 'amount', label: 'Amount', required: false, role: 'sync', hint: 'Or use Debit/Cr columns below' },
-    { key: 'debit_dr', dbColumn: null, label: 'Debit (Dr)', required: false, role: 'excel_import', hint: 'Import only — sets Type=OUT and Amount from this column' },
-    { key: 'credit_cr', dbColumn: null, label: 'Credit (Cr)', required: false, role: 'excel_import', hint: 'Import only — sets Type=IN and Amount from this column' },
+    { key: 'type', dbColumn: 'type', label: 'Type (IN / OUT)', required: false, role: 'sync', hint: 'Use Import/Export formulas for IN/OUT ↔ DR/CR' },
+    { key: 'amount', dbColumn: 'amount', label: 'Amount', required: false, role: 'sync', hint: 'Or map Debit/Cr columns with Dr/Cr formulas' },
+    { key: 'debit_dr', dbColumn: null, label: 'Debit (Dr)', required: false, role: 'excel_import', hint: 'Default import: DR_COLUMN — sets OUT + amount' },
+    { key: 'credit_cr', dbColumn: null, label: 'Credit (Cr)', required: false, role: 'excel_import', hint: 'Default import: CR_COLUMN — sets IN + amount' },
     { key: 'cat', dbColumn: 'cat', label: 'Category', required: false, role: 'sync' },
     { key: 'sub_category', dbColumn: 'sub_category', label: 'Sub-category', required: false, role: 'sync' },
     { key: 'description', dbColumn: 'description', label: 'Description', required: false, role: 'sync' },
@@ -71,46 +82,77 @@ const HEADER_ALIASES = {
     excel_sync_status: ['status', 'sync_status', 'sync_state'],
 };
 
+export { FORMULA_PRESETS, getDefaultImportExpr, getDefaultExportExpr } from './ledgerTransform.js';
+
+function defaultFieldConfig(def) {
+    return {
+        mode: def.role,
+        excelCol: null,
+        importExpr: getDefaultImportExpr(def.key),
+        exportExpr: getDefaultExportExpr(def.key),
+    };
+}
+
 export function defaultFieldModes() {
     const fields = {};
     for (const def of TRANSACTION_FIELD_DEFS) {
-        fields[def.key] = { mode: def.role, excelCol: null };
+        fields[def.key] = defaultFieldConfig(def);
     }
     return fields;
 }
 
-/** @returns {{ v: 2, fields: Record<string, { mode: FieldMode, excelCol: number|null }> }} */
+function enrichField(key, val = {}) {
+    const def = FIELD_BY_KEY[key];
+    if (!def) return val;
+    return {
+        mode: val.mode || def.role,
+        excelCol: typeof val.excelCol === 'number' ? val.excelCol : null,
+        importExpr: val.importExpr ?? getDefaultImportExpr(key),
+        exportExpr: val.exportExpr ?? getDefaultExportExpr(key),
+    };
+}
+
+/** @returns {{ v: 3, fields: Record<string, object> }} */
 export function normalizeMapping(stored) {
-    if (stored?.v === 2 && stored.fields) {
-        const fields = { ...defaultFieldModes() };
+    const fields = defaultFieldModes();
+
+    if (stored?.v >= 2 && stored.fields) {
         for (const [key, val] of Object.entries(stored.fields)) {
             if (!FIELD_BY_KEY[key]) continue;
-            fields[key] = {
-                mode: val.mode || FIELD_BY_KEY[key].role,
-                excelCol: typeof val.excelCol === 'number' ? val.excelCol : null,
-            };
+            fields[key] = enrichField(key, val);
         }
-        return { v: 2, fields };
+        return { v: 3, fields };
     }
 
     // Legacy v1: { date: 0, type: 1, category: 3, ... }
-    const fields = defaultFieldModes();
     if (stored && typeof stored === 'object' && !stored.v) {
         for (const [oldKey, colIdx] of Object.entries(stored)) {
             const newKey = V1_KEY_MAP[oldKey];
             if (!newKey || typeof colIdx !== 'number' || colIdx < 0) continue;
             const def = FIELD_BY_KEY[newKey];
-            fields[newKey] = {
+            fields[newKey] = enrichField(newKey, {
                 mode: def.role === 'excel_import' || def.role === 'excel_export' ? def.role : 'sync',
                 excelCol: colIdx,
-            };
+            });
         }
     }
-    return { v: 2, fields };
+    return { v: 3, fields };
+}
+
+function headerMatches(header, alias) {
+    const h = String(header || '').trim().toLowerCase();
+    const a = String(alias || '').trim().toLowerCase();
+    if (!h || !a) return false;
+    if (h === a) return true;
+    // Multi-word aliases (e.g. "bank ref") may match inside longer headers.
+    if (a.includes(' ') && h.includes(a)) return true;
+    // Short tokens (dr, cr, cat) must match the whole header — avoids "description" → cr.
+    if (a.length <= 3) return false;
+    return h.includes(a);
 }
 
 function findHeaderIndex(headers, aliases) {
-    return headers.findIndex((h) => aliases.some((a) => h.includes(a)));
+    return headers.findIndex((h) => aliases.some((a) => headerMatches(h, a)));
 }
 
 /** Auto-detect mapping from spreadsheet header row. */
@@ -124,10 +166,10 @@ export function buildMappingFromHeaders(headersRaw) {
         if (!aliases) continue;
         const idx = findHeaderIndex(headers, aliases);
         if (idx >= 0) {
-            mapping.fields[def.key] = {
+            mapping.fields[def.key] = enrichField(def.key, {
                 mode: def.role === 'excel_import' ? 'excel_import' : def.role === 'excel_export' ? 'excel_export' : 'sync',
                 excelCol: idx,
-            };
+            });
         }
     }
     return mapping;
@@ -135,7 +177,7 @@ export function buildMappingFromHeaders(headersRaw) {
 
 export function getFieldConfig(mapping, fieldKey) {
     const m = normalizeMapping(mapping);
-    return m.fields[fieldKey] || { mode: FIELD_BY_KEY[fieldKey]?.role || 'db_only', excelCol: null };
+    return m.fields[fieldKey] || enrichField(fieldKey, {});
 }
 
 export function colForField(mapping, fieldKey) {
@@ -255,59 +297,53 @@ export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
     return payload;
 }
 
-function readDbFieldFromRow(row, mapping, fieldKey, def) {
+function fieldImportsFromExcel(cfg) {
+    if (cfg.excelCol == null || cfg.excelCol < 0) return false;
+    return cfg.mode === 'sync' || cfg.mode === 'excel_import';
+}
+
+function fieldExportsToExcel(cfg) {
+    if (cfg.excelCol == null || cfg.excelCol < 0) return false;
+    if (cfg.mode === 'sync' || cfg.mode === 'excel_export') return true;
+    if (cfg.mode === 'excel_import' && cfg.exportExpr) return true;
+    return false;
+}
+
+function readMappedCell(row, mapping, fieldKey) {
     const col = colForField(mapping, fieldKey);
-    if (col < 0) return undefined;
-    const raw = row[col];
-    if (def.dbColumn === 'amount') return parseAmount(raw);
-    if (def.dbColumn === 'type') return normType(raw);
-    if (def.dbColumn === 'wallet') return normWallet(raw);
-    if (def.dbColumn === 'date') {
-        if (raw instanceof Date) return raw.toISOString().slice(0, 10);
-        const s = cellStr(raw);
-        if (!s) return null;
-        const d = new Date(s);
-        return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-    }
-    if (def.dbColumn === 'receipt_urls' || def.dbColumn === 'bank_proof_urls') {
-        try {
-            return typeof raw === 'string' ? JSON.parse(raw) : raw;
-        } catch {
-            return raw;
-        }
-    }
-    return cellStr(raw) || null;
+    if (col < 0) return { col: -1, raw: undefined };
+    return { col, raw: row[col] };
 }
 
 /**
- * Parse one spreadsheet row into a sync record using explicit mapping only.
+ * Parse one spreadsheet row using mapping formulas (importExpr per field).
  */
 export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
     const m = normalizeMapping(mapping);
     const record = {};
 
     for (const def of TRANSACTION_FIELD_DEFS) {
-        if (!def.dbColumn) continue;
         const cfg = m.fields[def.key];
-        if (cfg?.mode !== 'sync') continue;
-        const val = readDbFieldFromRow(row, m, def.key, def);
-        if (val !== undefined) record[def.dbColumn] = val;
+        if (!cfg) continue;
+        if (!fieldImportsFromExcel(cfg)) continue;
+        const { raw } = readMappedCell(row, m, def.key);
+        if (raw === undefined && cfg.excelCol == null) continue;
+
+        const { value, patch } = runImportTransform(cfg.importExpr, {
+            value: raw,
+            row,
+            record,
+            fieldKey: def.key,
+            mapping: m,
+        });
+        if (patch) Object.assign(record, patch);
+        if (def.dbColumn && value !== undefined && value !== null && value !== '') {
+            record[def.dbColumn] = value;
+        }
     }
 
-    // Excel import helpers (explicit user mapping)
     let type = record.type || null;
     let amount = record.amount != null ? parseAmount(record.amount) : 0;
-
-    const drCol = colForField(m, 'debit_dr');
-    const crCol = colForField(m, 'credit_cr');
-    if (!type && drCol >= 0 && parseAmount(row[drCol]) > 0) {
-        type = 'OUT';
-        amount = parseAmount(row[drCol]);
-    }
-    if (!type && crCol >= 0 && parseAmount(row[crCol]) > 0) {
-        type = 'IN';
-        amount = parseAmount(row[crCol]);
-    }
     if (!type && amount > 0) type = 'OUT';
 
     const date = record.date;
@@ -348,38 +384,40 @@ export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null) {
     return parsed;
 }
 
-/** Build a sparse Excel row from a DB transaction using mapping. */
+/** Build a sparse Excel row from a DB transaction using mapping exportExpr formulas. */
 export function transactionToExcelRow(txn, mapping) {
     const m = normalizeMapping(mapping);
     const mappedCols = [];
     for (const def of TRANSACTION_FIELD_DEFS) {
         const cfg = m.fields[def.key];
         if (!cfg) continue;
-        if (cfg.mode !== 'sync' && cfg.mode !== 'excel_export') continue;
-        if (cfg.excelCol == null || cfg.excelCol < 0) continue;
+        if (!fieldExportsToExcel(cfg)) continue;
         mappedCols.push(cfg.excelCol);
     }
     const maxCol = mappedCols.length ? Math.max(...mappedCols) : 9;
     const rowData = new Array(maxCol + 1).fill('');
 
-    const set = (fieldKey, val) => {
-        const col = colForField(m, fieldKey);
-        if (col >= 0) rowData[col] = val;
-    };
+    for (const def of TRANSACTION_FIELD_DEFS) {
+        const cfg = m.fields[def.key];
+        if (!cfg) continue;
+        if (!fieldExportsToExcel(cfg)) continue;
 
-    set('date', txn.date);
-    set('type', txn.type === 'OUT' ? 'DR' : 'CR');
-    set('amount', txn.amount);
-    set('cat', txn.cat);
-    set('sub_category', txn.sub_category || '');
-    set('description', txn.description || '');
-    set('wallet', txn.wallet);
-    set('vendor_name', txn.vendor_name || '');
-    set('vendor_invoice', txn.vendor_invoice || '');
-    set('bank_payment_type', txn.bank_payment_type || '');
-    set('bank_reference', txn.bank_reference || '');
-    set('external_sync_key', txn.external_sync_key || `app:txn:${txn.id}`);
-    set('excel_sync_status', 'SYNCED');
+        const rawVal = def.dbColumn ? txn[def.dbColumn] : null;
+        const cellVal = runExportTransform(cfg.exportExpr, {
+            value: rawVal,
+            txn,
+            fieldKey: def.key,
+            mapping: m,
+        });
+        rowData[cfg.excelCol] = cellVal ?? '';
+    }
+
+    if (colForField(m, 'external_sync_key') < 0) {
+        // no-op — only mapped fields are written
+    } else if (!txn.external_sync_key && txn.id) {
+        const col = colForField(m, 'external_sync_key');
+        if (col >= 0 && !rowData[col]) rowData[col] = `app:txn:${txn.id}`;
+    }
 
     return { rowData, maxCol };
 }
@@ -388,7 +426,7 @@ export function maxMappedColumn(mapping) {
     const m = normalizeMapping(mapping);
     let max = -1;
     for (const cfg of Object.values(m.fields)) {
-        if (['sync', 'excel_import', 'excel_export'].includes(cfg.mode) && cfg.excelCol >= 0) {
+        if ((fieldImportsFromExcel(cfg) || fieldExportsToExcel(cfg)) && cfg.excelCol >= 0) {
             max = Math.max(max, cfg.excelCol);
         }
     }
@@ -416,12 +454,29 @@ export function collectMappingFromForm(rootEl) {
         const mode = row.querySelector('[data-map-mode]')?.value || FIELD_BY_KEY[key].role;
         const colRaw = row.querySelector('[data-map-col]')?.value;
         const excelCol = colRaw === '' || colRaw == null ? null : parseInt(colRaw, 10);
+        const importExpr = row.querySelector('[data-map-import-expr]')?.value?.trim()
+            || getDefaultImportExpr(key);
+        const exportExpr = row.querySelector('[data-map-export-expr]')?.value?.trim()
+            || getDefaultExportExpr(key);
         fields[key] = {
             mode,
             excelCol: Number.isNaN(excelCol) ? null : excelCol,
+            importExpr,
+            exportExpr,
         };
     });
-    return { v: 2, fields };
+    return { v: 3, fields };
+}
+
+function formulaPresetOptions(direction, currentExpr, fieldKey) {
+    const key = direction === 'import' ? 'importExpr' : 'exportExpr';
+    const defaultExpr = direction === 'import' ? getDefaultImportExpr(fieldKey) : getDefaultExportExpr(fieldKey);
+    const selected = detectPreset(currentExpr || defaultExpr, direction, fieldKey);
+    const opts = FORMULA_PRESETS.filter((p) => p.id === 'default' || p[key] != null || p.id === 'custom');
+    return opts.map((p) => {
+        const label = p.id === 'default' ? `Default (${defaultExpr || '—'})` : p.label;
+        return `<option value="${p.id}" ${selected === p.id ? 'selected' : ''}>${label}</option>`;
+    }).join('') + `<option value="custom" ${selected === 'custom' ? 'selected' : ''}>Custom formula…</option>`;
 }
 
 const MODE_OPTIONS = [
@@ -448,24 +503,54 @@ export function renderLedgerMappingUI(mapping, headersRaw = []) {
     `;
 
     const dbRows = TRANSACTION_FIELD_DEFS.map((def) => {
-        const cfg = m.fields[def.key] || { mode: def.role, excelCol: null };
+        const cfg = m.fields[def.key] || enrichField(def.key, {});
         const modes = modesForField(def);
         const colDisabled = !['sync', 'excel_import', 'excel_export'].includes(cfg.mode);
+        const showFormulas = !colDisabled && def.role !== 'internal';
+        const importExpr = cfg.importExpr ?? getDefaultImportExpr(def.key);
+        const exportExpr = cfg.exportExpr ?? getDefaultExportExpr(def.key);
+        const importPreset = detectPreset(importExpr, 'import', def.key);
+        const exportPreset = detectPreset(exportExpr, 'export', def.key);
         return `
-          <div class="ledger-sync-map__row" data-map-field="${def.key}">
-            <div class="ledger-sync-map__field-info">
-              <span class="ledger-sync-map__label">${def.label}</span>
-              <code class="ledger-sync-map__db-name">${def.dbColumn || '(excel helper)'}</code>
-              ${def.hint ? `<span class="ledger-sync-map__hint">${def.hint}</span>` : ''}
+          <div class="ledger-sync-map__block" data-map-field="${def.key}">
+            <div class="ledger-sync-map__row">
+              <div class="ledger-sync-map__field-info">
+                <span class="ledger-sync-map__label">${def.label}</span>
+                <code class="ledger-sync-map__db-name">${def.dbColumn || '(excel helper)'}</code>
+                ${def.hint ? `<span class="ledger-sync-map__hint">${def.hint}</span>` : ''}
+              </div>
+              <div class="ledger-sync-map__controls">
+                <select class="ledger-sync-map__mode" data-map-mode ${def.role === 'internal' ? 'disabled' : ''}>
+                  ${modes.map((o) => `<option value="${o.value}" ${cfg.mode === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                <select class="ledger-sync-map__select" data-map-col ${colDisabled ? 'disabled' : ''}>
+                  ${colOptions(colDisabled ? null : cfg.excelCol)}
+                </select>
+              </div>
             </div>
-            <div class="ledger-sync-map__controls">
-              <select class="ledger-sync-map__mode" data-map-mode ${def.role === 'internal' ? 'disabled' : ''}>
-                ${modes.map((o) => `<option value="${o.value}" ${cfg.mode === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
-              </select>
-              <select class="ledger-sync-map__select" data-map-col ${colDisabled ? 'disabled' : ''}>
-                ${colOptions(colDisabled ? null : cfg.excelCol)}
-              </select>
-            </div>
+            ${showFormulas ? `
+            <div class="ledger-sync-map__formulas" data-map-formulas>
+              <div class="ledger-sync-map__formula-row">
+                <span class="ledger-sync-map__formula-label">Excel → DB</span>
+                <select class="ledger-sync-map__preset" data-map-import-preset>
+                  ${formulaPresetOptions('import', importExpr, def.key)}
+                </select>
+                <input type="text" class="ledger-sync-map__formula" data-map-import-expr
+                  value="${escapeAttr(importExpr)}"
+                  placeholder="e.g. NORM_TYPE({value})"
+                  ${importPreset !== 'custom' ? 'hidden' : ''} />
+              </div>
+              <div class="ledger-sync-map__formula-row">
+                <span class="ledger-sync-map__formula-label">DB → Excel</span>
+                <select class="ledger-sync-map__preset" data-map-export-preset>
+                  ${formulaPresetOptions('export', exportExpr, def.key)}
+                </select>
+                <input type="text" class="ledger-sync-map__formula" data-map-export-expr
+                  value="${escapeAttr(exportExpr)}"
+                  placeholder="e.g. TO_DR_CR({value})"
+                  ${exportPreset !== 'custom' ? 'hidden' : ''} />
+              </div>
+            </div>` : ''}
           </div>`;
     }).join('');
 
@@ -505,9 +590,14 @@ export function renderLedgerMappingUI(mapping, headersRaw = []) {
       <p class="sync-map-table-label">Database table: <code>public.transactions</code></p>
       <div class="ledger-sync-map">
         <div class="ledger-sync-map__row ledger-sync-map__head ledger-sync-map__head--wide">
-          <span>Field</span><span>Mode &amp; Excel column</span>
+          <span>Field</span><span>Mode, column &amp; directional formulas</span>
         </div>
         ${dbRows}
+      </div>
+      <div class="sync-formula-help">
+        <strong>Formula reference</strong>
+        <code>{value}</code> this cell · <code>{field:amount}</code> another DB field · <code>{col:3}</code> Excel column (import)
+        · <code>NORM_TYPE</code> <code>TO_DR_CR</code> <code>PARSE_AMOUNT</code> <code>IF(a,b,c)</code> <code>CONCAT(a,b)</code>
       </div>
       <div class="sync-excel-overview">
         <p class="sync-map-table-label">Excel columns in your sheet</p>
@@ -515,16 +605,53 @@ export function renderLedgerMappingUI(mapping, headersRaw = []) {
       </div>`;
 }
 
+function escapeAttr(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 export function wireMappingFormInteractions(rootEl) {
-    rootEl.querySelectorAll('[data-map-field]').forEach((row) => {
-        const modeSel = row.querySelector('[data-map-mode]');
-        const colSel = row.querySelector('[data-map-col]');
-        if (!modeSel || !colSel) return;
-        modeSel.addEventListener('change', () => {
-            const syncable = ['sync', 'excel_import', 'excel_export'].includes(modeSel.value);
+    const syncFormulaRow = (block) => {
+        const key = block.dataset.mapField;
+        const modeSel = block.querySelector('[data-map-mode]');
+        const colSel = block.querySelector('[data-map-col]');
+        const formulas = block.querySelector('[data-map-formulas]');
+        const syncable = modeSel && ['sync', 'excel_import', 'excel_export'].includes(modeSel.value);
+        if (colSel) {
             colSel.disabled = !syncable;
             if (!syncable) colSel.value = '';
-        });
+        }
+        if (formulas) formulas.hidden = !syncable || colSel?.disabled;
+    };
+
+    const wirePreset = (block, direction) => {
+        const key = block.dataset.mapField;
+        const presetSel = block.querySelector(`[data-map-${direction}-preset]`);
+        const exprInput = block.querySelector(`[data-map-${direction}-expr]`);
+        if (!presetSel || !exprInput) return;
+        const applyPreset = () => {
+            const id = presetSel.value;
+            const exprKey = direction === 'import' ? 'importExpr' : 'exportExpr';
+            if (id === 'custom') {
+                exprInput.hidden = false;
+                return;
+            }
+            exprInput.hidden = true;
+            const preset = presetById(id);
+            const expr = id === 'default'
+                ? (direction === 'import' ? getDefaultImportExpr(key) : getDefaultExportExpr(key))
+                : (preset?.[exprKey] ?? exprInput.value);
+            exprInput.value = expr || '';
+        };
+        presetSel.addEventListener('change', applyPreset);
+        applyPreset();
+    };
+
+    rootEl.querySelectorAll('[data-map-field]').forEach((block) => {
+        syncFormulaRow(block);
+        block.querySelector('[data-map-mode]')?.addEventListener('change', () => syncFormulaRow(block));
+        block.querySelector('[data-map-col]')?.addEventListener('change', () => syncFormulaRow(block));
+        wirePreset(block, 'import');
+        wirePreset(block, 'export');
     });
 }
 
