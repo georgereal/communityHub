@@ -394,7 +394,9 @@ async function saveSyncSettings(patch) {
                 spreadsheet_url: patch.spreadsheet_url,
                 sheet_name: patch.sheet_name,
                 range_a1: patch.range_a1,
+                sync_interval_minutes: patch.sync_interval_minutes,
                 last_synced_at: patch.last_synced_at,
+                last_synced_by: patch.last_synced_by,
                 // Fallback to 'OK' if 'WARN' is not allowed by constraint
                 last_sync_status: (error.code === '23514' && patch.last_sync_status === 'WARN') ? 'OK' : patch.last_sync_status,
                 last_sync_message: patch.last_sync_message,
@@ -461,7 +463,7 @@ function getBackgroundSyncReadiness(s) {
     items.push({
         ok: (s?.sync_interval_minutes || 0) > 0,
         label: 'Auto-sync schedule enabled',
-        hint: 'Choose an interval other than Manual only.',
+        hint: 'Choose Daily (or another interval) in the dropdown above and click Save schedule.',
     });
 
     return { provider, items, ready: items.every((i) => i.ok), conn };
@@ -664,11 +666,30 @@ export function renderAdminSyncPanel() {
             </p>
 
             <div class="ledger-sync-bg-job-meta">
-              <div><strong>Schedule:</strong> ${formatSyncInterval(s?.sync_interval_minutes || 0)} (cron checks daily)</div>
+              <div><strong>Schedule:</strong> ${formatSyncInterval(s?.sync_interval_minutes || 0)} (Vercel cron checks daily)</div>
               <div><strong>Provider:</strong> ${bgSync.provider === 'GOOGLE' ? 'Google Sheets' : 'Microsoft Excel'}</div>
               <div><strong>Background connection:</strong> ${bgSync.conn?.account_email || 'Not connected'}</div>
               ${s?.last_synced_at ? `<div><strong>Last run:</strong> ${new Date(s.last_synced_at).toLocaleString('en-IN')}${s.last_sync_message ? ` — ${s.last_sync_message}` : ''}</div>` : ''}
               ${s?.last_sync_status === 'ERROR' ? `<div class="ledger-sync-bg-job-meta__error"><i class="fa-solid fa-triangle-exclamation"></i> ${s.last_sync_message || 'Last background sync failed.'}</div>` : ''}
+            </div>
+
+            <div class="ledger-sync-form" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: #fff;">
+              <label class="ledger-sync-form__label" for="admin-bg-sync-interval">Auto-sync interval</label>
+              <p class="gate-wizard__hint" style="margin: 0.25rem 0 0.75rem;">
+                Cron runs once daily on Vercel; societies sync when this interval has elapsed since the last run.
+              </p>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <select id="admin-bg-sync-interval" class="expense-combobox" style="min-width: 12rem;">
+                  <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only (cron skips)</option>
+                  <option value="15" ${s?.sync_interval_minutes === 15 ? 'selected' : ''}>Every 15 minutes</option>
+                  <option value="60" ${s?.sync_interval_minutes === 60 ? 'selected' : ''}>Every 1 hour</option>
+                  <option value="360" ${s?.sync_interval_minutes === 360 ? 'selected' : ''}>Every 6 hours</option>
+                  <option value="1440" ${s?.sync_interval_minutes === 1440 ? 'selected' : ''}>Daily</option>
+                </select>
+                <button type="button" class="btn btn-primary btn--small" id="admin-bg-save-schedule">
+                  <i class="fa-solid fa-floppy-disk"></i> Save schedule
+                </button>
+              </div>
             </div>
 
             <div class="ledger-sync-service-account" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt);">
@@ -812,6 +833,21 @@ export function renderAdminSyncPanel() {
             await startMicrosoftWebConnect();
         } catch (e) {
             alert(e.message);
+        }
+    });
+
+    document.getElementById('admin-bg-save-schedule')?.addEventListener('click', async () => {
+        const interval = parseInt(document.getElementById('admin-bg-sync-interval')?.value, 10);
+        if (Number.isNaN(interval)) return alert('Choose a valid interval.');
+        try {
+            await saveSyncSettings({ sync_interval_minutes: interval });
+            startAutoSync();
+            alert(interval === 0
+                ? 'Schedule saved: manual only (background cron will skip this society).'
+                : `Schedule saved: ${formatSyncInterval(interval)}.`);
+            renderAdminSyncPanel();
+        } catch (e) {
+            alert(e.message || 'Could not save schedule. Run supabase_ledger_spreadsheet_sync.sql if sync_interval_minutes column is missing.');
         }
     });
 

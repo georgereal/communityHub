@@ -80,9 +80,11 @@ export default async function handler(req, res) {
     );
     const tokenJson = await tokenRes.json();
     if (!tokenRes.ok) {
-        return res.status(400).json({
-            error: tokenJson.error_description || tokenJson.error || 'Token exchange failed.',
-        });
+        const msg = tokenJson.error_description || tokenJson.error || 'Token exchange failed.';
+        const hint = /public clients can't send a client secret/i.test(msg)
+            ? ' In Azure → App registrations → Authentication, add the redirect URI under **Web** (not Single-page application). Remove it from SPA if listed there, then try again.'
+            : '';
+        return res.status(400).json({ error: msg + hint });
     }
 
     if (!tokenJson.refresh_token) {
