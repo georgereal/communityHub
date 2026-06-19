@@ -298,6 +298,11 @@ function callFn(name, args, ctx, direction) {
     if (U === 'PARSE_AMOUNT') return parseAmount(args[0]);
     if (U === 'NORM_WALLET') return normWallet(args[0]);
     if (U === 'FORMAT_DATE') return formatDate(args[0]);
+    if (U === 'FN' && args.length >= 1) {
+        const name = String(args[0] ?? '').replace(/^@/, '');
+        const body = ctx.mapping?.formulaSnippets?.[name];
+        if (body) return evaluate(body, ctx, direction).value;
+    }
     if (U === 'DR_COLUMN' && direction === 'import') {
         const n = parseAmount(args[0]);
         if (n > 0 && !ctx.record?.type) {
@@ -317,7 +322,9 @@ function callFn(name, args, ctx, direction) {
 
 function evaluate(expr, ctx, direction) {
     if (!expr || !String(expr).trim()) return { value: undefined };
-    const tokens = tokenize(expr);
+    const snippets = ctx.mapping?.formulaSnippets || {};
+    const expanded = expandSnippetRefs(expr, snippets);
+    const tokens = tokenize(expanded);
     const raw = evaluateTokens(tokens, ctx, direction);
     if (raw && typeof raw === 'object' && ('__patch' in raw || '__value' in raw)) {
         return { value: raw.__value, patch: raw.__patch };
@@ -336,6 +343,32 @@ export function runExportTransform(expr, ctx) {
     if (value === null || value === undefined) return '';
     return value;
 }
+
+export function expandSnippetRefs(expr, snippets = {}) {
+    if (!expr || !snippets || typeof snippets !== 'object') return expr;
+    return String(expr).replace(/@([a-zA-Z_][a-zA-Z0-9_]*)/g, (match, name) => {
+        if (Object.prototype.hasOwnProperty.call(snippets, name) && snippets[name]) {
+            return `(${snippets[name]})`;
+        }
+        return match;
+    });
+}
+
+export const BUILTIN_FUNCTIONS = [
+    { name: '{value}', desc: 'This field — Excel cell on import, DB column on export' },
+    { name: '{field:amount}', desc: 'Another field on the same row (import) or transaction (export)' },
+    { name: '{col:3}', desc: 'Raw Excel column index (0-based), import only' },
+    { name: '@snippet_name', desc: 'Expand a custom function from the library above' },
+    { name: 'NORM_TYPE(x)', desc: 'DR/CR/IN/OUT → IN or OUT' },
+    { name: 'TO_DR_CR(x)', desc: 'IN/OUT → CR or DR' },
+    { name: 'PARSE_AMOUNT(x)', desc: 'Number from text' },
+    { name: 'NORM_WALLET(x)', desc: '→ CASH or BANK' },
+    { name: 'FORMAT_DATE(x)', desc: '→ YYYY-MM-DD' },
+    { name: 'IF(a,b,c)', desc: 'Conditional' },
+    { name: 'CONCAT(a,b,…)', desc: 'Join values' },
+    { name: 'DR_COLUMN(x)', desc: 'Import: Dr cell → OUT + amount' },
+    { name: 'CR_COLUMN(x)', desc: 'Import: Cr cell → IN + amount' },
+];
 
 export function presetById(id) {
     return FORMULA_PRESETS.find((p) => p.id === id) || null;

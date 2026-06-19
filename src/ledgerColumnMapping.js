@@ -9,10 +9,17 @@ import {
     getDefaultExportExpr,
     runImportTransform,
     runExportTransform,
-    FORMULA_PRESETS,
-    detectPreset,
-    presetById,
+    BUILTIN_FUNCTIONS,
 } from './ledgerTransform.js';
+import {
+    wireCodeEditors,
+    renderSnippetRowHtml,
+    CUSTOM_FN_SAMPLE,
+    CUSTOM_FN_SAMPLE_EXPRESSION,
+    CUSTOM_FN_IMPORT_SAMPLE,
+    CUSTOM_FN_IMPORT_SAMPLE_EXPRESSION,
+    FORMULA_REFERENCES,
+} from './syncCodeEditor.js';
 
 /** @typedef {'sync'|'db_only'|'internal'|'excel_import'|'excel_export'} FieldMode */
 
@@ -82,7 +89,7 @@ const HEADER_ALIASES = {
     excel_sync_status: ['status', 'sync_status', 'sync_state'],
 };
 
-export { FORMULA_PRESETS, getDefaultImportExpr, getDefaultExportExpr } from './ledgerTransform.js';
+export { getDefaultImportExpr, getDefaultExportExpr } from './ledgerTransform.js';
 
 function defaultFieldConfig(def) {
     return {
@@ -112,16 +119,35 @@ function enrichField(key, val = {}) {
     };
 }
 
-/** @returns {{ v: 3, fields: Record<string, object> }} */
+/** Build placeholder header labels from mapped column indices when live headers are unavailable. */
+export function buildHeadersFromMapping(mapping) {
+    const m = normalizeMapping(mapping);
+    let maxCol = -1;
+    for (const cfg of Object.values(m.fields)) {
+        if (typeof cfg.excelCol === 'number' && cfg.excelCol >= 0) {
+            maxCol = Math.max(maxCol, cfg.excelCol);
+        }
+    }
+    if (maxCol < 0) return [];
+    return Array.from({ length: maxCol + 1 }, (_, i) => `Column ${i + 1}`);
+}
+
+/** @returns {{ v: 3, fields: Record<string, object>, formulaSnippets: Record<string, string>, excelHeaders: string[] }} */
 export function normalizeMapping(stored) {
     const fields = defaultFieldModes();
+    const formulaSnippets = (stored?.formulaSnippets && typeof stored.formulaSnippets === 'object')
+        ? { ...stored.formulaSnippets }
+        : {};
+    const excelHeaders = Array.isArray(stored?.excelHeaders)
+        ? stored.excelHeaders.map((h) => String(h ?? ''))
+        : [];
 
     if (stored?.v >= 2 && stored.fields) {
         for (const [key, val] of Object.entries(stored.fields)) {
             if (!FIELD_BY_KEY[key]) continue;
             fields[key] = enrichField(key, val);
         }
-        return { v: 3, fields };
+        return { v: 3, fields, formulaSnippets, excelHeaders };
     }
 
     // Legacy v1: { date: 0, type: 1, category: 3, ... }
@@ -136,7 +162,7 @@ export function normalizeMapping(stored) {
             });
         }
     }
-    return { v: 3, fields };
+    return { v: 3, fields, formulaSnippets, excelHeaders };
 }
 
 function headerMatches(header, alias) {
@@ -465,27 +491,154 @@ export function collectMappingFromForm(rootEl) {
             exportExpr,
         };
     });
-    return { v: 3, fields };
-}
 
-function formulaPresetOptions(direction, currentExpr, fieldKey) {
-    const key = direction === 'import' ? 'importExpr' : 'exportExpr';
-    const defaultExpr = direction === 'import' ? getDefaultImportExpr(fieldKey) : getDefaultExportExpr(fieldKey);
-    const selected = detectPreset(currentExpr || defaultExpr, direction, fieldKey);
-    const opts = FORMULA_PRESETS.filter((p) => p.id === 'default' || p[key] != null || p.id === 'custom');
-    return opts.map((p) => {
-        const label = p.id === 'default' ? `Default (${defaultExpr || '—'})` : p.label;
-        return `<option value="${p.id}" ${selected === p.id ? 'selected' : ''}>${label}</option>`;
-    }).join('') + `<option value="custom" ${selected === 'custom' ? 'selected' : ''}>Custom formula…</option>`;
+    const formulaSnippets = {};
+    rootEl.querySelectorAll('[data-snippet-row]').forEach((row) => {
+        const name = row.querySelector('[data-snippet-name]')?.value?.trim();
+        const body = row.querySelector('[data-snippet-body]')?.value?.trim();
+        if (name && body) formulaSnippets[name] = body;
+    });
+
+    const excelHeaders = rootEl.dataset.excelHeaders
+        ? JSON.parse(rootEl.dataset.excelHeaders)
+        : [];
+    return { v: 3, fields, formulaSnippets, excelHeaders };
 }
 
 const MODE_OPTIONS = [
-    { value: 'sync', label: 'Sync with Excel' },
-    { value: 'db_only', label: 'DB only (ignore sheet)' },
-    { value: 'internal', label: 'Internal (system)' },
-    { value: 'excel_import', label: 'Import only (Excel → app)' },
-    { value: 'excel_export', label: 'Export only (app → Excel)' },
+    { value: 'sync', label: '↔ Sync both ways', help: 'Maps to an Excel column. Import and export formulas both run.' },
+    { value: 'excel_import', label: '→ Import only', help: 'Excel → app only. Export formula is ignored.' },
+    { value: 'excel_export', label: '← Export only', help: 'App → Excel only. Import formula is ignored.' },
+    { value: 'db_only', label: 'App only', help: 'Stored in the database only — no Excel column.' },
+    { value: 'internal', label: 'System', help: 'Managed by the app (ids, hashes). Not synced.' },
 ];
+
+function modeHelpText(mode) {
+    return MODE_OPTIONS.find((o) => o.value === mode)?.help || '';
+}
+
+function renderFormulaFieldRefList() {
+    const refs = TRANSACTION_FIELD_DEFS
+        .filter((d) => d.dbColumn && d.role !== 'internal')
+        .map((d) => `<li><code>{field:${d.key}}</code> — ${d.label}${d.dbColumn !== d.key ? ` (<code>${d.dbColumn}</code>)` : ''}</li>`)
+        .join('');
+    return `<ul class="sync-fn-ref-fields">${refs}</ul>`;
+}
+
+function renderFormulaRefTable() {
+    const rows = FORMULA_REFERENCES.map((r) => `
+      <tr>
+        <td><code>${r.token}</code></td>
+        <td>${r.importDesc}</td>
+        <td>${r.exportDesc}</td>
+      </tr>`).join('');
+    return `
+      <table class="sync-fn-ref-table">
+        <thead>
+          <tr><th>Reference</th><th>Excel → DB (import)</th><th>DB → Excel (export)</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+}
+
+function renderSnippetLibrary(snippets) {
+    const rows = Object.entries(snippets || {}).map(([name, body]) => renderSnippetRowHtml(name, body)).join('');
+
+    return `
+      <details class="sync-formula-library" open>
+        <summary class="sync-formula-library__summary">
+          <span>Custom functions <span class="sync-formula-library__sub">(use as <code>@name</code> in formulas)</span></span>
+          <a href="#sync-fn-help" class="sync-fn-help-link">How to create a function</a>
+        </summary>
+        <div class="sync-fn-help" id="sync-fn-help">
+          <p class="sync-formula-library__hint">
+            Custom functions are <strong>reusable expressions</strong>, not full JavaScript. Give a name, paste the
+            <code>return</code> expression in the editor, then call it as <code>@name</code> from any field formula.
+            References always refer to the <strong>same Excel row</strong> (import) or <strong>same DB transaction</strong> (export).
+          </p>
+          ${renderFormulaRefTable()}
+          <details class="sync-fn-ref-fields-wrap">
+            <summary>Available <code>{field:…}</code> names</summary>
+            <p class="sync-formula-library__hint">Use the field key from the mapping cards below. On import, only fields parsed earlier in the row are available.</p>
+            ${renderFormulaFieldRefList()}
+          </details>
+          <div class="sync-code-sample">
+            <span class="sync-code-sample__label">Export example — combine DB fields</span>
+            <pre class="sync-code-sample__pre"><code>${escapeText(CUSTOM_FN_SAMPLE)}</code></pre>
+          </div>
+          <p class="sync-formula-library__hint sync-fn-help__store">
+            Store only the expression for <code>bank_line</code>:
+            <code class="sync-fn-help__expr">${escapeText(CUSTOM_FN_SAMPLE_EXPRESSION)}</code>
+          </p>
+          <div class="sync-code-sample">
+            <span class="sync-code-sample__label">Import example — read another Excel column on the same row</span>
+            <pre class="sync-code-sample__pre"><code>${escapeText(CUSTOM_FN_IMPORT_SAMPLE)}</code></pre>
+          </div>
+          <p class="sync-formula-library__hint sync-fn-help__store">
+            Store only:
+            <code class="sync-fn-help__expr">${escapeText(CUSTOM_FN_IMPORT_SAMPLE_EXPRESSION)}</code>
+            — <code>{col:10}</code> is column 11 in Excel (0-based). Match the index from <em>Excel columns</em> below.
+          </p>
+        </div>
+        <div class="sync-snippet-list" data-snippet-list>${rows}</div>
+        <button type="button" class="btn btn-outline btn--small" data-snippet-add><i class="fa-solid fa-plus"></i> Add function</button>
+      </details>
+      <details class="sync-formula-library">
+        <summary>Built-in functions</summary>
+        <ul class="sync-fn-list">${BUILTIN_FUNCTIONS.map((f) => `<li><code>${f.name}</code> ${f.desc}</li>`).join('')}</ul>
+      </details>`;
+}
+
+function renderFieldCard(def, cfg, headersRaw, colOptions) {
+    const modes = modesForField(def);
+    const colDisabled = !['sync', 'excel_import', 'excel_export'].includes(cfg.mode);
+    const syncable = !colDisabled && def.role !== 'internal';
+    const importExpr = cfg.importExpr ?? getDefaultImportExpr(def.key);
+    const exportExpr = cfg.exportExpr ?? getDefaultExportExpr(def.key);
+    const dbName = def.dbColumn || def.key;
+    const excelHeader = (cfg.excelCol != null && cfg.excelCol >= 0 && headersRaw[cfg.excelCol])
+        ? headersRaw[cfg.excelCol]
+        : (cfg.excelCol != null && cfg.excelCol >= 0 ? `Column ${cfg.excelCol + 1}` : '—');
+
+    return `
+      <article class="sync-map-card" data-map-field="${def.key}">
+        <header class="sync-map-card__head">
+          <div class="sync-map-card__identity">
+            <strong class="sync-map-card__title">${def.label}</strong>
+            <input type="text" class="sync-map-card__db" data-map-db-label value="${escapeAttr(dbName)}" readonly title="DB column" />
+          </div>
+          <div class="sync-map-card__excel">
+            <label>Excel</label>
+            <select class="sync-map-card__excel-select" data-map-col ${colDisabled ? 'disabled' : ''}>
+              ${colOptions(colDisabled ? null : cfg.excelCol)}
+            </select>
+          </div>
+          <select class="sync-map-card__mode" data-map-mode ${def.role === 'internal' ? 'disabled' : ''} title="Participation">
+            ${modes.map((o) => `<option value="${o.value}" ${cfg.mode === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+          </select>
+        </header>
+        ${syncable ? `
+        <div class="sync-map-card__flows" data-map-formulas>
+          <div class="sync-flow sync-flow--ltr" data-map-export-row>
+            <span class="sync-flow__dir">DB → Excel</span>
+            <code class="sync-flow__db">${dbName}</code>
+            <span class="sync-flow__arrow" aria-hidden="true">→</span>
+            <span class="sync-flow__excel" data-map-excel-display>${escapeAttr(excelHeader)}</span>
+            <span class="sync-flow__fn">ƒ</span>
+            <input type="text" class="sync-flow__formula" data-map-export-expr value="${escapeAttr(exportExpr)}" spellcheck="false" placeholder="{value}" />
+          </div>
+          <div class="sync-flow sync-flow--rtl" data-map-import-row>
+            <span class="sync-flow__dir">Excel → DB</span>
+            <input type="text" class="sync-flow__formula" data-map-import-expr value="${escapeAttr(importExpr)}" spellcheck="false" placeholder="NORM_TYPE({value})" />
+            <span class="sync-flow__fn">ƒ</span>
+            <span class="sync-flow__excel" data-map-excel-display>${escapeAttr(excelHeader)}</span>
+            <span class="sync-flow__arrow" aria-hidden="true">←</span>
+            <code class="sync-flow__db">${dbName}</code>
+          </div>
+        </div>` : `
+        <p class="sync-map-card__muted">${modeHelpText(cfg.mode)}</p>`}
+      </article>`;
+}
 
 function modesForField(def) {
     if (def.role === 'internal') return MODE_OPTIONS.filter((o) => o.value === 'internal');
@@ -496,62 +649,23 @@ function modesForField(def) {
 }
 
 export function renderLedgerMappingUI(mapping, headersRaw = []) {
-    const { mapping: m, errors, warnings } = validateMapping(mapping, headersRaw);
+    const { mapping: m, errors } = validateMapping(mapping, headersRaw);
     const colOptions = (selected) => `
-      <option value="">— Not mapped —</option>
-      ${headersRaw.map((h, i) => `<option value="${i}" ${selected === i ? 'selected' : ''}>${h || `Column ${i + 1}`}</option>`).join('')}
+      <option value="">—</option>
+      ${headersRaw.map((h, i) => `<option value="${i}" ${selected === i ? 'selected' : ''}>${h || `Col ${i + 1}`}</option>`).join('')}
     `;
 
-    const dbRows = TRANSACTION_FIELD_DEFS.map((def) => {
+    const primaryFields = TRANSACTION_FIELD_DEFS.filter((d) => d.role !== 'internal' && d.role !== 'db_only');
+    const otherFields = TRANSACTION_FIELD_DEFS.filter((d) => d.role === 'internal' || d.role === 'db_only');
+
+    const primaryCards = primaryFields.map((def) => {
         const cfg = m.fields[def.key] || enrichField(def.key, {});
-        const modes = modesForField(def);
-        const colDisabled = !['sync', 'excel_import', 'excel_export'].includes(cfg.mode);
-        const showFormulas = !colDisabled && def.role !== 'internal';
-        const importExpr = cfg.importExpr ?? getDefaultImportExpr(def.key);
-        const exportExpr = cfg.exportExpr ?? getDefaultExportExpr(def.key);
-        const importPreset = detectPreset(importExpr, 'import', def.key);
-        const exportPreset = detectPreset(exportExpr, 'export', def.key);
-        return `
-          <div class="ledger-sync-map__block" data-map-field="${def.key}">
-            <div class="ledger-sync-map__row">
-              <div class="ledger-sync-map__field-info">
-                <span class="ledger-sync-map__label">${def.label}</span>
-                <code class="ledger-sync-map__db-name">${def.dbColumn || '(excel helper)'}</code>
-                ${def.hint ? `<span class="ledger-sync-map__hint">${def.hint}</span>` : ''}
-              </div>
-              <div class="ledger-sync-map__controls">
-                <select class="ledger-sync-map__mode" data-map-mode ${def.role === 'internal' ? 'disabled' : ''}>
-                  ${modes.map((o) => `<option value="${o.value}" ${cfg.mode === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
-                </select>
-                <select class="ledger-sync-map__select" data-map-col ${colDisabled ? 'disabled' : ''}>
-                  ${colOptions(colDisabled ? null : cfg.excelCol)}
-                </select>
-              </div>
-            </div>
-            ${showFormulas ? `
-            <div class="ledger-sync-map__formulas" data-map-formulas>
-              <div class="ledger-sync-map__formula-row">
-                <span class="ledger-sync-map__formula-label">Excel → DB</span>
-                <select class="ledger-sync-map__preset" data-map-import-preset>
-                  ${formulaPresetOptions('import', importExpr, def.key)}
-                </select>
-                <input type="text" class="ledger-sync-map__formula" data-map-import-expr
-                  value="${escapeAttr(importExpr)}"
-                  placeholder="e.g. NORM_TYPE({value})"
-                  ${importPreset !== 'custom' ? 'hidden' : ''} />
-              </div>
-              <div class="ledger-sync-map__formula-row">
-                <span class="ledger-sync-map__formula-label">DB → Excel</span>
-                <select class="ledger-sync-map__preset" data-map-export-preset>
-                  ${formulaPresetOptions('export', exportExpr, def.key)}
-                </select>
-                <input type="text" class="ledger-sync-map__formula" data-map-export-expr
-                  value="${escapeAttr(exportExpr)}"
-                  placeholder="e.g. TO_DR_CR({value})"
-                  ${exportPreset !== 'custom' ? 'hidden' : ''} />
-              </div>
-            </div>` : ''}
-          </div>`;
+        return renderFieldCard(def, cfg, headersRaw, colOptions);
+    }).join('');
+
+    const otherCards = otherFields.map((def) => {
+        const cfg = m.fields[def.key] || enrichField(def.key, {});
+        return renderFieldCard(def, cfg, headersRaw, colOptions);
     }).join('');
 
     const assignment = new Map();
@@ -565,93 +679,93 @@ export function renderLedgerMappingUI(mapping, headersRaw = []) {
     const excelOverview = headersRaw.length
         ? headersRaw.map((h, i) => {
             const mapped = assignment.get(i);
-            const status = mapped
-                ? `<span class="sync-excel-col__mapped"><i class="fa-solid fa-link"></i> ${mapped}</span>`
-                : '<span class="sync-excel-col__ignore">Ignored on import</span>';
             return `
-              <div class="sync-excel-col">
-                <span class="sync-excel-col__letter">Col ${i + 1}</span>
-                <strong class="sync-excel-col__header">${h || '(empty header)'}</strong>
-                ${status}
+              <div class="sync-excel-col${mapped ? ' sync-excel-col--mapped' : ''}">
+                <span class="sync-excel-col__letter">${i + 1}</span>
+                <strong class="sync-excel-col__header">${h || '(empty)'}</strong>
+                ${mapped ? `<span class="sync-excel-col__mapped">${mapped}</span>` : ''}
               </div>`;
         }).join('')
-        : '<p class="gate-wizard__hint">Load columns from your spreadsheet to see all Excel headers here.</p>';
+        : '';
 
     const errHtml = errors.length
         ? `<div class="ledger-sync-status ledger-sync-status--error"><strong>Mapping errors</strong><br/>${errors.map((e) => `• ${e}`).join('<br/>')}</div>`
         : '';
-    const warnHtml = warnings.length
-        ? `<div class="ledger-sync-status ledger-sync-status--warn"><strong>Notes</strong><br/>${warnings.map((w) => `• ${w}`).join('<br/>')}</div>`
-        : '';
 
     return `
       ${errHtml}
-      ${warnHtml}
-      <p class="sync-map-table-label">Database table: <code>public.transactions</code></p>
-      <div class="ledger-sync-map">
-        <div class="ledger-sync-map__row ledger-sync-map__head ledger-sync-map__head--wide">
-          <span>Field</span><span>Mode, column &amp; directional formulas</span>
-        </div>
-        ${dbRows}
-      </div>
-      <div class="sync-formula-help">
-        <strong>Formula reference</strong>
-        <code>{value}</code> this cell · <code>{field:amount}</code> another DB field · <code>{col:3}</code> Excel column (import)
-        · <code>NORM_TYPE</code> <code>TO_DR_CR</code> <code>PARSE_AMOUNT</code> <code>IF(a,b,c)</code> <code>CONCAT(a,b)</code>
-      </div>
-      <div class="sync-excel-overview">
-        <p class="sync-map-table-label">Excel columns in your sheet</p>
-        <div class="sync-excel-overview__grid">${excelOverview}</div>
-      </div>`;
+      ${renderSnippetLibrary(m.formulaSnippets)}
+      <div class="sync-map-grid">${primaryCards}</div>
+      ${otherFields.length ? `<details class="sync-map-advanced"><summary>System &amp; app-only fields (${otherFields.length})</summary><div class="sync-map-grid">${otherCards}</div></details>` : ''}
+      ${excelOverview ? `<details class="sync-excel-overview"><summary>Excel columns (${headersRaw.length})</summary><div class="sync-excel-overview__grid">${excelOverview}</div></details>` : ''}`;
 }
 
 function escapeAttr(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+function escapeText(s) {
+    return escapeAttr(s);
+}
+
 export function wireMappingFormInteractions(rootEl) {
-    const syncFormulaRow = (block) => {
-        const key = block.dataset.mapField;
+    const updateExcelLabels = (block) => {
+        const colSel = block.querySelector('[data-map-col]');
+        const labels = block.querySelectorAll('[data-map-excel-display]');
+        if (!colSel || !labels.length) return;
+        const opt = colSel.options[colSel.selectedIndex];
+        const text = opt?.value === '' ? '—' : (opt?.text || '—');
+        labels.forEach((el) => { el.textContent = text; });
+    };
+
+    const syncFieldBlock = (block) => {
         const modeSel = block.querySelector('[data-map-mode]');
         const colSel = block.querySelector('[data-map-col]');
         const formulas = block.querySelector('[data-map-formulas]');
-        const syncable = modeSel && ['sync', 'excel_import', 'excel_export'].includes(modeSel.value);
+        const importRow = block.querySelector('[data-map-import-row]');
+        const exportRow = block.querySelector('[data-map-export-row]');
+        const mode = modeSel?.value;
+        const syncable = modeSel && ['sync', 'excel_import', 'excel_export'].includes(mode);
+
         if (colSel) {
             colSel.disabled = !syncable;
             if (!syncable) colSel.value = '';
         }
-        if (formulas) formulas.hidden = !syncable || colSel?.disabled;
-    };
-
-    const wirePreset = (block, direction) => {
-        const key = block.dataset.mapField;
-        const presetSel = block.querySelector(`[data-map-${direction}-preset]`);
-        const exprInput = block.querySelector(`[data-map-${direction}-expr]`);
-        if (!presetSel || !exprInput) return;
-        const applyPreset = () => {
-            const id = presetSel.value;
-            const exprKey = direction === 'import' ? 'importExpr' : 'exportExpr';
-            if (id === 'custom') {
-                exprInput.hidden = false;
-                return;
-            }
-            exprInput.hidden = true;
-            const preset = presetById(id);
-            const expr = id === 'default'
-                ? (direction === 'import' ? getDefaultImportExpr(key) : getDefaultExportExpr(key))
-                : (preset?.[exprKey] ?? exprInput.value);
-            exprInput.value = expr || '';
-        };
-        presetSel.addEventListener('change', applyPreset);
-        applyPreset();
+        if (formulas) formulas.hidden = !syncable;
+        if (importRow) importRow.hidden = mode === 'excel_export';
+        if (exportRow) exportRow.hidden = mode === 'excel_import';
+        updateExcelLabels(block);
     };
 
     rootEl.querySelectorAll('[data-map-field]').forEach((block) => {
-        syncFormulaRow(block);
-        block.querySelector('[data-map-mode]')?.addEventListener('change', () => syncFormulaRow(block));
-        block.querySelector('[data-map-col]')?.addEventListener('change', () => syncFormulaRow(block));
-        wirePreset(block, 'import');
-        wirePreset(block, 'export');
+        syncFieldBlock(block);
+        block.querySelector('[data-map-mode]')?.addEventListener('change', () => syncFieldBlock(block));
+        block.querySelector('[data-map-col]')?.addEventListener('change', () => syncFieldBlock(block));
+    });
+
+    rootEl.querySelector('[data-snippet-add]')?.addEventListener('click', () => {
+        const list = rootEl.querySelector('[data-snippet-list]');
+        if (!list) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = renderSnippetRowHtml();
+        const row = wrap.firstElementChild;
+        list.appendChild(row);
+        wireCodeEditors(row);
+        row.querySelector('[data-snippet-del]')?.addEventListener('click', () => row.remove());
+    });
+
+    rootEl.querySelectorAll('[data-snippet-del]').forEach((btn) => {
+        btn.addEventListener('click', () => btn.closest('[data-snippet-row]')?.remove());
+    });
+
+    wireCodeEditors(rootEl);
+
+    rootEl.querySelector('.sync-fn-help-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const help = rootEl.querySelector('#sync-fn-help');
+        help?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        help?.classList.add('sync-fn-help--flash');
+        window.setTimeout(() => help?.classList.remove('sync-fn-help--flash'), 1200);
     });
 }
 

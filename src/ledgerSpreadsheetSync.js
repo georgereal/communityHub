@@ -36,6 +36,7 @@ import {
     computeSyncHash,
     colForField,
     buildDbSyncPayload,
+    buildHeadersFromMapping,
     TEMPLATE_HEADERS,
 } from './ledgerColumnMapping.js';
 import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPush.js';
@@ -555,7 +556,7 @@ export function renderAdminSyncPanel() {
     const mappingStepBody = `
       <p class="sync-step-hint">
         Match each <strong>CommunityHub field</strong> (database) to a column in your spreadsheet.
-        ${hasUrl ? 'Connect in step 4 first if headers fail to load.' : 'Save the workbook URL in step 2, then load columns here.'}
+        Saved mapping loads from the database automatically. Use <strong>Load columns</strong> to refresh Excel headers.
       </p>
       <div class="sync-mapping-toolbar">
         <button type="button" class="btn btn-outline btn--small" id="admin-ledger-sync-load-cols" ${hasUrl ? '' : 'disabled'}>
@@ -567,7 +568,7 @@ export function renderAdminSyncPanel() {
       </div>
       <div id="admin-ledger-sync-mapping" class="sync-mapping-panel">
         <p class="gate-wizard__hint">${hasUrl
-        ? 'Click <strong>Load columns</strong> to fetch headers from your workbook.'
+        ? '<i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Loading saved mapping…'
         : 'Complete step 2 to enable column mapping.'}</p>
       </div>
     `;
@@ -822,12 +823,7 @@ export function renderAdminSyncPanel() {
         wireSyncOps(opsRoot, 'admin-', renderAdminSyncPanel);
     }
 
-    if (hasSavedColumnMapping(s)) {
-        const mapEl = document.getElementById('admin-ledger-sync-mapping');
-        if (mapEl && !mapEl.querySelector('.ledger-sync-map')) {
-            mapEl.innerHTML = `<p class="gate-wizard__hint"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Column mapping saved. Click <strong>Load columns from spreadsheet</strong> to view or edit.</p>`;
-        }
-    } else if (hasUrl && connMeta?.account_email) {
+    if (hasUrl) {
         void refreshMappingUI();
     }
 }
@@ -1408,6 +1404,51 @@ function renderStatus() {
     return statusHtml + conflictsHtml;
 }
 
+function mountMappingUI(mapEl, storedMapping, headersRaw, noticeHtml = '') {
+    const p = syncOpsCtx.prefix;
+    const hasLiveHeaders = Array.isArray(headersRaw) && headersRaw.length > 0;
+    const resolvedHeaders = hasLiveHeaders
+        ? headersRaw
+        : (storedMapping?.excelHeaders?.length
+            ? storedMapping.excelHeaders
+            : buildHeadersFromMapping(storedMapping));
+
+    const mappingForRender = normalizeMapping({
+        ...storedMapping,
+        excelHeaders: hasLiveHeaders ? headersRaw : (storedMapping?.excelHeaders || resolvedHeaders),
+    });
+
+    mapEl.dataset.excelHeaders = JSON.stringify(resolvedHeaders);
+    mapEl.innerHTML = `${noticeHtml}${renderLedgerMappingUI(mappingForRender, resolvedHeaders)}`;
+    wireMappingFormInteractions(mapEl);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'ledger-sync-map__actions';
+    actionsDiv.innerHTML = `
+        <button type="button" class="btn btn-outline btn--small" id="${opsId(p, 'refresh-cols')}">
+            <i class="fa-solid fa-arrows-rotate"></i> Refresh columns
+        </button>
+        <button type="button" class="btn btn-primary btn--small" id="${opsId(p, 'save-map')}">Save mapping</button>
+    `;
+    mapEl.appendChild(actionsDiv);
+
+    mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`)?.addEventListener('click', () => {
+        void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`), 'Loading columns…', () => refreshMappingUI());
+    });
+    mapEl.querySelector(`#${opsId(p, 'save-map')}`)?.addEventListener('click', async () => {
+        const saveBtn = mapEl.querySelector(`#${opsId(p, 'save-map')}`);
+        await withButtonBusy(saveBtn, 'Saving…', async () => {
+            const newMap = collectMappingFromForm(mapEl);
+            const headersForValidation = JSON.parse(mapEl.dataset.excelHeaders || '[]');
+            const { errors } = validateMapping(newMap, headersForValidation);
+            if (errors.length) throw new Error(errors.join('\n'));
+            await saveSyncSettings({ column_mapping: newMap });
+            alert('Column mapping saved.');
+            syncOpsCtx.onRefresh();
+        }).catch((e) => alert(e.message));
+    });
+}
+
 async function refreshMappingUI() {
     const mapEl = syncEl('mapping');
     if (!mapEl) return;
@@ -1418,11 +1459,28 @@ async function refreshMappingUI() {
     const p = syncOpsCtx.prefix;
 
     if (!url) {
-        mapEl.innerHTML = '<p class="gate-wizard__hint">Save a spreadsheet URL above, then click <strong>Load columns</strong>.</p>';
+        mapEl.innerHTML = '<p class="gate-wizard__hint">Save a spreadsheet URL above, then column mapping will load automatically.</p>';
         return;
     }
 
-    mapEl.innerHTML = '<p class="gate-wizard__hint"><i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Loading headers...</p>';
+    const hasSaved = hasSavedColumnMapping(settings);
+    const storedMapping = settings?.column_mapping
+        ? normalizeMapping(settings.column_mapping)
+        : null;
+
+    if (hasSaved && storedMapping) {
+        const cachedHeaders = storedMapping.excelHeaders?.length
+            ? storedMapping.excelHeaders
+            : buildHeadersFromMapping(storedMapping);
+        mountMappingUI(
+            mapEl,
+            storedMapping,
+            cachedHeaders,
+            '<p class="gate-wizard__hint sync-mapping-notice"><i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Refreshing Excel headers…</p>',
+        );
+    } else {
+        mapEl.innerHTML = '<p class="gate-wizard__hint"><i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Loading headers...</p>';
+    }
 
     try {
         await ensureOAuthConnected(activeProvider);
@@ -1435,50 +1493,36 @@ async function refreshMappingUI() {
             const rangeA1 = settings?.range_a1 || 'A:J';
             const pull = await fetchGoogleRows({ spreadsheetUrl: url, sheetName, rangeA1 });
             headersRaw = pull.rows?.[0] || [];
+        } else if (hasSaved && storedMapping) {
+            return;
         } else {
             mapEl.innerHTML = '<p class="gate-wizard__hint">Column mapping applies to Microsoft Excel or Google Sheets.</p>';
             return;
         }
 
-        const storedMapping = settings?.column_mapping
-            ? normalizeMapping(settings.column_mapping)
-            : buildMappingFromHeaders(headersRaw);
-        mapEl.innerHTML = renderLedgerMappingUI(storedMapping, headersRaw);
-        wireMappingFormInteractions(mapEl);
-
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'ledger-sync-map__actions';
-        actionsDiv.innerHTML = `
-            <button type="button" class="btn btn-outline btn--small" id="${opsId(p, 'refresh-cols')}">
-                <i class="fa-solid fa-arrows-rotate"></i> Refresh columns
-            </button>
-            <button type="button" class="btn btn-primary btn--small" id="${opsId(p, 'save-map')}">Save mapping</button>
-        `;
-        mapEl.appendChild(actionsDiv);
-
-        mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`)?.addEventListener('click', () => {
-            void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`), 'Loading columns…', () => refreshMappingUI());
-        });
-        mapEl.querySelector(`#${opsId(p, 'save-map')}`)?.addEventListener('click', async () => {
-            const saveBtn = mapEl.querySelector(`#${opsId(p, 'save-map')}`);
-            await withButtonBusy(saveBtn, 'Saving…', async () => {
-                const newMap = collectMappingFromForm(mapEl);
-                const { errors } = validateMapping(newMap, headersRaw);
-                if (errors.length) throw new Error(errors.join('\n'));
-                await saveSyncSettings({ column_mapping: newMap });
-                alert('Column mapping saved.');
-                syncOpsCtx.onRefresh();
-            }).catch((e) => alert(e.message));
-        });
+        const mapping = storedMapping || buildMappingFromHeaders(headersRaw);
+        mountMappingUI(mapEl, mapping, headersRaw);
     } catch (err) {
-        mapEl.innerHTML = `
+        if (hasSaved && storedMapping) {
+            const fallback = storedMapping.excelHeaders?.length
+                ? storedMapping.excelHeaders
+                : buildHeadersFromMapping(storedMapping);
+            mountMappingUI(
+                mapEl,
+                storedMapping,
+                fallback,
+                `<p class="gate-wizard__hint" style="color: var(--error);">Could not refresh Excel headers: ${err.message}. Showing saved mapping from the database — connect in step 4 and click <strong>Load columns</strong> to retry.</p>`,
+            );
+        } else {
+            mapEl.innerHTML = `
             <p class="gate-wizard__hint" style="color: var(--error);">Failed to load headers: ${err.message}</p>
             <button type="button" class="btn btn-outline btn--small" id="${opsId(p, 'refresh-cols-retry')}" style="margin-top:0.5rem;">
                 <i class="fa-solid fa-arrows-rotate"></i> Try again
             </button>`;
-        mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`)?.addEventListener('click', () => {
-            void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`), 'Loading columns…', () => refreshMappingUI());
-        });
+            mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`)?.addEventListener('click', () => {
+                void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`), 'Loading columns…', () => refreshMappingUI());
+            });
+        }
     }
 }
 

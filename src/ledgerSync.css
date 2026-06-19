@@ -646,6 +646,191 @@
   margin-bottom: 0.75rem;
 }
 
+/* ── Directional mapping cards ── */
+.sync-map-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.sync-map-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.sync-map-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.45rem 0.65rem;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.sync-map-card__identity {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.sync-map-card__title {
+  font-size: 0.82rem;
+}
+
+.sync-map-card__db {
+  width: 5.5rem;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.sync-map-card__excel {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.sync-map-card__excel-select,
+.sync-map-card__mode {
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: #fff;
+  max-width: 11rem;
+}
+
+.sync-map-card__mode {
+  margin-left: auto;
+}
+
+.sync-map-card__flows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.55rem 0.5rem;
+}
+
+.sync-map-card__muted {
+  margin: 0;
+  padding: 0.4rem 0.65rem 0.55rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.sync-flow {
+  display: grid;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.sync-flow--ltr {
+  grid-template-columns: 5.5rem auto auto auto auto 1fr;
+}
+
+.sync-flow--rtl {
+  grid-template-columns: 5.5rem 1fr auto auto auto auto;
+}
+
+.sync-flow__dir {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+.sync-flow__db {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.35rem;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: 4px;
+}
+
+.sync-flow__excel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 8rem;
+}
+
+.sync-flow__arrow {
+  color: var(--text-dim);
+  font-weight: 700;
+  text-align: center;
+}
+
+.sync-flow__fn {
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+}
+
+.sync-flow__formula {
+  width: 100%;
+  min-width: 0;
+  padding: 0.22rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #fff;
+}
+
+.sync-map-advanced,
+.sync-excel-overview {
+  margin-top: 0.65rem;
+  font-size: 0.78rem;
+}
+
+.sync-map-advanced summary,
+.sync-excel-overview summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.sync-formula-library__sub {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.sync-excel-col--mapped {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+@media (max-width: 800px) {
+  .sync-flow--ltr,
+  .sync-flow--rtl {
+    grid-template-columns: 1fr;
+  }
+  .sync-flow__dir {
+    grid-column: 1 / -1;
+  }
+  .sync-map-card__mode {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
 .ledger-sync-map {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -732,7 +917,7 @@
 
 .ledger-sync-map__row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.2fr);
+  grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.4fr);
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
@@ -749,10 +934,303 @@
   color: var(--text-dim);
 }
 
+.sync-map-intro {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+
+.sync-formula-library {
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt, #f8fafc);
+}
+
+.sync-formula-library summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.sync-formula-library__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  list-style: none;
+}
+
+.sync-fn-help-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary, #2563eb);
+  text-decoration: none;
+}
+
+.sync-fn-help-link:hover {
+  text-decoration: underline;
+}
+
+.sync-fn-help {
+  margin: 0.5rem 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--primary, #2563eb) 18%, var(--border));
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sync-fn-help--flash {
+  animation: sync-fn-help-flash 1.2s ease;
+}
+
+@keyframes sync-fn-help-flash {
+  0%, 100% { box-shadow: none; }
+  20% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary, #2563eb) 25%, transparent); }
+}
+
+.sync-fn-ref-table {
+  width: 100%;
+  margin: 0.5rem 0 0.65rem;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.sync-fn-ref-table th,
+.sync-fn-ref-table td {
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.sync-fn-ref-table th {
+  background: color-mix(in srgb, var(--text) 5%, #fff);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+.sync-fn-ref-fields-wrap {
+  margin: 0 0 0.65rem;
+  font-size: 0.75rem;
+}
+
+.sync-fn-ref-fields-wrap summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.sync-fn-ref-fields {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  columns: 2;
+  column-gap: 1.5rem;
+}
+
+.sync-fn-help__store {
+  margin-bottom: 0;
+}
+
+.sync-fn-help__expr {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 4%, #fff);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sync-code-sample {
+  margin: 0.45rem 0 0.55rem;
+}
+
+.sync-code-sample__label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  margin-bottom: 0.25rem;
+}
+
+.sync-code-sample__pre {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  overflow-x: auto;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.sync-code-sample__pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre;
+}
+
+.sync-code-editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.sync-code-editor__input {
+  display: block;
+  width: 100%;
+  min-height: 5rem;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  resize: vertical;
+  background: transparent;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  tab-size: 2;
+}
+
+.sync-code-editor__input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary, #2563eb) 45%, transparent);
+}
+
+.sync-code-editor__input::placeholder {
+  color: #64748b;
+}
+
+.sync-formula-library__hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin: 0.35rem 0 0.5rem;
+}
+
+.sync-snippet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.sync-snippet-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr auto;
+  gap: 0.5rem;
+  align-items: start;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sync-snippet-row__label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+
+.sync-snippet-row__name-wrap,
+.sync-snippet-row__editor-wrap {
+  min-width: 0;
+}
+
+.sync-snippet-row__name {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.sync-snippet-row__del {
+  margin-top: 1.35rem;
+  min-width: 2rem;
+  padding-inline: 0.35rem;
+}
+
+.sync-fn-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
 .ledger-sync-map__controls {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.ledger-sync-map__control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.ledger-sync-map__control-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.ledger-sync-map__mode-help {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  line-height: 1.3;
+  min-height: 2.4em;
+}
+
+.ledger-sync-map__formula-row {
+  display: grid;
+  grid-template-columns: 5.25rem 1fr 9.5rem;
   gap: 0.35rem;
+  align-items: center;
+}
+
+.ledger-sync-map__formula {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #fff;
+}
+
+@media (max-width: 720px) {
+  .ledger-sync-map__controls {
+    grid-template-columns: 1fr;
+  }
+  .ledger-sync-map__formula-row {
+    grid-template-columns: 1fr;
+  }
+  .sync-snippet-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ledger-sync-map__mode {
