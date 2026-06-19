@@ -19,6 +19,9 @@ const RETURN_HASH_KEY = 'ledger_oauth_return_hash';
 const MS_OAUTH_PENDING_KEY = 'ms_oauth_pending';
 const MS_OAUTH_RESULT_KEY = 'ms_oauth_result';
 const MS_OAUTH_ERROR_KEY = 'ms_oauth_error';
+const MS_WEB_OAUTH_PENDING_KEY = 'ms_web_oauth_pending';
+const SERVICE_MS_OAUTH_PENDING_KEY = 'ms_service_oauth_pending';
+const SERVICE_GOOGLE_OAUTH_PENDING_KEY = 'google_service_oauth_pending';
 
 export function getAppRedirectUri() {
     return `${window.location.origin}${window.location.pathname}`;
@@ -68,7 +71,30 @@ export function getMyOAuthConnectionMeta(provider) {
         connected_at: c.connected_at,
         token_expires_at: c.token_expires_at,
         is_expired: c.token_expires_at && new Date(c.token_expires_at) <= new Date(),
+        background_capable: provider === 'GOOGLE'
+            ? true
+            : !!(c.account_meta?.background_capable),
     };
+}
+
+export function getServiceAccountStatus(provider) {
+    return (portalState.finances?.syncServiceAccounts || []).find((c) => c.provider === provider) || null;
+}
+
+export function getServiceAccountMeta(provider) {
+    const c = getServiceAccountStatus(provider);
+    if (!c) return null;
+    return {
+        account_email: c.account_email,
+        connected_at: c.connected_at,
+        token_expires_at: c.token_expires_at,
+        has_refresh_token: !!c.has_refresh_token,
+        is_expired: c.token_expires_at && new Date(c.token_expires_at) <= new Date(),
+    };
+}
+
+export function oauthAppHasClientSecret(provider) {
+    return !!getOAuthApp(provider)?.client_secret_set;
 }
 
 export async function saveOAuthApp({ provider, client_id, tenant_id, client_secret }) {
@@ -83,18 +109,25 @@ export async function saveOAuthApp({ provider, client_id, tenant_id, client_secr
         .eq('apartment_id', apartment_id)
         .eq('provider', provider)
         .maybeSingle();
-    const { error } = await supabase.from('ledger_sync_oauth_apps').upsert({
+
+    const secretTrimmed = client_secret?.trim();
+    const row = {
         id: existing?.id || crypto.randomUUID(),
         apartment_id,
         provider,
         client_id: client_id.trim(),
-        client_secret: client_secret?.trim() || null,
         tenant_id: (tenant_id || 'common').trim(),
         redirect_uri: provider === 'MICROSOFT' ? getMicrosoftRedirectUri() : redirectUri(),
         enabled: true,
         configured_by: user?.id,
         updated_at: new Date().toISOString(),
-    }, { onConflict: 'apartment_id,provider' });
+    };
+    if (secretTrimmed) {
+        row.client_secret = secretTrimmed;
+        row.client_secret_set = true;
+    }
+
+    const { error } = await supabase.from('ledger_sync_oauth_apps').upsert(row, { onConflict: 'apartment_id,provider' });
     if (error) throw new Error(error.message);
     await pullState();
 }
@@ -221,7 +254,7 @@ export async function completeGoogleOAuthCallback(code) {
         token_expires_at: expiresAt,
         scopes: GOOGLE_SHEETS_SCOPE,
         provider_account_id: accountEmail,
-        account_meta: {},
+        account_meta: { background_capable: true },
     });
 
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
@@ -299,6 +332,11 @@ export async function startMicrosoftConnect() {
         throw new Error('Microsoft OAuth is not configured for this society. An accounts manager must add the Application (client) ID first.');
     }
 
+    // When a client secret is saved, use web OAuth so refresh_token is stored for cron sync.
+    if (app.client_secret_set) {
+        return startMicrosoftWebConnect();
+    }
+
     const pending = {
         client_id: app.client_id,
         tenant_id: app.tenant_id || 'common',
@@ -346,8 +384,169 @@ async function saveMicrosoftConnection(result, apartmentIdOverride) {
             home_account_id: result.home_account_id || result.account?.homeAccountId,
             tenant_id: result.tenant_id || result.account?.tenantId,
             username: result.username || result.account?.username,
+            background_capable: false,
+            web_oauth: false,
         },
     }, apartmentIdOverride);
+}
+
+/** Web OAuth (client secret) — stores refresh_token for background cron sync. */
+export async function startMicrosoftWebConnect() {
+    const app = getOAuthApp('MICROSOFT');
+    if (!app?.client_id) {
+        throw new Error('Microsoft OAuth is not configured for this society.');
+    }
+    if (!app.client_secret_set) {
+        throw new Error('Save a Microsoft Client Secret first (Administration → Spreadsheet Sync).');
+    }
+
+    const verifier = randomVerifier();
+    const challenge = await pkceChallenge(verifier);
+    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    sessionStorage.setItem(MS_WEB_OAUTH_PENDING_KEY, JSON.stringify({
+        apartment_id: portalState.access?.activeApartmentId,
+        return_hash: window.location.hash || '#admin-sync',
+    }));
+    sessionStorage.setItem(RETURN_HASH_KEY, window.location.hash || '#admin-sync');
+
+    const redirectUri = getMicrosoftRedirectUri();
+    const tenant = app.tenant_id || 'common';
+    const params = new URLSearchParams({
+        client_id: app.client_id,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        scope: MS_SCOPES.join(' '),
+        response_mode: 'query',
+        prompt: 'consent',
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+    });
+    window.location.href = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params}`;
+}
+
+/** Connect a dedicated Microsoft account for background cron sync (not tied to app user). */
+export async function startServiceAccountMicrosoftConnect() {
+    const app = getOAuthApp('MICROSOFT');
+    if (!app?.client_id) {
+        throw new Error('Microsoft OAuth is not configured for this society.');
+    }
+    if (!app.client_secret_set) {
+        throw new Error('Save a Microsoft Client Secret first — required for background sync.');
+    }
+
+    const verifier = randomVerifier();
+    const challenge = await pkceChallenge(verifier);
+    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    sessionStorage.setItem(SERVICE_MS_OAUTH_PENDING_KEY, JSON.stringify({
+        apartment_id: portalState.access?.activeApartmentId,
+        return_hash: window.location.hash || '#admin-sync',
+    }));
+    sessionStorage.setItem(RETURN_HASH_KEY, window.location.hash || '#admin-sync');
+
+    const redirectUri = getMicrosoftRedirectUri();
+    const tenant = app.tenant_id || 'common';
+    const params = new URLSearchParams({
+        client_id: app.client_id,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        scope: MS_SCOPES.join(' '),
+        response_mode: 'query',
+        prompt: 'consent',
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+    });
+    window.location.href = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params}`;
+}
+
+/** Connect a dedicated Google account for background cron sync (not tied to app user). */
+export async function startServiceAccountGoogleConnect() {
+    const app = getOAuthApp('GOOGLE');
+    if (!app?.client_id) {
+        throw new Error('Google OAuth is not configured for this society.');
+    }
+    if (!oauthAppHasClientSecret('GOOGLE')) {
+        throw new Error('Save a Google Client Secret first — required for background sync token refresh.');
+    }
+
+    const verifier = randomVerifier();
+    const challenge = await pkceChallenge(verifier);
+    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    sessionStorage.setItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY, JSON.stringify({
+        apartment_id: portalState.access?.activeApartmentId,
+        return_hash: window.location.hash || '#admin-sync',
+    }));
+    sessionStorage.setItem(RETURN_HASH_KEY, window.location.hash || '#admin-sync');
+
+    const params = new URLSearchParams({
+        client_id: app.client_id,
+        redirect_uri: app.redirect_uri || redirectUri(),
+        response_type: 'code',
+        scope: 'https://www.googleapis.com/auth/spreadsheets',
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        access_type: 'offline',
+        prompt: 'consent',
+        include_granted_scopes: 'true',
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+export async function disconnectServiceAccount(provider) {
+    if (!hasClientPermission('accounts.edit')) {
+        throw new Error('Only accounts managers can disconnect the service account.');
+    }
+    const apartment_id = portalState.access?.activeApartmentId;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Sign in again to disconnect the service account.');
+
+    const res = await fetch('/api/oauth-service', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: 'disconnect', apartment_id, provider }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Could not disconnect service account.');
+    await pullState();
+}
+
+async function completeServiceAccountGoogleCallback(code) {
+    const pendingRaw = sessionStorage.getItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY);
+    if (!pendingRaw) throw new Error('Google service-account session expired. Try again.');
+    const pending = JSON.parse(pendingRaw);
+    const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+        throw new Error('Sign in to CommunityHub before connecting the service account.');
+    }
+
+    const res = await fetch('/api/oauth-service', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+            action: 'google_exchange',
+            code,
+            apartment_id: pending.apartment_id,
+            redirect_uri: getAppRedirectUri(),
+            code_verifier: verifier,
+        }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Google service account connect failed.');
+
+    sessionStorage.removeItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY);
+    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    await pullState();
+
+    const hash = pending.return_hash || '#admin-sync';
+    window.history.replaceState({}, '', `${window.location.pathname}${hash}`);
 }
 
 async function completeMicrosoftOAuth() {
@@ -507,8 +706,23 @@ export async function handleOAuthRedirectIfPresent() {
     const code = params.get('code');
     const error = params.get('error');
     const pending = sessionStorage.getItem(OAUTH_PENDING_KEY);
+    const serviceGooglePending = sessionStorage.getItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY);
 
     console.log('handleOAuthRedirectIfPresent: checking URL and storage...');
+
+    if (error && serviceGooglePending) {
+        sessionStorage.removeItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY);
+        sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+        const hash = sessionStorage.getItem(RETURN_HASH_KEY) || '#admin-sync';
+        sessionStorage.removeItem(RETURN_HASH_KEY);
+        window.history.replaceState({}, '', `${window.location.pathname}${hash}`);
+        throw new Error(params.get('error_description') || error);
+    }
+
+    if (code && serviceGooglePending) {
+        await completeServiceAccountGoogleCallback(code);
+        return true;
+    }
 
     // 1. Handle Google (Query-based)
     if (error && pending === 'GOOGLE') {

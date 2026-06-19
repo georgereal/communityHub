@@ -37,6 +37,47 @@ const INCOME_CATS = [
     'Other Income',
 ];
 
+/** Extra fields shown on Record Income for specific income types (stored as vendor_name / vendor_invoice). */
+const INCOME_EXTRA_BY_CAT = {
+    Promotion: {
+        hint: 'Who sponsored or paid for this promotion?',
+        vendor: {
+            label: 'Sponsor / vendor',
+            placeholder: 'e.g. ABC Builders, Local supermarket',
+            required: true,
+        },
+        reference: {
+            label: 'Contract / reference',
+            placeholder: 'e.g. Banner agreement #12',
+        },
+    },
+    Marketing: {
+        hint: 'Which event or vendor is this income linked to?',
+        vendor: {
+            label: 'Event / vendor',
+            placeholder: 'e.g. Diwali carnival, Food festival vendor',
+        },
+        reference: {
+            label: 'Event reference',
+            placeholder: 'e.g. Stall #4, 15 Jun event',
+        },
+    },
+    'Other Income': {
+        hint: 'Optional — who paid or what is this income for?',
+        vendor: {
+            label: 'Received from',
+            placeholder: 'e.g. Tenant deposit, Ad hoc refund',
+        },
+    },
+    Interest: {
+        hint: 'Optional — note the bank account or statement period.',
+        reference: {
+            label: 'Period / account',
+            placeholder: 'e.g. Q1 2026 savings account',
+        },
+    },
+};
+
 const SUB_CAT_SUGGESTIONS = {
     Maintenance: ['Lift / Elevator', 'Generator', 'Housekeeping', 'Painting', 'Landscaping', 'Pest control'],
     Security: ['Guard salary', 'Uniforms', 'CCTV'],
@@ -137,12 +178,79 @@ const populateVendorDatalist = () => {
     if (!vendors.length) {
         vendors = [...new Set(
             portalState.finances.txns
-                .filter((t) => t.type === 'OUT' && t.vendor_name)
+                .filter((t) => t.vendor_name)
                 .map((t) => t.vendor_name.trim()),
         )];
     }
     vendors = [...new Set(vendors)].sort((a, b) => a.localeCompare(b));
     list.innerHTML = vendors.map((v) => `<option value="${v}"></option>`).join('');
+
+    const incomeList = document.getElementById('income-vendor-datalist');
+    if (incomeList) incomeList.innerHTML = list.innerHTML;
+};
+
+export const syncIncomeExtraSection = (catKey, txn = null) => {
+    const section = document.getElementById('income-extra-section');
+    if (!section) return;
+
+    const config = INCOME_EXTRA_BY_CAT[catKey];
+    const vendorWrap = document.getElementById('income-extra-vendor-wrap');
+    const refWrap = document.getElementById('income-extra-ref-wrap');
+    const vendorInput = document.getElementById('income-vendor-input');
+    const refInput = document.getElementById('income-reference-input');
+    const hintEl = document.getElementById('income-extra-hint');
+    const prevCat = section.dataset.incomeExtraCat;
+
+    if (!config) {
+        section.hidden = true;
+        if (vendorWrap) vendorWrap.hidden = true;
+        if (refWrap) refWrap.hidden = true;
+        if (vendorInput) vendorInput.value = '';
+        if (refInput) refInput.value = '';
+        section.dataset.incomeExtraCat = catKey;
+        return;
+    }
+
+    if (!txn && prevCat && prevCat !== catKey) {
+        if (vendorInput) vendorInput.value = '';
+        if (refInput) refInput.value = '';
+    }
+
+    section.hidden = false;
+    section.dataset.incomeExtraCat = catKey;
+    if (hintEl) hintEl.textContent = config.hint || '';
+
+    if (config.vendor && vendorWrap && vendorInput) {
+        vendorWrap.hidden = false;
+        const vendorLabel = document.getElementById('income-vendor-label');
+        if (vendorLabel) {
+            vendorLabel.innerHTML = `${config.vendor.label}${config.vendor.required ? '' : ' <span class="expense-optional">(optional)</span>'}`;
+        }
+        vendorInput.placeholder = config.vendor.placeholder || '';
+        vendorInput.required = !!config.vendor.required;
+        if (txn) vendorInput.value = txn.vendor_name || '';
+    } else if (vendorWrap) {
+        vendorWrap.hidden = true;
+        if (vendorInput) {
+            vendorInput.value = '';
+            vendorInput.required = false;
+        }
+    }
+
+    if (config.reference && refWrap && refInput) {
+        refWrap.hidden = false;
+        const refLabel = document.getElementById('income-reference-label');
+        if (refLabel) {
+            refLabel.innerHTML = `${config.reference.label} <span class="expense-optional">(optional)</span>`;
+        }
+        refInput.placeholder = config.reference.placeholder || '';
+        if (txn) refInput.value = txn.vendor_invoice || '';
+    } else if (refWrap) {
+        refWrap.hidden = true;
+        if (refInput) refInput.value = '';
+    }
+
+    populateVendorDatalist();
 };
 
 export const refreshExpenseReferences = async () => {
@@ -486,12 +594,13 @@ export const initExpenseModal = () => {
     const incomeCatInput = document.getElementById('income-cat-input');
     if (incomeCatInput && !incomeCatInput.dataset.wired) {
         incomeCatInput.dataset.wired = '1';
-        const syncMaint = () => {
+        const syncIncomeSections = () => {
             const cat = resolveCategory(incomeCatInput.value, INCOME_CATS);
             syncMaintenanceIncomeSection(cat, portalState.editingTxnId);
+            syncIncomeExtraSection(cat);
         };
-        incomeCatInput.addEventListener('change', syncMaint);
-        incomeCatInput.addEventListener('input', syncMaint);
+        incomeCatInput.addEventListener('change', syncIncomeSections);
+        incomeCatInput.addEventListener('input', syncIncomeSections);
     }
 
     const billInput = document.getElementById('cash-bill');
@@ -575,15 +684,20 @@ export const renderCashLedger = () => {
         const amt = parseFloat(t.amount).toLocaleString('en-IN');
         const dr = t.type === 'OUT' ? `₹${amt}` : '';
         const cr = t.type === 'IN' ? `₹${amt}` : '';
-        const row = document.createElement('div'); row.className = 'apt-row';
-        row.style = "grid-template-columns: 100px 100px 140px 1fr 90px 90px 100px; padding: 0.85rem 1rem; align-items: center; border-bottom: 1px solid var(--border);";
-        row.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim);">${new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
-           <div><span style="font-size:0.6rem; font-weight:900; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:4px;">${t.wallet}</span> ${reconBadge}</div>
-           <div><span style="font-size:0.6rem; font-weight:800; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:100px;">${getLabel(t.cat)}</span></div>
-           <div style="font-size:0.85rem; font-weight:700;">${detail}</div>
-           <div style="text-align:right; font-weight:900; color:var(--danger);">${dr}</div>
-           <div style="text-align:right; font-weight:900; color:var(--success);">${cr}</div>
-           <div style="text-align:right; display:flex; gap:0.4rem; justify-content:flex-end;">${receiptBtn}<button class="btn btn-outline" style="padding:0.2rem 0.4rem;" onclick="window.editTxn('${t.id}')"><i class="fa-solid fa-pen"></i></button><button class="btn btn-outline" style="padding:0.2rem 0.4rem; color:var(--danger);" onclick="window.delTxn('${t.id}')"><i class="fa-solid fa-trash-can"></i></button></div>`;
+        const amountClass = t.type === 'IN' ? 'ledger-txn-row__amount--in' : 'ledger-txn-row__amount--out';
+        const amountText = t.type === 'IN' ? cr : dr;
+        const row = document.createElement('div');
+        row.className = 'apt-row ledger-txn-row';
+        row.innerHTML = `<div class="ledger-txn-row__date">${new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+           <div class="ledger-txn-row__meta">
+             <div class="ledger-txn-row__wallet"><span class="ledger-txn-chip ledger-txn-chip--wallet">${t.wallet}</span> ${reconBadge}</div>
+             <div class="ledger-txn-row__cat"><span class="ledger-txn-chip ledger-txn-chip--cat">${getLabel(t.cat)}</span></div>
+           </div>
+           <div class="ledger-txn-row__desc">${detail || '<span class="ledger-txn-row__desc-empty">—</span>'}</div>
+           <div class="ledger-txn-row__dr">${dr}</div>
+           <div class="ledger-txn-row__cr">${cr}</div>
+           <div class="ledger-txn-row__amount ${amountClass}">${amountText}</div>
+           <div class="ledger-txn-row__actions">${receiptBtn}<button class="btn btn-outline ledger-txn-row__action-btn" type="button" onclick="window.editTxn('${t.id}')"><i class="fa-solid fa-pen" aria-hidden="true"></i></button><button class="btn btn-outline ledger-txn-row__action-btn ledger-txn-row__action-btn--danger" type="button" onclick="window.delTxn('${t.id}')"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button></div>`;
         list.appendChild(row);
     });
 };
@@ -736,15 +850,35 @@ export const saveCashData = async () => {
 
     const amt = parseFloat(amtEl?.value);
     const desc = descEl?.value?.trim() || null;
-    const vendor_name = !isIncome ? (vendorEl?.value?.trim() || null) : null;
-    const vendor_invoice = !isIncome ? (invoiceEl?.value?.trim() || null) : null;
     const cat = resolveCategory(catInput?.value, isIncome ? INCOME_CATS : EXPENSE_CATS);
     const wallet = getActiveWallet(walletContainer);
     const sub_category = !isIncome ? (subCatEl?.value?.trim() || null) : null;
     const bank_payment_type = wallet === 'BANK' ? getActiveBankType() : null;
     const bank_reference = wallet === 'BANK' ? (bankRefEl?.value?.trim() || null) : null;
+
+    let vendor_name = null;
+    let vendor_invoice = null;
+    if (!isIncome) {
+        vendor_name = vendorEl?.value?.trim() || null;
+        vendor_invoice = invoiceEl?.value?.trim() || null;
+    } else {
+        const extra = INCOME_EXTRA_BY_CAT[cat];
+        if (extra?.vendor) {
+            vendor_name = document.getElementById('income-vendor-input')?.value?.trim() || null;
+        }
+        if (extra?.reference) {
+            vendor_invoice = document.getElementById('income-reference-input')?.value?.trim() || null;
+        }
+    }
+
     if (isNaN(amt) || amt <= 0) return alert('Enter a valid amount.');
     if (!isIncome && !vendor_name) return alert('Enter the vendor name.');
+    if (isIncome) {
+        const extra = INCOME_EXTRA_BY_CAT[cat];
+        if (extra?.vendor?.required && !vendor_name) {
+            return alert(`Enter ${extra.vendor.label.toLowerCase()}.`);
+        }
+    }
     const allocCheck = validateMaintenanceAllocations(amt, cat);
     if (allocCheck !== true) return alert(allocCheck);
     if (wallet === 'BANK') {
@@ -969,6 +1103,8 @@ const openIncomeFormDefaults = (wallet = 'CASH', catKey = 'Maintenance Collectio
     document.getElementById('income-date').value = todayISO();
     document.getElementById('income-cat-input').value = labelForCat(catKey);
     document.getElementById('maintenance-unit-input').value = '';
+    document.getElementById('income-vendor-input').value = '';
+    document.getElementById('income-reference-input').value = '';
     syncWalletPills('income-wallet-pills', wallet);
     syncBankTypePills('CHEQUE');
     document.getElementById('income-bank-ref').value = '';
@@ -978,6 +1114,7 @@ const openIncomeFormDefaults = (wallet = 'CASH', catKey = 'Maintenance Collectio
     document.getElementById('cash-wallet-select').value = wallet;
     resetReceiptUI([]);
     syncMaintenanceIncomeSection(catKey);
+    syncIncomeExtraSection(catKey);
 };
 
 window.openIncome = (wallet = 'CASH') => {
@@ -1006,6 +1143,7 @@ window.openBankSnapshot = () => {
     document.getElementById('save-cash-btn').textContent = 'Save Sync';
     syncBankWalletUI();
     syncMaintenanceIncomeSection('Reconcile');
+    syncIncomeExtraSection('Reconcile');
 };
 
 window.openCash = (direction = 'OUT', wallet = 'CASH') => {
@@ -1045,6 +1183,7 @@ window.editTxn = (id) => {
         syncBankWalletUI();
         resetReceiptUI([]);
         syncMaintenanceIncomeSection(t.cat, id);
+        syncIncomeExtraSection(t.cat, t);
     } else {
         document.getElementById('expense-form-view').style.display = 'grid';
         document.getElementById('income-form-view').style.display = 'none';

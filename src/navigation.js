@@ -140,17 +140,33 @@ export const NAV_MODULES = [
         label: 'Finance',
         icon: 'fa-coins',
         navEntries: [
-            { route: 'finance-billing-list' },
-            { route: 'finance-billing-flats' },
-            { route: 'finance-billing-collections' },
-            { route: 'finance-billing-batches' },
-            { route: 'finance-billing-aging' },
+            {
+                tabbed: true,
+                label: 'Invoices',
+                icon: 'fa-file-invoice',
+                defaultRoute: 'finance-billing-list',
+                routes: [
+                    'finance-billing-list',
+                    'finance-billing-flats',
+                    'finance-billing-collections',
+                    'finance-billing-batches',
+                    'finance-billing-aging',
+                ],
+            },
             { route: 'finance-parking-fines' },
-            { route: 'finance-ledger' },
-            { route: 'finance-bank-recon' },
-            { route: 'finance-activity' },
-            { route: 'finance-reports' },
-            { route: 'finance-gl' },
+            {
+                tabbed: true,
+                label: 'Income & Expenses',
+                icon: 'fa-book',
+                defaultRoute: 'finance-ledger',
+                routes: [
+                    'finance-ledger',
+                    'finance-bank-recon',
+                    'finance-activity',
+                    'finance-reports',
+                    'finance-gl',
+                ],
+            },
         ],
         pages: [
             {
@@ -178,6 +194,7 @@ export const NAV_MODULES = [
                 view: 'invoices',
                 subview: 'by-flat',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
             {
                 route: 'finance-billing-collections',
@@ -186,6 +203,7 @@ export const NAV_MODULES = [
                 view: 'invoices',
                 subview: 'collections',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
             {
                 route: 'finance-billing-batches',
@@ -194,6 +212,7 @@ export const NAV_MODULES = [
                 view: 'invoices',
                 subview: 'batches',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
             {
                 route: 'finance-billing-aging',
@@ -202,6 +221,7 @@ export const NAV_MODULES = [
                 view: 'invoices',
                 subview: 'aging',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
             {
                 route: 'finance-parking-fines',
@@ -218,6 +238,7 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'bank-recon',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
             {
                 route: 'finance-activity',
@@ -227,6 +248,7 @@ export const NAV_MODULES = [
                 subview: 'activity',
                 permission: 'accounts.view',
                 altPermissions: ['rbac.view'],
+                hideFromNav: true,
             },
             {
                 route: 'finance-reports',
@@ -236,6 +258,7 @@ export const NAV_MODULES = [
                 subview: 'reports',
                 permission: 'accounts.view',
                 legacy: ['treasury-reports'],
+                hideFromNav: true,
             },
             {
                 route: 'finance-gl',
@@ -244,6 +267,7 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'gl',
                 permission: 'accounts.edit',
+                hideFromNav: true,
             },
         ],
     },
@@ -372,7 +396,7 @@ const getModuleNavEntries = (mod) => {
         }];
     }
     if (mod.navEntries?.length) return mod.navEntries;
-    return mod.pages.map((p) => ({ route: p.route }));
+    return mod.pages.filter((p) => !p.hideFromNav).map((p) => ({ route: p.route }));
 };
 
 const navEntryRoute = (entry) => (entry.tabbed ? entry.defaultRoute : entry.route);

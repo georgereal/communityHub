@@ -2,71 +2,184 @@ import { createClient } from '@supabase/supabase-js';
 
 // Vercel Serverless Function for background ledger sync
 export default async function handler(req, res) {
-    // 1. Auth check (Cron secret or similar)
-    const authHeader = req.headers.authorization;
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-        return res.status(401).json({ error: 'Unauthorized' });
+    if (req.method !== 'GET' && req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    const authHeader = req.headers.authorization || '';
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !supabaseServiceKey) {
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
         return res.status(500).json({ error: 'Missing Supabase environment variables.' });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const service = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Mode A: Cron secret — sync all due societies.
+    const isCron = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
+    if (isCron) {
+        try {
+            const { data: settings, error: settingsError } = await service
+                .from('ledger_sync_settings')
+                .select('*, apartments(name)')
+                .gt('sync_interval_minutes', 0);
+
+            if (settingsError) throw settingsError;
+
+            const results = [];
+            for (const s of settings) {
+                try {
+                    const lastSynced = s.last_synced_at ? new Date(s.last_synced_at) : new Date(0);
+                    const now = new Date();
+                    const diffMins = (now - lastSynced) / (1000 * 60);
+
+                    if (diffMins < s.sync_interval_minutes) {
+                        results.push({ apartment: s.apartments?.name, status: 'SKIPPED', message: 'Too soon' });
+                        continue;
+                    }
+
+                    const result = await performSync(service, s);
+                    results.push({ apartment: s.apartments?.name, status: 'OK', result });
+                } catch (err) {
+                    console.error(`Sync failed for ${s.apartments?.name}:`, err);
+                    results.push({ apartment: s.apartments?.name, status: 'ERROR', message: err.message });
+
+                    await service.from('ledger_sync_settings').update({
+                        last_sync_status: 'ERROR',
+                        last_sync_message: `Background sync failed: ${err.message}`,
+                        last_synced_at: new Date().toISOString(),
+                    }).eq('apartment_id', s.apartment_id);
+                }
+            }
+
+            return res.status(200).json({ results });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+
+    // Mode B: Admin test button — uses Supabase session JWT.
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const token = authHeader.slice('Bearer '.length);
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) {
+        return res.status(401).json({ error: 'Invalid session.' });
+    }
+
+    const apartment_id = req.body?.apartment_id;
+    if (!apartment_id) {
+        return res.status(400).json({ error: 'apartment_id is required.' });
+    }
+
+    const allowed = await userCanAccountsEdit(service, user.id, apartment_id);
+    if (!allowed) {
+        return res.status(403).json({ error: 'Not permitted.' });
+    }
 
     try {
-        // 2. Find all societies that have auto-sync enabled
-        const { data: settings, error: settingsError } = await supabase
+        const { data: settings, error: settingsError } = await service
             .from('ledger_sync_settings')
-            .select('*, apartments(name)')
-            .gt('sync_interval_minutes', 0);
-
+            .select('*')
+            .eq('apartment_id', apartment_id)
+            .maybeSingle();
         if (settingsError) throw settingsError;
-
-        const results = [];
-
-        for (const s of settings) {
-            try {
-                // Check if it's time to sync
-                const lastSynced = s.last_synced_at ? new Date(s.last_synced_at) : new Date(0);
-                const now = new Date();
-                const diffMins = (now - lastSynced) / (1000 * 60);
-
-                if (diffMins < s.sync_interval_minutes) {
-                    results.push({ apartment: s.apartments?.name, status: 'SKIPPED', message: 'Too soon' });
-                    continue;
-                }
-
-                // Perform sync for this society
-                const result = await performSync(supabase, s);
-                results.push({ apartment: s.apartments?.name, status: 'OK', result });
-            } catch (err) {
-                console.error(`Sync failed for ${s.apartments?.name}:`, err);
-                results.push({ apartment: s.apartments?.name, status: 'ERROR', message: err.message });
-                
-                // Update status in DB
-                await supabase.from('ledger_sync_settings').update({
-                    last_sync_status: 'ERROR',
-                    last_sync_message: `Background sync failed: ${err.message}`,
-                    last_synced_at: new Date().toISOString()
-                }).eq('apartment_id', s.apartment_id);
-            }
+        if (!settings) {
+            return res.status(400).json({ error: 'Spreadsheet sync is not configured for this society yet.' });
         }
 
-        return res.status(200).json({ results });
+        const result = await performSync(service, settings);
+        return res.status(200).json({ ok: true, result });
     } catch (err) {
+        await service.from('ledger_sync_settings').update({
+            last_sync_status: 'ERROR',
+            last_sync_message: `Manual server sync failed: ${err.message}`,
+            last_synced_at: new Date().toISOString(),
+        }).eq('apartment_id', apartment_id);
         return res.status(500).json({ error: err.message });
     }
 }
 
-async function performSync(supabase, settings) {
-    const { apartment_id, provider, last_synced_by } = settings;
-    if (!last_synced_by) throw new Error('No user associated with last sync.');
+async function userCanAccountsEdit(supabase, userId, apartmentId) {
+    // v2 RBAC first
+    try {
+        const { data: roles } = await supabase
+            .from('user_role_assignments')
+            .select('role_key, scope, apartment_id')
+            .eq('user_id', userId);
 
-    // 1. Get OAuth App config
+        const aptRoleKeys = (roles || [])
+            .filter((r) => r.scope === 'apartment' && String(r.apartment_id) === String(apartmentId))
+            .map((r) => r.role_key);
+
+        if (aptRoleKeys.length) {
+            const { data: rp } = await supabase
+                .from('role_permissions')
+                .select('permission_key')
+                .in('role_key', aptRoleKeys);
+            const perms = new Set((rp || []).map((x) => x.permission_key));
+            if (perms.has('accounts.edit')) return true;
+        }
+    } catch {
+        // ignore, fall back to v1
+    }
+
+    // v1 fallback
+    const { data: prof } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+    return ['admin', 'accounts_manager'].includes(prof?.role);
+}
+
+async function resolveSyncCredentials(supabase, settings) {
+    const { apartment_id, provider, last_synced_by } = settings;
+
+    const { data: serviceConn, error: serviceError } = await supabase
+        .from('ledger_sync_service_accounts')
+        .select('*')
+        .eq('apartment_id', apartment_id)
+        .eq('provider', provider)
+        .maybeSingle();
+
+    if (serviceError) throw serviceError;
+    if (serviceConn) {
+        const { data: app, error: appError } = await supabase
+            .from('ledger_sync_oauth_apps')
+            .select('*')
+            .eq('apartment_id', apartment_id)
+            .eq('provider', provider)
+            .maybeSingle();
+        if (appError || !app) throw new Error('OAuth app not configured for this society.');
+        return { conn: serviceConn, app, connTable: 'ledger_sync_service_accounts' };
+    }
+
+    // Legacy fallback: last user who ran a manual sync
+    if (!last_synced_by) {
+        throw new Error('No service account configured. Connect a dedicated sync account in Administration → Spreadsheet Sync.');
+    }
+
+    const { data: userConn, error: connError } = await supabase
+        .from('user_oauth_connections')
+        .select('*')
+        .eq('user_id', last_synced_by)
+        .eq('apartment_id', apartment_id)
+        .eq('provider', provider)
+        .maybeSingle();
+
+    if (connError || !userConn) {
+        throw new Error('Service account not configured and legacy user connection is missing.');
+    }
+
     const { data: app, error: appError } = await supabase
         .from('ledger_sync_oauth_apps')
         .select('*')
@@ -75,27 +188,21 @@ async function performSync(supabase, settings) {
         .maybeSingle();
 
     if (appError || !app) throw new Error('OAuth app not configured for this society.');
+    return { conn: userConn, app, connTable: 'user_oauth_connections' };
+}
 
-    // 2. Get User Connection
-    const { data: conn, error: connError } = await supabase
-        .from('user_oauth_connections')
-        .select('*')
-        .eq('user_id', last_synced_by)
-        .eq('apartment_id', apartment_id)
-        .eq('provider', provider)
-        .maybeSingle();
-
-    if (connError || !conn) throw new Error('User connection not found.');
-
-    // 3. Refresh Token if needed
+async function performSync(supabase, settings) {
+    const { apartment_id, provider } = settings;
+    const { conn, app, connTable } = await resolveSyncCredentials(supabase, settings);
+    // Refresh token if needed
     let accessToken = conn.access_token;
     const expired = conn.token_expires_at && new Date(conn.token_expires_at) <= new Date(Date.now() + 60000);
-    
+
     if (expired) {
-        accessToken = await refreshToken(supabase, conn, app);
+        accessToken = await refreshToken(supabase, conn, app, connTable);
     }
 
-    // 4. Pull from Spreadsheet
+    // Pull from spreadsheet
     let rows = [];
     let etag = null;
     let driveId, itemId, shareId, useSharesApi;
@@ -171,17 +278,19 @@ async function performSync(supabase, settings) {
     return { imported, updated, pushed };
 }
 
-async function refreshToken(supabase, conn, app) {
+async function refreshToken(supabase, conn, app, connTable = 'user_oauth_connections') {
     let res, json;
     if (conn.provider === 'GOOGLE') {
+        const params = {
+            client_id: app.client_id,
+            refresh_token: conn.refresh_token,
+            grant_type: 'refresh_token',
+        };
+        if (app.client_secret) params.client_secret = app.client_secret;
         res = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                client_id: app.client_id,
-                refresh_token: conn.refresh_token,
-                grant_type: 'refresh_token',
-            }),
+            body: new URLSearchParams(params),
         });
     } else {
         if (!app.client_secret) throw new Error('Microsoft background sync requires a Client Secret.');
@@ -205,7 +314,7 @@ async function refreshToken(supabase, conn, app) {
         ? new Date(Date.now() + json.expires_in * 1000).toISOString()
         : null;
 
-    await supabase.from('user_oauth_connections').update({
+    await supabase.from(connTable).update({
         access_token: json.access_token,
         refresh_token: json.refresh_token || conn.refresh_token,
         token_expires_at: expiresAt,

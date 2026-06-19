@@ -11,7 +11,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_U
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -67,15 +67,17 @@ export const pullState = async () => {
     try {
         const activeApartmentId = portalState.access?.activeApartmentId;
         if (!activeApartmentId) throw new Error('No active apartment selected');
+        if (isPlaceholderApartmentId(activeApartmentId)) {
+            console.warn('[pullState] Refusing to load placeholder apartment id:', activeApartmentId);
+            return false;
+        }
+        console.group('[Store] Pulling state for:', activeApartmentId);
 
         const { data: { user } } = await supabase.auth.getUser();
         const uid = user?.id;
 
-        const [
-            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,
-            rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
-            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc,
-        ] = await Promise.all([
+        console.log('Running 49 parallel queries...');
+        const results = await Promise.all([
             supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
             supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
@@ -123,9 +125,20 @@ export const pullState = async () => {
             supabase.from('gate_parcels').select('*').eq('apartment_id', activeApartmentId).order('received_at', { ascending: false }),
             supabase.from('visitor_log_units').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('ledger_sync_settings').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('ledger_sync_oauth_apps').select('id, apartment_id, provider, client_id, tenant_id, redirect_uri, enabled, updated_at').eq('apartment_id', activeApartmentId),
-            supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
+            supabase.from('ledger_sync_oauth_apps').select('id, apartment_id, provider, client_id, tenant_id, redirect_uri, enabled, client_secret_set, updated_at').eq('apartment_id', activeApartmentId),
+            supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id, account_meta').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
+            supabase.rpc('get_ledger_sync_service_status', { p_apartment_id: activeApartmentId }),
         ]);
+
+        const [
+            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,
+            rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
+            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc, ssa,
+        ] = results;
+
+        console.log('Queries finished.');
+        const errors = results.filter(r => r.error).map(r => r.error.message);
+        if (errors.length) console.warn('Some queries failed:', errors);
 
         if (s.data) {
             portalState.community = {
@@ -133,13 +146,25 @@ export const pullState = async () => {
                 defaults: { cars: s.data.car_default, bikes: s.data.bike_default },
                 configId: s.data.id,
             };
-        } else {
+        } else if (portalState.community) {
             portalState.community.configId = null;
+        } else {
+            portalState.community = { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null };
         }
 
-        const units = u.data || [];
-        const vehicles = v.data || [];
+        if (u.error) console.error('[pullState] units query failed:', u.error.message);
+        if (v.error) console.error('[pullState] vehicles query failed:', v.error.message);
+
+        const units = u.error ? [] : (u.data || []);
+        const vehicles = v.error ? [] : (v.data || []);
         portalState.units = units.map(unit => ({ ...unit, vehicles: vehicles.filter(veh => veh.unit_id === unit.id) }));
+        portalState.lastPullMeta = {
+            apartmentId: activeApartmentId,
+            unitCount: units.length,
+            vehicleCount: vehicles.length,
+            unitsError: u.error?.message || null,
+            at: new Date().toISOString(),
+        };
         portalState.finances.txns = t.data || [];
         portalState.finances.vendors = ev.error ? [] : (ev.data || []);
         portalState.finances.subCategories = esc.error ? [] : (esc.data || []);
@@ -196,6 +221,7 @@ export const pullState = async () => {
         portalState.finances.ledgerSyncSettings = lss.error ? null : (lss.data || null);
         portalState.finances.ledgerOAuthApps = loa.error ? [] : (loa.data || []);
         portalState.finances.myOAuthConnections = uoc.error ? [] : (uoc.data || []);
+        portalState.finances.syncServiceAccounts = ssa.error ? [] : (ssa.data || []);
 
         // Hydrate slots with vehicle plate numbers
         portalState.slots = (p.data || []).map(slot => {
@@ -207,7 +233,23 @@ export const pullState = async () => {
     } catch (err) { console.error('Cloud-Link Broken:', err); return false; }
 };
 
-export const persist = () => { localStorage.setItem('sentry_portal_v5_platinum', JSON.stringify(portalState)); };
+export const persist = () => {
+    try {
+        const snapshot = JSON.parse(JSON.stringify(portalState));
+        if (isPlaceholderApartmentId(snapshot.access?.activeApartmentId)) {
+            snapshot.access.activeApartmentId = null;
+        }
+        if (snapshot.access?.apartments?.length) {
+            const real = snapshot.access.apartments.filter((a) => !isPlaceholderApartmentId(a.id));
+            if (real.length) snapshot.access.apartments = real;
+        }
+        localStorage.setItem('sentry_portal_v5_platinum', JSON.stringify(snapshot));
+    } catch (err) {
+        console.error('[persist] Failed to save local cache', err);
+    }
+};
+
+export const isPlaceholderApartmentId = (id) => !id || id === 'apt-default';
 
 /** Insert or update society_config (id is required on first insert). */
 export const upsertSocietyConfig = async (apartment_id, { name, car_default, bike_default }) => {
@@ -231,31 +273,45 @@ export const upsertSocietyConfig = async (apartment_id, { name, car_default, bik
     return { data, error };
 };
 
-export const migrateAndRecover = async () => {
-    // 1. Try to restore active apartment from local storage first
+export const migrateAndRecover = async ({ skipLocalApartmentRestore = false, skipCloudPull = false, signedIn = false } = {}) => {
     const local = localStorage.getItem('sentry_portal_v5_platinum');
-    if (local) {
+    if (local && !skipLocalApartmentRestore && !signedIn) {
         try {
             const savedState = JSON.parse(local);
-            if (savedState.access?.activeApartmentId) {
-                portalState.access.activeApartmentId = savedState.access.activeApartmentId;
+            const savedAptId = savedState.access?.activeApartmentId;
+            if (savedAptId && !isPlaceholderApartmentId(savedAptId)) {
+                portalState.access.activeApartmentId = savedAptId;
             }
         } catch (e) { console.error('Local state recovery failed', e); }
     }
 
-    // 2. Now pull data for that specific apartment
-    const cloudLink = await pullState();
-    
-    // 3. Fallback to local data if offline
-    if (!cloudLink && local) {
-        portalState = JSON.parse(local);
+    const cloudLink = skipCloudPull ? true : await pullState();
+
+    // When signed in, never replace cloud state with stale offline cache.
+    if (!cloudLink && local && !skipLocalApartmentRestore && !signedIn) {
+        const saved = JSON.parse(local);
+        const preservedAuth = portalState.auth;
+        const preservedAccess = portalState.access;
+        const preservedUnits = portalState.units?.length ? portalState.units : null;
+        portalState = saved;
+        if (preservedAuth) portalState.auth = preservedAuth;
+        if (preservedAccess?.activeApartmentId && !isPlaceholderApartmentId(preservedAccess.activeApartmentId)) {
+            portalState.access = {
+                ...(portalState.access || {}),
+                ...preservedAccess,
+                apartments: preservedAccess.apartments?.length
+                    ? preservedAccess.apartments
+                    : portalState.access?.apartments,
+            };
+        }
+        if (preservedUnits?.length) portalState.units = preservedUnits;
         return true;
     }
 
-    if (!portalState.access) {
+    if (!portalState.access && !signedIn) {
         portalState.access = {
-            apartments: [{ id: 'apt-default', name: portalState.community?.name || 'CommunityHub' }],
-            users: [{ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: ['apt-default'] }],
+            apartments: [{ id: 'apt-default', name: portalState.community?.name || 'Offline' }],
+            users: [{ id: 'usr-default', name: 'Offline user', email: '', apartment_ids: ['apt-default'] }],
             activeApartmentId: 'apt-default',
             activeUserId: 'usr-default'
         };

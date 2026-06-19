@@ -9,15 +9,20 @@ import { hasClientPermission } from './rbac.js';
 import {
     getOAuthApp,
     getMyOAuthConnectionMeta,
+    getServiceAccountMeta,
     getMicrosoftRedirectUri,
     getAppRedirectUri,
     saveOAuthApp,
     startGoogleConnect,
     startMicrosoftConnect,
+    startServiceAccountMicrosoftConnect,
+    startServiceAccountGoogleConnect,
     disconnectOAuth,
+    disconnectServiceAccount,
     ensureOAuthConnected,
     getAccessTokenForProvider,
     handleOAuthRedirectIfPresent,
+    oauthAppHasClientSecret,
 } from './ledgerOAuth.js';
 
 let activeProvider = 'MICROSOFT';
@@ -406,6 +411,62 @@ async function saveSyncSettings(patch) {
     await pullState();
 }
 
+function formatSyncInterval(mins) {
+    if (!mins) return 'Manual only';
+    if (mins === 15) return 'Every 15 minutes';
+    if (mins === 60) return 'Every hour';
+    if (mins === 360) return 'Every 6 hours';
+    if (mins === 1440) return 'Daily';
+    return `Every ${mins} minutes`;
+}
+
+function getBackgroundSyncReadiness(s) {
+    const provider = s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+    const serviceMeta = getServiceAccountMeta(provider);
+    const appReady = oauthAppConfigured(provider);
+    const items = [
+        {
+            ok: !!s?.spreadsheet_url,
+            label: 'Spreadsheet URL saved',
+            hint: 'Set the workbook link under Target Spreadsheet.',
+        },
+        {
+            ok: appReady,
+            label: `${provider === 'GOOGLE' ? 'Google' : 'Microsoft'} OAuth app configured`,
+            hint: 'Add the Client ID from your cloud console.',
+        },
+    ];
+
+    if (provider === 'MICROSOFT') {
+        items.push({
+            ok: oauthAppHasClientSecret('MICROSOFT'),
+            label: 'Microsoft client secret saved',
+            hint: 'Create a secret in Azure → App registrations → Certificates & secrets.',
+        });
+    } else {
+        items.push({
+            ok: oauthAppHasClientSecret('GOOGLE'),
+            label: 'Google client secret saved',
+            hint: 'Add a client secret in Google Cloud Console (Web application type).',
+        });
+    }
+
+    items.push({
+        ok: !!serviceMeta?.account_email && !!serviceMeta?.has_refresh_token,
+        label: 'Service account connected',
+        hint: provider === 'GOOGLE'
+            ? 'Connect a dedicated Google account that owns or can edit the spreadsheet.'
+            : 'Connect a dedicated Microsoft account (e.g. accounts@your-society.com) with access to the workbook.',
+    });
+    items.push({
+        ok: (s?.sync_interval_minutes || 0) > 0,
+        label: 'Auto-sync schedule enabled',
+        hint: 'Choose an interval other than Manual only.',
+    });
+
+    return { provider, items, ready: items.every((i) => i.ok), serviceMeta };
+}
+
 export function renderAdminSyncPanel() {
     const el = document.getElementById('admin-sync-panel-container');
     if (!el) return;
@@ -421,6 +482,9 @@ export function renderAdminSyncPanel() {
     const msAppReady = oauthAppConfigured('MICROSOFT');
     const googleAppReady = oauthAppConfigured('GOOGLE');
     const canConnect = (activeProvider === 'MICROSOFT' && msAppReady) || (activeProvider === 'GOOGLE' && googleAppReady);
+    const bgSync = getBackgroundSyncReadiness(s);
+    const msSecretSaved = oauthAppHasClientSecret('MICROSOFT');
+    const googleSecretSaved = oauthAppHasClientSecret('GOOGLE');
 
     el.innerHTML = `
       <div class="ledger-sync-admin-page">
@@ -452,7 +516,7 @@ export function renderAdminSyncPanel() {
                 <code>${getMicrosoftRedirectUri()}</code>
                 <button type="button" class="btn btn-outline btn--small" id="admin-oauth-copy-redirect">Copy</button>
               </div>
-              <p class="gate-wizard__hint" style="margin-top: 0.5rem;">Add this as a <strong>Single-page application</strong> redirect in Azure.</p>
+              <p class="gate-wizard__hint" style="margin-top: 0.5rem;">Add as <strong>Web</strong> redirect URI (for background sync with client secret). SPA redirect is only needed if you skip the secret.</p>
             </div>
 
             <div class="ledger-sync-form" style="display: flex; flex-direction: column; gap: 1rem;">
@@ -468,7 +532,8 @@ export function renderAdminSyncPanel() {
               </div>
               <div class="ledger-sync-form__field">
                 <label class="ledger-sync-form__label">Client Secret</label>
-                <input type="password" id="admin-oauth-ms-secret" class="expense-combobox" value="${microsoft?.client_secret || ''}" placeholder="Optional: for background sync" />
+                <input type="password" id="admin-oauth-ms-secret" class="expense-combobox" value="" placeholder="${msSecretSaved ? 'Saved — leave blank to keep' : 'Required for background sync'}" autocomplete="new-password" />
+                <p class="gate-wizard__hint" style="margin-top:0.35rem;">Used only on the server to refresh tokens during the Vercel cron job. Never shown in the browser after save.</p>
               </div>
               <button type="button" class="btn btn-primary" id="admin-oauth-save-ms" style="margin-top: 0.5rem;">
                 <i class="fa-solid fa-floppy-disk"></i> Save Microsoft Settings
@@ -506,7 +571,7 @@ export function renderAdminSyncPanel() {
               </div>
               <div class="ledger-sync-form__field">
                 <label class="ledger-sync-form__label">Client Secret</label>
-                <input type="password" id="admin-oauth-google-secret" class="expense-combobox" value="${google?.client_secret || ''}" placeholder="Optional: for background sync" />
+                <input type="password" id="admin-oauth-google-secret" class="expense-combobox" value="" placeholder="${googleSecretSaved ? 'Saved — leave blank to keep' : 'Optional (web client type)'}" autocomplete="new-password" />
               </div>
               <button type="button" class="btn btn-primary" id="admin-oauth-save-google" style="margin-top: 0.25rem;">
                 <i class="fa-solid fa-floppy-disk"></i> Save Google Settings
@@ -578,6 +643,76 @@ export function renderAdminSyncPanel() {
                 Changes here affect all society members. Ensure the spreadsheet has the correct column headers.
               </p>
             </div>
+          </div>
+
+          <!-- 4. Background sync job -->
+          <div class="ledger-sync-card ledger-sync-card--full">
+            <div class="ledger-sync-card__header">
+              <div class="ledger-sync-card__title">
+                <i class="fa-solid fa-clock"></i>
+                <span>Background Sync Job</span>
+              </div>
+              <span class="ledger-sync-card__status ${bgSync.ready ? 'ledger-sync-card__status--ok' : 'ledger-sync-card__status--pending'}">
+                ${bgSync.ready ? 'Ready' : 'Setup needed'}
+              </span>
+            </div>
+
+            <p class="gate-wizard__hint">
+              When auto-sync is enabled, a Vercel cron calls <code>/api/sync</code> daily.
+              Societies due for sync (based on the interval below) are processed server-side using the
+              <strong>service account</strong> below — no signed-in user required.
+            </p>
+
+            <div class="ledger-sync-bg-job-meta">
+              <div><strong>Schedule:</strong> ${formatSyncInterval(s?.sync_interval_minutes || 0)} (cron checks daily)</div>
+              <div><strong>Provider:</strong> ${bgSync.provider === 'GOOGLE' ? 'Google Sheets' : 'Microsoft Excel'}</div>
+              <div><strong>Service account:</strong> ${bgSync.serviceMeta?.account_email || 'Not connected'}</div>
+              ${s?.last_synced_at ? `<div><strong>Last run:</strong> ${new Date(s.last_synced_at).toLocaleString('en-IN')}${s.last_sync_message ? ` — ${s.last_sync_message}` : ''}</div>` : ''}
+              ${s?.last_sync_status === 'ERROR' ? `<div class="ledger-sync-bg-job-meta__error"><i class="fa-solid fa-triangle-exclamation"></i> ${s.last_sync_message || 'Last background sync failed.'}</div>` : ''}
+            </div>
+
+            <div class="ledger-sync-service-account" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt);">
+              <p class="gate-wizard__hint" style="margin-top: 0;">
+                Sign in once with a <strong>dedicated mailbox</strong> that has edit access to the spreadsheet
+                (e.g. society accounts email). Tokens are stored server-side for the cron job — not linked to any CommunityHub user session.
+              </p>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top: 0.75rem;">
+                <button type="button" class="btn btn-primary btn--small" id="admin-service-account-connect">
+                  <i class="fa-solid fa-user-gear"></i> Connect service account
+                </button>
+                ${bgSync.serviceMeta?.account_email ? `
+                <button type="button" class="btn btn-outline btn--small" id="admin-service-account-disconnect">
+                  Disconnect service account
+                </button>` : ''}
+              </div>
+            </div>
+
+            <ul class="ledger-sync-readiness">
+              ${bgSync.items.map((item) => `
+                <li class="ledger-sync-readiness__item ${item.ok ? 'ledger-sync-readiness__item--ok' : 'ledger-sync-readiness__item--pending'}">
+                  <i class="fa-solid ${item.ok ? 'fa-circle-check' : 'fa-circle'}"></i>
+                  <div>
+                    <strong>${item.label}</strong>
+                    ${item.ok ? '' : `<span class="ledger-sync-readiness__hint">${item.hint}</span>`}
+                  </div>
+                </li>
+              `).join('')}
+            </ul>
+
+            <div style="margin-top: 1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
+                <i class="fa-solid fa-bolt"></i> Run server sync now
+              </button>
+              <span class="gate-wizard__hint" style="margin:0.25rem 0 0;">
+                Runs a one-off sync on the server for this society and updates the status above.
+              </span>
+            </div>
+
+            <p class="gate-wizard__hint" style="margin-top: 1rem;">
+              <strong>Token refresh:</strong>
+              Background sync uses the service account above. Microsoft and Google both require a
+              <strong>Client Secret</strong> saved in the OAuth app section so the server can refresh tokens without a browser.
+            </p>
           </div>
         </div>
 
@@ -673,6 +808,67 @@ export function renderAdminSyncPanel() {
             renderAdminSyncPanel();
         } catch (e) {
             alert(e.message);
+        }
+    });
+
+    document.getElementById('admin-service-account-connect')?.addEventListener('click', async () => {
+        const provider = getSyncSettings()?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+        try {
+            if (provider === 'GOOGLE') await startServiceAccountGoogleConnect();
+            else await startServiceAccountMicrosoftConnect();
+        } catch (e) {
+            alert(e.message);
+        }
+    });
+
+    document.getElementById('admin-service-account-disconnect')?.addEventListener('click', async () => {
+        const provider = getSyncSettings()?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+        if (!confirm('Disconnect the background sync service account? Cron sync will stop until reconnected.')) return;
+        try {
+            await disconnectServiceAccount(provider);
+            renderAdminSyncPanel();
+        } catch (e) {
+            alert(e.message);
+        }
+    });
+
+    document.getElementById('admin-bg-sync-run')?.addEventListener('click', async () => {
+        const btn = document.getElementById('admin-bg-sync-run');
+        const original = btn?.innerHTML;
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-rotate fa-spin"></i> Running…`;
+        }
+        try {
+            const apartment_id = portalState.access?.activeApartmentId;
+            if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
+            const { data: s } = await supabase.auth.getSession();
+            const token = s?.session?.access_token;
+            if (!token) throw new Error('Sign in again to run the server sync.');
+
+            const res = await fetch('/api/sync', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ apartment_id }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json.error || 'Server sync failed.');
+
+            await pullState();
+            renderAdminSyncPanel();
+
+            const r = json.result || {};
+            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.`);
+        } catch (err) {
+            alert(err.message || String(err));
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
         }
     });
 
@@ -1777,7 +1973,7 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect) {
 
         <div id="${id('sheet-list')}" class="ledger-sync-sheet-list"></div>
 
-        <details class="ledger-sync-mapping-section" id="${id('mapping-details')}" ${hasUrl ? 'open' : ''} style="margin-top: 1rem;">
+        <details class="ledger-sync-mapping-section" id="${id('mapping-details')}" style="margin-top: 1rem;">
           <summary>Column mapping</summary>
           <div id="${id('mapping')}" style="padding: 0.5rem 0;">
             <p class="gate-wizard__hint">${hasUrl
@@ -1907,8 +2103,7 @@ export function renderLedgerSyncPanel() {
     const googleAppReady = oauthAppConfigured('GOOGLE');
     const canConnect = (activeProvider === 'MICROSOFT' && msAppReady) || (activeProvider === 'GOOGLE' && googleAppReady);
     const connStatus = connectionStatus();
-    // Auto-open if not connected (so user can see connect button immediately)
-    const shouldOpen = wasOpen || syncPanelForceOpen || !connStatus.connected;
+    const shouldOpen = wasOpen || syncPanelForceOpen;
 
     el.innerHTML = `
       <details class="ledger-sync-panel" id="ledger-sync-details"${shouldOpen ? ' open' : ''}>

@@ -2,7 +2,7 @@
  * Sentry Portal Modular Entry (Vercel Edition)
  * Primary Boot Sequence & View Coordination
  */
-import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig } from './store.js';
+import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig, isPlaceholderApartmentId } from './store.js';
 import {
   processAnalytics,
   renderRegistry,
@@ -107,17 +107,26 @@ const hideAuth = () => {
 const getProfile = async (userId) => {
   if (!supabase || !userId) return null;
   try {
-    const { data } = await supabase.from('profiles').select('id, full_name, role, email').eq('id', userId).single();
-    return data || null;
-  } catch {
-    // Backward-compatible fallback if the `email` column isn't migrated yet.
-    try {
-      const { data } = await supabase.from('profiles').select('id, full_name, role').eq('id', userId).single();
-      return data || null;
-    } catch {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, email, last_apartment_id')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    if (error) {
+      console.warn('[Auth] Profile fetch error:', error.message);
       return null;
     }
+    return data;
+  } catch (err) {
+    console.error('[Auth] Profile fetch failed:', err.message);
+    return null;
   }
+};
+
+const formatRoleLabel = (role) => {
+  const match = ROLE_OPTIONS.find((r) => r.key === role || r.v1Key === role);
+  return match?.label || v2KeyToLabel(role) || String(role || 'Viewer').replace(/_/g, ' ');
 };
 
 const can = (perm) => hasClientPermission(perm, resolveEffectivePermissions());
@@ -129,12 +138,16 @@ const applyPermissionsToNav = (perms) => {
 const applyAuthToUI = async (session) => {
   const user = session?.user;
   if (!user) return;
+  console.group('[Auth] Applying to UI');
+  console.log('User:', user.id, user.email);
   const profile = await getProfile(user.id);
-  const name = profile?.full_name || profile?.email || user.email || 'User';
+  console.log('Profile:', profile);
+  const name = profile?.full_name || user.user_metadata?.full_name || profile?.email || user.email || 'User';
   const role = profile?.role || 'resident_viewer';
-  portalState.auth = { id: user.id, email: user.email || '', name, role };
+  portalState.auth = { id: user.id, email: user.email || profile?.email || '', name, role };
 
   const initials = (name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+  const roleLabel = formatRoleLabel(role);
   const topbarInitialsNode = document.getElementById('topbar-user-initials');
   const topbarNameNode = document.getElementById('topbar-user-name');
   const topbarRoleNode = document.getElementById('topbar-user-role');
@@ -146,12 +159,13 @@ const applyAuthToUI = async (session) => {
   if (sidebarInitials) sidebarInitials.textContent = initials;
   if (topbarNameNode) topbarNameNode.textContent = name;
   if (sidebarName) sidebarName.textContent = name;
-  if (topbarRoleNode) topbarRoleNode.textContent = role;
-  if (sidebarRole) sidebarRole.textContent = role;
+  if (topbarRoleNode) topbarRoleNode.textContent = roleLabel;
+  if (sidebarRole) sidebarRole.textContent = roleLabel;
 
   portalState.authPermissions = null;
   const aptId = portalState.access?.activeApartmentId;
-  if (aptId && supabase) {
+  if (aptId && supabase && !isPlaceholderApartmentId(aptId)) {
+    console.log('Refreshing permissions for:', aptId);
     await refreshAuthPermissions(aptId);
   } else {
     portalState.authPermissions = permissionsFromV1Role(role);
@@ -172,37 +186,190 @@ const applyAuthToUI = async (session) => {
       makeAdminBtn.style.display = 'none';
     }
   }
+  console.groupEnd();
+};
+
+const isSignedIn = () => Boolean(portalState.auth?.id);
+
+const signOut = async (message = 'Signed out.') => {
+  if (supabase) await supabase.auth.signOut();
+  localStorage.removeItem('sentry_portal_v5_platinum');
+  showAuth(message);
+};
+
+const hideWorkspaceGate = () => {
+  const modal = document.getElementById('workspace-gate-modal');
+  if (modal) modal.classList.remove('active');
+};
+
+const showWorkspaceGate = (message = '') => {
+  const modal = document.getElementById('workspace-gate-modal');
+  const select = document.getElementById('workspace-gate-select');
+  const err = document.getElementById('workspace-gate-error');
+  const msg = document.getElementById('workspace-gate-message');
+  if (!modal || !select) return;
+
+  const apartments = (portalState.access?.apartments || []).filter((a) => !isPlaceholderApartmentId(a.id));
+  if (!apartments.length) {
+    if (msg) {
+      msg.textContent = message || 'No societies are linked to your account. Ask an admin to grant access in Setup → Users.';
+    }
+    select.innerHTML = '<option value="">No societies available</option>';
+    select.disabled = true;
+  } else {
+    if (msg) {
+      msg.textContent = message || 'Choose which apartment society to load. Your data is stored per society.';
+    }
+    select.disabled = false;
+    select.innerHTML = apartments.map((a) => `<option value="${a.id}">${a.name}</option>`).join('');
+    const active = portalState.access?.activeApartmentId;
+    if (active && apartments.some((a) => a.id === active)) select.value = active;
+    else select.value = apartments[0].id;
+  }
+
+  if (err) { err.style.display = 'none'; err.textContent = ''; }
+  modal.classList.add('active');
+};
+
+const initWorkspaceGate = () => {
+  const confirmBtn = document.getElementById('workspace-gate-confirm');
+  const logoutBtn = document.getElementById('workspace-gate-logout');
+  const select = document.getElementById('workspace-gate-select');
+  const err = document.getElementById('workspace-gate-error');
+
+  if (logoutBtn) {
+    logoutBtn.onclick = () => {
+      hideWorkspaceGate();
+      void signOut();
+    };
+  }
+
+  if (confirmBtn && select) {
+    confirmBtn.onclick = async () => {
+      const aptId = select.value;
+      if (!aptId || isPlaceholderApartmentId(aptId)) {
+        if (err) {
+          err.style.display = 'block';
+          err.textContent = 'Select a society first.';
+        }
+        return;
+      }
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Loading…';
+      const ok = await setActiveApartment(aptId);
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Load society';
+      if (!ok) {
+        if (err) {
+          err.style.display = 'block';
+          err.textContent = 'Could not load society data. Check the browser console or try again.';
+        }
+        return;
+      }
+      hideWorkspaceGate();
+      processAnalytics();
+      processFinances();
+      renderRegistry();
+      window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+    };
+  }
+};
+
+const apartmentOptionsForUi = () => {
+  const all = portalState.access?.apartments || [];
+  const real = all.filter((a) => !isPlaceholderApartmentId(a.id));
+  return real.length ? real : all;
 };
 
 const ensureAccessState = () => {
   if (!portalState.access) {
-    portalState.access = {
-      apartments: [{ id: 'apt-default', name: portalState.community?.name || 'CommunityHub' }],
-      users: [{ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: ['apt-default'] }],
-      activeApartmentId: 'apt-default',
-      activeUserId: 'usr-default'
-    };
+    if (isSignedIn()) {
+      portalState.access = {
+        apartments: [],
+        users: [],
+        activeApartmentId: null,
+        activeUserId: portalState.auth.id,
+      };
+    } else {
+      portalState.access = {
+        apartments: [{ id: 'apt-default', name: 'Offline' }],
+        users: [],
+        activeApartmentId: 'apt-default',
+        activeUserId: null,
+      };
+    }
   }
-  if (!portalState.access.apartments.length) portalState.access.apartments.push({ id: 'apt-default', name: 'CommunityHub' });
-  if (!portalState.access.activeApartmentId) portalState.access.activeApartmentId = portalState.access.apartments[0].id;
-  if (!portalState.access.users.length) portalState.access.users.push({ id: 'usr-default', name: 'Property Lead', email: '', apartment_ids: [portalState.access.activeApartmentId] });
-  if (!portalState.access.activeUserId) portalState.access.activeUserId = portalState.access.users[0].id;
+  if (!portalState.access.apartments.length && !isSignedIn()) {
+    portalState.access.apartments.push({ id: 'apt-default', name: 'Offline' });
+  }
+  if (isSignedIn()) {
+    if (isPlaceholderApartmentId(portalState.access.activeApartmentId)) {
+      const realApt = portalState.access.apartments.find((a) => !isPlaceholderApartmentId(a.id));
+      portalState.access.activeApartmentId = realApt?.id || null;
+    }
+  } else if (!portalState.access.activeApartmentId || isPlaceholderApartmentId(portalState.access.activeApartmentId)) {
+    const realApt = portalState.access.apartments.find((a) => !isPlaceholderApartmentId(a.id));
+    portalState.access.activeApartmentId = realApt?.id || portalState.access.apartments[0]?.id || 'apt-default';
+  }
+  if (!portalState.access.users.length) {
+    if (portalState.auth?.id) {
+      portalState.access.users.push({
+        id: portalState.auth.id,
+        name: portalState.auth.name || portalState.auth.email || 'User',
+        email: portalState.auth.email || '',
+        role: portalState.auth.role,
+        apartment_ids: portalState.access.apartments
+          .map((a) => a.id)
+          .filter((id) => !isPlaceholderApartmentId(id)),
+      });
+      portalState.access.activeUserId = portalState.auth.id;
+    } else if (!isSignedIn()) {
+      portalState.access.users.push({
+        id: 'usr-default',
+        name: 'Offline user',
+        email: '',
+        apartment_ids: [portalState.access.activeApartmentId],
+      });
+      portalState.access.activeUserId = 'usr-default';
+    }
+  }
+  if (!portalState.access.activeUserId) {
+    portalState.access.activeUserId = portalState.access.users[0].id;
+  }
 };
 
 const setActiveApartment = async (apartmentId) => {
-  const apt = portalState.access.apartments.find(a => a.id === apartmentId);
-  if (!apt) return;
-  
+  if (isPlaceholderApartmentId(apartmentId)) {
+    console.warn('[access] Ignoring placeholder apartment id');
+    return false;
+  }
+  console.group('[Access] Setting active apartment:', apartmentId);
+
+  let apt = portalState.access?.apartments?.find(a => a.id === apartmentId);
+  if (!apt && supabase) {
+    console.log('Apartment not in state, fetching from DB...');
+    const { data } = await supabase.from('apartments').select('id, name').eq('id', apartmentId).maybeSingle();
+    if (data) {
+      apt = data;
+      if (!portalState.access.apartments.some((a) => a.id === data.id)) {
+        portalState.access.apartments.push(data);
+      }
+    }
+  }
+  if (!apt) {
+    console.error('[access] Unknown apartment id:', apartmentId);
+    console.groupEnd();
+    return false;
+  }
+
   portalState.access.activeApartmentId = apartmentId;
   portalState.community.name = apt.name;
-  
-  // UI header updates
-  const topApt = document.getElementById('topbar-apartment-name');
-  if (topApt) topApt.textContent = apt.name;
-  
+
+  const headerSelect = document.getElementById('header-apartment-switch');
+  if (headerSelect) headerSelect.value = apartmentId;
+
   persist();
-  
-  // Save to DB for permanent history (cross-device)
+
   if (supabase) {
     const { data: s } = await supabase.auth.getSession();
     if (s?.session?.user?.id) {
@@ -210,8 +377,9 @@ const setActiveApartment = async (apartmentId) => {
     }
   }
 
-  // 🔄 Pull new data partition from Supabase and refresh all views
+  console.log('Pulling state for apartment...');
   const success = await pullState();
+  console.log('Pull State Success:', success);
   if (success) {
     await refreshAuthPermissions(apartmentId);
     applyPermissionsToNav(portalState.authPermissions);
@@ -220,11 +388,12 @@ const setActiveApartment = async (apartmentId) => {
     document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
     renderAccessMappings();
     renderRegistry();
-    // Refresh other view-specific components if they exist
     if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
     if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
     if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
   }
+  console.groupEnd();
+  return success;
 };
 
 const setActiveUser = (userId) => {
@@ -237,7 +406,7 @@ const setActiveUser = (userId) => {
 
 const renderAccessMappings = () => {
   ensureAccessState();
-  const apartments = portalState.access.apartments;
+  const apartments = apartmentOptionsForUi();
   const users = portalState.access.users;
 
   // 1. Sidebar/Header Selects
@@ -245,19 +414,23 @@ const renderAccessMappings = () => {
   const drawerApartmentSelect = document.getElementById('nav-apartment-switch');
   const headerApartmentSelect = document.getElementById('header-apartment-switch');
 
-  const apartmentOptions = apartments.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-  if (sidebarApartmentSelect) {
-    sidebarApartmentSelect.innerHTML = apartmentOptions;
-    sidebarApartmentSelect.value = portalState.access.activeApartmentId;
-  }
-  if (drawerApartmentSelect) {
-    drawerApartmentSelect.innerHTML = apartmentOptions;
-    drawerApartmentSelect.value = portalState.access.activeApartmentId;
-  }
-  if (headerApartmentSelect) {
-    headerApartmentSelect.innerHTML = apartmentOptions;
-    headerApartmentSelect.value = portalState.access.activeApartmentId;
-  }
+  const placeholderOption = isSignedIn() && !apartments.length
+    ? '<option value="">No societies</option>'
+    : '<option value="">Select society…</option>';
+  const apartmentOptions = apartments.length
+    ? apartments.map(a => `<option value="${a.id}">${a.name}</option>`).join('')
+    : placeholderOption;
+  const activeId = portalState.access.activeApartmentId;
+  const syncSelect = (el) => {
+    if (!el) return;
+    el.innerHTML = apartmentOptions;
+    if (activeId && apartments.some((a) => a.id === activeId)) el.value = activeId;
+    else if (apartments.length === 1) el.value = apartments[0].id;
+    else el.value = '';
+  };
+  syncSelect(sidebarApartmentSelect);
+  syncSelect(drawerApartmentSelect);
+  syncSelect(headerApartmentSelect);
 
   // 2. New User Directory Table (v2)
   const usersListV2 = document.getElementById('access-users-list-v2');
@@ -323,66 +496,138 @@ const renderAccessMappings = () => {
   }
 };
 
+const resolveActiveApartment = async (uid, profile) => {
+  if (!supabase || !uid) return { apartments: [], activeId: null };
+  console.group('[Access] Resolving active apartment');
+
+  const [{ data: apartmentsRaw, error: aptError }, { data: mappings, error: mapError }] = await Promise.all([
+    supabase.from('apartments').select('id, name').order('name'),
+    supabase.from('user_apartments').select('apartment_id').eq('user_id', uid),
+  ]);
+
+  if (aptError) console.error('[access] apartments query failed:', aptError.message);
+  if (mapError) console.error('[access] user_apartments query failed:', mapError.message);
+
+  console.log('Apartments Raw:', apartmentsRaw);
+  console.log('Mappings:', mappings);
+
+  const allApartments = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
+  const mappedIds = new Set((mappings || []).map((m) => m.apartment_id));
+  const permitted = mappedIds.size
+    ? allApartments.filter((a) => mappedIds.has(a.id))
+    : allApartments;
+
+  const pool = permitted.length ? permitted : allApartments;
+  console.log('Pool:', pool);
+
+  if (!pool.length) {
+    console.error('[access] No apartments in pool for user', uid, { mapped: mappedIds.size, total: allApartments.length });
+    console.groupEnd();
+    return { apartments: [], activeId: null };
+  }
+
+  const cur = portalState.access?.activeApartmentId;
+  if (cur && !isPlaceholderApartmentId(cur) && pool.some((a) => a.id === cur)) {
+    console.log('Using current:', cur);
+    console.groupEnd();
+    return { apartments: pool, activeId: cur };
+  }
+
+  const last = profile?.last_apartment_id;
+  if (last && pool.some((a) => a.id === last)) {
+    console.log('Using last profile apt:', last);
+    console.groupEnd();
+    return { apartments: pool, activeId: last };
+  }
+
+  const preferred = pool.find((a) => /elixir/i.test(a.name || ''));
+  if (preferred) {
+    console.log('Using preferred (Elixir):', preferred.id);
+    console.groupEnd();
+    return { apartments: pool, activeId: preferred.id };
+  }
+
+  const cachedName = (portalState.community?.name || '').trim().toLowerCase();
+  if (cachedName && cachedName !== 'communityhub' && cachedName !== 'offline') {
+    const byName = pool.find((a) => (a.name || '').trim().toLowerCase() === cachedName);
+    if (byName) {
+      console.log('Using cached name match:', byName.id);
+      console.groupEnd();
+      return { apartments: pool, activeId: byName.id };
+    }
+  }
+
+  if (pool.length > 1) {
+    const counts = await Promise.all(pool.map(async (a) => {
+      const { count, error } = await supabase
+        .from('units')
+        .select('*', { count: 'exact', head: true })
+        .eq('apartment_id', a.id);
+      return { id: a.id, count: error ? 0 : (count || 0) };
+    }));
+    const best = [...counts].sort((a, b) => b.count - a.count)[0];
+    if (best?.count > 0) {
+      console.log('Using best (most units):', best.id);
+      console.groupEnd();
+      return { apartments: pool, activeId: best.id };
+    }
+  }
+
+  console.log('Using first in pool:', pool[0].id);
+  console.groupEnd();
+  return { apartments: pool, activeId: pool[0].id };
+};
+
 const syncAccessFromSupabase = async () => {
   if (!supabase) return false;
   const { data: sessionData } = await supabase.auth.getSession();
   const uid = sessionData?.session?.user?.id;
   if (!uid) return false;
 
-  // 1. Get profile (including last_viewed_apartment if column exists)
+  ensureAccessState();
+
   const selfProfile = await getProfile(uid);
   if (selfProfile) {
-    const selfUser = {
+    portalState.access.users = [{
       id: selfProfile.id,
       name: selfProfile.full_name || selfProfile.email || 'User',
       email: selfProfile.email || '',
       role: selfProfile.role || 'resident_viewer',
-      apartment_ids: []
-    };
-    portalState.access.users = [selfUser];
+      apartment_ids: [],
+    }];
     portalState.access.activeUserId = uid;
-    
-    // If we have a saved ID in the DB and current state is default, use the DB one
-    if (selfProfile.last_apartment_id && (!portalState.access.activeApartmentId || portalState.access.activeApartmentId === 'apt-default')) {
-      portalState.access.activeApartmentId = selfProfile.last_apartment_id;
-    }
   }
 
-  // 2. Apartments the current user can see (RLS enforces)
-  const { data: apartmentsRaw } = await supabase.from('apartments').select('id, name').order('name');
-  const apartments = (apartmentsRaw || []).filter(a => a.name !== '__SYSTEM__');
-  
-  if (apartments && apartments.length) {
-    portalState.access.apartments = apartments;
-    const cur = portalState.access.activeApartmentId;
-    
-    // Verify if the current apartment is still valid/permitted
-    const isValid = cur && cur !== 'apt-default' && apartments.some(a => a.id === cur);
-    
-    if (!isValid) {
-      portalState.access.activeApartmentId = apartments[0].id;
-    }
-    
-    // 🔥 Ensure the UI and Data Partition are fully synchronized
-    await setActiveApartment(portalState.access.activeApartmentId);
+  const { apartments, activeId } = await resolveActiveApartment(uid, selfProfile);
+  if (!apartments.length || !activeId) {
+    console.error('[access] No apartments available for this user', { apartments: apartments.length, activeId, uid });
+    renderAccessMappings();
+    return false;
   }
 
-  // Apply scoped permissions (v2 assignments with v1 fallback)
-  await refreshAuthPermissions(portalState.access.activeApartmentId);
+  portalState.access.apartments = apartments;
+  portalState.access.activeApartmentId = activeId;
+
+  const loaded = await setActiveApartment(activeId);
+  if (!loaded) {
+    console.error('[access] setActiveApartment failed for', activeId, portalState.lastPullMeta);
+    renderAccessMappings();
+    return false;
+  }
+
+  await refreshAuthPermissions(activeId);
   applyPermissionsToNav(portalState.authPermissions);
 
-  // Current user's apartment mappings (always allowed under current RLS).
   const { data: selfMappings } = await supabase.from('user_apartments').select('apartment_id').eq('user_id', uid);
   if (portalState.access.users?.length) {
     portalState.access.users[0].apartment_ids = (selfMappings || []).map(m => m.apartment_id);
   }
 
-  // Users list (admin only due to RLS). If allowed, hydrate full directory.
   const { data: profiles } = await supabase.from('profiles').select('id, full_name, email, role').order('full_name');
   if (profiles && profiles.length) {
-    const { data: mappings } = await supabase.from('user_apartments').select('user_id, apartment_id');
+    const { data: allMappings } = await supabase.from('user_apartments').select('user_id, apartment_id');
     const map = new Map();
-    (mappings || []).forEach(m => {
+    (allMappings || []).forEach(m => {
       if (!map.has(m.user_id)) map.set(m.user_id, []);
       map.get(m.user_id).push(m.apartment_id);
     });
@@ -410,10 +655,27 @@ const syncAccessFromSupabase = async () => {
 /**
  * Global Boot Sequence: Relational Retrieval & Modular Hydration
  */
+const repairLocalCache = () => {
+  try {
+    const raw = localStorage.getItem('sentry_portal_v5_platinum');
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (isPlaceholderApartmentId(saved.access?.activeApartmentId)) {
+      saved.access.activeApartmentId = null;
+      localStorage.setItem('sentry_portal_v5_platinum', JSON.stringify(saved));
+    }
+  } catch {
+    /* ignore corrupt cache */
+  }
+};
+
 const boot = async () => {
   document.body.prepend(Object.assign(document.createElement('div'), { id: 'sentry-boot-loader', innerHTML: '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; color:#fff;"><i class="fa-solid fa-hotel fa-spin" style="font-size:2rem; margin-bottom:1rem; color:var(--accent);"></i><div style="font-weight:900; letter-spacing:1px; text-transform:uppercase; font-size:0.75rem;">Initializing CommunityHub</div></div>' }));
 
   let bootHasSupabaseSession = false;
+  let bootSession = null;
+  let accessSynced = false;
+
   if (supabase) {
     const { data } = await supabase.auth.getSession();
     if (!data?.session) {
@@ -422,17 +684,42 @@ const boot = async () => {
       return;
     }
     bootHasSupabaseSession = true;
-    await applyAuthToUI(data.session);
-    // Resolve real apartment UUID before pullState — otherwise queries use apt-default and return empty rows.
-    ensureAccessState();
-    await syncAccessFromSupabase();
+    bootSession = data.session;
+    repairLocalCache();
+    await applyAuthToUI(bootSession);
+    accessSynced = await syncAccessFromSupabase();
   }
 
-  const connected = await migrateAndRecover();
+  if (!accessSynced && bootHasSupabaseSession && bootSession?.user?.id) {
+    const profile = await getProfile(bootSession.user.id);
+    const { apartments, activeId } = await resolveActiveApartment(bootSession.user.id, profile);
+    if (apartments.length && activeId) {
+      portalState.access = portalState.access || { users: [], activeUserId: bootSession.user.id };
+      portalState.access.apartments = apartments;
+      portalState.access.activeApartmentId = activeId;
+      renderAccessMappings();
+      accessSynced = await setActiveApartment(activeId);
+    }
+  }
+
+  if (!accessSynced && !bootHasSupabaseSession) {
+    ensureAccessState();
+    const connected = await migrateAndRecover({ signedIn: false });
+    if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
+    ensureAccessState();
+
+    if (!isPlaceholderApartmentId(portalState.access?.activeApartmentId)) {
+      await setActiveApartment(portalState.access.activeApartmentId);
+    }
+  } else if (!accessSynced && bootHasSupabaseSession) {
+    await applyAuthToUI(bootSession);
+    renderAccessMappings();
+    showWorkspaceGate();
+  } else if (bootSession) {
+    await applyAuthToUI(bootSession);
+  }
+
   document.getElementById('sentry-boot-loader')?.remove();
-  if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
-  if (!supabase || !bootHasSupabaseSession) ensureAccessState();
-  await setActiveApartment(portalState.access.activeApartmentId);
   renderAccessMappings();
 
   processAnalytics();
@@ -786,15 +1073,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (error) return showAuth(error.message);
     await applyAuthToUI(data.session);
     hideAuth();
-    ensureAccessState();
+    hideWorkspaceGate();
+    if (data?.session?.user?.id) portalState.access = portalState.access || { users: [], apartments: [] };
     if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
-    await syncAccessFromSupabase();
-    await setActiveApartment(portalState.access.activeApartmentId);
-    renderAccessMappings();
-    await pullState();
-    processAnalytics();
-    processFinances();
-    renderRegistry();
+    const synced = await syncAccessFromSupabase();
+    if (!synced) showWorkspaceGate('Sign-in succeeded but society data did not load. Select your society below.');
+    else {
+      processAnalytics();
+      processFinances();
+      renderRegistry();
+    }
     window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
   };
 
@@ -808,19 +1096,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
     await applyAuthToUI(data.session);
     hideAuth();
-    ensureAccessState();
+    hideWorkspaceGate();
+    if (data?.session?.user?.id) portalState.access = portalState.access || { users: [], apartments: [] };
     if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
-    await syncAccessFromSupabase();
-    await setActiveApartment(portalState.access.activeApartmentId);
-    renderAccessMappings();
-    processAnalytics();
-    processFinances();
-    renderRegistry();
+    const synced = await syncAccessFromSupabase();
+    if (!synced) showWorkspaceGate('Account created but society data did not load. Select your society below.');
+    else {
+      processAnalytics();
+      processFinances();
+      renderRegistry();
+    }
     window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
   };
 
   if (loginBtn) loginBtn.onclick = signIn;
   if (signupBtn) signupBtn.onclick = signUp;
+
+  initWorkspaceGate();
+
+  if (supabase) {
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        await applyAuthToUI(session);
+        if (event === 'SIGNED_IN') {
+          hideAuth();
+          hideWorkspaceGate();
+          const synced = await syncAccessFromSupabase();
+          if (!synced) showWorkspaceGate();
+          else {
+            processAnalytics();
+            processFinances();
+            renderRegistry();
+          }
+        }
+      }
+      if (event === 'SIGNED_OUT') showAuth();
+    });
+  }
 
   // Global View Router
   window.addEventListener('hashchange', () => {
@@ -1140,11 +1452,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const el = document.getElementById(id);
     if (el) {
       el.onchange = async (e) => {
-        await setActiveApartment(e.target.value);
-        // Ensure all selectors stay in sync
+        const aptId = e.target.value;
+        if (!aptId || isPlaceholderApartmentId(aptId)) return;
+        await setActiveApartment(aptId);
         apartmentSelectors.forEach(sid => {
           const sel = document.getElementById(sid);
-          if (sel) sel.value = e.target.value;
+          if (sel) sel.value = aptId;
         });
       };
     }
@@ -1207,10 +1520,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const logoutBtn = document.getElementById('user-menu-logout');
   if (logoutBtn) logoutBtn.onclick = () => {
     hideUserMenu();
-    if (supabase) supabase.auth.signOut();
-    localStorage.clear();
-    showAuth('Signed out.');
+    void signOut();
   };
+
+  const topbarLogoutBtn = document.getElementById('topbar-logout-btn');
+  if (topbarLogoutBtn) topbarLogoutBtn.onclick = () => void signOut();
 
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
   if (makeAdminBtn) makeAdminBtn.onclick = async () => {
@@ -1232,6 +1546,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Modal Unified Button Hooks
   document.getElementById('save-mdl-btn').onclick = () => saveMdlData();
+
+  document.querySelectorAll('.unit-parking-type__btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (typeof window.syncNewVehicleType === 'function') {
+        window.syncNewVehicleType(btn.dataset.vType);
+      }
+    });
+  });
   document.getElementById('save-cash-btn').onclick = () => saveCashData();
   initExpenseModal();
   initMaintenanceBilling();
@@ -1429,13 +1751,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
-
-  // Registry Header Register Hook
-  const addBtn = document.getElementById('add-vehicle-top');
-  if (addBtn) addBtn.onclick = () => {
-    const firstUnit = portalState.units[0];
-    if (firstUnit) window.openMdl(firstUnit.id);
-  };
 
   // Initialize Router State
   console.log('Main: Starting boot sequence...');

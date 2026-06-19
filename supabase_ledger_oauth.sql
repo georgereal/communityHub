@@ -7,6 +7,7 @@ create table if not exists public.ledger_sync_oauth_apps (
   provider text not null check (provider in ('GOOGLE', 'MICROSOFT')),
   client_id text not null,
   client_secret text, -- Optional, needed for server-side background sync
+  client_secret_set boolean not null default false,
   tenant_id text not null default 'common',
   redirect_uri text,
   enabled boolean not null default true,
@@ -74,3 +75,11 @@ comment on table public.ledger_sync_oauth_apps is
 
 comment on table public.user_oauth_connections is
   'Per-user OAuth tokens after SSO connect. Only the owning user can read/write their row (RLS).';
+
+-- Backfill for existing deployments
+alter table public.ledger_sync_oauth_apps
+  add column if not exists client_secret_set boolean not null default false;
+
+update public.ledger_sync_oauth_apps
+set client_secret_set = true
+where client_secret is not null and client_secret <> '';

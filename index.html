@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css" />
+  <link rel="stylesheet" href="/src/ledgerSync.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
@@ -38,8 +39,8 @@
         <div style="display:flex; align-items:center; gap:0.6rem;">
           <div id="sidebar-user-initials" class="rail-avatar">CH</div>
           <div class="sidebar-user-meta" style="min-width:0;">
-            <p id="sidebar-user-name" class="rail-user">Property Lead</p>
-            <p id="sidebar-user-role" class="rail-role">Apartment Manager</p>
+            <p id="sidebar-user-name" class="rail-user">—</p>
+            <p id="sidebar-user-role" class="rail-role">—</p>
           </div>
         </div>
       </div>
@@ -57,7 +58,9 @@
             <div class="brand-lockup" aria-label="CommunityHub workspace">
               <span class="brand-lockup__app">CommunityHub</span>
               <span class="brand-lockup__sep">for</span>
-              <span id="topbar-apartment-name" class="brand-lockup__workspace">CommunityHub</span>
+              <select id="header-apartment-switch" class="brand-lockup__workspace brand-lockup__workspace-select" aria-label="Select society">
+                <option value="">Select society…</option>
+              </select>
             </div>
             <nav class="topbar-breadcrumb" aria-label="Current page">
               <span id="topbar-nav-module">Property</span>
@@ -67,12 +70,15 @@
           </div>
         </div>
         <div class="topbar-right">
+          <button id="topbar-logout-btn" class="topbar-icon-btn" type="button" aria-label="Sign out" title="Sign out">
+            <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+          </button>
           <button id="topbar-user-btn" class="topbar-user" type="button" aria-label="User menu">
             <div class="topbar-user-meta">
-              <div id="topbar-user-name" class="topbar-user-name">Property Lead</div>
-              <div id="topbar-user-role" class="topbar-user-role">Apartment Manager</div>
+              <div id="topbar-user-name" class="topbar-user-name">—</div>
+              <div id="topbar-user-role" class="topbar-user-role">—</div>
             </div>
-            <div id="topbar-user-initials" class="topbar-user-avatar">PL</div>
+            <div id="topbar-user-initials" class="topbar-user-avatar">—</div>
           </button>
           <div id="topbar-user-menu" class="user-menu" style="display:none;">
             <button id="user-menu-profile" class="user-menu-item"><i class="fa-solid fa-id-badge"></i><span>Profile</span></button>
@@ -86,33 +92,30 @@
 
       <!-- VIEW: REGISTRY -->
       <section id="view-registry" class="content-view active">
-        <header>
-          <div class="header-title">
+        <header class="registry-page-header">
+          <div class="header-title registry-page-header__title">
             <h2 id="complex-title" class="page-title">Parking & Vehicles</h2>
-            <p>Parking slots, vehicle registry, stickers & compliance</p>
+            <p class="registry-page-header__subtitle">Parking slots, vehicle registry, stickers & compliance</p>
           </div>
-          <div style="display: flex; gap: 0.5rem;">
+          <div class="registry-page-header__actions">
             <button class="btn btn-outline btn--with-badge" type="button" id="registry-change-log">
-              <i class="fa-solid fa-clock-rotate-left"></i> <span>Change Log</span>
+              <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Change Log</span>
               <span class="btn-badge" id="audit-pending-badge" hidden>0</span>
             </button>
             <button class="btn btn-outline" type="button" id="registry-base-capacity">
-              <i class="fa-solid fa-table-cells"></i> <span>Base Capacity</span>
+              <i class="fa-solid fa-table-cells" aria-hidden="true"></i> <span>Base Capacity</span>
             </button>
             <button class="btn btn-outline" type="button" id="registry-download-xlsx">
-              <i class="fa-solid fa-download"></i> <span>Download</span>
+              <i class="fa-solid fa-download" aria-hidden="true"></i> <span>Download</span>
             </button>
             <button class="btn btn-outline" type="button" id="registry-import-xlsx">
-              <i class="fa-solid fa-file-excel"></i> <span>Reconcile Excel</span>
+              <i class="fa-solid fa-file-excel" aria-hidden="true"></i> <span>Reconcile Excel</span>
             </button>
             <input type="file" id="xlsx-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;" />
             <button class="btn btn-outline" onclick="document.getElementById('csv-file').click()">
-              <i class="fa-solid fa-file-import"></i> <span>Import CSV</span>
+              <i class="fa-solid fa-file-import" aria-hidden="true"></i> <span>Import CSV</span>
             </button>
             <input type="file" id="csv-file" accept=".csv" style="display: none;" />
-            <button class="btn btn-primary" id="add-vehicle-top">
-              <i class="fa-solid fa-plus"></i> <span>Register</span>
-            </button>
           </div>
         </header>
 
@@ -218,10 +221,10 @@
             </span>
           </summary>
           <div class="page-section__body">
-          <section class="explorer-controls explorer-controls--inset">
-          <div class="explorer-controls__row">
-            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
-              <i class="fa-solid fa-magnifying-glass"></i>
+          <section class="explorer-controls explorer-controls--inset registry-explorer">
+          <div class="registry-explorer__search-row">
+            <form class="search-container registry-explorer__search" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
               <input
                 type="search"
                 id="apt-search"
@@ -234,18 +237,21 @@
                 data-lpignore="true"
                 data-1p-ignore
                 data-form-type="other"
-                placeholder="Search by unit or plate..."
+                placeholder="Search unit or plate…"
               />
             </form>
-            <div class="explorer-sort">
+            <div class="explorer-sort registry-explorer__sort">
               <span class="explorer-sort__label">Sort</span>
-              <select id="registry-sort" class="explorer-sort__select">
+              <label class="explorer-sort__trigger" for="registry-sort" title="Sort units" aria-label="Sort units">
+                <i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i>
+              </label>
+              <select id="registry-sort" class="explorer-sort__select" aria-label="Sort units">
                 <option value="AZ">Unit (A-Z)</option>
                 <option value="OVERLIMIT">Violation Cases</option>
               </select>
             </div>
           </div>
-          <div class="filter-bar">
+          <div class="filter-bar registry-explorer__filters">
             <button class="filter-pill active" data-filter="ALL">All Units</button>
             <button class="filter-pill" data-filter="OVERLIMIT">Overlimit</button>
             <button class="filter-pill" data-filter="FREE_SLOTS_CARS">Free Cars</button>
@@ -267,20 +273,20 @@
 
       <!-- VIEW: ACCOUNTS -->
       <section id="view-accounts" class="content-view">
-        <header>
-          <div class="header-title">
+        <header class="ledger-page-header">
+          <div class="header-title ledger-page-header__title">
             <h2>Income & Expenses</h2>
-            <p>Track income and expenses across petty cash and bank</p>
+            <p class="ledger-page-header__subtitle">Track income and expenses across petty cash and bank</p>
           </div>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+          <div class="ledger-page-header__actions">
             <button class="btn btn-primary" type="button" onclick="window.openExpense('CASH')">
-              <i class="fa-solid fa-plus"></i> <span>Add Expense</span>
+              <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add Expense</span>
             </button>
             <button class="btn btn-outline" type="button" onclick="window.openIncome('CASH')">
-              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record Income</span>
+              <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record Income</span>
             </button>
-            <button class="btn btn-outline" type="button" onclick="window.openBankSnapshot()">
-              <i class="fa-solid fa-building-columns"></i> <span>Bank Sync</span>
+            <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> <span>Bank Sync</span>
             </button>
           </div>
         </header>
@@ -288,32 +294,45 @@
 
         <div id="subview-ledger">
           <div class="ledger-summary-strip" aria-label="Account balances">
-            <div class="ledger-summary-stat">
-              <span class="ledger-summary-stat__label">Petty cash</span>
-              <span class="ledger-summary-stat__value" id="cash-balance">₹ 0</span>
+            <div class="ledger-summary-stat ledger-summary-stat--total">
+              <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Total balance</span>
+                <span class="ledger-summary-stat__value ledger-summary-stat__value--total" id="total-wealth">₹ 0</span>
+              </div>
             </div>
-            <div class="ledger-summary-stat">
-              <span class="ledger-summary-stat__label">Bank</span>
-              <span class="ledger-summary-stat__value" id="bank-balance">₹ 0</span>
+            <div class="ledger-summary-stat ledger-summary-stat--cash">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Petty cash</span>
+                <span class="ledger-summary-stat__value" id="cash-balance">₹ 0</span>
+              </div>
             </div>
-            <div class="ledger-summary-stat">
-              <span class="ledger-summary-stat__label">Today out</span>
-              <span class="ledger-summary-stat__value ledger-summary-stat__value--out" id="cash-today-out">₹ 0</span>
+            <div class="ledger-summary-stat ledger-summary-stat--bank">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Bank</span>
+                <span class="ledger-summary-stat__value" id="bank-balance">₹ 0</span>
+              </div>
             </div>
-            <div class="ledger-summary-stat">
-              <span class="ledger-summary-stat__label">Total</span>
-              <span class="ledger-summary-stat__value" id="total-wealth">₹ 0</span>
+            <div class="ledger-summary-stat ledger-summary-stat--out">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Today out</span>
+                <span class="ledger-summary-stat__value ledger-summary-stat__value--out" id="cash-today-out">₹ 0</span>
+              </div>
             </div>
           </div>
 
           <div id="ledger-sync-panel"></div>
 
-          <section style="margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding: 0 1.6rem;">
-              <h3 style="font-size: 0.78rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase;">
-                Financial Ledger <span id="cash-txn-count" style="font-weight: 600; text-transform: none;"></span></h3>
-              <form class="search-container" role="search" autocomplete="off" onsubmit="return false" style="max-width: 240px;">
-                <i class="fa-solid fa-magnifying-glass"></i>
+          <section class="ledger-ledger-section">
+            <div class="ledger-ledger-toolbar">
+              <h3 class="ledger-ledger-toolbar__title">
+                Financial Ledger <span id="cash-txn-count" class="ledger-ledger-toolbar__count"></span>
+              </h3>
+              <form class="search-container ledger-ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                 <input
                   type="search"
                   id="cash-search"
@@ -330,10 +349,10 @@
                 />
               </form>
             </div>
-            <div class="registry-list">
-              <div class="registry-header ledger-txn-header" style="grid-template-columns: 100px 100px 140px 1fr 90px 90px 100px;">
+            <div class="registry-list ledger-registry-list">
+              <div class="registry-header ledger-txn-header">
                 <span>Date</span><span>Ledger</span><span>Category</span><span>Description</span><span
-                  style="text-align: right;">Dr (₹)</span><span style="text-align: right;">Cr (₹)</span><span style="text-align: right;">Action</span>
+                  class="ledger-txn-header__num">Dr (₹)</span><span class="ledger-txn-header__num">Cr (₹)</span><span class="ledger-txn-header__action">Action</span>
               </div>
               <div id="cash-ledger-items"></div>
             </div>
@@ -1385,71 +1404,66 @@
 
   <!-- MODALS -->
   <div class="modal-backdrop" id="apt-modal">
-    <div class="modal-content">
-      <div class="drawer-header">
-        <div>
-          <h2 id="mdl-apt-name" style="font-size: 1.5rem; font-weight: 900; color: var(--accent);">Unit Configuration
-          </h2>
-          <p id="mdl-apt-meta"
-            style="font-size: 0.75rem; color: var(--text-dim); font-weight: 700; text-transform: uppercase; margin-top: 0.25rem;">
-          </p>
+    <div class="modal-content unit-parking-modal" role="dialog" aria-modal="true" aria-labelledby="mdl-apt-name">
+      <header class="unit-parking-modal__header">
+        <div class="unit-parking-modal__title-wrap">
+          <h2 id="mdl-apt-name" class="unit-parking-modal__title">D-001</h2>
+          <p id="mdl-apt-meta" class="unit-parking-modal__meta"></p>
         </div>
-        <button class="btn btn-outline" style="padding: 0.5rem 0.75rem;" onclick="window.closeMdl()"><i
-            class="fa-solid fa-xmark"></i></button>
-      </div>
+        <button type="button" class="unit-parking-modal__close btn btn-outline" onclick="window.closeMdl()" aria-label="Close">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </header>
 
-      <div class="drawer-body">
-        <section style="margin-bottom: 1rem;">
-          <label
-            style="display: block; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem; letter-spacing: 0.5px;">Active
-            Fleet Composition</label>
-          <div id="mdl-vehicle-list"></div>
-        </section>
-
-        <section
-          style="background: white; border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
-          <label
-            style="display: block; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem;">New
-            Registry Entry</label>
-          <div style="display: flex; gap: 0.6rem;">
-            <select id="new-v-type"
-              style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; font-weight: 600;">
-              <option value="CAR">Car</option>
-              <option value="BIKE">Bike</option>
-            </select>
-            <input type="text" id="new-v-plate" placeholder="Plate Number..."
-              style="flex: 1; padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; font-weight: 700; font-family: monospace;" />
+      <div class="unit-parking-modal__body">
+        <section class="unit-parking-modal__capacity" aria-label="Base slot limits">
+          <div class="unit-parking-capacity">
+            <label class="unit-parking-capacity__item">
+              <span class="unit-parking-capacity__label"><i class="fa-solid fa-car" aria-hidden="true"></i> Cars</span>
+              <input type="number" id="mdl-car-slots" min="0" step="1" inputmode="numeric" aria-label="Car slot limit" />
+            </label>
+            <label class="unit-parking-capacity__item">
+              <span class="unit-parking-capacity__label"><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> Bikes</span>
+              <input type="number" id="mdl-bike-slots" min="0" step="1" inputmode="numeric" aria-label="Bike slot limit" />
+            </label>
+            <label class="unit-parking-capacity__item">
+              <span class="unit-parking-capacity__label"><i class="fa-solid fa-ruler-combined" aria-hidden="true"></i> Sq ft</span>
+              <input type="number" id="mdl-area-sqft" min="0" step="0.01" inputmode="decimal" placeholder="—" aria-label="Area in square feet" />
+            </label>
           </div>
         </section>
 
-        <section style="background: white; border: 1px solid var(--border); border-radius: 10px; padding: 1rem;">
-          <label
-            style="display: block; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem;">Base
-            Capacity Matrix</label>
-          <div style="display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 0.75rem; font-weight: 800;">
-              <i class="fa-solid fa-car" style="color: var(--text-dim);"></i>
-              <input type="number" id="mdl-car-slots"
-                style="width: 60px; text-align: center; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px;" />
-            </div>
-            <div style="display: flex; align-items: center; gap: 0.75rem; font-weight: 800;">
-              <i class="fa-solid fa-motorcycle" style="color: var(--text-dim);"></i>
-              <input type="number" id="mdl-bike-slots"
-                style="width: 60px; text-align: center; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px;" />
-            </div>
-            <div style="display: flex; align-items: center; gap: 0.75rem; font-weight: 800;">
-              <i class="fa-solid fa-ruler-combined" style="color: var(--text-dim);"></i>
-              <input type="number" id="mdl-area-sqft" min="0" step="0.01" placeholder="Sq ft"
-                style="width: 90px; text-align: center; padding: 0.4rem; border: 1px solid var(--border); border-radius: 6px;" />
-            </div>
+        <section class="unit-parking-modal__fleet">
+          <div class="unit-parking-modal__section-head">
+            <h3 class="unit-parking-modal__section-title">Registered vehicles</h3>
           </div>
+          <div id="mdl-vehicle-list" class="unit-parking-vehicle-list"></div>
+        </section>
+
+        <section class="unit-parking-modal__add" aria-label="Add vehicle">
+          <h3 class="unit-parking-modal__section-title">Add vehicle</h3>
+          <div class="unit-parking-add">
+            <div class="unit-parking-type" role="group" aria-label="Vehicle type">
+              <button type="button" class="unit-parking-type__btn unit-parking-type__btn--active" data-v-type="CAR" aria-pressed="true">
+                <i class="fa-solid fa-car" aria-hidden="true"></i> Car
+              </button>
+              <button type="button" class="unit-parking-type__btn" data-v-type="BIKE" aria-pressed="false">
+                <i class="fa-solid fa-motorcycle" aria-hidden="true"></i> Bike
+              </button>
+            </div>
+            <input type="text" id="new-v-plate" class="unit-parking-add__plate" placeholder="Plate number" spellcheck="false" autocapitalize="characters" autocomplete="off" />
+          </div>
+          <select id="new-v-type" hidden aria-hidden="true" tabindex="-1">
+            <option value="CAR">Car</option>
+            <option value="BIKE">Bike</option>
+          </select>
         </section>
       </div>
 
-      <div class="drawer-footer">
-        <button class="btn btn-outline" style="flex: 1;" onclick="window.closeMdl()">Cancel</button>
-        <button class="btn btn-primary" style="flex: 1;" id="save-mdl-btn">Save</button>
-      </div>
+      <footer class="unit-parking-modal__footer">
+        <button type="button" class="btn btn-outline" onclick="window.closeMdl()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="save-mdl-btn">Save changes</button>
+      </footer>
     </div>
   </div>
 
@@ -1510,14 +1524,16 @@
 
       <div id="expense-form-view" class="expense-form">
         <div class="expense-form__section expense-form__section--wallet">
-          <label class="expense-label">Paid from</label>
-          <div class="expense-wallet-pills" id="expense-wallet-pills">
-            <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
-              <i class="fa-solid fa-wallet"></i> Petty Cash
-            </button>
-            <button type="button" class="expense-wallet-pill" data-wallet="BANK">
-              <i class="fa-solid fa-building-columns"></i> Bank
-            </button>
+          <div class="expense-wallet-row">
+            <span class="expense-label expense-label--inline">Paid from</span>
+            <div class="expense-wallet-pills expense-wallet-pills--compact" id="expense-wallet-pills" role="group" aria-label="Paid from">
+              <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
+                <i class="fa-solid fa-wallet"></i> Petty Cash
+              </button>
+              <button type="button" class="expense-wallet-pill" data-wallet="BANK">
+                <i class="fa-solid fa-building-columns"></i> Bank
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1551,12 +1567,6 @@
           <input type="date" id="cash-date" class="expense-date" />
         </div>
 
-        <div class="expense-form__section expense-form__section--invoice">
-          <label class="expense-label" for="expense-invoice-input">Invoice # <span class="expense-optional">(optional)</span></label>
-          <input type="text" id="expense-invoice-input" class="expense-combobox"
-            placeholder="e.g. INV-4821" autocomplete="off" />
-        </div>
-
         <div class="expense-form__section expense-form__section--cats">
           <label class="expense-label" for="expense-cat-input">Category</label>
           <input type="text" id="expense-cat-input" class="expense-combobox" list="expense-cat-datalist"
@@ -1571,11 +1581,18 @@
           <datalist id="expense-subcat-datalist"></datalist>
         </div>
 
-        <div class="expense-form__section expense-form__section--vendor">
-          <label class="expense-label" for="expense-vendor-input">Vendor</label>
-          <input type="text" id="expense-vendor-input" class="expense-combobox" list="expense-vendor-datalist"
-            placeholder="e.g. ABC Elevators, Sharma Plumbing" autocomplete="off" />
-          <datalist id="expense-vendor-datalist"></datalist>
+        <div class="expense-form__section expense-form__section--vendor-invoice">
+          <div class="expense-form__section expense-form__section--vendor">
+            <label class="expense-label" for="expense-vendor-input">Vendor</label>
+            <input type="text" id="expense-vendor-input" class="expense-combobox" list="expense-vendor-datalist"
+              placeholder="e.g. ABC Elevators, Sharma Plumbing" autocomplete="off" />
+            <datalist id="expense-vendor-datalist"></datalist>
+          </div>
+          <div class="expense-form__section expense-form__section--invoice">
+            <label class="expense-label" for="expense-invoice-input">Invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="expense-invoice-input" class="expense-combobox"
+              placeholder="e.g. INV-4821" autocomplete="off" />
+          </div>
         </div>
 
         <div class="expense-form__section expense-form__section--desc">
@@ -1596,14 +1613,16 @@
 
       <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
         <div class="expense-form__section expense-form__section--wallet">
-          <label class="expense-label">Received into</label>
-          <div class="expense-wallet-pills" id="income-wallet-pills">
-            <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
-              <i class="fa-solid fa-wallet"></i> Petty Cash
-            </button>
-            <button type="button" class="expense-wallet-pill" data-wallet="BANK">
-              <i class="fa-solid fa-building-columns"></i> Bank
-            </button>
+          <div class="expense-wallet-row">
+            <span class="expense-label expense-label--inline">Received into</span>
+            <div class="expense-wallet-pills expense-wallet-pills--compact" id="income-wallet-pills" role="group" aria-label="Received into">
+              <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
+                <i class="fa-solid fa-wallet"></i> Petty Cash
+              </button>
+              <button type="button" class="expense-wallet-pill" data-wallet="BANK">
+                <i class="fa-solid fa-building-columns"></i> Bank
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1657,6 +1676,23 @@
           </div>
           <div id="maintenance-allocation-rows" class="maintenance-allocation-rows"></div>
           <p id="maintenance-allocation-summary" class="maintenance-alloc-summary"></p>
+        </div>
+
+        <div id="income-extra-section" class="expense-form__section expense-form__section--income-extra" hidden>
+          <p id="income-extra-hint" class="income-extra-hint"></p>
+          <div class="expense-form__section--vendor-invoice income-extra-fields">
+            <div id="income-extra-vendor-wrap" class="expense-form__section expense-form__section--vendor" hidden>
+              <label class="expense-label" for="income-vendor-input" id="income-vendor-label">Vendor</label>
+              <input type="text" id="income-vendor-input" class="expense-combobox" list="income-vendor-datalist"
+                placeholder="e.g. ABC Builders" autocomplete="off" />
+              <datalist id="income-vendor-datalist"></datalist>
+            </div>
+            <div id="income-extra-ref-wrap" class="expense-form__section expense-form__section--invoice" hidden>
+              <label class="expense-label" for="income-reference-input" id="income-reference-label">Reference</label>
+              <input type="text" id="income-reference-input" class="expense-combobox"
+                placeholder="e.g. Contract #12" autocomplete="off" />
+            </div>
+          </div>
         </div>
 
         <div class="expense-form__section expense-form__section--desc">
@@ -2113,6 +2149,19 @@
       <div class="receipt-viewer__footer">
         <a id="receipt-open-tab" class="receipt-viewer__open" href="#" target="_blank" rel="noopener">Open in new tab</a>
       </div>
+    </div>
+  </div>
+
+  <!-- WORKSPACE GATE (signed in but no society loaded) -->
+  <div class="modal-backdrop" id="workspace-gate-modal">
+    <div class="modal-content auth-card" style="max-width:420px;">
+      <h2 style="font-size: 1.25rem; font-weight: 950; letter-spacing: -0.3px;">Select your society</h2>
+      <p id="workspace-gate-message" style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1.25rem;">Choose which apartment society to load. Your data is stored per society.</p>
+      <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
+      <select id="workspace-gate-select" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:1rem;"></select>
+      <div id="workspace-gate-error" style="display:none; padding:0.6rem 0.7rem; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-weight:800; font-size:0.8rem; margin-bottom:0.75rem;"></div>
+      <button type="button" id="workspace-gate-confirm" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem; margin-bottom:0.5rem;">Load society</button>
+      <button type="button" id="workspace-gate-logout" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Sign out</button>
     </div>
   </div>
 

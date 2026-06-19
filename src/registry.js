@@ -111,10 +111,32 @@ export const processAnalytics = () => {
 export const renderRegistry = () => {
     processAnalytics();
     const list = document.getElementById('registry-items'); if (!list) return; list.innerHTML = '';
-    const search = document.getElementById('apt-search').value.toLowerCase();
-    const sort = document.getElementById('registry-sort').value;
+    const searchEl = document.getElementById('apt-search');
+    const search = (searchEl?.value || '').toLowerCase();
+    const sort = document.getElementById('registry-sort')?.value || 'AZ';
     const filter = document.body.dataset.registryFilter || 'ALL';
     const isMobile = window.matchMedia && window.matchMedia('(max-width: 520px)').matches;
+
+    if (!portalState.units.length) {
+        const aptName = portalState.access?.apartments?.find(
+            (a) => a.id === portalState.access?.activeApartmentId,
+        )?.name || portalState.community?.name || 'this society';
+        const meta = portalState.lastPullMeta;
+        const errHint = meta?.unitsError
+            ? `<p class="registry-empty-state__error">Database: ${meta.unitsError}</p>`
+            : '';
+        const aptHint = meta?.apartmentId
+            ? `<p class="registry-empty-state__meta">Society id: <code>${meta.apartmentId.slice(0, 8)}…</code></p>`
+            : '';
+        list.innerHTML = `<div class="registry-empty-state">
+          <p><strong>No units loaded for ${aptName}.</strong></p>
+          <p>Select the correct society in the sidebar <strong>Workspace</strong> dropdown (e.g. Elixir Heights), then reload.</p>
+          ${aptHint}
+          ${errHint}
+          <p class="registry-empty-state__meta">Your data is still in Supabase — the app was likely querying the wrong society partition.</p>
+        </div>`;
+        return;
+    }
 
     const block = getSelectedBlock();
 
@@ -434,8 +456,7 @@ export const addCommunityPoolSlot = async (kind) => {
     await pullState();
     processAnalytics();
     renderRegistry();
-};
-window.addCommunityPoolSlot = addCommunityPoolSlot;
+}
 
 export const deleteCommunityPoolSlot = async (slotId, kind) => {
     if (!supabase) return;
@@ -452,8 +473,7 @@ export const deleteCommunityPoolSlot = async (slotId, kind) => {
     await pullState();
     processAnalytics();
     renderRegistry();
-};
-window.deleteCommunityPoolSlot = deleteCommunityPoolSlot;
+}
 
 const renderPoolSearchResults = (slotId, query = '') => {
     const list = document.getElementById('pool-search-results');
@@ -548,8 +568,7 @@ export const openPool = (id) => {
         renderPoolSearchResults(id, '');
     }
     document.getElementById('pool-modal').classList.add('active');
-};
-window.openPool = openPool;
+}
 
 export const deallocateSlot = async (id) => {
     if (confirm('Release this community slot?') && supabase) {
@@ -578,23 +597,55 @@ export const deallocateSlot = async (id) => {
         document.getElementById('pool-modal').classList.remove('active');
         await pullState(); renderRegistry();
     }
-};
-window.deallocateSlot = deallocateSlot;
+}
 
 export const openMdl = (id) => {
-    portalState.activeUnitId = id; const u = portalState.units.find(x => x.id == id);
+    portalState.activeUnitId = id;
+    const u = portalState.units.find(x => x.id == id);
+    if (!u) return;
     document.getElementById('mdl-apt-name').textContent = u.number;
     document.getElementById('mdl-car-slots').value = u.car_limit;
     document.getElementById('mdl-bike-slots').value = u.bike_limit;
     const areaEl = document.getElementById('mdl-area-sqft');
     if (areaEl) areaEl.value = u.area_sqft ?? '';
+    const plateEl = document.getElementById('new-v-plate');
+    if (plateEl) plateEl.value = '';
+    syncNewVehicleType('CAR');
+    updateMdlMeta(u);
     renderMdlList(u);
     document.getElementById('apt-modal').classList.add('active');
 };
-window.openMdl = openMdl;
+
+function syncNewVehicleType(type) {
+    const value = type === 'BIKE' ? 'BIKE' : 'CAR';
+    const select = document.getElementById('new-v-type');
+    if (select) select.value = value;
+    document.querySelectorAll('.unit-parking-type__btn').forEach((btn) => {
+        const active = btn.dataset.vType === value;
+        btn.classList.toggle('unit-parking-type__btn--active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+const updateMdlMeta = (u) => {
+    const meta = document.getElementById('mdl-apt-meta');
+    if (!meta) return;
+    const activeFleet = (u.vehicles || []).filter(v => v.is_parking_active !== false);
+    const activeCars = activeFleet.filter(v => (v.type || 'CAR').toUpperCase() === 'CAR').length;
+    const activeBikes = activeFleet.filter(v => (v.type || 'CAR').toUpperCase() === 'BIKE').length;
+    const over = activeFleet.some(v => v.status === 'OVERLIMIT');
+    const usage = countBaseSlotUsage(u);
+    const parts = [
+        `${activeFleet.length} active`,
+        `🚗 ${activeCars}/${u.car_limit ?? 0}`,
+        `🏍 ${activeBikes}/${u.bike_limit ?? 0}`,
+    ];
+    if (over) parts.push('Over limit');
+    else if (usage.hasFreeCarSlots || usage.hasFreeBikeSlots) parts.push('Slots available');
+    meta.textContent = parts.join(' · ');
+};
 
 export const closeMdl = () => document.getElementById('apt-modal').classList.remove('active');
-window.closeMdl = closeMdl;
 
 let capacityDraft = null;
 
@@ -785,59 +836,73 @@ const formatParkingAllocLine = (v) => {
 
 const renderMdlList = (u) => {
     const c = document.getElementById('mdl-vehicle-list'); if (!c) return; c.innerHTML = '';
-    // Stable Sort: Maintain arrival order to prevent jumpy UI
     const stableVehicles = [...u.vehicles].sort((a, b) => a.id.localeCompare(b.id));
 
-    stableVehicles.forEach(v => {
-        const d = document.createElement('div'); d.className = 'modal-list-item';
-        d.classList.add('vehicle-row-card');
-        const status = (v.status || 'ALLOWED').toUpperCase();
+    if (!stableVehicles.length) {
+        c.innerHTML = '<p class="unit-parking-empty">No vehicles registered for this unit yet. Add one below.</p>';
+        return;
+    }
 
+    stableVehicles.forEach(v => {
+        const d = document.createElement('div');
+        d.className = 'unit-parking-vehicle modal-list-item vehicle-row-card';
+        const status = (v.status || 'ALLOWED').toUpperCase();
         const type = (v.type || 'CAR').toLowerCase();
         const icon = type === 'car' ? 'fa-car' : 'fa-motorcycle';
         const alloc = effectiveAllocationType(v);
         const statusChip = status === 'OVERLIMIT'
-            ? `<span class="alloc-status-chip overlimit">Overlimit</span>`
+            ? `<span class="alloc-status-chip overlimit">Over limit</span>`
             : (status === 'REALLOCATED'
                 ? `<span class="alloc-status-chip reallocated">Reallocated</span>`
                 : (status === 'INACTIVE' ? `<span class="alloc-status-chip inactive">Inactive</span>` : ''));
         if (status === 'OVERLIMIT') d.classList.add('is-overlimit');
 
         d.innerHTML = `
-        <div class="apt-alloc-row">
-          <div class="apt-alloc-vehicle">
-            <i class="fa-solid ${icon} vehicle-type-icon ${type}"></i>
-            <div class="apt-alloc-vehicle__text">
+        <div class="unit-parking-vehicle__head">
+          <div class="unit-parking-vehicle__identity">
+            <span class="unit-parking-vehicle__icon unit-parking-vehicle__icon--${type}" aria-hidden="true">
+              <i class="fa-solid ${icon}"></i>
+            </span>
+            <div class="unit-parking-vehicle__plate-wrap">
               <input type="text" class="vehicle-plate-input" aria-label="Plate number" spellcheck="false" autocomplete="off" />
               ${formatParkingAllocLine(v)}
-              ${formatRegistryMetaLine(v)}
             </div>
-            ${statusChip}
           </div>
-          <div class="apt-alloc-controls ${alloc !== 'BASE' ? 'with-target' : ''}">
-            <label class="vehicle-active-toggle">
-              <input type="checkbox" ${v.is_parking_active ? 'checked' : ''} onchange="window.toggleVehicleActive('${u.id}', '${v.id}', this.checked)" />
-              <span>${v.is_parking_active ? 'Active' : 'Dormant'}</span>
-            </label>
-            <select class="form-select apt-alloc-select" aria-label="Space Type" title="Space Type" onchange="window.updateAllocation('${v.id}', '${u.id}', this.value)">
-              <option value="BASE" ${alloc === 'BASE' ? 'selected' : ''}>Base Area Slot</option>
-              <option value="COMMON" ${alloc === 'COMMON' ? 'selected' : ''}>Community Pool</option>
-              <option value="NEIGHBOR" ${alloc === 'NEIGHBOR' ? 'selected' : ''}>Neighbor Unit</option>
+          <div class="unit-parking-vehicle__aside">
+            <div class="unit-parking-vehicle__badges">${statusChip}</div>
+            <button type="button" class="btn btn-outline unit-parking-vehicle__delete vehicle-del-btn" onclick="window.delVeh('${u.id}', '${v.id}')" aria-label="Remove vehicle">
+              <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        ${formatRegistryMetaLine(v)}
+        <div class="unit-parking-vehicle__controls apt-alloc-controls ${alloc !== 'BASE' ? 'with-target' : ''}">
+          <label class="vehicle-active-toggle">
+            <input type="checkbox" ${v.is_parking_active ? 'checked' : ''} onchange="window.toggleVehicleActive('${u.id}', '${v.id}', this.checked)" />
+            <span>${v.is_parking_active ? 'Active' : 'Dormant'}</span>
+          </label>
+          <div class="unit-parking-vehicle__field">
+            <span class="unit-parking-vehicle__field-label">Space</span>
+            <select class="form-select apt-alloc-select" aria-label="Space type" onchange="window.updateAllocation('${v.id}', '${u.id}', this.value)">
+              <option value="BASE" ${alloc === 'BASE' ? 'selected' : ''}>Base slot</option>
+              <option value="COMMON" ${alloc === 'COMMON' ? 'selected' : ''}>Community pool</option>
+              <option value="NEIGHBOR" ${alloc === 'NEIGHBOR' ? 'selected' : ''}>Neighbor unit</option>
             </select>
-            ${alloc !== 'BASE' ? `
-            <select class="form-select apt-alloc-select" aria-label="Allocation Target" title="Allocation Target" onchange="window.updateAllocationTarget('${v.id}', '${u.id}', this.value)">
-              <option value="">Choose Target...</option>
+          </div>
+          ${alloc !== 'BASE' ? `
+          <div class="unit-parking-vehicle__field">
+            <span class="unit-parking-vehicle__field-label">Target</span>
+            <select class="form-select apt-alloc-select" aria-label="Allocation target" onchange="window.updateAllocationTarget('${v.id}', '${u.id}', this.value)">
+              <option value="">Choose target…</option>
               ${alloc === 'COMMON'
                     ? portalState.slots
                         .filter(s => !s.occupant || s.assigned_vehicle_id === v.id)
                         .map(s => `<option value="${s.id}" ${v.allocation_target_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')
                     : portalState.units.filter(ux => ux.id !== u.id).map(ux => `<option value="${ux.id}" ${v.allocation_target_id === ux.id ? 'selected' : ''}>Unit ${ux.number}</option>`).join('')
                 }
-            </select>` : ''}
-            <button class="btn btn-outline vehicle-del-btn" onclick="window.delVeh('${u.id}', '${v.id}')"><i class="fa-solid fa-trash-can"></i></button>
-          </div>
-        </div>
-        `;
+            </select>
+          </div>` : ''}
+        </div>`;
         const plateInput = d.querySelector('.vehicle-plate-input');
         if (plateInput) {
             plateInput.value = v.plate || '';
@@ -860,7 +925,7 @@ const renderMdlList = (u) => {
     });
 };
 
-window.updateVehiclePlate = async (uid, vid, inputEl) => {
+export const updateVehiclePlate = async (uid, vid, inputEl) => {
     if (!supabase || !inputEl) return;
     const u = portalState.units.find((x) => x.id === uid);
     const v = u?.vehicles.find((veh) => veh.id === vid);
@@ -907,7 +972,7 @@ window.updateVehiclePlate = async (uid, vid, inputEl) => {
     openMdl(uid);
 };
 
-window.updateAllocation = async (vid, uid, type) => {
+export const updateAllocation = async (vid, uid, type) => {
     if (!supabase) return;
     const u = portalState.units.find((x) => x.id === uid);
     const v = u?.vehicles.find((veh) => veh.id === vid);
@@ -930,7 +995,7 @@ window.updateAllocation = async (vid, uid, type) => {
     await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
 };
 
-window.updateAllocationTarget = async (vid, uid, targetId) => {
+export const updateAllocationTarget = async (vid, uid, targetId) => {
     if (!supabase || !targetId) return;
     const u = portalState.units.find((x) => x.id === uid);
     const v = u?.vehicles.find((veh) => veh.id === vid);
@@ -962,7 +1027,7 @@ window.updateAllocationTarget = async (vid, uid, targetId) => {
     await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
 };
 
-window.delVeh = async (uid, vid) => {
+export const delVeh = async (uid, vid) => {
     if (!supabase) return;
     const u = portalState.units.find((x) => x.id === uid);
     const v = u?.vehicles.find((veh) => veh.id === vid);
@@ -983,7 +1048,7 @@ window.delVeh = async (uid, vid) => {
     }
 };
 
-window.toggleVehicleActive = async (uid, vid, isActive) => {
+export const toggleVehicleActive = async (uid, vid, isActive) => {
     if (!supabase) return;
     const u = portalState.units.find((x) => x.id === uid);
     const v = u?.vehicles.find((veh) => veh.id === vid);
@@ -1048,8 +1113,7 @@ export const saveMdlData = async () => {
 
     document.getElementById('new-v-plate').value = '';
     await pullState(); processAnalytics(); renderRegistry(); persist(); window.closeMdl();
-};
-window.saveMdlData = saveMdlData;
+}
 
 export const handleCSVImport = async (file) => {
     console.log('🔄 [Ingestion] Starting Bulk CSV Ingestion Engine...');
@@ -1095,8 +1159,7 @@ export const handleCSVImport = async (file) => {
         }
     };
     reader.readAsText(file);
-};
-window.handleCSVImport = handleCSVImport;
+}
 
 const HEADER_GREEN = 'FF00FF00';
 
@@ -1164,4 +1227,19 @@ export const downloadVehicleRegistryXlsx = async () => {
     URL.revokeObjectURL(a.href);
 };
 
+// --- GLOBAL WINDOW HOOKS ---
+window.deallocateSlot = deallocateSlot;
+window.openMdl = openMdl;
+window.syncNewVehicleType = syncNewVehicleType;
+window.openPool = openPool;
+window.closeMdl = closeMdl;
+window.saveMdlData = saveMdlData;
+window.handleCSVImport = handleCSVImport;
 window.downloadVehicleRegistryXlsx = downloadVehicleRegistryXlsx;
+window.addCommunityPoolSlot = addCommunityPoolSlot;
+window.deleteCommunityPoolSlot = deleteCommunityPoolSlot;
+window.openCapacityModal = openCapacityModal;
+window.closeCapacityModal = closeCapacityModal;
+window.applyCapacityDefaultsToAll = applyCapacityDefaultsToAll;
+window.saveCapacityAllocation = saveCapacityAllocation;
+window.refreshCapacityUnitList = refreshCapacityUnitList;
