@@ -20,6 +20,7 @@ import {
 } from './maintenanceBilling.js';
 import { effectiveAllocationType, resolveAllocationTargetLabel } from './allocation.js';
 import { getDocumentsForUnit, saveUnitDocument, deleteUnitDocument } from './operations.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 export const OCCUPANCY_STATUSES = {
     OWNER_OCCUPIED: { label: 'Owner occupied', short: 'Owner' },
@@ -823,7 +824,8 @@ const renderUnitDetailDocuments = (u) => {
         document.getElementById('unit-doc-form')?.setAttribute('hidden', '');
     });
     document.getElementById('unit-doc-save')?.addEventListener('click', async () => {
-        try {
+        const btn = document.getElementById('unit-doc-save');
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveUnitDocument(u.id, {
                 title: document.getElementById('unit-doc-title')?.value?.trim(),
                 doc_type: document.getElementById('unit-doc-type')?.value,
@@ -831,19 +833,15 @@ const renderUnitDetailDocuments = (u) => {
                 expires_at: document.getElementById('unit-doc-expires')?.value || null,
             });
             renderUnitDetailDocuments(u);
-        } catch (err) {
-            alert(err?.message || 'Could not save document.');
-        }
+        }).catch((err) => alert(err?.message || 'Could not save document.'));
     });
     el.querySelectorAll('.unit-detail-del-doc').forEach((btn) => {
         btn.addEventListener('click', async () => {
             if (!confirm('Delete this document record?')) return;
-            try {
+            await withButtonBusy(btn, 'Deleting…', async () => {
                 await deleteUnitDocument(btn.dataset.id);
                 renderUnitDetailDocuments(u);
-            } catch (err) {
-                alert(err?.message || 'Could not delete.');
-            }
+            }).catch((err) => alert(err?.message || 'Could not delete.'));
         });
     });
 };
@@ -1001,14 +999,8 @@ export const initUnitDirectory = () => {
     document.getElementById('unit-edit-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('unit-edit-save');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-        try {
-            await saveUnitEdit();
-        } catch (err) {
-            alert(err?.message || 'Could not save flat.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
-        }
+        await withButtonBusy(btn, 'Saving…', saveUnitEdit)
+            .catch((err) => alert(err?.message || 'Could not save flat.'));
     });
     document.getElementById('unit-detail-close')?.addEventListener('click', closeUnitDetailModal);
     document.getElementById('unit-edit-cancel')?.addEventListener('click', closeUnitDetailModal);
@@ -1090,8 +1082,7 @@ export const initUnitDirectory = () => {
         const mode = document.querySelector('input[name="resident-import-mode"]:checked')?.value || 'update_listed';
         if (mode === 'full_replace' && !confirm('This will delete ALL residents for this apartment before importing. Continue?')) return;
         const btn = document.getElementById('unit-directory-import-apply');
-        if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
-        try {
+        await withButtonBusy(btn, 'Applying…', async () => {
             const stats = await applyUnitDirectoryImport(pendingImport, { residentImportMode: mode });
             closeImportModal();
             await renderUnitDirectory();
@@ -1099,11 +1090,7 @@ export const initUnitDirectory = () => {
                 ? `\n\nIssues (${stats.errors.length}):\n${stats.errors.slice(0, 8).join('\n')}`
                 : '';
             alert(`Updated ${stats.updated} flat(s), created ${stats.created}, residents ${stats.residents}.${errNote}`);
-        } catch (err) {
-            showError(err?.message || 'Import failed.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Apply import'; }
-        }
+        }).catch((err) => showError(err?.message || 'Import failed.'));
     });
 
     modal?.addEventListener('click', (e) => {

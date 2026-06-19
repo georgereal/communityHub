@@ -2324,6 +2324,18 @@ header {
   color: #374151;
 }
 
+.btn--busy,
+.btn[aria-busy="true"] {
+  opacity: 0.85;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.btn--busy .fa-spin,
+.btn[aria-busy="true"] .fa-spin {
+  flex-shrink: 0;
+}
+
 /* --- SENTRY SLIDE-OVER DRAWER --- */
 .modal-backdrop {
   position: fixed;

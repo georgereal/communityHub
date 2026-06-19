@@ -3,6 +3,7 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { countExtraPoolVehicles, getExtraPoolVehicles } from './allocation.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 export const CALC_TYPES = {
     FLAT: {
@@ -414,8 +415,7 @@ export const initChargeHeadsUi = () => {
     document.getElementById('charge-head-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('charge-head-save-btn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-        try {
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveChargeHead({
                 id: document.getElementById('charge-head-form')?.dataset.headId || null,
                 name: document.getElementById('charge-head-name')?.value,
@@ -428,11 +428,7 @@ export const initChargeHeadsUi = () => {
             closeChargeHeadEditor();
             renderChargeHeadsList();
             refreshBulkInvoiceHeads();
-        } catch (err) {
-            alert(err?.message || 'Could not save charge head.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Save head'; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not save charge head.'));
     });
 
     document.getElementById('charge-head-add-btn')?.addEventListener('click', () => openChargeHeadEditor());

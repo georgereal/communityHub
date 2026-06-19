@@ -2,6 +2,7 @@
  * Billing groups — combine multiple flats into one invoice
  */
 import { portalState, supabase, pullState } from './store.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const normUnit = (n) => String(n || '').trim().toUpperCase();
@@ -355,16 +356,11 @@ const renderSuggestPanel = async () => {
             return;
         }
         const btn = document.getElementById('billing-group-suggest-create');
-        if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
-        try {
+        await withButtonBusy(btn, 'Creating…', async () => {
             await createSuggestedGroups(picked);
             panel.innerHTML = `<p class="maintenance-alloc-hint">Created ${picked.length} group(s).</p>`;
             renderBillingGroupsList();
-        } catch (err) {
-            alert(err?.message || 'Could not create groups.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Create selected groups'; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not create groups.'));
     });
 };
 
@@ -386,8 +382,7 @@ export const initBillingGroupsUi = () => {
     document.getElementById('billing-group-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('billing-group-save-btn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-        try {
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveBillingGroup({
                 id: document.getElementById('billing-group-form')?.dataset.groupId || null,
                 name: document.getElementById('billing-group-name')?.value,
@@ -400,11 +395,7 @@ export const initBillingGroupsUi = () => {
             closeBillingGroupEditor();
             renderBillingGroupsList();
             renderSuggestPanel();
-        } catch (err) {
-            alert(err?.message || 'Could not save group.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Save group'; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not save group.'));
     });
 
     document.getElementById('billing-group-add-btn')?.addEventListener('click', () => openBillingGroupEditor());

@@ -10,6 +10,7 @@ import {
     renderGateLog,
     ensureGateContext,
 } from './visitorGate.js';
+import { withButtonBusy } from './buttonBusy.js';
 import {
     renderGateWizard,
     renderPendingApprovalsPanel,
@@ -103,12 +104,17 @@ export const initSecurityPortal = () => {
         renderSecurityLog();
     });
 
-    document.getElementById('sec-pass-save')?.addEventListener('click', () => void saveSecurityPass());
+    document.getElementById('sec-pass-save')?.addEventListener('click', () => {
+        void withButtonBusy(document.getElementById('sec-pass-save'), 'Saving…', saveSecurityPass);
+    });
 
     document.getElementById('sec-refresh')?.addEventListener('click', async () => {
-        await pullState();
-        const active = document.querySelector('.security-subview:not([hidden])')?.id?.replace('security-subview-', '') || 'gate';
-        renderSecuritySubview(active);
+        const btn = document.getElementById('sec-refresh');
+        await withButtonBusy(btn, 'Refreshing…', async () => {
+            await pullState();
+            const active = document.querySelector('.security-subview:not([hidden])')?.id?.replace('security-subview-', '') || 'gate';
+            renderSecuritySubview(active);
+        });
     });
 
     document.addEventListener('gate-data-updated', () => {

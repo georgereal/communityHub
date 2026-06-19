@@ -61,6 +61,7 @@ import {
 } from './blockFilter.js';
 import { clearResidentsCache } from './residents.js';
 import { logActivity, renderInvoiceActivityHistory } from './activityAudit.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -1579,8 +1580,7 @@ export const initMaintenanceBilling = () => {
     document.getElementById('raise-invoice-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('raise-invoice-btn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-        try {
+        await withButtonBusy(btn, 'Saving…', async () => {
             const result = await createBulkMaintenanceInvoices({
                 periodLabel: document.getElementById('raise-invoice-period')?.value,
                 dueDate: document.getElementById('raise-invoice-due')?.value || null,
@@ -1597,11 +1597,8 @@ export const initMaintenanceBilling = () => {
             if (result.skipped > 0) {
                 alert(`Created ${result.created} invoice(s). Skipped ${result.skipped} flat(s) that already had this period.`);
             }
-        } catch (err) {
-            alert(err?.message || 'Could not create invoices.');
-        } finally {
-            if (btn) { btn.disabled = false; refreshBulkInvoicePreview(); }
-        }
+        }).catch((err) => alert(err?.message || 'Could not create invoices.'))
+            .finally(() => refreshBulkInvoicePreview());
     });
 
     document.getElementById('raise-invoice-period')?.addEventListener('input', refreshBulkInvoicePreview);
@@ -1618,29 +1615,18 @@ export const initMaintenanceBilling = () => {
     document.getElementById('invoice-detail-pdf-btn')?.addEventListener('click', async () => {
         if (!detailInvoiceId) return;
         const btn = document.getElementById('invoice-detail-pdf-btn');
-        if (btn) { btn.disabled = true; }
-        try {
-            await downloadInvoicePdf(detailInvoiceId);
-        } catch (err) {
-            alert(err?.message || 'Could not generate PDF.');
-        } finally {
-            if (btn) { btn.disabled = false; }
-        }
+        await withButtonBusy(btn, 'Generating PDF…', () => downloadInvoicePdf(detailInvoiceId))
+            .catch((err) => alert(err?.message || 'Could not generate PDF.'));
     });
     document.getElementById('invoice-detail-email-btn')?.addEventListener('click', async () => {
         if (!detailInvoiceId) return;
         const btn = document.getElementById('invoice-detail-email-btn');
-        if (btn) { btn.disabled = true; }
-        try {
+        await withButtonBusy(btn, 'Preparing email…', async () => {
             const result = await emailInvoicePdf(detailInvoiceId);
             if (result.method === 'mailto' && !result.email) {
                 alert('No email on file for this flat — add owner/tenant email in Residents, or enter the address manually.');
             }
-        } catch (err) {
-            alert(err?.message || 'Could not prepare email.');
-        } finally {
-            if (btn) { btn.disabled = false; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not prepare email.'));
     });
 
     document.getElementById('apply-penalty-asof')?.addEventListener('change', refreshApplyPenaltyPreview);
@@ -1655,8 +1641,7 @@ export const initMaintenanceBilling = () => {
             return;
         }
         if (!confirm('Add penalty lines to overdue open invoices? Existing penalty rules on an invoice are skipped.')) return;
-        if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
-        try {
+        await withButtonBusy(btn, 'Applying…', async () => {
             const result = await applyPenaltiesToOverdue({
                 ruleIds,
                 overrides: applyPenaltyOverrides,
@@ -1664,11 +1649,7 @@ export const initMaintenanceBilling = () => {
             });
             closeApplyPenaltiesModal();
             alert(`Applied penalties to ${result.applied} invoice(s) · ${result.linesAdded} line(s) added.`);
-        } catch (err) {
-            alert(err?.message || 'Could not apply penalties.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Apply to overdue invoices'; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not apply penalties.'));
     });
 
     document.getElementById('bulk-invoice-download')?.addEventListener('click', () => {

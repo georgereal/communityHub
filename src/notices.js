@@ -20,6 +20,7 @@ import {
     dispatchNoticeDelivery,
     formatDeliverySummary,
 } from './noticeDelivery.js';
+import { bindBusyClick } from './buttonBusy.js';
 
 const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -375,7 +376,7 @@ export const initNotices = () => {
     initNoticeEditor();
     document.getElementById('notice-add-btn')?.addEventListener('click', openNoticeComposer);
     document.getElementById('notice-back-btn')?.addEventListener('click', closeNoticeComposer);
-    document.getElementById('notice-save-btn')?.addEventListener('click', () => void saveNotice());
+    bindBusyClick(document.getElementById('notice-save-btn'), 'Publishing…', saveNotice);
     document.getElementById('notice-cancel-btn')?.addEventListener('click', closeNoticeComposer);
     document.getElementById('notice-audience')?.addEventListener('change', syncAudiencePanel);
 

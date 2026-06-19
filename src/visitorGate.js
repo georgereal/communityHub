@@ -3,6 +3,7 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { logActivity } from './activityAudit.js';
+import { bindBusyClick } from './buttonBusy.js';
 
 function getVisitorLogUnits(visitorLogId) {
     return (portalState.operations?.visitorLogUnits || []).filter((u) => u.visitor_log_id === visitorLogId);
@@ -513,7 +514,7 @@ export function initGate(prefix) {
         togglePurposeFields(prefix);
     });
 
-    document.getElementById(cfg.entrySave)?.addEventListener('click', () => void saveVisitorEntry(prefix));
+    bindBusyClick(document.getElementById(cfg.entrySave), 'Saving…', () => saveVisitorEntry(prefix));
 
     document.getElementById(cfg.logFilters)?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-visitor-filter]');
@@ -530,7 +531,7 @@ export function initGate(prefix) {
         renderGateParcels(prefix);
     });
 
-    document.getElementById(cfg.receiveSave)?.addEventListener('click', () => void saveStandaloneParcel(prefix));
+    bindBusyClick(document.getElementById(cfg.receiveSave), 'Saving…', () => saveStandaloneParcel(prefix));
 
     document.getElementById(cfg.companyChips)?.addEventListener('click', (e) => {
         const chip = e.target.closest('.visitor-company-chip');

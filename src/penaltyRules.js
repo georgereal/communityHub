@@ -2,6 +2,7 @@
  * Late payment & penalty rules — definitions, calculation, CRUD
  */
 import { portalState, supabase, pullState } from './store.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 const invoiceBalance = (inv) =>
     Math.max(0, parseFloat(inv.amount || 0) - parseFloat(inv.amount_paid || 0));
@@ -439,8 +440,7 @@ export const initPenaltyRulesUi = () => {
     document.getElementById('penalty-rule-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('penalty-rule-save-btn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-        try {
+        await withButtonBusy(btn, 'Saving…', async () => {
             await savePenaltyRule({
                 id: document.getElementById('penalty-rule-form')?.dataset.ruleId || null,
                 name: document.getElementById('penalty-rule-name')?.value,
@@ -458,11 +458,7 @@ export const initPenaltyRulesUi = () => {
             closePenaltyRuleEditor();
             renderPenaltyRulesList();
             refreshBulkPenaltyRules();
-        } catch (err) {
-            alert(err?.message || 'Could not save rule.');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Save rule'; }
-        }
+        }).catch((err) => alert(err?.message || 'Could not save rule.'));
     });
 
     document.getElementById('penalty-rule-add-btn')?.addEventListener('click', () => openPenaltyRuleEditor());

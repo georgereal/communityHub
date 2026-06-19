@@ -21,6 +21,7 @@ import {
     handleOAuthRedirectIfPresent,
     oauthAppHasClientSecret,
 } from './ledgerOAuth.js';
+import { withButtonBusy, setButtonBusy, clearButtonBusy } from './buttonBusy.js';
 
 let activeProvider = 'MICROSOFT';
 let syncPanelForceOpen = false;
@@ -768,7 +769,8 @@ export function renderAdminSyncPanel() {
     });
 
     document.getElementById('admin-oauth-save-ms')?.addEventListener('click', async () => {
-        try {
+        const btn = document.getElementById('admin-oauth-save-ms');
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveOAuthApp({
                 provider: 'MICROSOFT',
                 client_id: document.getElementById('admin-oauth-ms-client')?.value,
@@ -777,13 +779,12 @@ export function renderAdminSyncPanel() {
             });
             alert('Microsoft OAuth settings saved.');
             renderAdminSyncPanel();
-        } catch (e) {
-            alert(e.message);
-        }
+        }).catch((e) => alert(e.message));
     });
 
     document.getElementById('admin-oauth-save-google')?.addEventListener('click', async () => {
-        try {
+        const btn = document.getElementById('admin-oauth-save-google');
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveOAuthApp({
                 provider: 'GOOGLE',
                 client_id: document.getElementById('admin-oauth-google-client')?.value,
@@ -792,9 +793,7 @@ export function renderAdminSyncPanel() {
             });
             alert('Google OAuth settings saved.');
             renderAdminSyncPanel();
-        } catch (e) {
-            alert(e.message);
-        }
+        }).catch((e) => alert(e.message));
     });
 
     // Show/hide Google-specific range field when provider changes
@@ -804,15 +803,15 @@ export function renderAdminSyncPanel() {
     });
 
     document.getElementById('admin-ledger-save-settings')?.addEventListener('click', async () => {
+        const btn = document.getElementById('admin-ledger-save-settings');
         const url = document.getElementById('admin-ledger-sync-url')?.value?.trim();
         const sheet = document.getElementById('admin-ledger-sync-sheet')?.value?.trim();
-        const interval = parseInt(document.getElementById('admin-ledger-sync-interval')?.value);
+        const interval = parseInt(document.getElementById('admin-ledger-sync-interval')?.value, 10);
         const providerSelect = document.getElementById('admin-ledger-sync-provider')?.value;
         const rangeA1 = document.getElementById('admin-ledger-sync-range')?.value?.trim() || 'A:J';
-        // Provider dropdown is authoritative; auto-detect only as a fallback
         const provider = providerSelect || detectProviderFromUrl(url) || 'MICROSOFT';
 
-        try {
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveSyncSettings({
                 spreadsheet_url: url,
                 sheet_name: sheet,
@@ -823,42 +822,37 @@ export function renderAdminSyncPanel() {
             startAutoSync();
             alert('Spreadsheet settings saved.');
             renderAdminSyncPanel();
-        } catch (e) {
-            alert(e.message);
-        }
+        }).catch((e) => alert(e.message));
     });
 
     document.getElementById('admin-bg-connect-microsoft')?.addEventListener('click', async () => {
+        const btn = document.getElementById('admin-bg-connect-microsoft');
+        const snapshot = setButtonBusy(btn, 'Redirecting to Microsoft…');
         try {
             await startMicrosoftWebConnect();
         } catch (e) {
+            clearButtonBusy(btn, snapshot);
             alert(e.message);
         }
     });
 
     document.getElementById('admin-bg-save-schedule')?.addEventListener('click', async () => {
+        const btn = document.getElementById('admin-bg-save-schedule');
         const interval = parseInt(document.getElementById('admin-bg-sync-interval')?.value, 10);
         if (Number.isNaN(interval)) return alert('Choose a valid interval.');
-        try {
+        await withButtonBusy(btn, 'Saving schedule…', async () => {
             await saveSyncSettings({ sync_interval_minutes: interval });
             startAutoSync();
             alert(interval === 0
                 ? 'Schedule saved: manual only (background cron will skip this society).'
                 : `Schedule saved: ${formatSyncInterval(interval)}.`);
             renderAdminSyncPanel();
-        } catch (e) {
-            alert(e.message || 'Could not save schedule. Run supabase_ledger_spreadsheet_sync.sql if sync_interval_minutes column is missing.');
-        }
+        }).catch((e) => alert(e.message || 'Could not save schedule.'));
     });
 
     document.getElementById('admin-bg-sync-run')?.addEventListener('click', async () => {
         const btn = document.getElementById('admin-bg-sync-run');
-        const original = btn?.innerHTML;
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-rotate fa-spin"></i> Running…`;
-        }
-        try {
+        await withButtonBusy(btn, 'Running server sync…', async () => {
             const apartment_id = portalState.access?.activeApartmentId;
             if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
             const { data: s } = await supabase.auth.getSession();
@@ -881,14 +875,7 @@ export function renderAdminSyncPanel() {
 
             const r = json.result || {};
             alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.`);
-        } catch (err) {
-            alert(err.message || String(err));
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = original;
-            }
-        }
+        }).catch((err) => alert(err.message || String(err)));
     });
 
     const opsRoot = document.getElementById('admin-sync-ops-root');
@@ -1792,26 +1779,20 @@ async function refreshMappingUI() {
 
         mapEl.appendChild(actionsDiv);
 
-        mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`)?.addEventListener('click', () => refreshMappingUI());
+        mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`)?.addEventListener('click', () => {
+            void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`), 'Loading columns…', () => refreshMappingUI());
+        });
         mapEl.querySelector(`#${opsId(p, 'save-map')}`)?.addEventListener('click', async () => {
             const saveBtn = mapEl.querySelector(`#${opsId(p, 'save-map')}`);
-            const originalSaveHtml = saveBtn.innerHTML;
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = '<i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Saving...';
-
-            const newMap = {};
-            mapEl.querySelectorAll('.ledger-sync-map__select').forEach((sel) => {
-                newMap[sel.dataset.field] = parseInt(sel.value, 10);
-            });
-            try {
+            await withButtonBusy(saveBtn, 'Saving…', async () => {
+                const newMap = {};
+                mapEl.querySelectorAll('.ledger-sync-map__select').forEach((sel) => {
+                    newMap[sel.dataset.field] = parseInt(sel.value, 10);
+                });
                 await saveSyncSettings({ column_mapping: newMap });
                 alert('Column mapping saved.');
                 syncOpsCtx.onRefresh();
-            } catch (e) {
-                alert(e.message);
-                saveBtn.disabled = false;
-                saveBtn.innerHTML = originalSaveHtml;
-            }
+            }).catch((e) => alert(e.message));
         });
     } catch (err) {
         mapEl.innerHTML = `
@@ -1819,7 +1800,9 @@ async function refreshMappingUI() {
             <button type="button" class="btn btn-outline btn--small" id="${opsId(p, 'refresh-cols-retry')}" style="margin-top:0.5rem;">
                 <i class="fa-solid fa-arrows-rotate"></i> Try again
             </button>`;
-        mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`)?.addEventListener('click', () => refreshMappingUI());
+        mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`)?.addEventListener('click', () => {
+            void withButtonBusy(mapEl.querySelector(`#${opsId(p, 'refresh-cols-retry')}`), 'Loading columns…', () => refreshMappingUI());
+        });
     }
 }
 
@@ -1889,13 +1872,6 @@ async function testSpreadsheetLink() {
         return;
     }
 
-    const btn = syncEl('test-ms');
-    const originalHtml = btn?.innerHTML;
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Testing...';
-    }
-
     try {
         await ensureOAuthConnected(activeProvider);
         if (activeProvider === 'MICROSOFT') {
@@ -1918,11 +1894,6 @@ async function testSpreadsheetLink() {
         }
     } catch (err) {
         alert(err.message);
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-        }
     }
 }
 
@@ -2024,29 +1995,34 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
 
     q('connect')?.addEventListener('click', async () => {
         const btn = q('connect');
-        if (btn) btn.disabled = true;
+        const snapshot = setButtonBusy(btn, 'Connecting…');
         try {
             if (activeProvider === 'GOOGLE') await startGoogleConnect();
             else await startMicrosoftConnect();
         } catch (err) {
+            clearButtonBusy(btn, snapshot);
             alert(err.message || String(err));
-            if (btn) btn.disabled = false;
         }
     });
 
     q('disconnect')?.addEventListener('click', async () => {
         if (!confirm('Disconnect your account from spreadsheet sync?')) return;
-        try {
+        const btn = q('disconnect');
+        await withButtonBusy(btn, 'Disconnecting…', async () => {
             await disconnectOAuth(activeProvider);
             onRefresh();
-        } catch (err) {
-            alert(err.message);
-        }
+        }).catch((err) => alert(err.message));
     });
 
-    q('test-ms')?.addEventListener('click', () => void testSpreadsheetLink());
-    q('list-sheets')?.addEventListener('click', () => void listAndRenderWorksheets());
-    q('refresh-cols-top')?.addEventListener('click', () => void refreshMappingUI());
+    q('test-ms')?.addEventListener('click', () => {
+        void withButtonBusy(q('test-ms'), 'Testing link…', () => testSpreadsheetLink());
+    });
+    q('list-sheets')?.addEventListener('click', () => {
+        void withButtonBusy(q('list-sheets'), 'Loading sheets…', () => listAndRenderWorksheets());
+    });
+    q('refresh-cols-top')?.addEventListener('click', () => {
+        void withButtonBusy(q('refresh-cols-top'), 'Loading columns…', () => refreshMappingUI());
+    });
 
     q('reset-ms')?.addEventListener('click', () => {
         if (!confirm('This will clear all pending Microsoft sign-in state from your browser. Continue?')) return;
@@ -2059,43 +2035,37 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
 
     q('clear-keys')?.addEventListener('click', async () => {
         if (!confirm('This will remove all Sync IDs from transactions in the App for this society. Continue?')) return;
+        const btn = q('clear-keys');
         const apartment_id = portalState.access?.activeApartmentId;
-        try {
+        await withButtonBusy(btn, 'Clearing…', async () => {
             await supabase.from('transactions').update({ external_sync_key: null, sync_hash: null }).eq('apartment_id', apartment_id);
             await pullState();
             alert('Sync IDs cleared.');
             onRefresh();
-        } catch (err) {
-            alert(`Failed to clear keys: ${err.message}`);
-        }
+        }).catch((err) => alert(`Failed to clear keys: ${err.message}`));
     });
 
     q('run')?.addEventListener('click', async () => {
         const btn = q('run');
         if (!btn || isSyncing) return;
 
-        const originalHtml = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch ledger-sync-spinner"></i> Syncing...';
-
-        try {
+        await withButtonBusy(btn, 'Syncing…', async () => {
             isSyncing = true;
-            if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
-            const { imported, skipped, updated, pushed, conflicts } = await runSync();
-            let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
-            if (pushed > 0) msg += ` ${pushed} pushed to Excel.`;
-            if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) need review below.`;
-            alert(msg);
-            onRefresh();
-        } catch (err) {
-            alert(err.message);
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
+            try {
+                if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
+                const { imported, skipped, updated, pushed, conflicts } = await runSync();
+                let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
+                if (pushed > 0) msg += ` ${pushed} pushed.`;
+                if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) — open panel to review.`;
+                alert(msg);
+                onRefresh();
+            } finally {
+                isSyncing = false;
             }
+        }).catch((err) => {
             isSyncing = false;
-        }
+            alert(err.message);
+        });
     });
 
     q('template')?.addEventListener('click', () => void downloadLedgerTemplate());
@@ -2104,9 +2074,7 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
         btn.addEventListener('click', async () => {
             const idx = parseInt(btn.dataset.idx, 10);
             const winner = btn.dataset.winner;
-            btn.disabled = true;
-            btn.textContent = 'Resolving...';
-            await resolveConflict(idx, winner);
+            await withButtonBusy(btn, 'Resolving…', () => resolveConflict(idx, winner));
         });
     });
 }
@@ -2156,24 +2124,24 @@ export function renderLedgerSyncPanel() {
         e.preventDefault();
         e.stopPropagation();
         const btn = el.querySelector('#ledger-sync-summary-run');
-        const originalHtml = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch ledger-sync-spinner"></i>';
-        try {
+        if (!btn || isSyncing) return;
+        await withButtonBusy(btn, 'Syncing…', async () => {
             isSyncing = true;
-            if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
-            const { imported, skipped, updated, pushed, conflicts } = await runSync();
-            let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
-            if (pushed > 0) msg += ` ${pushed} pushed.`;
-            if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) — open panel to review.`;
-            alert(msg);
-            renderLedgerSyncPanel();
-        } catch (err) {
-            alert(err.message);
-            if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
-        } finally {
+            try {
+                if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
+                const { imported, skipped, updated, pushed, conflicts } = await runSync();
+                let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
+                if (pushed > 0) msg += ` ${pushed} pushed.`;
+                if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) — open panel to review.`;
+                alert(msg);
+                renderLedgerSyncPanel();
+            } finally {
+                isSyncing = false;
+            }
+        }).catch((err) => {
             isSyncing = false;
-        }
+            alert(err.message);
+        });
     });
 
     const opsRoot = el.querySelector('.ledger-sync-ops-block');

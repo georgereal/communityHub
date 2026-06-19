@@ -907,9 +907,6 @@ export const saveCashData = async () => {
         ? (portalState.originalBankProofPaths || []).filter((p) => !bank_proof_urls.includes(p))
         : (portalState.originalBankProofPaths || []);
 
-    const saveBtn = document.getElementById('save-cash-btn');
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
-
     try {
         if (!isIncome && portalState.pendingReceiptFiles?.length) {
             const uploaded = await uploadReceiptFiles(
@@ -1004,11 +1001,6 @@ export const saveCashData = async () => {
         document.getElementById('cash-modal').classList.remove('active');
     } catch (err) {
         alert(err?.message || 'Could not upload receipts. Check that supabase_transactions_extras.sql has been run.');
-    } finally {
-        if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.textContent = isIncome ? 'Save Income' : 'Save Expense';
-        }
     }
 };
 window.saveCashData = saveCashData;

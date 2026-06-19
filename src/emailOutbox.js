@@ -2,6 +2,7 @@
  * Phase 6.5 — Email outbox queue (processed by Edge Function / Resend)
  */
 import { portalState, supabase, pullState } from './store.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 export async function queueEmail({ recipient_email, subject, body, template_key, related_entity_type, related_entity_id }) {
     if (!supabase) throw new Error('Supabase required.');
@@ -57,11 +58,12 @@ export const initEmailOutbox = () => {
         const subject = document.getElementById('email-compose-subject')?.value;
         const body = document.getElementById('email-compose-body')?.value;
         if (!to?.trim() || !subject?.trim()) return alert('To and subject required.');
-        try {
+        const btn = document.getElementById('email-compose-save');
+        await withButtonBusy(btn, 'Queuing…', async () => {
             await queueEmail({ recipient_email: to, subject, body });
             document.getElementById('email-compose-modal')?.classList.remove('active');
             renderEmailOutbox();
-        } catch (e) { alert(e.message); }
+        }).catch((e) => alert(e.message));
     });
     document.getElementById('email-compose-cancel')?.addEventListener('click', () => {
         document.getElementById('email-compose-modal')?.classList.remove('active');
@@ -71,10 +73,11 @@ export const initEmailOutbox = () => {
         document.getElementById('email-compose-modal')?.classList.add('active');
     });
     document.getElementById('email-outbox-process')?.addEventListener('click', async () => {
-        try {
+        const btn = document.getElementById('email-outbox-process');
+        await withButtonBusy(btn, 'Processing…', async () => {
             const { processed } = await processPendingEmailsTestMode();
             alert(processed ? `Marked ${processed} email(s) as sent (test mode).` : 'No pending emails.');
             renderEmailOutbox();
-        } catch (e) { alert(e.message); }
+        }).catch((e) => alert(e.message));
     });
 };

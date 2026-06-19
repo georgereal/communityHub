@@ -72,6 +72,7 @@ import {
   markAllPendingVehicleAuditSynced,
   refreshAuditBadge,
 } from './vehicleAudit.js';
+import { withButtonBusy } from './buttonBusy.js';
 import {
   loadResidents,
   saveResident as persistResident,
@@ -1554,7 +1555,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
   });
-  document.getElementById('save-cash-btn').onclick = () => saveCashData();
+  document.getElementById('save-cash-btn').onclick = () => {
+    void withButtonBusy(document.getElementById('save-cash-btn'), 'Saving…', saveCashData);
+  };
   initExpenseModal();
   initMaintenanceBilling();
   initActivityAuditUi();
@@ -1597,15 +1600,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('audit-export-csv')?.addEventListener('click', () => void downloadPendingAuditCsv());
   document.getElementById('audit-mark-synced')?.addEventListener('click', async () => {
     if (!confirm('Mark all pending vehicle changes as synced to the other system?')) return;
-    const { error } = await markAllPendingVehicleAuditSynced();
-    if (error) return alert(error.message || 'Could not update sync status.');
-    await renderVehicleAuditModal();
-    await refreshAuditBadge();
+    const btn = document.getElementById('audit-mark-synced');
+    await withButtonBusy(btn, 'Updating…', async () => {
+      const { error } = await markAllPendingVehicleAuditSynced();
+      if (error) throw new Error(error.message || 'Could not update sync status.');
+      await renderVehicleAuditModal();
+      await refreshAuditBadge();
+    }).catch((err) => alert(err.message));
   });
   document.getElementById('capacity-close')?.addEventListener('click', closeCapacityModal);
   document.getElementById('capacity-cancel')?.addEventListener('click', closeCapacityModal);
   document.getElementById('capacity-apply-all')?.addEventListener('click', applyCapacityDefaultsToAll);
-  document.getElementById('capacity-save')?.addEventListener('click', () => void saveCapacityAllocation());
+  document.getElementById('capacity-save')?.addEventListener('click', () => {
+    void withButtonBusy(document.getElementById('capacity-save'), 'Saving…', saveCapacityAllocation);
+  });
   document.getElementById('capacity-search')?.addEventListener('input', refreshCapacityUnitList);
 
   // Parking Excel reconcile import
@@ -1723,12 +1731,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!ok) return;
     }
     const applyBtn = document.getElementById('parking-import-apply');
-    if (applyBtn) {
-      applyBtn.disabled = true;
-      applyBtn.textContent = 'Importing…';
-    }
     showParkingImportError('');
-    try {
+    await withButtonBusy(applyBtn, 'Importing…', async () => {
       const result = await applyParkingImport(pendingParkingImport, mode);
       processAnalytics();
       renderRegistry();
@@ -1742,14 +1746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         alert(`Parking registry ${mode === 'overwrite' ? 'overwritten' : 'merged'} successfully.`);
       }
-    } catch (err) {
-      showParkingImportError(err?.message || 'Import failed.');
-    } finally {
-      if (applyBtn) {
-        applyBtn.disabled = false;
-        applyBtn.textContent = 'Apply import';
-      }
-    }
+    }).catch((err) => showParkingImportError(err?.message || 'Import failed.'));
   });
 
   // Initialize Router State

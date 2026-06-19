@@ -2,6 +2,7 @@
  * Phase 6.2 — General ledger (chart of accounts + journal entries)
  */
 import { portalState, supabase, pullState } from './store.js';
+import { bindBusyClick } from './buttonBusy.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -87,8 +88,11 @@ export async function postJournalEntry({ entry_date, description, debit_account_
 window.renderGeneralLedger = renderGeneralLedger;
 
 export const initGeneralLedger = () => {
-    document.getElementById('gl-seed-accounts')?.addEventListener('click', () => void seedDefaultAccounts().then(renderGeneralLedger));
-    document.getElementById('gl-post-entry')?.addEventListener('click', async () => {
+    bindBusyClick(document.getElementById('gl-seed-accounts'), 'Seeding…', async () => {
+        await seedDefaultAccounts();
+        renderGeneralLedger();
+    });
+    bindBusyClick(document.getElementById('gl-post-entry'), 'Posting…', async () => {
         try {
             await postJournalEntry({
                 entry_date: document.getElementById('gl-entry-date')?.value,

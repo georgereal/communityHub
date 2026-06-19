@@ -13,6 +13,7 @@ import {
 import { getNoticesForUser, markNoticeRead } from './notices.js';
 import { renderNoticeBodyHtml } from './noticeEditor.js';
 import { renderPortalPayments } from './payments.js';
+import { bindBusyClick } from './buttonBusy.js';
 import {
     getPendingApprovalsForMyUnits,
     respondVisitorApproval,
@@ -274,7 +275,7 @@ export const renderPortalSubview = async (subview) => {
 };
 
 export const initResidentPortal = () => {
-    document.getElementById('portal-ticket-save')?.addEventListener('click', () => void savePortalTicket());
+    bindBusyClick(document.getElementById('portal-ticket-save'), 'Submitting…', savePortalTicket);
     document.getElementById('portal-ticket-cancel')?.addEventListener('click', () => {
         document.getElementById('portal-ticket-modal')?.classList.remove('active');
     });

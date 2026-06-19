@@ -4,6 +4,7 @@
 import { portalState, supabase, pullState } from './store.js';
 import { refreshExpenseReferences } from './finances.js';
 import { renderLedgerSyncPanel, renderAdminSyncPanel } from './ledgerSpreadsheetSync.js';
+import { withButtonBusy, bindBusyClick } from './buttonBusy.js';
 
 const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
 const STAFF_ROLES = ['Manager', 'Security Guard', 'Housekeeping', 'Maintenance', 'Accounts', 'Other'];
@@ -32,10 +33,10 @@ export const switchSetupSubView = (id = 'society') => {
 window.switchSetupSubView = switchSetupSubView;
 
 export const initSetupAdmin = () => {
-    document.getElementById('admin-bank-save')?.addEventListener('click', () => void saveBankAccount());
-    document.getElementById('admin-vendor-save')?.addEventListener('click', () => void saveVendor());
-    document.getElementById('admin-subcat-save')?.addEventListener('click', () => void saveSubCategory());
-    document.getElementById('admin-staff-save')?.addEventListener('click', () => void saveStaff());
+    bindBusyClick(document.getElementById('admin-bank-save'), 'Saving…', saveBankAccount);
+    bindBusyClick(document.getElementById('admin-vendor-save'), 'Saving…', saveVendor);
+    bindBusyClick(document.getElementById('admin-subcat-save'), 'Saving…', saveSubCategory);
+    bindBusyClick(document.getElementById('admin-staff-save'), 'Saving…', saveStaff);
     document.getElementById('admin-subcat-filter')?.addEventListener('change', renderSubCatsAdmin);
 };
 
@@ -112,7 +113,7 @@ export const renderVendorsAdmin = () => {
         btn.onclick = () => openVendorModal(vendors.find((v) => v.id === btn.dataset.editVendor));
     });
     list.querySelectorAll('[data-del-vendor]').forEach((btn) => {
-        btn.onclick = () => void deleteVendor(btn.dataset.delVendor);
+        btn.onclick = () => void withButtonBusy(btn, 'Deleting…', () => deleteVendor(btn.dataset.delVendor));
     });
 };
 
@@ -188,7 +189,7 @@ export const renderSubCatsAdmin = () => {
         btn.onclick = () => openSubCatModal(rows.find((r) => r.id === btn.dataset.editSubcat));
     });
     list.querySelectorAll('[data-del-subcat]').forEach((btn) => {
-        btn.onclick = () => void deleteSubCategory(btn.dataset.delSubcat);
+        btn.onclick = () => void withButtonBusy(btn, 'Deleting…', () => deleteSubCategory(btn.dataset.delSubcat));
     });
 };
 
@@ -261,7 +262,7 @@ export const renderStaffAdmin = () => {
         btn.onclick = () => openStaffModal(staff.find((s) => s.id === btn.dataset.editStaff));
     });
     list.querySelectorAll('[data-del-staff]').forEach((btn) => {
-        btn.onclick = () => void deleteStaff(btn.dataset.delStaff);
+        btn.onclick = () => void withButtonBusy(btn, 'Deleting…', () => deleteStaff(btn.dataset.delStaff));
     });
 };
 

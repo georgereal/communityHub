@@ -4,6 +4,7 @@
 import { portalState, supabase, pullState } from './store.js';
 import { getOpenInvoicesForUnit, invoiceBalance } from './maintenanceBilling.js';
 import { logActivity } from './activityAudit.js';
+import { bindBusyClick, withButtonBusy } from './buttonBusy.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 const unitLabel = (id) => portalState.units.find((u) => u.id === id)?.number || '—';
@@ -210,26 +211,25 @@ export const renderParkingViolations = () => {
 };
 
 export const initParkingOps = () => {
-    document.getElementById('visitor-pass-save')?.addEventListener('click', () => void saveVisitorPassFromForm());
+    bindBusyClick(document.getElementById('visitor-pass-save'), 'Saving…', saveVisitorPassFromForm);
     document.getElementById('parking-fine-rule-save')?.addEventListener('click', async () => {
         const name = document.getElementById('parking-fine-rule-name')?.value;
         const amt = document.getElementById('parking-fine-rule-amount')?.value;
         if (!name?.trim()) return alert('Rule name required.');
-        try {
+        const btn = document.getElementById('parking-fine-rule-save');
+        await withButtonBusy(btn, 'Saving…', async () => {
             await saveFineRule(name, amt);
             renderParkingViolations();
-        } catch (e) { alert(e.message); }
+        }).catch((e) => alert(e.message));
     });
-    document.getElementById('parking-violation-save')?.addEventListener('click', async () => {
-        try {
-            await recordViolation({
-                unit_id: document.getElementById('parking-violation-unit')?.value,
-                rule_id: document.getElementById('parking-violation-rule')?.value || null,
-                violation_date: document.getElementById('parking-violation-date')?.value,
-                description: document.getElementById('parking-violation-desc')?.value,
-            });
-            renderParkingViolations();
-        } catch (e) { alert(e.message); }
+    bindBusyClick(document.getElementById('parking-violation-save'), 'Recording…', async () => {
+        await recordViolation({
+            unit_id: document.getElementById('parking-violation-unit')?.value,
+            rule_id: document.getElementById('parking-violation-rule')?.value || null,
+            violation_date: document.getElementById('parking-violation-date')?.value,
+            description: document.getElementById('parking-violation-desc')?.value,
+        });
+        renderParkingViolations();
     });
     document.addEventListener('apartment-data-loaded', () => {
         const opts = portalState.units.map((u) => `<option value="${u.id}">${u.number}</option>`).join('');

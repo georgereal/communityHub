@@ -6,6 +6,7 @@ import { logActivity } from './activityAudit.js';
 import { renderNoticesAdmin } from './notices.js';
 import { renderTransitions, initUnitTransitions } from './unitTransitions.js';
 import { renderVisitors, initVisitors } from './visitors.js';
+import { bindBusyClick } from './buttonBusy.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 const unitLabel = (id) => portalState.units.find((u) => u.id === id)?.number || '—';
@@ -299,13 +300,13 @@ async function saveStaffHelpdeskTicket() {
 }
 
 export const initOperations = () => {
-    document.getElementById('ops-ticket-save')?.addEventListener('click', () => void saveStaffHelpdeskTicket());
-    document.getElementById('ops-asset-save')?.addEventListener('click', () => void saveAsset());
-    document.getElementById('ops-amenity-save')?.addEventListener('click', () => void saveAmenity());
-    document.getElementById('ops-booking-save')?.addEventListener('click', () => void saveBooking());
+    bindBusyClick(document.getElementById('ops-ticket-save'), 'Saving…', saveStaffHelpdeskTicket);
+    bindBusyClick(document.getElementById('ops-asset-save'), 'Saving…', saveAsset);
+    bindBusyClick(document.getElementById('ops-amenity-save'), 'Saving…', saveAmenity);
+    bindBusyClick(document.getElementById('ops-booking-save'), 'Saving…', saveBooking);
     initVisitors();
-    document.getElementById('ops-att-save')?.addEventListener('click', () => void saveAttendance());
-    document.getElementById('ops-payroll-save')?.addEventListener('click', () => void savePayrollRun());
+    bindBusyClick(document.getElementById('ops-att-save'), 'Saving…', saveAttendance);
+    bindBusyClick(document.getElementById('ops-payroll-save'), 'Saving…', savePayrollRun);
     initUnitTransitions();
     const populateUnitSelects = () => {
         const opts = portalState.units.map((u) => `<option value="${u.id}">${u.number}</option>`).join('');
