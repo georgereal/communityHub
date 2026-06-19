@@ -22,6 +22,25 @@ import {
     oauthAppHasClientSecret,
 } from './ledgerOAuth.js';
 import { withButtonBusy, setButtonBusy, clearButtonBusy } from './buttonBusy.js';
+import {
+    TRANSACTION_FIELD_DEFS,
+    normalizeMapping,
+    buildMappingFromHeaders,
+    validateMapping,
+    parseLedgerRowsFromAoA,
+    transactionToExcelRow,
+    maxMappedColumn,
+    collectMappingFromForm,
+    renderLedgerMappingUI,
+    wireMappingFormInteractions,
+    computeSyncHash,
+    colForField,
+    buildDbSyncPayload,
+    TEMPLATE_HEADERS,
+} from './ledgerColumnMapping.js';
+import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPush.js';
+
+export { parseLedgerRowsFromAoA };
 
 let activeProvider = 'MICROSOFT';
 let syncPanelForceOpen = false;
@@ -149,21 +168,6 @@ function encodeMicrosoftShareId(url) {
     return `u!${b64.replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-')}`;
 }
 
-/**
- * Safe Base64 encoding for strings with non-Latin1 characters (like ₹)
- */
-function safeHash(str) {
-    try {
-        const bytes = new TextEncoder().encode(str);
-        let bin = '';
-        bytes.forEach((b) => { bin += String.fromCharCode(b); });
-        return btoa(bin);
-    } catch (e) {
-        console.error('Hash encoding failed:', e);
-        return 'hash-err';
-    }
-}
-
 async function graphGet(path, token, extraHeaders = {}, suppressError = false) {
     const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
         headers: {
@@ -236,126 +240,22 @@ async function fetchMicrosoftRows({ spreadsheetUrl, sheetName }) {
         driveId,
         itemId,
         shareId,
-        useSharesApi: !(() => {
-            try {
-                const u = new URL(spreadsheetUrl);
-                return !!(u.searchParams.get('driveId') && u.searchParams.get('docId'));
-            } catch {
-                return false;
-            }
-        })(),
+        useSharesApi: false,
     };
 }
 
 async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheetName, rowsToPush, columnMapping = {} }) {
-    if (!rowsToPush.length) return 0;
     const token = await getAccessTokenForProvider('MICROSOFT');
-    const sharesBase = useSharesApi && shareId ? `/shares/${shareId}/driveItem` : null;
-    const driveBase = `/drives/${driveId}/items/${itemId}`;
-    let base = sharesBase || driveBase;
-    
-    // 1. Find the used range to know where to append
-    const safeSheet = sheetName.replace(/'/g, "''");
-    let usedRange = await graphGet(
-        `${base}/workbook/worksheets('${safeSheet}')/usedRange`,
-        token,
-        {},
-        true // Suppress error for MSA fallback
-    );
-
-    if (!usedRange && sharesBase) {
-        base = driveBase;
-        usedRange = await graphGet(
-            `${base}/workbook/worksheets('${safeSheet}')/usedRange`,
-            token
-        );
-    } else if (!usedRange) {
-        throw new Error('Could not read Excel workbook used range.');
-    }
-    
-    // Address format is usually "Sheet1!A1:H10"
-    const address = usedRange.address || '';
-    const lastRowMatch = address.match(/\d+$/);
-    const lastRowIndex = lastRowMatch ? parseInt(lastRowMatch[0]) : 1;
-    const nextRowIndex = lastRowIndex + 1;
-    
-    // 2. Prepare the data for Excel respecting the mapping
-    const mapping = columnMapping || {};
-    const mappedIndices = Object.values(mapping).filter(v => v >= 0);
-    const maxCol = mappedIndices.length > 0 ? Math.max(...mappedIndices) : 9;
-    
-    const values = rowsToPush.map(r => {
-        const rowData = new Array(maxCol + 1).fill('');
-        const syncKey = `app:txn:${r.id}`;
-        
-        const setVal = (key, val) => {
-            const idx = mapping[key];
-            if (idx >= 0) rowData[idx] = val;
-        };
-
-        setVal('date', r.date);
-        setVal('type', r.type === 'OUT' ? 'DR' : 'CR');
-        setVal('amount', r.amount);
-        setVal('category', r.cat);
-        setVal('description', r.description || '');
-        setVal('wallet', r.wallet);
-        setVal('vendor', r.vendor_name || '');
-        setVal('reference', r.vendor_invoice || '');
-        setVal('sync_id', syncKey);
-        setVal('sync_status', 'SYNCED');
-        
-        return rowData;
+    return pushMicrosoftRowsGraph({
+        accessToken: token,
+        driveId,
+        itemId,
+        shareId,
+        useSharesApi,
+        sheetName,
+        rowsToPush,
+        columnMapping,
     });
-    
-    const colLetter = (n) => {
-        let letter = '';
-        while (n >= 0) {
-            letter = String.fromCharCode((n % 26) + 65) + letter;
-            n = Math.floor(n / 26) - 1;
-        }
-        return letter;
-    };
-
-    const rangeAddress = `A${nextRowIndex}:${colLetter(maxCol)}${nextRowIndex + values.length - 1}`;
-    
-    let res = await fetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`, {
-        method: 'PATCH',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ values })
-    });
-
-    if (!res.ok && base === sharesBase) {
-        const json = await res.json().catch(() => ({}));
-        const msg = json?.error?.message || '';
-        if (String(msg).includes('not supported for MSA')) {
-            // Retry via drive endpoints for MSA accounts
-            base = driveBase;
-            res = await fetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`, {
-                method: 'PATCH',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ values })
-            });
-        } else {
-            // put body back into the usual error handler below
-            // eslint-disable-next-line no-param-reassign
-            res = new Response(JSON.stringify(json), { status: res.status, statusText: res.statusText, headers: res.headers });
-        }
-    }
-    
-    if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        const code = json?.error?.code ? ` (${json.error.code})` : '';
-        const msg = json?.error?.message || `Failed to push rows to Excel (${res.status})`;
-        throw new Error(`${msg}${code}`);
-    }
-    
-    return values.length;
 }
 
 function getSyncSettings() {
@@ -420,8 +320,8 @@ function formatSyncInterval(mins) {
     return `Every ${mins} minutes`;
 }
 
-function getBackgroundSyncReadiness(s) {
-    const provider = s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+function getBackgroundSyncReadiness(s, providerOverride) {
+    const provider = providerOverride || (s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT');
     const conn = getMyOAuthConnectionMeta(provider);
     const appReady = oauthAppConfigured(provider);
     const items = [
@@ -470,285 +370,322 @@ function getBackgroundSyncReadiness(s) {
     return { provider, items, ready: items.every((i) => i.ok), conn };
 }
 
+const ADMIN_SYNC_TAB_KEY = 'admin_sync_provider_tab';
+
+function getAdminWizardProvider(s) {
+    const tab = sessionStorage.getItem(ADMIN_SYNC_TAB_KEY);
+    if (tab === 'GOOGLE' || tab === 'MICROSOFT') return tab;
+    return s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+}
+
+function hasSavedColumnMapping(s) {
+    const m = normalizeMapping(s?.column_mapping);
+    return Object.entries(m.fields).some(([, cfg]) => cfg.mode === 'sync' && cfg.excelCol != null && cfg.excelCol >= 0);
+}
+
+function buildAdminWizardSteps(provider, s, microsoft, google) {
+    const hasUrl = !!s?.spreadsheet_url;
+    const mapped = hasSavedColumnMapping(s);
+    const conn = getMyOAuthConnectionMeta(provider);
+    const connected = !!conn?.account_email;
+    const appOk = provider === 'GOOGLE'
+        ? !!(google?.client_id)
+        : !!(microsoft?.client_id);
+    const secretOk = oauthAppHasClientSecret(provider);
+    const scheduleOk = (s?.sync_interval_minutes || 0) > 0;
+    const bgOk = provider === 'MICROSOFT'
+        ? !!(conn?.background_capable && conn?.account_email)
+        : connected;
+
+    return [
+        {
+            id: 'oauth',
+            label: provider === 'GOOGLE' ? 'Google OAuth' : 'Azure app',
+            done: appOk && (provider === 'GOOGLE' ? true : secretOk),
+        },
+        { id: 'workbook', label: 'Workbook', done: hasUrl && s?.provider === provider },
+        { id: 'mapping', label: 'Column map', done: mapped },
+        { id: 'connect', label: 'Connect & sync', done: connected },
+        {
+            id: 'schedule',
+            label: 'Auto-sync',
+            done: scheduleOk && (provider !== 'MICROSOFT' || bgOk),
+        },
+    ];
+}
+
+function firstOpenStepIndex(steps) {
+    const idx = steps.findIndex((st) => !st.done);
+    return idx === -1 ? steps.length - 1 : idx;
+}
+
+function renderWizardRail(steps, openIdx) {
+    return `
+      <nav class="sync-wizard-rail" aria-label="Setup steps">
+        ${steps.map((st, i) => `
+          <button type="button"
+            class="sync-wizard-rail__item${i === openIdx ? ' sync-wizard-rail__item--active' : ''}${st.done ? ' sync-wizard-rail__item--done' : ''}"
+            data-sync-step="${st.id}">
+            <span class="sync-wizard-rail__num" aria-hidden="true">
+              ${st.done ? '<i class="fa-solid fa-check"></i>' : i + 1}
+            </span>
+            <span class="sync-wizard-rail__label">${st.label}</span>
+          </button>
+        `).join('')}
+      </nav>`;
+}
+
+function renderSyncStepCard(stepNum, title, status, bodyHtml, { open = false, id = '' } = {}) {
+    const statusCls = status === 'done' ? 'sync-step-card__badge--done'
+        : status === 'current' ? 'sync-step-card__badge--current'
+            : 'sync-step-card__badge--pending';
+    const statusLabel = status === 'done' ? 'Complete' : status === 'current' ? 'In progress' : 'Pending';
+    return `
+      <details class="sync-step-card" id="${id}"${open ? ' open' : ''}>
+        <summary class="sync-step-card__summary">
+          <span class="sync-step-card__num">${stepNum}</span>
+          <span class="sync-step-card__title">${title}</span>
+          <span class="sync-step-card__badge ${statusCls}">${statusLabel}</span>
+          <i class="fa-solid fa-chevron-down sync-step-card__chevron" aria-hidden="true"></i>
+        </summary>
+        <div class="sync-step-card__body">${bodyHtml}</div>
+      </details>`;
+}
+
 export function renderAdminSyncPanel() {
     const el = document.getElementById('admin-sync-panel-container');
     if (!el) return;
-    initActiveProvider();
+
     const s = getSyncSettings();
+    const wizardProvider = getAdminWizardProvider(s);
+    activeProvider = wizardProvider;
+    syncOpsCtx = { prefix: 'admin-', onRefresh: renderAdminSyncPanel };
+
     const microsoft = getOAuthApp('MICROSOFT');
     const google = getOAuthApp('GOOGLE');
-    const msConfigured = !!microsoft?.client_id;
-    const googleConfigured = !!google?.client_id;
-    const urlValue = s?.spreadsheet_url || '';
-    const savedProvider = s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
-    const hasUrl = !!urlValue;
-    const msAppReady = oauthAppConfigured('MICROSOFT');
-    const googleAppReady = oauthAppConfigured('GOOGLE');
-    const canConnect = (activeProvider === 'MICROSOFT' && msAppReady) || (activeProvider === 'GOOGLE' && googleAppReady);
-    const bgSync = getBackgroundSyncReadiness(s);
     const msSecretSaved = oauthAppHasClientSecret('MICROSOFT');
     const googleSecretSaved = oauthAppHasClientSecret('GOOGLE');
+    const urlValue = s?.spreadsheet_url || '';
+    const hasUrl = !!urlValue && s?.provider === wizardProvider;
+    const msAppReady = oauthAppConfigured('MICROSOFT');
+    const googleAppReady = oauthAppConfigured('GOOGLE');
+    const canConnect = (wizardProvider === 'MICROSOFT' && msAppReady) || (wizardProvider === 'GOOGLE' && googleAppReady);
+    const bgSync = getBackgroundSyncReadiness(s, wizardProvider);
+    const steps = buildAdminWizardSteps(wizardProvider, s, microsoft, google);
+    const openIdx = firstOpenStepIndex(steps);
+    const isMicrosoft = wizardProvider === 'MICROSOFT';
+    const connMeta = getMyOAuthConnectionMeta(wizardProvider);
+
+    const stepStatus = (idx) => {
+        if (steps[idx].done) return 'done';
+        if (idx === openIdx) return 'current';
+        return 'pending';
+    };
+
+    const oauthStepBody = isMicrosoft ? `
+      <p class="sync-step-hint">Register CommunityHub in Azure Portal. Use a <strong>Web</strong> redirect URI (not SPA) so the server can store a refresh token for auto-sync.</p>
+      <div class="sync-uri-row">
+        <code>${getMicrosoftRedirectUri()}</code>
+        <button type="button" class="btn btn-outline btn--small" id="admin-oauth-copy-redirect">Copy</button>
+      </div>
+      <div class="sync-form-grid sync-form-grid--2">
+        <label class="sync-field">
+          <span>Client ID</span>
+          <input type="text" id="admin-oauth-ms-client" class="expense-combobox" value="${microsoft?.client_id || ''}" placeholder="Application ID" />
+        </label>
+        <label class="sync-field">
+          <span>Tenant ID</span>
+          <input type="text" id="admin-oauth-ms-tenant" class="expense-combobox" value="${microsoft?.tenant_id || 'common'}" placeholder="common" />
+        </label>
+        <label class="sync-field sync-field--full">
+          <span>Client secret</span>
+          <input type="password" id="admin-oauth-ms-secret" class="expense-combobox" value="" placeholder="${msSecretSaved ? 'Saved — leave blank to keep' : 'Required for background sync'}" autocomplete="new-password" />
+          <small>Stored server-side only — used by the cron job to refresh tokens.</small>
+        </label>
+      </div>
+      <button type="button" class="btn btn-primary btn--small" id="admin-oauth-save-ms">
+        <i class="fa-solid fa-floppy-disk"></i> Save Azure settings
+      </button>
+    ` : `
+      <p class="sync-step-hint">Create a <strong>Web application</strong> OAuth client in Google Cloud Console.</p>
+      <div class="sync-uri-row">
+        <code>${getAppRedirectUri()}</code>
+        <button type="button" class="btn btn-outline btn--small" id="admin-oauth-copy-google-redirect">Copy</button>
+      </div>
+      <div class="sync-form-grid">
+        <label class="sync-field">
+          <span>Client ID</span>
+          <input type="text" id="admin-oauth-google-client" class="expense-combobox" value="${google?.client_id || ''}" placeholder="OAuth 2.0 Client ID" />
+        </label>
+        <label class="sync-field">
+          <span>Client secret</span>
+          <input type="password" id="admin-oauth-google-secret" class="expense-combobox" value="" placeholder="${googleSecretSaved ? 'Saved — leave blank to keep' : 'Optional'}" autocomplete="new-password" />
+        </label>
+      </div>
+      <button type="button" class="btn btn-primary btn--small" id="admin-oauth-save-google">
+        <i class="fa-solid fa-floppy-disk"></i> Save Google settings
+      </button>
+    `;
+
+    const workbookStepBody = `
+      <p class="sync-step-hint">Paste the ${isMicrosoft ? 'OneDrive / SharePoint Excel' : 'Google Sheets'} link your society uses for income &amp; expenses.</p>
+      <div class="sync-form-grid sync-form-grid--2">
+        <label class="sync-field sync-field--full">
+          <span>Spreadsheet URL</span>
+          <input type="url" id="admin-ledger-sync-url" class="expense-combobox"
+            placeholder="${isMicrosoft ? 'https://...sharepoint.com/... or OneDrive link' : 'https://docs.google.com/spreadsheets/d/...'}"
+            value="${s?.provider === wizardProvider ? urlValue : ''}" />
+        </label>
+        <label class="sync-field">
+          <span>Sheet / tab name</span>
+          <input type="text" id="admin-ledger-sync-sheet" class="expense-combobox" value="${s?.sheet_name || 'Transactions'}" />
+        </label>
+        ${isMicrosoft ? '' : `
+        <label class="sync-field">
+          <span>Column range</span>
+          <input type="text" id="admin-ledger-sync-range" class="expense-combobox" value="${s?.range_a1 || 'A:J'}" placeholder="A:J" />
+        </label>`}
+      </div>
+      <input type="hidden" id="admin-ledger-sync-provider" value="${wizardProvider}" />
+      <button type="button" class="btn btn-primary btn--small" id="admin-ledger-save-settings">
+        <i class="fa-solid fa-link"></i> Save workbook
+      </button>
+    `;
+
+    const mappingStepBody = `
+      <p class="sync-step-hint">
+        Match each <strong>CommunityHub field</strong> (database) to a column in your spreadsheet.
+        ${hasUrl ? 'Connect in step 4 first if headers fail to load.' : 'Save the workbook URL in step 2, then load columns here.'}
+      </p>
+      <div class="sync-mapping-toolbar">
+        <button type="button" class="btn btn-outline btn--small" id="admin-ledger-sync-load-cols" ${hasUrl ? '' : 'disabled'}>
+          <i class="fa-solid fa-arrows-rotate"></i> Load columns from spreadsheet
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-ledger-sync-template">
+          <i class="fa-solid fa-download"></i> Download template
+        </button>
+      </div>
+      <div id="admin-ledger-sync-mapping" class="sync-mapping-panel">
+        <p class="gate-wizard__hint">${hasUrl
+        ? 'Click <strong>Load columns</strong> to fetch headers from your workbook.'
+        : 'Complete step 2 to enable column mapping.'}</p>
+      </div>
+    `;
+
+    const connectStepBody = `
+      <div id="admin-sync-ops-root">
+        ${buildSyncOpsHtml('admin-', s, hasUrl, canConnect, { includeMapping: false, compact: true })}
+      </div>
+    `;
+
+    const scheduleStepBody = isMicrosoft ? `
+      <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> daily. Societies sync when the interval below has elapsed since the last run.</p>
+      <div class="sync-schedule-row">
+        <select id="admin-bg-sync-interval" class="expense-combobox">
+          <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only</option>
+          <option value="15" ${s?.sync_interval_minutes === 15 ? 'selected' : ''}>Every 15 minutes</option>
+          <option value="60" ${s?.sync_interval_minutes === 60 ? 'selected' : ''}>Every hour</option>
+          <option value="360" ${s?.sync_interval_minutes === 360 ? 'selected' : ''}>Every 6 hours</option>
+          <option value="1440" ${s?.sync_interval_minutes === 1440 ? 'selected' : ''}>Daily</option>
+        </select>
+        <button type="button" class="btn btn-primary btn--small" id="admin-bg-save-schedule">
+          <i class="fa-solid fa-floppy-disk"></i> Save schedule
+        </button>
+      </div>
+      <div class="sync-bg-connect">
+        <p class="sync-step-hint" style="margin:0;">
+          Sign in with the <strong>personal Microsoft account</strong> that owns the Excel file (requires client secret in step 1).
+        </p>
+        <button type="button" class="btn btn-primary btn--small" id="admin-bg-connect-microsoft" ${msSecretSaved ? '' : 'disabled'}>
+          <i class="fa-brands fa-microsoft"></i> Connect for background sync
+        </button>
+        ${connMeta?.account_email ? `<span class="sync-connected-chip"><i class="fa-solid fa-circle-check"></i> ${connMeta.account_email}</span>` : ''}
+      </div>
+      <ul class="sync-checklist">
+        ${bgSync.items.map((item) => `
+          <li class="sync-checklist__item${item.ok ? ' sync-checklist__item--ok' : ''}">
+            <i class="fa-solid ${item.ok ? 'fa-circle-check' : 'fa-circle'}"></i>
+            <span>${item.label}${item.ok ? '' : ` — <em>${item.hint}</em>`}</span>
+          </li>
+        `).join('')}
+      </ul>
+      <div class="sync-schedule-actions">
+        <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
+          <i class="fa-solid fa-bolt"></i> Run server sync now
+        </button>
+        ${s?.last_synced_at ? `<span class="gate-wizard__hint">Last run: ${new Date(s.last_synced_at).toLocaleString('en-IN')}</span>` : ''}
+      </div>
+    ` : `
+      <p class="sync-step-hint">Choose how often the server should pull/push changes. Cron runs once daily on Vercel.</p>
+      <div class="sync-schedule-row">
+        <select id="admin-bg-sync-interval" class="expense-combobox">
+          <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only</option>
+          <option value="15" ${s?.sync_interval_minutes === 15 ? 'selected' : ''}>Every 15 minutes</option>
+          <option value="60" ${s?.sync_interval_minutes === 60 ? 'selected' : ''}>Every hour</option>
+          <option value="360" ${s?.sync_interval_minutes === 360 ? 'selected' : ''}>Every 6 hours</option>
+          <option value="1440" ${s?.sync_interval_minutes === 1440 ? 'selected' : ''}>Daily</option>
+        </select>
+        <button type="button" class="btn btn-primary btn--small" id="admin-bg-save-schedule">
+          <i class="fa-solid fa-floppy-disk"></i> Save schedule
+        </button>
+      </div>
+      <div class="sync-schedule-actions">
+        <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
+          <i class="fa-solid fa-bolt"></i> Run server sync now
+        </button>
+      </div>
+    `;
 
     el.innerHTML = `
-      <div class="ledger-sync-admin-page">
-        <header class="admin-panel-header" style="margin-bottom: 2rem;">
+      <div class="sync-wizard-page">
+        <header class="sync-wizard-header">
           <div>
-            <h3 class="admin-panel-title">Spreadsheet Integration Configuration</h3>
-            <p class="admin-panel-desc">Configure Microsoft Excel Online or Google Sheets sync for your society's income &amp; expenses.</p>
+            <h3 class="sync-wizard-header__title">Spreadsheet sync</h3>
+            <p class="sync-wizard-header__desc">Set up ${isMicrosoft ? 'Microsoft Excel Online' : 'Google Sheets'} in five steps — OAuth, workbook, column mapping, connect, and schedule.</p>
+          </div>
+          <div class="sync-provider-tabs" role="tablist" aria-label="Spreadsheet provider">
+            <button type="button" class="sync-provider-tab${isMicrosoft ? ' sync-provider-tab--active' : ''}" data-sync-provider="MICROSOFT" role="tab" aria-selected="${isMicrosoft}">
+              <i class="fa-brands fa-microsoft"></i> Excel Online
+            </button>
+            <button type="button" class="sync-provider-tab${!isMicrosoft ? ' sync-provider-tab--active' : ''}" data-sync-provider="GOOGLE" role="tab" aria-selected="${!isMicrosoft}">
+              <i class="fa-brands fa-google"></i> Google Sheets
+            </button>
           </div>
         </header>
 
-        <div class="ledger-sync-admin-grid">
-          <!-- 1. Microsoft App Registration -->
-          <div class="ledger-sync-card">
-            <div class="ledger-sync-card__header">
-              <div class="ledger-sync-card__title">
-                <i class="fa-brands fa-microsoft"></i>
-                <span>Microsoft Azure App</span>
-              </div>
-              <span class="ledger-sync-card__status ${msConfigured ? 'ledger-sync-card__status--ok' : 'ledger-sync-card__status--pending'}">
-                ${msConfigured ? 'Configured' : 'Pending'}
-              </span>
-            </div>
-            
-            <p class="gate-wizard__hint">Register CommunityHub in your Azure Portal to enable Excel Online sync.</p>
+        ${renderWizardRail(steps, openIdx)}
 
-            <div class="ledger-sync-section">
-              <span class="ledger-sync-section-label">Redirect URI</span>
-              <div class="ledger-sync-uri-box">
-                <code>${getMicrosoftRedirectUri()}</code>
-                <button type="button" class="btn btn-outline btn--small" id="admin-oauth-copy-redirect">Copy</button>
-              </div>
-              <p class="gate-wizard__hint" style="margin-top: 0.5rem;">Add as <strong>Web</strong> redirect URI (for background sync with client secret). SPA redirect is only needed if you skip the secret.</p>
-            </div>
-
-            <div class="ledger-sync-form" style="display: flex; flex-direction: column; gap: 1rem;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                <div class="ledger-sync-form__field">
-                  <label class="ledger-sync-form__label">Client ID</label>
-                  <input type="text" id="admin-oauth-ms-client" class="expense-combobox" value="${microsoft?.client_id || ''}" placeholder="Application ID" />
-                </div>
-                <div class="ledger-sync-form__field">
-                  <label class="ledger-sync-form__label">Tenant ID</label>
-                  <input type="text" id="admin-oauth-ms-tenant" class="expense-combobox" value="${microsoft?.tenant_id || 'common'}" placeholder="common or GUID" />
-                </div>
-              </div>
-              <div class="ledger-sync-form__field">
-                <label class="ledger-sync-form__label">Client Secret</label>
-                <input type="password" id="admin-oauth-ms-secret" class="expense-combobox" value="" placeholder="${msSecretSaved ? 'Saved — leave blank to keep' : 'Required for background sync'}" autocomplete="new-password" />
-                <p class="gate-wizard__hint" style="margin-top:0.35rem;">Used only on the server to refresh tokens during the Vercel cron job. Never shown in the browser after save.</p>
-              </div>
-              <button type="button" class="btn btn-primary" id="admin-oauth-save-ms" style="margin-top: 0.5rem;">
-                <i class="fa-solid fa-floppy-disk"></i> Save Microsoft Settings
-              </button>
-            </div>
-          </div>
-
-          <!-- 2. Google Cloud OAuth -->
-          <div class="ledger-sync-card">
-            <div class="ledger-sync-card__header">
-              <div class="ledger-sync-card__title">
-                <i class="fa-brands fa-google"></i>
-                <span>Google Cloud OAuth</span>
-              </div>
-              <span class="ledger-sync-card__status ${googleConfigured ? 'ledger-sync-card__status--ok' : 'ledger-sync-card__status--pending'}">
-                ${googleConfigured ? 'Configured' : 'Pending'}
-              </span>
-            </div>
-
-            <p class="gate-wizard__hint">Create an OAuth client in Google Cloud Console to enable Google Sheets sync.</p>
-
-            <div class="ledger-sync-section">
-              <span class="ledger-sync-section-label">Redirect URI</span>
-              <div class="ledger-sync-uri-box">
-                <code>${getAppRedirectUri()}</code>
-                <button type="button" class="btn btn-outline btn--small" id="admin-oauth-copy-google-redirect">Copy</button>
-              </div>
-              <p class="gate-wizard__hint" style="margin-top: 0.5rem;">Add this under <strong>Authorized redirect URIs</strong> for a Web application OAuth client.</p>
-            </div>
-
-            <div class="ledger-sync-form" style="display: flex; flex-direction: column; gap: 1rem;">
-              <div class="ledger-sync-form__field">
-                <label class="ledger-sync-form__label">Client ID</label>
-                <input type="text" id="admin-oauth-google-client" class="expense-combobox" value="${google?.client_id || ''}" placeholder="OAuth 2.0 Client ID" />
-              </div>
-              <div class="ledger-sync-form__field">
-                <label class="ledger-sync-form__label">Client Secret</label>
-                <input type="password" id="admin-oauth-google-secret" class="expense-combobox" value="" placeholder="${googleSecretSaved ? 'Saved — leave blank to keep' : 'Optional (web client type)'}" autocomplete="new-password" />
-              </div>
-              <button type="button" class="btn btn-primary" id="admin-oauth-save-google" style="margin-top: 0.25rem;">
-                <i class="fa-solid fa-floppy-disk"></i> Save Google Settings
-              </button>
-            </div>
-          </div>
-
-          <!-- 3. Target Spreadsheet Settings -->
-          <div class="ledger-sync-card ledger-sync-card--full">
-            <div class="ledger-sync-card__header">
-              <div class="ledger-sync-card__title">
-                <i class="fa-solid fa-table"></i>
-                <span>Target Spreadsheet</span>
-              </div>
-              <span class="ledger-sync-card__status ${urlValue ? 'ledger-sync-card__status--ok' : 'ledger-sync-card__status--pending'}">
-                ${urlValue ? 'Linked' : 'Not Linked'}
-              </span>
-            </div>
-
-            <p class="gate-wizard__hint">Specify the Excel or Google Sheet where transactions should be synced.</p>
-
-            <div class="ledger-sync-form" style="display: flex; flex-direction: column; gap: 1.25rem;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                <div class="ledger-sync-form__field">
-                  <label class="ledger-sync-form__label">Provider</label>
-                  <select id="admin-ledger-sync-provider" class="expense-combobox">
-                    <option value="MICROSOFT" ${savedProvider === 'MICROSOFT' ? 'selected' : ''}>Microsoft Excel Online</option>
-                    <option value="GOOGLE" ${savedProvider === 'GOOGLE' ? 'selected' : ''}>Google Sheets</option>
-                  </select>
-                </div>
-                <div class="ledger-sync-form__field">
-                  <label class="ledger-sync-form__label">Auto-Sync</label>
-                  <select id="admin-ledger-sync-interval" class="expense-combobox">
-                    <option value="0" ${s?.sync_interval_minutes === 0 ? 'selected' : ''}>Manual only</option>
-                    <option value="15" ${s?.sync_interval_minutes === 15 ? 'selected' : ''}>Every 15 mins</option>
-                    <option value="60" ${s?.sync_interval_minutes === 60 ? 'selected' : ''}>Every 1 hour</option>
-                    <option value="360" ${s?.sync_interval_minutes === 360 ? 'selected' : ''}>Every 6 hours</option>
-                    <option value="1440" ${s?.sync_interval_minutes === 1440 ? 'selected' : ''}>Daily</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="ledger-sync-form__field">
-                <label class="ledger-sync-form__label">Spreadsheet URL</label>
-                <input type="url" id="admin-ledger-sync-url" class="expense-combobox"
-                  placeholder="${savedProvider === 'GOOGLE' ? 'https://docs.google.com/spreadsheets/d/...' : 'https://...sharepoint.com/... or OneDrive link'}"
-                  value="${urlValue}" />
-              </div>
-              
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                <div class="ledger-sync-form__field">
-                  <label class="ledger-sync-form__label">Sheet / Tab Name</label>
-                  <input type="text" id="admin-ledger-sync-sheet" class="expense-combobox" value="${s?.sheet_name || 'Transactions'}" />
-                </div>
-                <div class="ledger-sync-form__field" id="admin-ledger-sync-range-wrap" style="${savedProvider === 'GOOGLE' ? '' : 'display:none;'}">
-                  <label class="ledger-sync-form__label">Column Range (Google)</label>
-                  <input type="text" id="admin-ledger-sync-range" class="expense-combobox" value="${s?.range_a1 || 'A:J'}" placeholder="A:J" />
-                </div>
-              </div>
-
-              <button type="button" class="btn btn-primary" id="admin-ledger-save-settings" style="margin-top: 0.25rem;">
-                <i class="fa-solid fa-link"></i> Save Spreadsheet Settings
-              </button>
-            </div>
-            
-            <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border);">
-              <p class="gate-wizard__hint">
-                <i class="fa-solid fa-circle-info"></i> 
-                Changes here affect all society members. Ensure the spreadsheet has the correct column headers.
-              </p>
-            </div>
-          </div>
-
-          <!-- 4. Background sync job -->
-          <div class="ledger-sync-card ledger-sync-card--full">
-            <div class="ledger-sync-card__header">
-              <div class="ledger-sync-card__title">
-                <i class="fa-solid fa-clock"></i>
-                <span>Background Sync Job</span>
-              </div>
-              <span class="ledger-sync-card__status ${bgSync.ready ? 'ledger-sync-card__status--ok' : 'ledger-sync-card__status--pending'}">
-                ${bgSync.ready ? 'Ready' : 'Setup needed'}
-              </span>
-            </div>
-
-            <p class="gate-wizard__hint">
-              When auto-sync is enabled, a Vercel cron calls <code>/api/sync</code> daily.
-              Societies due for sync are processed server-side using your Microsoft connection below
-              (refresh token + client secret — no browser login needed on each run).
-            </p>
-
-            <div class="ledger-sync-bg-job-meta">
-              <div><strong>Schedule:</strong> ${formatSyncInterval(s?.sync_interval_minutes || 0)} (Vercel cron checks daily)</div>
-              <div><strong>Provider:</strong> ${bgSync.provider === 'GOOGLE' ? 'Google Sheets' : 'Microsoft Excel'}</div>
-              <div><strong>Background connection:</strong> ${bgSync.conn?.account_email || 'Not connected'}</div>
-              ${s?.last_synced_at ? `<div><strong>Last run:</strong> ${new Date(s.last_synced_at).toLocaleString('en-IN')}${s.last_sync_message ? ` — ${s.last_sync_message}` : ''}</div>` : ''}
-              ${s?.last_sync_status === 'ERROR' ? `<div class="ledger-sync-bg-job-meta__error"><i class="fa-solid fa-triangle-exclamation"></i> ${s.last_sync_message || 'Last background sync failed.'}</div>` : ''}
-            </div>
-
-            <div class="ledger-sync-form" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: #fff;">
-              <label class="ledger-sync-form__label" for="admin-bg-sync-interval">Auto-sync interval</label>
-              <p class="gate-wizard__hint" style="margin: 0.25rem 0 0.75rem;">
-                Cron runs once daily on Vercel; societies sync when this interval has elapsed since the last run.
-              </p>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                <select id="admin-bg-sync-interval" class="expense-combobox" style="min-width: 12rem;">
-                  <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only (cron skips)</option>
-                  <option value="15" ${s?.sync_interval_minutes === 15 ? 'selected' : ''}>Every 15 minutes</option>
-                  <option value="60" ${s?.sync_interval_minutes === 60 ? 'selected' : ''}>Every 1 hour</option>
-                  <option value="360" ${s?.sync_interval_minutes === 360 ? 'selected' : ''}>Every 6 hours</option>
-                  <option value="1440" ${s?.sync_interval_minutes === 1440 ? 'selected' : ''}>Daily</option>
-                </select>
-                <button type="button" class="btn btn-primary btn--small" id="admin-bg-save-schedule">
-                  <i class="fa-solid fa-floppy-disk"></i> Save schedule
-                </button>
-              </div>
-            </div>
-
-            <div class="ledger-sync-service-account" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt);">
-              <p class="gate-wizard__hint" style="margin-top: 0;">
-                Sign in once with the <strong>personal Microsoft account</strong> that owns the Excel file
-                (e.g. your hotmail/outlook login). Requires client secret saved above.
-                The server stores a refresh token and renews access automatically.
-              </p>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top: 0.75rem;">
-                <button type="button" class="btn btn-primary btn--small" id="admin-bg-connect-microsoft" ${savedProvider === 'MICROSOFT' && msSecretSaved ? '' : 'disabled'}>
-                  <i class="fa-brands fa-microsoft"></i> Connect Microsoft (background sync)
-                </button>
-              </div>
-            </div>
-
-            <ul class="ledger-sync-readiness">
-              ${bgSync.items.map((item) => `
-                <li class="ledger-sync-readiness__item ${item.ok ? 'ledger-sync-readiness__item--ok' : 'ledger-sync-readiness__item--pending'}">
-                  <i class="fa-solid ${item.ok ? 'fa-circle-check' : 'fa-circle'}"></i>
-                  <div>
-                    <strong>${item.label}</strong>
-                    ${item.ok ? '' : `<span class="ledger-sync-readiness__hint">${item.hint}</span>`}
-                  </div>
-                </li>
-              `).join('')}
-            </ul>
-
-            <div style="margin-top: 1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
-              <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
-                <i class="fa-solid fa-bolt"></i> Run server sync now
-              </button>
-              <span class="gate-wizard__hint" style="margin:0.25rem 0 0;">
-                Runs a one-off sync on the server for this society and updates the status above.
-              </span>
-            </div>
-
-            <p class="gate-wizard__hint" style="margin-top: 1rem;">
-              <strong>Token refresh:</strong>
-              Access tokens expire hourly; the client secret lets the server use your stored refresh token automatically on each cron run.
-            </p>
-          </div>
-        </div>
-
-        <div class="ledger-sync-card ledger-sync-card--ops" style="margin-top: 1.5rem;">
-          <div class="ledger-sync-card__header">
-            <div class="ledger-sync-card__title">
-              <i class="fa-solid fa-rotate"></i>
-              <span>Connect &amp; Sync</span>
-            </div>
-          </div>
-          <div id="admin-sync-ops-root">
-            ${buildSyncOpsHtml('admin-', s, hasUrl, canConnect)}
-          </div>
+        <div class="sync-wizard-steps">
+          ${renderSyncStepCard(1, isMicrosoft ? 'Azure app registration' : 'Google Cloud OAuth', stepStatus(0), oauthStepBody, { open: openIdx === 0, id: 'admin-sync-step-oauth' })}
+          ${renderSyncStepCard(2, 'Link workbook', stepStatus(1), workbookStepBody, { open: openIdx === 1, id: 'admin-sync-step-workbook' })}
+          ${renderSyncStepCard(3, 'Column mapping', stepStatus(2), mappingStepBody, { open: openIdx === 2, id: 'admin-sync-step-mapping' })}
+          ${renderSyncStepCard(4, 'Connect & sync', stepStatus(3), connectStepBody, { open: openIdx === 3, id: 'admin-sync-step-connect' })}
+          ${renderSyncStepCard(5, 'Auto-sync schedule', stepStatus(4), scheduleStepBody, { open: openIdx === 4, id: 'admin-sync-step-schedule' })}
         </div>
       </div>
     `;
 
-    // Wire events
+    // Provider tabs
+    el.querySelectorAll('[data-sync-provider]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const p = btn.dataset.syncProvider;
+            if (!p || p === wizardProvider) return;
+            sessionStorage.setItem(ADMIN_SYNC_TAB_KEY, p);
+            activeProvider = p;
+            renderAdminSyncPanel();
+        });
+    });
+
+    // Step rail navigation
+    el.querySelectorAll('[data-sync-step]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const target = document.getElementById(`admin-sync-step-${btn.dataset.syncStep}`);
+            if (!target) return;
+            target.open = true;
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
     document.getElementById('admin-oauth-copy-redirect')?.addEventListener('click', async () => {
         try {
             await navigator.clipboard.writeText(getMicrosoftRedirectUri());
@@ -796,38 +733,40 @@ export function renderAdminSyncPanel() {
         }).catch((e) => alert(e.message));
     });
 
-    // Show/hide Google-specific range field when provider changes
-    document.getElementById('admin-ledger-sync-provider')?.addEventListener('change', (e) => {
-        const rangeWrap = document.getElementById('admin-ledger-sync-range-wrap');
-        if (rangeWrap) rangeWrap.style.display = e.target.value === 'GOOGLE' ? '' : 'none';
-    });
-
     document.getElementById('admin-ledger-save-settings')?.addEventListener('click', async () => {
         const btn = document.getElementById('admin-ledger-save-settings');
         const url = document.getElementById('admin-ledger-sync-url')?.value?.trim();
         const sheet = document.getElementById('admin-ledger-sync-sheet')?.value?.trim();
-        const interval = parseInt(document.getElementById('admin-ledger-sync-interval')?.value, 10);
-        const providerSelect = document.getElementById('admin-ledger-sync-provider')?.value;
+        const provider = document.getElementById('admin-ledger-sync-provider')?.value || wizardProvider;
         const rangeA1 = document.getElementById('admin-ledger-sync-range')?.value?.trim() || 'A:J';
-        const provider = providerSelect || detectProviderFromUrl(url) || 'MICROSOFT';
+        if (!url) return alert('Enter a spreadsheet URL.');
 
         await withButtonBusy(btn, 'Saving…', async () => {
             await saveSyncSettings({
                 spreadsheet_url: url,
                 sheet_name: sheet,
-                sync_interval_minutes: interval,
                 provider,
                 range_a1: rangeA1,
             });
             startAutoSync();
-            alert('Spreadsheet settings saved.');
+            alert('Workbook saved.');
             renderAdminSyncPanel();
         }).catch((e) => alert(e.message));
     });
 
+    document.getElementById('admin-ledger-sync-load-cols')?.addEventListener('click', () => {
+        void withButtonBusy(
+            document.getElementById('admin-ledger-sync-load-cols'),
+            'Loading…',
+            () => refreshMappingUI(),
+        );
+    });
+
+    document.getElementById('admin-ledger-sync-template')?.addEventListener('click', () => void downloadLedgerTemplate());
+
     document.getElementById('admin-bg-connect-microsoft')?.addEventListener('click', async () => {
         const btn = document.getElementById('admin-bg-connect-microsoft');
-        const snapshot = setButtonBusy(btn, 'Redirecting to Microsoft…');
+        const snapshot = setButtonBusy(btn, 'Redirecting…');
         try {
             await startMicrosoftWebConnect();
         } catch (e) {
@@ -844,7 +783,7 @@ export function renderAdminSyncPanel() {
             await saveSyncSettings({ sync_interval_minutes: interval });
             startAutoSync();
             alert(interval === 0
-                ? 'Schedule saved: manual only (background cron will skip this society).'
+                ? 'Schedule saved: manual only.'
                 : `Schedule saved: ${formatSyncInterval(interval)}.`);
             renderAdminSyncPanel();
         }).catch((e) => alert(e.message || 'Could not save schedule.'));
@@ -852,11 +791,11 @@ export function renderAdminSyncPanel() {
 
     document.getElementById('admin-bg-sync-run')?.addEventListener('click', async () => {
         const btn = document.getElementById('admin-bg-sync-run');
-        await withButtonBusy(btn, 'Running server sync…', async () => {
+        await withButtonBusy(btn, 'Running…', async () => {
             const apartment_id = portalState.access?.activeApartmentId;
             if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
-            const { data: s } = await supabase.auth.getSession();
-            const token = s?.session?.access_token;
+            const { data: sess } = await supabase.auth.getSession();
+            const token = sess?.session?.access_token;
             if (!token) throw new Error('Sign in again to run the server sync.');
 
             const res = await fetch('/api/sync', {
@@ -881,7 +820,15 @@ export function renderAdminSyncPanel() {
     const opsRoot = document.getElementById('admin-sync-ops-root');
     if (opsRoot) {
         wireSyncOps(opsRoot, 'admin-', renderAdminSyncPanel);
-        if (hasUrl) void refreshMappingUI();
+    }
+
+    if (hasSavedColumnMapping(s)) {
+        const mapEl = document.getElementById('admin-ledger-sync-mapping');
+        if (mapEl && !mapEl.querySelector('.ledger-sync-map')) {
+            mapEl.innerHTML = `<p class="gate-wizard__hint"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Column mapping saved. Click <strong>Load columns from spreadsheet</strong> to view or edit.</p>`;
+        }
+    } else if (hasUrl && connMeta?.account_email) {
+        void refreshMappingUI();
     }
 }
 
@@ -897,218 +844,6 @@ async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1 }) {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error?.message || 'Google Sheets request failed.');
     return { rows: json.values || [], sourceKey: `google:${sheetId}` };
-}
-
-export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null) {
-    if (!aoa?.length) return [];
-    const headersRaw = (aoa[0] || []).map((h) => String(h || '').trim());
-    const headers = headersRaw.map(h => h.toLowerCase());
-    
-    const findCol = (names) => headers.findIndex((h) => names.some((n) => h.includes(n)));
-
-    const mapping = customMapping || {
-        date: findCol(['date']),
-        type: findCol(['type', 'in/out', 'direction']),
-        amount: findCol(['amount', 'value']),
-        dr: findCol(['debit', 'dr', 'withdraw']),
-        cr: findCol(['credit', 'cr', 'deposit']),
-        category: findCol(['category', 'cat']),
-        description: findCol(['description', 'narration', 'particular', 'notes']),
-        wallet: findCol(['wallet', 'ledger']),
-        vendor: findCol(['vendor', 'payee']),
-        reference: findCol(['reference', 'invoice', 'ref']),
-        sync_id: findCol(['syncid', 'sync_id', 'internal_id']),
-        sync_status: findCol(['status', 'sync_status', 'sync_state']),
-    };
-
-    const dateCol = mapping.date;
-    const typeCol = mapping.type;
-    const amtCol = mapping.amount;
-    const debitCol = mapping.dr;
-    const creditCol = mapping.cr;
-    const catCol = mapping.category;
-    const descCol = mapping.description;
-    const walletCol = mapping.wallet;
-    const vendorCol = mapping.vendor;
-    const refCol = mapping.reference;
-    const syncIdCol = mapping.sync_id;
-    const syncStatusCol = mapping.sync_status;
-
-    if (dateCol < 0) throw new Error('Sheet must have a Date column. Download the template for the expected format.');
-
-    const parsed = [];
-    console.log(`Parsing ${aoa.length - 1} rows from sheet...`);
-    for (let i = 1; i < aoa.length; i += 1) {
-        const row = aoa[i] || [];
-        const rowNum = i + 1;
-        const date = parseDate(row[dateCol]);
-        
-        if (!date) {
-            console.warn(`Row ${rowNum}: Skipped - Invalid or missing Date in column ${dateCol + 1} (${row[dateCol]})`);
-            continue;
-        }
-
-        let type = typeCol >= 0 ? normType(row[typeCol]) : null;
-        let amount = amtCol >= 0 ? parseAmount(row[amtCol]) : 0;
-        
-        if (!type && debitCol >= 0 && parseAmount(row[debitCol]) > 0) {
-            type = 'OUT';
-            amount = parseAmount(row[debitCol]);
-        }
-        if (!type && creditCol >= 0 && parseAmount(row[creditCol]) > 0) {
-            type = 'IN';
-            amount = parseAmount(row[creditCol]);
-        }
-        
-        if (!type) {
-            console.warn(`Row ${rowNum}: Skipped - Could not determine Type (IN/OUT or Dr/Cr)`);
-            continue;
-        }
-        if (amount <= 0) {
-            console.warn(`Row ${rowNum}: Skipped - Amount is 0 or invalid (${amount})`);
-            continue;
-        }
-
-        const syncId = syncIdCol >= 0 ? String(row[syncIdCol] || '').trim() : null;
-
-        // Content hash for change detection
-        const hashBase = `${date}|${type}|${amount}|${String(row[catCol] || '')}|${String(row[descCol] || '')}`;
-        const syncHash = safeHash(hashBase);
-
-        parsed.push({
-            row_index: rowNum,
-            external_sync_key: syncId || `${sourceKey}:row:${rowNum}`,
-            sync_hash: syncHash,
-            date,
-            type,
-            amount,
-            cat: normCat(catCol >= 0 ? row[catCol] : '', type),
-            description: descCol >= 0 ? String(row[descCol] || '').trim() : '',
-            wallet: walletCol >= 0 ? normWallet(row[walletCol]) : 'CASH',
-            vendor_name: vendorCol >= 0 ? String(row[vendorCol] || '').trim() || null : null,
-            vendor_invoice: refCol >= 0 ? String(row[refCol] || '').trim() || null : null,
-        });
-    }
-    console.log(`Parsing complete. ${parsed.length} / ${aoa.length - 1} rows valid.`);
-    return parsed;
-}
-
-function validateLedgerHeaderMapping(aoa, customMapping = null) {
-    const headersRaw = (aoa?.[0] || []).map((h) => String(h || '').trim());
-    const headers = headersRaw.map((h) => h.toLowerCase());
-    const findCol = (names) => headers.findIndex((h) => names.some((n) => h.includes(n)));
-
-    const mapping = customMapping || {
-        date: findCol(['date']),
-        type: findCol(['type', 'in/out', 'direction']),
-        amount: findCol(['amount', 'value']),
-        dr: findCol(['debit', 'dr', 'withdraw']),
-        cr: findCol(['credit', 'cr', 'deposit']),
-        category: findCol(['category', 'cat']),
-        description: findCol(['description', 'narration', 'particular', 'notes']),
-        wallet: findCol(['wallet', 'ledger']),
-        vendor: findCol(['vendor', 'payee']),
-        reference: findCol(['reference', 'invoice', 'ref']),
-        sync_id: findCol(['syncid', 'sync_id', 'internal_id']),
-        sync_status: findCol(['status', 'sync_status', 'sync_state']),
-    };
-
-    const errors = [];
-    const warnings = [];
-
-    if (mapping.date < 0) errors.push('Missing required column: Date');
-
-    const hasDrCr = mapping.dr >= 0 || mapping.cr >= 0;
-    const hasTypeAmount = mapping.type >= 0 && mapping.amount >= 0;
-    const hasSingleAmount = mapping.amount >= 0;
-
-    if (!hasTypeAmount && !hasDrCr) {
-        errors.push('Missing required columns: either (Type + Amount) OR (Dr and/or Cr).');
-    } else if (hasDrCr && hasSingleAmount) {
-        warnings.push('Both Amount and Dr/Cr columns exist. Dr/Cr will be used only if Type is missing.');
-    }
-
-    // “New / extra” columns: not used by our parser
-    const usedIdx = new Set(Object.values(mapping).filter((i) => i >= 0));
-    const extras = headersRaw
-        .map((h, idx) => ({ h, idx }))
-        .filter(({ h, idx }) => h && !usedIdx.has(idx))
-        .map(({ h }) => h);
-    if (extras.length) warnings.push(`Extra columns will be ignored: ${extras.join(', ')}`);
-
-    const nameAt = (idx) => (idx >= 0 ? headersRaw[idx] : '—');
-    const pretty = [
-        ['Date', nameAt(mapping.date)],
-        ['Type', nameAt(mapping.type)],
-        ['Amount', nameAt(mapping.amount)],
-        ['Dr', nameAt(mapping.dr)],
-        ['Cr', nameAt(mapping.cr)],
-        ['Category', nameAt(mapping.category)],
-        ['Description', nameAt(mapping.description)],
-        ['Wallet', nameAt(mapping.wallet)],
-        ['Vendor', nameAt(mapping.vendor)],
-        ['Reference', nameAt(mapping.reference)],
-    ];
-
-    return { mapping, pretty, errors, warnings };
-}
-
-function renderLedgerMappingResult({ mapping, pretty, errors, warnings }, headersRaw = []) {
-    const fields = [
-        { key: 'date', label: 'Date', db: 'date' },
-        { key: 'type', label: 'Type', db: 'type' },
-        { key: 'amount', label: 'Amount', db: 'amount' },
-        { key: 'dr', label: 'Debit (Dr)', db: 'amount' },
-        { key: 'cr', label: 'Credit (Cr)', db: 'amount' },
-        { key: 'category', label: 'Category', db: 'cat' },
-        { key: 'description', label: 'Description', db: 'description' },
-        { key: 'wallet', label: 'Wallet/Ledger', db: 'wallet' },
-        { key: 'vendor', label: 'Vendor/Payee', db: 'vendor_name' },
-        { key: 'reference', label: 'Reference/Invoice', db: 'vendor_invoice' },
-        { key: 'sync_id', label: 'Sync ID (Internal)', db: 'external_sync_key' },
-        { key: 'sync_status', label: 'Sync Status', db: '(visual only)' },
-    ];
-
-    const rows = fields
-        .map((f) => {
-            const current = mapping[f.key];
-            return `
-                <div class="ledger-sync-map__row">
-                    <div class="ledger-sync-map__field-info">
-                        <span class="ledger-sync-map__label">${f.label}</span>
-                        <code class="ledger-sync-map__db-name">${f.db}</code>
-                    </div>
-                    <select class="ledger-sync-map__select" data-field="${f.key}">
-                        <option value="-1">— Not mapped —</option>
-                        ${headersRaw.map((h, i) => `<option value="${i}" ${current === i ? 'selected' : ''}>${h || `Column ${i + 1}`}</option>`).join('')}
-                    </select>
-                </div>`;
-        })
-        .join('');
-    const errHtml = errors?.length
-        ? `<div class="ledger-sync-status ledger-sync-status--error" style="margin:0.5rem 0;">
-            <strong>Sheet mapping errors</strong><br/>
-            ${errors.map((e) => `• ${e}`).join('<br/>')}
-           </div>`
-        : '';
-    const warnHtml = warnings?.length
-        ? `<div class="ledger-sync-status ledger-sync-status--warn" style="margin:0.5rem 0;">
-            <strong>Mapping warnings</strong><br/>
-            ${warnings.map((w) => `• ${w}`).join('<br/>')}
-           </div>`
-        : '';
-
-    return `
-      ${errHtml}
-      ${warnHtml}
-      <div class="ledger-sync-map">
-        <div class="ledger-sync-map__row ledger-sync-map__head"><span>Database Field</span><span>Excel Column</span></div>
-        ${rows}
-      </div>
-      <div style="margin-top:0.5rem; text-align:right;">
-        <button type="button" class="btn btn-primary btn--small" id="ledger-sync-save-map">Save mapping</button>
-      </div>
-    `;
 }
 
 export async function parseLedgerFile(file) {
@@ -1129,6 +864,7 @@ export async function parseLedgerFile(file) {
 export async function importLedgerRows(rows, last_sync_at = null) {
     const apartment_id = portalState.access?.activeApartmentId;
     if (!supabase || !apartment_id) throw new Error('Supabase required.');
+    const columnMapping = getSyncSettings()?.column_mapping;
 
     const allLocalTxns = portalState.finances.txns || [];
     const existingMap = new Map(
@@ -1173,15 +909,7 @@ export async function importLedgerRows(rows, last_sync_at = null) {
                         console.log(`  Updating DB record ${existing.id} with Excel changes.`);
                         updatePromises.push(
                             supabase.from('transactions').update({
-                                amount: row.amount,
-                                cat: row.cat,
-                                description: row.description || null,
-                                wallet: row.wallet,
-                                type: row.type,
-                                date: row.date,
-                                vendor_name: row.vendor_name,
-                                vendor_invoice: row.vendor_invoice,
-                                sync_hash: row.sync_hash,
+                                ...buildDbSyncPayload(row, columnMapping),
                                 updated_at: new Date().toISOString(),
                             }).eq('id', existing.id)
                         );
@@ -1206,16 +934,8 @@ export async function importLedgerRows(rows, last_sync_at = null) {
             batchInsert.push({
                 id: crypto.randomUUID(),
                 apartment_id,
-                amount: row.amount,
-                cat: row.cat,
-                description: row.description || null,
-                wallet: row.wallet,
-                type: row.type,
-                date: row.date,
-                vendor_name: row.vendor_name,
-                vendor_invoice: row.vendor_invoice,
+                ...buildDbSyncPayload(row, columnMapping),
                 external_sync_key: row.external_sync_key,
-                sync_hash: row.sync_hash,
             });
             imported += 1;
         }
@@ -1308,16 +1028,8 @@ async function resolveConflict(idx, winner) {
                 const { error } = await supabase.from('transactions').insert({
                     id: crypto.randomUUID(),
                     apartment_id,
-                    amount: conflict.incoming.amount,
-                    cat: conflict.incoming.cat,
-                    description: conflict.incoming.description || null,
-                    wallet: conflict.incoming.wallet,
-                    type: conflict.incoming.type,
-                    date: conflict.incoming.date,
-                    vendor_name: conflict.incoming.vendor_name,
-                    vendor_invoice: conflict.incoming.vendor_invoice,
+                    ...buildDbSyncPayload(conflict.incoming, settings.column_mapping),
                     external_sync_key: conflict.incoming.external_sync_key,
-                    sync_hash: conflict.incoming.sync_hash,
                 });
                 if (error) throw error;
             } else {
@@ -1327,8 +1039,7 @@ async function resolveConflict(idx, winner) {
                     const item = await resolveMicrosoftDriveItem(settings.spreadsheet_url, token);
                     
                     // Prepare empty values to "clear" the row
-                    const mapping = settings.column_mapping || {};
-                    const maxCol = Math.max(...Object.values(mapping), 9);
+                    const maxCol = Math.max(maxMappedColumn(settings.column_mapping), 9);
                     const emptyValues = new Array(maxCol + 1).fill('');
                     
                     await updateMicrosoftRow({
@@ -1366,7 +1077,7 @@ async function resolveConflict(idx, winner) {
                     });
 
                     // Update DB hash to match what we just pushed
-                    const syncHash = safeHash(`${conflict.existing.date}|${conflict.existing.type}|${conflict.existing.amount}|${conflict.existing.cat}|${conflict.existing.description || ''}`);
+                    const syncHash = computeSyncHash(conflict.existing, settings.column_mapping);
                     await supabase.from('transactions').update({ 
                         sync_hash: syncHash,
                         updated_at: new Date().toISOString()
@@ -1381,15 +1092,7 @@ async function resolveConflict(idx, winner) {
             if (winner === 'excel') {
                 // Keep Excel version: Update DB with incoming data
                 const { error } = await supabase.from('transactions').update({
-                    amount: conflict.incoming.amount,
-                    cat: conflict.incoming.cat,
-                    description: conflict.incoming.description || null,
-                    wallet: conflict.incoming.wallet,
-                    type: conflict.incoming.type,
-                    date: conflict.incoming.date,
-                    vendor_name: conflict.incoming.vendor_name,
-                    vendor_invoice: conflict.incoming.vendor_invoice,
-                    sync_hash: conflict.incoming.sync_hash,
+                    ...buildDbSyncPayload(conflict.incoming, settings.column_mapping),
                     updated_at: new Date().toISOString(),
                 }).eq('id', conflict.existing.id);
                 if (error) throw error;
@@ -1399,28 +1102,8 @@ async function resolveConflict(idx, winner) {
                     const token = await getAccessTokenForProvider('MICROSOFT');
                     const item = await resolveMicrosoftDriveItem(settings.spreadsheet_url, token);
                     
-                    // Prepare values for Excel (respecting user's mapping)
-                    const mapping = settings.column_mapping || {};
-                    const maxCol = Math.max(...Object.values(mapping), 9); // At least 10 columns (0-9)
-                    const excelValues = new Array(maxCol + 1).fill('');
-                    
-                    const setVal = (key, val) => {
-                        const idx = mapping[key];
-                        if (idx >= 0) excelValues[idx] = val;
-                    };
-
-                    setVal('date', conflict.existing.date);
-                    setVal('type', conflict.existing.type === 'OUT' ? 'DR' : 'CR');
-                    setVal('amount', conflict.existing.amount);
-                    setVal('category', conflict.existing.cat);
-                    setVal('description', conflict.existing.description || '');
-                    setVal('wallet', conflict.existing.wallet);
-                    setVal('vendor', conflict.existing.vendor_name || '');
-                    setVal('reference', conflict.existing.vendor_invoice || '');
-                    setVal('sync_id', conflict.existing.external_sync_key);
-                    setVal('sync_status', 'SYNCED');
-
-                    const syncHash = safeHash(`${conflict.existing.date}|${conflict.existing.type}|${conflict.existing.amount}|${conflict.existing.cat}|${conflict.existing.description || ''}`);
+                    const { rowData: excelValues, maxCol } = transactionToExcelRow(conflict.existing, settings.column_mapping);
+                    const syncHash = computeSyncHash(conflict.existing, settings.column_mapping);
 
                     const colLetter = (n) => {
                         let letter = '';
@@ -1540,8 +1223,7 @@ async function runSync() {
             // Mark pushed transactions in DB with a sync key and hash
             for (const txn of localTxns) {
                 const syncKey = `app:txn:${txn.id}`;
-                const hashBase = `${txn.date}|${txn.type}|${txn.amount}|${txn.cat}|${txn.description || ''}`;
-                const syncHash = safeHash(hashBase);
+                const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, customMapping);
                 await supabase.from('transactions').update({ 
                     external_sync_key: syncKey,
                     sync_hash: syncHash 
@@ -1758,8 +1440,11 @@ async function refreshMappingUI() {
             return;
         }
 
-        const check = validateLedgerHeaderMapping([headersRaw], settings?.column_mapping);
-        mapEl.innerHTML = renderLedgerMappingResult(check, headersRaw);
+        const storedMapping = settings?.column_mapping
+            ? normalizeMapping(settings.column_mapping)
+            : buildMappingFromHeaders(headersRaw);
+        mapEl.innerHTML = renderLedgerMappingUI(storedMapping, headersRaw);
+        wireMappingFormInteractions(mapEl);
 
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'ledger-sync-map__actions';
@@ -1769,14 +1454,6 @@ async function refreshMappingUI() {
             </button>
             <button type="button" class="btn btn-primary btn--small" id="${opsId(p, 'save-map')}">Save mapping</button>
         `;
-
-        mapEl.querySelector(`#${opsId(p, 'save-map')}`)?.closest('div')?.querySelector(`#${opsId(p, 'save-map')}`);
-        const oldSave = mapEl.querySelector(`#${opsId(p, 'save-map')}`);
-        if (oldSave && oldSave.parentElement?.classList.contains('ledger-sync-map__actions') === false) {
-            const dup = mapEl.querySelectorAll(`#${opsId(p, 'save-map')}`);
-            if (dup.length > 1) dup[0].parentElement?.remove();
-        }
-
         mapEl.appendChild(actionsDiv);
 
         mapEl.querySelector(`#${opsId(p, 'refresh-cols')}`)?.addEventListener('click', () => {
@@ -1785,10 +1462,9 @@ async function refreshMappingUI() {
         mapEl.querySelector(`#${opsId(p, 'save-map')}`)?.addEventListener('click', async () => {
             const saveBtn = mapEl.querySelector(`#${opsId(p, 'save-map')}`);
             await withButtonBusy(saveBtn, 'Saving…', async () => {
-                const newMap = {};
-                mapEl.querySelectorAll('.ledger-sync-map__select').forEach((sel) => {
-                    newMap[sel.dataset.field] = parseInt(sel.value, 10);
-                });
+                const newMap = collectMappingFromForm(mapEl);
+                const { errors } = validateMapping(newMap, headersRaw);
+                if (errors.length) throw new Error(errors.join('\n'));
                 await saveSyncSettings({ column_mapping: newMap });
                 alert('Column mapping saved.');
                 syncOpsCtx.onRefresh();
@@ -1897,7 +1573,8 @@ async function testSpreadsheetLink() {
     }
 }
 
-function buildSyncOpsHtml(prefix, s, hasUrl, canConnect) {
+function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
+    const { includeMapping = true, compact = false } = options;
     const id = (n) => opsId(prefix, n);
     const isAdmin = prefix === 'admin-';
     const noUrlHint = isAdmin
@@ -1910,13 +1587,14 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect) {
         ? 'Save the Microsoft or Google Client ID above to enable Connect.'
         : 'OAuth app not configured — set it in Administration → Spreadsheet Sync.';
     return `
-      <div class="ledger-sync-ops-block">
+      <div class="ledger-sync-ops-block${compact ? ' ledger-sync-ops-block--compact' : ''}">
+        ${compact ? '' : `
         <div class="ledger-sync-panel__head" style="margin-top:0;">
           <p>Connect your account, verify the workbook, map columns, then sync.</p>
           <button type="button" class="btn btn-outline btn--small" id="${id('template')}">
             <i class="fa-solid fa-download"></i> Template
           </button>
-        </div>
+        </div>`}
 
         ${hasUrl ? `
           <div class="ledger-sync-status" style="margin-bottom: 1rem; background: var(--surface-alt);">
@@ -1963,6 +1641,7 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect) {
 
         <div id="${id('sheet-list')}" class="ledger-sync-sheet-list"></div>
 
+        ${includeMapping ? `
         <details class="ledger-sync-mapping-section" id="${id('mapping-details')}" style="margin-top: 1rem;">
           <summary>Column mapping</summary>
           <div id="${id('mapping')}" style="padding: 0.5rem 0;">
@@ -1970,7 +1649,7 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect) {
               ? 'Click <strong>Load columns</strong> or <strong>Test link</strong> to fetch headers, then map each field.'
               : noMapHint}</p>
           </div>
-        </details>
+        </details>` : ''}
 
         <div id="${id('status')}">${renderStatus()}</div>
 
@@ -2154,9 +1833,9 @@ export function renderLedgerSyncPanel() {
 async function downloadLedgerTemplate() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Transactions');
-    ws.addRow(['Date', 'Dr', 'Cr', 'Category', 'Description', 'Wallet', 'Vendor', 'Reference']);
-    ws.addRow(['2026-06-01', 1500, '', 'Maintenance', 'Lift AMC', 'BANK', 'Otis', 'INV-001']);
-    ws.addRow(['2026-06-02', '', 25000, 'Maintenance Collection', 'Flat A-101 June', 'BANK', '', '']);
+    ws.addRow(TEMPLATE_HEADERS);
+    ws.addRow(['2026-06-01', 'DR', 1500, '', '', 'Maintenance', '', 'Lift AMC', 'BANK', 'Otis', 'INV-001', 'cheque', 'CHQ-123', '', '']);
+    ws.addRow(['2026-06-02', 'CR', 25000, '', '', 'Maintenance Collection', '', 'Flat A-101 June', 'BANK', '', '', 'upi', 'UPI-99', '', '']);
     ws.getRow(1).font = { bold: true };
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement('a');
