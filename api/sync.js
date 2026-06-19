@@ -1,8 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import {
-    parseLedgerRowsFromAoA,
+    parseLedgerSheet,
     buildDbSyncPayload,
+    buildImportTxnPayload,
     computeSyncHash,
+    normalizeMapping,
+    colForField,
 } from '../src/ledgerColumnMapping.js';
 import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
 
@@ -198,6 +201,11 @@ async function resolveSyncCredentials(supabase, settings) {
 
 async function performSync(supabase, settings) {
     const { apartment_id, provider } = settings;
+    const mapping = normalizeMapping(settings.column_mapping);
+    if (colForField(mapping, 'date') < 0) {
+        throw new Error('Column mapping is incomplete — map Date to an Excel column in Admin → Spreadsheet sync (step 3), then save.');
+    }
+
     const { conn, app, connTable } = await resolveSyncCredentials(supabase, settings);
     // Refresh token if needed
     let accessToken = conn.access_token;
@@ -209,6 +217,7 @@ async function performSync(supabase, settings) {
 
     // Pull from spreadsheet
     let rows = [];
+    let pullStats = { excelDataRows: 0, parsed: 0, skipped: 0 };
     let etag = null;
     let driveId, itemId, shareId, useSharesApi;
 
@@ -220,7 +229,9 @@ async function performSync(supabase, settings) {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message || 'Google Sheets pull failed.');
-        rows = parseLedgerRowsFromAoA(json.values || [], `google:${sheetId}`, settings.column_mapping);
+        const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping);
+        rows = sheet.parsed;
+        pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
     } else if (provider === 'MICROSOFT') {
         const shareIdEncoded = encodeMicrosoftShareId(settings.spreadsheet_url);
         const item = await resolveMicrosoftDriveItem(settings.spreadsheet_url, accessToken);
@@ -234,11 +245,20 @@ async function performSync(supabase, settings) {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message || 'Excel pull failed.');
-        rows = parseLedgerRowsFromAoA(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping);
+        const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping);
+        rows = sheet.parsed;
+        pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
         shareId = shareIdEncoded;
         useSharesApi = false;
     } else {
         throw new Error(`Unsupported sync provider: ${provider || '(none)'}.`);
+    }
+
+    if (pullStats.excelDataRows > 0 && pullStats.parsed === 0) {
+        throw new Error(
+            `Pulled ${pullStats.excelDataRows} Excel row(s) but none could be imported. `
+            + 'Check Date, Type, and Amount (or Dr/Cr) on each row match your column mapping.',
+        );
     }
 
     // 5. Push to Spreadsheet
@@ -257,34 +277,36 @@ async function performSync(supabase, settings) {
                 useSharesApi,
                 sheetName: settings.sheet_name,
                 rowsToPush: localTxns,
-                columnMapping: settings.column_mapping
+                columnMapping: settings.column_mapping,
+                onRowPushed: async (txn) => {
+                    const syncKey = `app:txn:${txn.id}`;
+                    const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, settings.column_mapping);
+                    const { error } = await supabase.from('transactions').update({
+                        external_sync_key: syncKey,
+                        sync_hash: syncHash,
+                    }).eq('id', txn.id);
+                    if (error) throw new Error(error.message);
+                },
             });
-
-        // Mark as synced in DB
-        for (const txn of localTxns) {
-            const syncKey = `app:txn:${txn.id}`;
-            const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, settings.column_mapping);
-            await supabase.from('transactions').update({
-                external_sync_key: syncKey,
-                sync_hash: syncHash,
-            }).eq('id', txn.id);
-        }
     }
 
     // 6. Import to DB
     const { imported, updated } = await importToDatabase(supabase, apartment_id, rows, settings.last_synced_at, settings.column_mapping);
 
     // 7. Update Settings
+    const pullMsg = pullStats.skipped > 0
+        ? ` (${pullStats.skipped} Excel row(s) skipped — missing date/type/amount)`
+        : '';
     await supabase.from('ledger_sync_settings').update({
         last_synced_at: new Date().toISOString(),
         last_sync_status: 'OK',
-        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated. Pushed ${pushed} new.`,
+        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated. Pushed ${pushed} new.${pullMsg}`,
         last_sync_imported: imported,
         last_sync_pushed: pushed,
         last_sync_etag: etag
     }).eq('apartment_id', apartment_id);
 
-    return { imported, updated, pushed };
+    return { imported, updated, pushed, ...pullStats };
 }
 
 async function refreshToken(supabase, conn, app, connTable = 'user_oauth_connections') {
@@ -376,13 +398,14 @@ async function getUnsyncedTransactions(supabase, apartment_id) {
 }
 
 async function importToDatabase(supabase, apartment_id, rows, last_sync_at, columnMapping) {
-    const { data: existingTxns } = await supabase
+    const { data: existingTxns, error: loadErr } = await supabase
         .from('transactions')
         .select('*')
         .eq('apartment_id', apartment_id)
         .not('external_sync_key', 'is', null);
+    if (loadErr) throw new Error(loadErr.message);
 
-    const existingMap = new Map(existingTxns.map((t) => [t.external_sync_key, t]));
+    const existingMap = new Map((existingTxns || []).map((t) => [t.external_sync_key, t]));
     let imported = 0;
     let updated = 0;
 
@@ -392,20 +415,22 @@ async function importToDatabase(supabase, apartment_id, rows, last_sync_at, colu
             if (existing.sync_hash !== row.sync_hash) {
                 const dbChangedLocally = last_sync_at && existing.updated_at && new Date(existing.updated_at) > new Date(last_sync_at);
                 if (!dbChangedLocally) {
-                    await supabase.from('transactions').update({
+                    const { error } = await supabase.from('transactions').update({
                         ...buildDbSyncPayload(row, columnMapping),
                         updated_at: new Date().toISOString(),
                     }).eq('id', existing.id);
+                    if (error) throw new Error(`Update row ${row.row_index}: ${error.message}`);
                     updated++;
                 }
             }
         } else {
-            await supabase.from('transactions').insert({
+            const { error } = await supabase.from('transactions').insert({
                 id: crypto.randomUUID(),
                 apartment_id,
-                ...buildDbSyncPayload(row, columnMapping),
+                ...buildImportTxnPayload(row, columnMapping),
                 external_sync_key: row.external_sync_key,
             });
+            if (error) throw new Error(`Import row ${row.row_index}: ${error.message}`);
             imported++;
         }
     }

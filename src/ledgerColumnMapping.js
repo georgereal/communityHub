@@ -323,6 +323,34 @@ export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
     return payload;
 }
 
+/** Import insert payload — mapped sync fields plus required row fields from parse. */
+export function buildImportTxnPayload(row, mapping) {
+    const payload = buildDbSyncPayload(row, mapping);
+    for (const key of ['date', 'type', 'amount', 'cat', 'wallet', 'description']) {
+        if (row[key] !== undefined && row[key] !== null && payload[key] === undefined) {
+            payload[key] = row[key];
+        }
+    }
+    return payload;
+}
+
+export function parseLedgerSheet(aoa, sourceKey, customMapping = null) {
+    if (!aoa?.length) return { parsed: [], excelDataRows: 0, skipped: 0 };
+    const headersRaw = (aoa[0] || []).map((h) => String(h || '').trim());
+    const mapping = customMapping
+        ? normalizeMapping(customMapping)
+        : buildMappingFromHeaders(headersRaw);
+
+    const parsed = [];
+    for (let i = 1; i < aoa.length; i += 1) {
+        const row = aoa[i] || [];
+        const item = parseRowFromSheet(row, i + 1, mapping, sourceKey);
+        if (item) parsed.push(item);
+    }
+    const excelDataRows = Math.max(0, aoa.length - 1);
+    return { parsed, excelDataRows, skipped: excelDataRows - parsed.length, mapping };
+}
+
 function fieldImportsFromExcel(cfg) {
     if (cfg.excelCol == null || cfg.excelCol < 0) return false;
     return cfg.mode === 'sync' || cfg.mode === 'excel_import';
@@ -395,19 +423,7 @@ export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
 }
 
 export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null) {
-    if (!aoa?.length) return [];
-    const headersRaw = (aoa[0] || []).map((h) => String(h || '').trim());
-    const mapping = customMapping
-        ? normalizeMapping(customMapping)
-        : buildMappingFromHeaders(headersRaw);
-
-    const parsed = [];
-    for (let i = 1; i < aoa.length; i += 1) {
-        const row = aoa[i] || [];
-        const item = parseRowFromSheet(row, i + 1, mapping, sourceKey);
-        if (item) parsed.push(item);
-    }
-    return parsed;
+    return parseLedgerSheet(aoa, sourceKey, customMapping).parsed;
 }
 
 /** Build a sparse Excel row from a DB transaction using mapping exportExpr formulas. */

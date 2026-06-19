@@ -4,6 +4,7 @@
 import './ledgerSync.css';
 import ExcelJS from 'exceljs';
 import { portalState, supabase, pullState } from './store.js';
+import { processFinances, renderCashLedger } from './finances.js';
 import { logActivity } from './activityAudit.js';
 import { hasClientPermission } from './rbac.js';
 import {
@@ -36,6 +37,7 @@ import {
     computeSyncHash,
     colForField,
     buildDbSyncPayload,
+    buildImportTxnPayload,
     buildHeadersFromMapping,
     TEMPLATE_HEADERS,
 } from './ledgerColumnMapping.js';
@@ -310,6 +312,46 @@ async function saveSyncSettings(patch) {
         }
     }
     await pullState();
+}
+
+/** Clear DB sync linkage so the next sync can run from a clean slate (testing). */
+function refreshFinancesView() {
+    processFinances();
+    renderCashLedger();
+}
+
+async function resetSyncState() {
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!supabase || !apartment_id || apartment_id === 'apt-default') {
+        throw new Error('Select a society first.');
+    }
+
+    const { count, error: countErr } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('apartment_id', apartment_id)
+        .not('external_sync_key', 'is', null);
+    if (countErr) throw new Error(countErr.message);
+
+    const { error: txnErr } = await supabase
+        .from('transactions')
+        .update({ external_sync_key: null, sync_hash: null })
+        .eq('apartment_id', apartment_id);
+    if (txnErr) throw new Error(txnErr.message);
+
+    await saveSyncSettings({
+        last_synced_at: null,
+        last_sync_status: null,
+        last_sync_message: null,
+        last_sync_imported: 0,
+        last_sync_pushed: 0,
+        last_sync_etag: null,
+    });
+
+    window._ledgerSyncConflicts = [];
+    await pullState();
+
+    return { clearedKeys: count ?? 0 };
 }
 
 function formatSyncInterval(mins) {
@@ -614,6 +656,9 @@ export function renderAdminSyncPanel() {
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
           <i class="fa-solid fa-bolt"></i> Run server sync now
         </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
+          <i class="fa-solid fa-rotate-left"></i> Reset sync state
+        </button>
         ${s?.last_synced_at ? `<span class="gate-wizard__hint">Last run: ${new Date(s.last_synced_at).toLocaleString('en-IN')}</span>` : ''}
       </div>
     ` : `
@@ -633,6 +678,9 @@ export function renderAdminSyncPanel() {
       <div class="sync-schedule-actions">
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
           <i class="fa-solid fa-bolt"></i> Run server sync now
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
+          <i class="fa-solid fa-rotate-left"></i> Reset sync state
         </button>
       </div>
     `;
@@ -811,11 +859,20 @@ export function renderAdminSyncPanel() {
             if (!res.ok) throw new Error(json.error || 'Server sync failed.');
 
             await pullState();
+            refreshFinancesView();
             renderAdminSyncPanel();
 
             const r = json.result || {};
-            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.`);
+            const skipNote = r.skipped > 0 ? `\nSkipped ${r.skipped} Excel row(s) (missing date/type/amount).` : '';
+            const pullNote = r.excelDataRows != null
+                ? `\nExcel rows read: ${r.excelDataRows}, parsed: ${r.parsed ?? r.imported + r.updated}.`
+                : '';
+            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.${skipNote}${pullNote}`);
         }).catch((err) => alert(err.message || String(err)));
+    });
+
+    document.getElementById('admin-reset-sync-state')?.addEventListener('click', () => {
+        void confirmResetSyncState('admin-reset-sync-state', renderAdminSyncPanel);
     });
 
     const opsRoot = document.getElementById('admin-sync-ops-root');
@@ -873,8 +930,6 @@ export async function importLedgerRows(rows, last_sync_at = null) {
     let skipped = 0;
     let updated = 0;
     const conflicts = [];
-    const batchInsert = [];
-    const updatePromises = [];
 
     // Track which local transactions were seen in Excel
     const seenKeys = new Set();
@@ -903,12 +958,11 @@ export async function importLedgerRows(rows, last_sync_at = null) {
                         });
                     } else {
                         console.log(`  Updating DB record ${existing.id} with Excel changes.`);
-                        updatePromises.push(
-                            supabase.from('transactions').update({
-                                ...buildDbSyncPayload(row, columnMapping),
-                                updated_at: new Date().toISOString(),
-                            }).eq('id', existing.id)
-                        );
+                        const { error } = await supabase.from('transactions').update({
+                            ...buildDbSyncPayload(row, columnMapping),
+                            updated_at: new Date().toISOString(),
+                        }).eq('id', existing.id);
+                        if (error) throw new Error(error.message);
                         updated += 1;
                     }
                 } else {
@@ -927,12 +981,13 @@ export async function importLedgerRows(rows, last_sync_at = null) {
             }
 
             console.log(`Sync New Row: Row ${row.row_index} (Key: ${row.external_sync_key}) - Importing to DB.`);
-            batchInsert.push({
+            const { error } = await supabase.from('transactions').insert({
                 id: crypto.randomUUID(),
                 apartment_id,
-                ...buildDbSyncPayload(row, columnMapping),
+                ...buildImportTxnPayload(row, columnMapping),
                 external_sync_key: row.external_sync_key,
             });
+            if (error) throw new Error(error.message);
             imported += 1;
         }
     }
@@ -947,14 +1002,6 @@ export async function importLedgerRows(rows, last_sync_at = null) {
                 existing: txn
             });
         }
-    }
-
-    if (batchInsert.length) {
-        const { error } = await supabase.from('transactions').insert(batchInsert);
-        if (error) throw new Error(error.message);
-    }
-    if (updatePromises.length) {
-        await Promise.all(updatePromises);
     }
 
     if (imported > 0 || updated > 0) {
@@ -1146,7 +1193,7 @@ async function resolveConflict(idx, winner) {
         }
 
         await pullState();
-        window.renderCashLedger?.();
+        refreshFinancesView();
         syncOpsCtx.onRefresh();
     } catch (err) {
         alert(`Resolution failed: ${err.message}`);
@@ -1205,7 +1252,7 @@ async function runSync() {
         }
 
         if (localTxns.length > 0) {
-            console.log(`Pushing ${localTxns.length} local transactions to Excel...`);
+            console.log(`Pushing ${localTxns.length} local transactions to Excel (one row at a time)...`);
             pushed = await pushMicrosoftRows({
                 driveId: result.driveId,
                 itemId: result.itemId,
@@ -1213,18 +1260,17 @@ async function runSync() {
                 useSharesApi: result.useSharesApi,
                 sheetName,
                 rowsToPush: localTxns,
-                columnMapping: customMapping
+                columnMapping: customMapping,
+                onRowPushed: async (txn) => {
+                    const syncKey = `app:txn:${txn.id}`;
+                    const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, customMapping);
+                    const { error } = await supabase.from('transactions').update({
+                        external_sync_key: syncKey,
+                        sync_hash: syncHash,
+                    }).eq('id', txn.id);
+                    if (error) throw new Error(error.message);
+                },
             });
-            
-            // Mark pushed transactions in DB with a sync key and hash
-            for (const txn of localTxns) {
-                const syncKey = `app:txn:${txn.id}`;
-                const syncHash = computeSyncHash({ ...txn, external_sync_key: syncKey }, customMapping);
-                await supabase.from('transactions').update({ 
-                    external_sync_key: syncKey,
-                    sync_hash: syncHash 
-                }).eq('id', txn.id);
-            }
             
             // Re-fetch eTag after push
             const finalItem = await resolveMicrosoftDriveItem(spreadsheetUrl, await getAccessTokenForProvider('MICROSOFT'));
@@ -1241,7 +1287,7 @@ async function runSync() {
         ? `Pulled: ${imported} new, ${updated} updated. Pushed: ${pushed} new. ${conflicts.length} CONFLICTS.`
         : `Pulled: ${imported} new, ${updated} updated. Pushed: ${pushed} new.`;
 
-    window.renderCashLedger?.();
+    refreshFinancesView();
     
     // Store conflicts in a global-ish state BEFORE saving settings
     // This ensures they show up even if the DB save fails
@@ -1281,7 +1327,7 @@ async function runFileImport(file) {
         last_sync_message: `${imported} new from ${file.name}, ${skipped} skipped`,
         last_sync_imported: imported,
     });
-    window.renderCashLedger?.();
+    refreshFinancesView();
     renderLedgerSyncPanel();
 }
 
@@ -1699,16 +1745,38 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
 
         <details class="ledger-sync-advanced" style="margin-top: 1rem;">
           <summary style="font-size:0.75rem; color:var(--text-dim); cursor:pointer;">Advanced / troubleshooting</summary>
+          <p class="gate-wizard__hint" style="margin:0.35rem 0 0.5rem;">
+            <strong>Reset sync state</strong> clears <code>external_sync_key</code> and <code>sync_hash</code> on all transactions plus last-sync metadata — use while testing to re-sync from scratch.
+          </p>
           <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button type="button" class="btn btn-outline btn--small" id="${id('reset-ms')}">
               <i class="fa-solid fa-trash-can"></i> Reset Microsoft state
             </button>
-            <button type="button" class="btn btn-outline btn--small" id="${id('clear-keys')}" style="color: var(--error);">
-              <i class="fa-solid fa-eraser"></i> Clear Sync IDs
+            <button type="button" class="btn btn-outline btn--small" id="${id('reset-sync-state')}" style="color: var(--error);">
+              <i class="fa-solid fa-rotate-left"></i> Reset sync state
             </button>
           </div>
         </details>
       </div>`;
+}
+
+function confirmResetSyncState(buttonId, onRefresh) {
+    const msg = `Reset sync state for testing?
+
+This clears for the current society:
+• external_sync_key and sync_hash on all transactions
+• Last sync time, status, and conflict state
+
+Excel Sync ID / Sync Status cells are not cleared — empty those columns in the sheet too if you want a fully clean re-import.
+
+Continue?`;
+    if (!confirm(msg)) return Promise.resolve();
+    const btn = buttonId ? document.getElementById(buttonId) : null;
+    return withButtonBusy(btn, 'Resetting…', async () => {
+        const { clearedKeys } = await resetSyncState();
+        alert(`Sync state reset. Cleared linkage on ${clearedKeys} transaction(s). Run sync again when ready.`);
+        onRefresh?.();
+    }).catch((err) => alert(err.message || String(err)));
 }
 
 function wireSyncOps(rootEl, prefix, onRefresh) {
@@ -1756,16 +1824,8 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
         onRefresh();
     });
 
-    q('clear-keys')?.addEventListener('click', async () => {
-        if (!confirm('This will remove all Sync IDs from transactions in the App for this society. Continue?')) return;
-        const btn = q('clear-keys');
-        const apartment_id = portalState.access?.activeApartmentId;
-        await withButtonBusy(btn, 'Clearing…', async () => {
-            await supabase.from('transactions').update({ external_sync_key: null, sync_hash: null }).eq('apartment_id', apartment_id);
-            await pullState();
-            alert('Sync IDs cleared.');
-            onRefresh();
-        }).catch((err) => alert(`Failed to clear keys: ${err.message}`));
+    q('reset-sync-state')?.addEventListener('click', () => {
+        void confirmResetSyncState(q('reset-sync-state')?.id, onRefresh);
     });
 
     q('run')?.addEventListener('click', async () => {

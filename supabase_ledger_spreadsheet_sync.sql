@@ -3,6 +3,9 @@
 alter table public.transactions
   add column if not exists external_sync_key text;
 
+alter table public.transactions
+  add column if not exists sync_hash text;
+
 create unique index if not exists idx_transactions_external_sync_key
   on public.transactions (apartment_id, external_sync_key)
   where external_sync_key is not null;

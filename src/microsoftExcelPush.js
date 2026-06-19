@@ -1,4 +1,4 @@
-import { rowsToExcelValues } from './ledgerColumnMapping.js';
+import { transactionToExcelRow, maxMappedColumn } from './ledgerColumnMapping.js';
 
 function colLetter(n) {
     let letter = '';
@@ -22,30 +22,10 @@ async function graphJson(path, accessToken, init = {}) {
     return { res, json };
 }
 
-/**
- * Append transaction rows to an Excel Online worksheet via Microsoft Graph.
- * Tries shares API first when configured; falls back to drive endpoints (required for MSA).
- */
-export async function pushMicrosoftRows({
-    accessToken,
-    driveId,
-    itemId,
-    shareId,
-    useSharesApi,
-    sheetName,
-    rowsToPush,
-    columnMapping = {},
-}) {
-    if (!rowsToPush?.length) return 0;
-    if (!driveId || !itemId) {
-        throw new Error('Excel workbook drive/item id missing — re-save the spreadsheet URL.');
-    }
-
+async function resolveWorkbookBase({ accessToken, driveId, itemId, shareId, useSharesApi, safeSheet }) {
     const sharesBase = useSharesApi && shareId ? `/shares/${shareId}/driveItem` : null;
     const driveBase = `/drives/${driveId}/items/${itemId}`;
-    // After resolving the workbook item, drive endpoints are more reliable (especially MSA / personal accounts).
     let base = driveId && itemId ? driveBase : (sharesBase || driveBase);
-    const safeSheet = String(sheetName || 'Transactions').replace(/'/g, "''");
 
     let used = await graphJson(
         `${base}/workbook/worksheets('${safeSheet}')/usedRange`,
@@ -67,44 +47,108 @@ export async function pushMicrosoftRows({
     const lastRowMatch = address.match(/\d+$/);
     const nextRowIndex = lastRowMatch ? parseInt(lastRowMatch[0], 10) + 1 : 2;
 
-    const { values, maxCol } = rowsToExcelValues(rowsToPush, columnMapping);
-    if (!values.length) return 0;
+    return { base, sharesBase, driveBase, nextRowIndex };
+}
 
-    const width = maxCol + 1;
-    const padded = values.map((row) => {
-        const out = row.slice(0, width);
-        while (out.length < width) out.push('');
-        return out;
-    });
-
-    const endRow = nextRowIndex + padded.length - 1;
-    const rangeAddress = `A${nextRowIndex}:${colLetter(maxCol)}${endRow}`;
-
+async function patchExcelRow({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    rangeAddress,
+    values,
+}) {
     const patchRange = async (apiBase) => graphJson(
         `${apiBase}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`,
         accessToken,
         {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values: padded }),
+            body: JSON.stringify({ values: [values] }),
         },
     );
 
     let patch = await patchRange(base);
 
-    if (!patch.res.ok && sharesBase) {
+    if (!patch.res.ok && sharesBase && base === sharesBase) {
         const msg = String(patch.json?.error?.message || '');
         if (msg.includes('not supported for MSA') || msg.includes('Sharing') || patch.res.status === 400) {
             patch = await patchRange(driveBase);
-            base = driveBase;
         }
     }
 
     if (!patch.res.ok) {
         const code = patch.json?.error?.code ? ` [${patch.json.error.code}]` : '';
         const msg = patch.json?.error?.message || `HTTP ${patch.res.status}`;
-        throw new Error(`Push to Excel failed: ${msg}${code} (range ${rangeAddress}, sheet "${sheetName}")`);
+        throw new Error(`Push to Excel failed: ${msg}${code} (range ${rangeAddress}, sheet "${safeSheet}")`);
+    }
+}
+
+function excelRowValues(txn, columnMapping) {
+    const { rowData, maxCol } = transactionToExcelRow(txn, columnMapping);
+    const width = Math.max(maxCol, maxMappedColumn(columnMapping)) + 1;
+    const row = rowData.slice(0, width);
+    while (row.length < width) row.push('');
+    return { row, maxCol: width - 1 };
+}
+
+/**
+ * Append transaction rows to Excel one at a time via Microsoft Graph.
+ * Calls onRowPushed(txn, excelRowIndex) after each successful row (optional).
+ */
+export async function pushMicrosoftRows({
+    accessToken,
+    driveId,
+    itemId,
+    shareId,
+    useSharesApi,
+    sheetName,
+    rowsToPush,
+    columnMapping = {},
+    onRowPushed,
+}) {
+    if (!rowsToPush?.length) return 0;
+    if (!driveId || !itemId) {
+        throw new Error('Excel workbook drive/item id missing — re-save the spreadsheet URL.');
     }
 
-    return padded.length;
+    const safeSheet = String(sheetName || 'Transactions').replace(/'/g, "''");
+    const { base, sharesBase, driveBase, nextRowIndex: startRow } = await resolveWorkbookBase({
+        accessToken,
+        driveId,
+        itemId,
+        shareId,
+        useSharesApi,
+        safeSheet,
+    });
+
+    let nextRowIndex = startRow;
+    let pushed = 0;
+    const total = rowsToPush.length;
+
+    for (const txn of rowsToPush) {
+        const { row, maxCol } = excelRowValues(txn, columnMapping);
+        const rangeAddress = `A${nextRowIndex}:${colLetter(maxCol)}${nextRowIndex}`;
+
+        await patchExcelRow({
+            base,
+            sharesBase,
+            driveBase,
+            accessToken,
+            safeSheet,
+            rangeAddress,
+            values: row,
+        });
+
+        pushed += 1;
+        if (onRowPushed) {
+            await onRowPushed(txn, nextRowIndex);
+        }
+
+        console.log(`Excel push: row ${pushed}/${total} → ${rangeAddress}`);
+        nextRowIndex += 1;
+    }
+
+    return pushed;
 }

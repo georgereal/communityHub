@@ -86,11 +86,27 @@ function normWallet(val) {
     return s.includes('BANK') ? 'BANK' : 'CASH';
 }
 
+function excelSerialToIso(serial) {
+    const n = typeof serial === 'number' ? serial : parseFloat(String(serial));
+    if (!Number.isFinite(n) || n < 1) return null;
+    // Excel 1900 date system → Unix epoch (25569 = days from 1899-12-30 to 1970-01-01)
+    const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 function formatDate(val) {
     if (val == null || val === '') return null;
     if (val instanceof Date) return val.toISOString().slice(0, 10);
+    if (typeof val === 'number') {
+        const fromSerial = excelSerialToIso(val);
+        if (fromSerial) return fromSerial;
+    }
     const s = String(val).trim();
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    if (/^\d+(\.\d+)?$/.test(s)) {
+        const fromSerial = excelSerialToIso(parseFloat(s));
+        if (fromSerial) return fromSerial;
+    }
     const d = new Date(s);
     return Number.isNaN(d.getTime()) ? s : d.toISOString().slice(0, 10);
 }
