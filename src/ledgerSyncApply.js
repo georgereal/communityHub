@@ -19,7 +19,6 @@ export async function executeImportActions(supabase, apartment_id, actions, colu
             const { error } = await supabase.from('transactions').update({
                 sync_anchor_hash: meta.sync_anchor_hash,
                 excel_row_index: meta.excel_row_index,
-                updated_at: new Date().toISOString(),
             }).eq('id', act.db.id);
             if (error) throw new Error(error.message);
             skipped += 1;
@@ -59,7 +58,6 @@ export async function executeImportActions(supabase, apartment_id, actions, colu
             const { error } = await supabase.from('transactions').update({
                 ...buildDbSyncPayload(act.row, columnMapping),
                 ...meta,
-                updated_at: new Date().toISOString(),
             }).eq('id', act.db.id);
             if (error) throw new Error(`Update row ${act.row.row_index}: ${error.message}`);
             updated += 1;

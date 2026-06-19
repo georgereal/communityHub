@@ -1049,7 +1049,6 @@ async function resolveConflict(idx, winner) {
                     const syncHash = computeSyncHash(conflict.existing, settings.column_mapping);
                     await supabase.from('transactions').update({ 
                         sync_hash: syncHash,
-                        updated_at: new Date().toISOString()
                     }).eq('id', conflict.existing.id);
                 } else {
                     alert('Excel restoration is currently only supported for Microsoft Excel.');
@@ -1062,7 +1061,6 @@ async function resolveConflict(idx, winner) {
                 // Keep Excel version: Update DB with incoming data
                 const { error } = await supabase.from('transactions').update({
                     ...buildDbSyncPayload(conflict.incoming, settings.column_mapping),
-                    updated_at: new Date().toISOString(),
                 }).eq('id', conflict.existing.id);
                 if (error) throw error;
             } else {
@@ -1098,7 +1096,6 @@ async function resolveConflict(idx, winner) {
                     // Update DB hash to match what we just pushed
                     await supabase.from('transactions').update({ 
                         sync_hash: syncHash,
-                        updated_at: new Date().toISOString()
                     }).eq('id', conflict.existing.id);
                 } else {
                     alert('Conflict resolution for App version is currently only supported for Microsoft Excel.');

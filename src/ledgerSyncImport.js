@@ -6,14 +6,15 @@
  * excel_row_index  — last known Excel row number; same position + changed hash → in-place edit
  */
 
-import { computeAnchorHash } from './ledgerColumnMapping.js';
+import { computeAnchorHash, computeSyncHash } from './ledgerColumnMapping.js';
 
 export function newExcelRowId() {
     return `xls:${crypto.randomUUID()}`;
 }
 
-function isLocallyChanged(db, last_sync_at) {
-    return last_sync_at && db.updated_at && new Date(db.updated_at) > new Date(last_sync_at);
+function isLocallyChanged(txn, columnMapping) {
+    if (!txn?.sync_hash || !columnMapping) return false;
+    return computeSyncHash(txn, columnMapping) !== txn.sync_hash;
 }
 
 function dbAnchorHash(txn, columnMapping) {
@@ -87,7 +88,7 @@ export function reconcileExcelRows(excelRows, dbTxns, { last_sync_at = null, col
         if (e.used || d.used) continue;
         useExcel(e);
         useDb(d);
-        if (isLocallyChanged(d.txn, last_sync_at)) {
+        if (isLocallyChanged(d.txn, columnMapping)) {
             actions.push({ action: 'conflict', row: e.row, db: d.txn, reason: 'anchor' });
         } else {
             actions.push({ action: 'update', row: e.row, db: d.txn, reason: 'anchor' });
@@ -101,7 +102,7 @@ export function reconcileExcelRows(excelRows, dbTxns, { last_sync_at = null, col
         if (!match) continue;
         useExcel(e);
         useDb(match);
-        if (isLocallyChanged(match.txn, last_sync_at)) {
+        if (isLocallyChanged(match.txn, columnMapping)) {
             actions.push({ action: 'conflict', row: e.row, db: match.txn, reason: 'position' });
         } else {
             actions.push({ action: 'update', row: e.row, db: match.txn, reason: 'position' });
