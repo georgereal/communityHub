@@ -1,6 +1,7 @@
 import { PublicClientApplication } from '@azure/msal-browser';
-import { supabase } from './store.js';
+import { supabase, pullState } from './store.js';
 import { getMicrosoftRedirectUri } from './ledgerOAuth.js';
+import { readApiJson } from './apiJson.js';
 
 const MS_OAUTH_PENDING_KEY = 'ms_oauth_pending';
 const MS_OAUTH_RESULT_KEY = 'ms_oauth_result';
@@ -19,8 +20,8 @@ function returnToApp(pending, extra = {}) {
     window.location.replace(window.location.origin + '/' + hash.replace(/^#/, '#'));
 }
 
-async function completeMicrosoftWebOAuth(code, { target } = {}) {
-    const pendingKey = target === 'service' ? SERVICE_MS_OAUTH_PENDING_KEY : MS_WEB_OAUTH_PENDING_KEY;
+async function completeMicrosoftWebOAuth(code) {
+    const pendingKey = MS_WEB_OAUTH_PENDING_KEY;
     const pendingRaw = sessionStorage.getItem(pendingKey);
     if (!pendingRaw) throw new Error('Microsoft sign-in session expired. Try Connect again.');
     const pending = JSON.parse(pendingRaw);
@@ -42,16 +43,17 @@ async function completeMicrosoftWebOAuth(code, { target } = {}) {
             apartment_id: pending.apartment_id,
             redirect_uri: getMicrosoftRedirectUri(),
             code_verifier: verifier,
-            target: target === 'service' ? 'service' : undefined,
         }),
     });
-    const json = await res.json();
+    const { json, error: parseError } = await readApiJson(res);
+    if (parseError) throw new Error(parseError);
     if (!res.ok) throw new Error(json.error || 'Microsoft token exchange failed.');
 
     sessionStorage.removeItem(pendingKey);
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
     sessionStorage.setItem('ms_oauth_just_connected', '1');
     localStorage.setItem('ms_oauth_just_connected', '1');
+    try { await pullState(); } catch { /* optional */ }
     return pending;
 }
 
@@ -66,7 +68,6 @@ async function run() {
     const webPendingRaw = sessionStorage.getItem(MS_WEB_OAUTH_PENDING_KEY);
     const servicePendingRaw = sessionStorage.getItem(SERVICE_MS_OAUTH_PENDING_KEY);
     const oauthPendingRaw = webPendingRaw || servicePendingRaw;
-    const oauthTarget = servicePendingRaw ? 'service' : undefined;
 
     if (oauthError && oauthPendingRaw) {
         sessionStorage.removeItem(MS_WEB_OAUTH_PENDING_KEY);
@@ -79,10 +80,8 @@ async function run() {
 
     if (code && oauthPendingRaw) {
         try {
-            setStatus(oauthTarget === 'service'
-                ? 'Saving service account for background sync…'
-                : 'Saving Microsoft connection for background sync…');
-            const pending = await completeMicrosoftWebOAuth(code, { target: oauthTarget });
+            setStatus('Saving Microsoft connection for background sync…');
+            const pending = await completeMicrosoftWebOAuth(code);
             setStatus('Success! Returning to app…');
             returnToApp(pending);
         } catch (err) {

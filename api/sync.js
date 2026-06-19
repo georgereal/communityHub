@@ -144,31 +144,11 @@ async function userCanAccountsEdit(supabase, userId, apartmentId) {
 async function resolveSyncCredentials(supabase, settings) {
     const { apartment_id, provider, last_synced_by } = settings;
 
-    const { data: serviceConn, error: serviceError } = await supabase
-        .from('ledger_sync_service_accounts')
-        .select('*')
-        .eq('apartment_id', apartment_id)
-        .eq('provider', provider)
-        .maybeSingle();
-
-    if (serviceError) throw serviceError;
-    if (serviceConn) {
-        const { data: app, error: appError } = await supabase
-            .from('ledger_sync_oauth_apps')
-            .select('*')
-            .eq('apartment_id', apartment_id)
-            .eq('provider', provider)
-            .maybeSingle();
-        if (appError || !app) throw new Error('OAuth app not configured for this society.');
-        return { conn: serviceConn, app, connTable: 'ledger_sync_service_accounts' };
-    }
-
-    // Legacy fallback: last user who ran a manual sync
     if (!last_synced_by) {
-        throw new Error('No service account configured. Connect a dedicated sync account in Administration → Spreadsheet Sync.');
+        throw new Error('Connect Microsoft under Admin → Spreadsheet Sync (with client secret saved), then try again.');
     }
 
-    const { data: userConn, error: connError } = await supabase
+    const { data: conn, error: connError } = await supabase
         .from('user_oauth_connections')
         .select('*')
         .eq('user_id', last_synced_by)
@@ -176,8 +156,12 @@ async function resolveSyncCredentials(supabase, settings) {
         .eq('provider', provider)
         .maybeSingle();
 
-    if (connError || !userConn) {
-        throw new Error('Service account not configured and legacy user connection is missing.');
+    if (connError || !conn) {
+        throw new Error('Microsoft connection not found. Connect Microsoft in Admin first.');
+    }
+
+    if (!conn.refresh_token) {
+        throw new Error('Microsoft connection has no refresh token. Re-connect via Admin → Connect Microsoft (client secret required).');
     }
 
     const { data: app, error: appError } = await supabase
@@ -188,7 +172,8 @@ async function resolveSyncCredentials(supabase, settings) {
         .maybeSingle();
 
     if (appError || !app) throw new Error('OAuth app not configured for this society.');
-    return { conn: userConn, app, connTable: 'user_oauth_connections' };
+    if (!app.client_secret) throw new Error('Microsoft client secret is not configured.');
+    return { conn, app, connTable: 'user_oauth_connections' };
 }
 
 async function performSync(supabase, settings) {

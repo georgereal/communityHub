@@ -9,16 +9,13 @@ import { hasClientPermission } from './rbac.js';
 import {
     getOAuthApp,
     getMyOAuthConnectionMeta,
-    getServiceAccountMeta,
     getMicrosoftRedirectUri,
     getAppRedirectUri,
     saveOAuthApp,
     startGoogleConnect,
     startMicrosoftConnect,
-    startServiceAccountMicrosoftConnect,
-    startServiceAccountGoogleConnect,
+    startMicrosoftWebConnect,
     disconnectOAuth,
-    disconnectServiceAccount,
     ensureOAuthConnected,
     getAccessTokenForProvider,
     handleOAuthRedirectIfPresent,
@@ -422,7 +419,7 @@ function formatSyncInterval(mins) {
 
 function getBackgroundSyncReadiness(s) {
     const provider = s?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
-    const serviceMeta = getServiceAccountMeta(provider);
+    const conn = getMyOAuthConnectionMeta(provider);
     const appReady = oauthAppConfigured(provider);
     const items = [
         {
@@ -443,28 +440,31 @@ function getBackgroundSyncReadiness(s) {
             label: 'Microsoft client secret saved',
             hint: 'Create a secret in Azure → App registrations → Certificates & secrets.',
         });
+        items.push({
+            ok: !!(conn?.account_email && conn?.background_capable),
+            label: 'Microsoft connected for background sync',
+            hint: 'Click Connect Microsoft below. Sign in with the personal account that owns the Excel file.',
+        });
     } else {
         items.push({
             ok: oauthAppHasClientSecret('GOOGLE'),
             label: 'Google client secret saved',
-            hint: 'Add a client secret in Google Cloud Console (Web application type).',
+            hint: 'Add a client secret in Google Cloud Console.',
+        });
+        items.push({
+            ok: !!(conn?.account_email && conn?.background_capable),
+            label: 'Google connected for background sync',
+            hint: 'Click Connect Google below.',
         });
     }
 
-    items.push({
-        ok: !!serviceMeta?.account_email && !!serviceMeta?.has_refresh_token,
-        label: 'Service account connected',
-        hint: provider === 'GOOGLE'
-            ? 'Connect a dedicated Google account that owns or can edit the spreadsheet.'
-            : 'Connect a dedicated Microsoft account (e.g. accounts@your-society.com) with access to the workbook.',
-    });
     items.push({
         ok: (s?.sync_interval_minutes || 0) > 0,
         label: 'Auto-sync schedule enabled',
         hint: 'Choose an interval other than Manual only.',
     });
 
-    return { provider, items, ready: items.every((i) => i.ok), serviceMeta };
+    return { provider, items, ready: items.every((i) => i.ok), conn };
 }
 
 export function renderAdminSyncPanel() {
@@ -659,31 +659,28 @@ export function renderAdminSyncPanel() {
 
             <p class="gate-wizard__hint">
               When auto-sync is enabled, a Vercel cron calls <code>/api/sync</code> daily.
-              Societies due for sync (based on the interval below) are processed server-side using the
-              <strong>service account</strong> below — no signed-in user required.
+              Societies due for sync are processed server-side using your Microsoft connection below
+              (refresh token + client secret — no browser login needed on each run).
             </p>
 
             <div class="ledger-sync-bg-job-meta">
               <div><strong>Schedule:</strong> ${formatSyncInterval(s?.sync_interval_minutes || 0)} (cron checks daily)</div>
               <div><strong>Provider:</strong> ${bgSync.provider === 'GOOGLE' ? 'Google Sheets' : 'Microsoft Excel'}</div>
-              <div><strong>Service account:</strong> ${bgSync.serviceMeta?.account_email || 'Not connected'}</div>
+              <div><strong>Background connection:</strong> ${bgSync.conn?.account_email || 'Not connected'}</div>
               ${s?.last_synced_at ? `<div><strong>Last run:</strong> ${new Date(s.last_synced_at).toLocaleString('en-IN')}${s.last_sync_message ? ` — ${s.last_sync_message}` : ''}</div>` : ''}
               ${s?.last_sync_status === 'ERROR' ? `<div class="ledger-sync-bg-job-meta__error"><i class="fa-solid fa-triangle-exclamation"></i> ${s.last_sync_message || 'Last background sync failed.'}</div>` : ''}
             </div>
 
             <div class="ledger-sync-service-account" style="margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt);">
               <p class="gate-wizard__hint" style="margin-top: 0;">
-                Sign in once with a <strong>dedicated mailbox</strong> that has edit access to the spreadsheet
-                (e.g. society accounts email). Tokens are stored server-side for the cron job — not linked to any CommunityHub user session.
+                Sign in once with the <strong>personal Microsoft account</strong> that owns the Excel file
+                (e.g. your hotmail/outlook login). Requires client secret saved above.
+                The server stores a refresh token and renews access automatically.
               </p>
               <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top: 0.75rem;">
-                <button type="button" class="btn btn-primary btn--small" id="admin-service-account-connect">
-                  <i class="fa-solid fa-user-gear"></i> Connect service account
+                <button type="button" class="btn btn-primary btn--small" id="admin-bg-connect-microsoft" ${savedProvider === 'MICROSOFT' && msSecretSaved ? '' : 'disabled'}>
+                  <i class="fa-brands fa-microsoft"></i> Connect Microsoft (background sync)
                 </button>
-                ${bgSync.serviceMeta?.account_email ? `
-                <button type="button" class="btn btn-outline btn--small" id="admin-service-account-disconnect">
-                  Disconnect service account
-                </button>` : ''}
               </div>
             </div>
 
@@ -710,8 +707,7 @@ export function renderAdminSyncPanel() {
 
             <p class="gate-wizard__hint" style="margin-top: 1rem;">
               <strong>Token refresh:</strong>
-              Background sync uses the service account above. Microsoft and Google both require a
-              <strong>Client Secret</strong> saved in the OAuth app section so the server can refresh tokens without a browser.
+              Access tokens expire hourly; the client secret lets the server use your stored refresh token automatically on each cron run.
             </p>
           </div>
         </div>
@@ -811,22 +807,9 @@ export function renderAdminSyncPanel() {
         }
     });
 
-    document.getElementById('admin-service-account-connect')?.addEventListener('click', async () => {
-        const provider = getSyncSettings()?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
+    document.getElementById('admin-bg-connect-microsoft')?.addEventListener('click', async () => {
         try {
-            if (provider === 'GOOGLE') await startServiceAccountGoogleConnect();
-            else await startServiceAccountMicrosoftConnect();
-        } catch (e) {
-            alert(e.message);
-        }
-    });
-
-    document.getElementById('admin-service-account-disconnect')?.addEventListener('click', async () => {
-        const provider = getSyncSettings()?.provider === 'GOOGLE' ? 'GOOGLE' : 'MICROSOFT';
-        if (!confirm('Disconnect the background sync service account? Cron sync will stop until reconnected.')) return;
-        try {
-            await disconnectServiceAccount(provider);
-            renderAdminSyncPanel();
+            await startMicrosoftWebConnect();
         } catch (e) {
             alert(e.message);
         }
