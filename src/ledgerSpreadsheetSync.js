@@ -29,6 +29,7 @@ import {
     buildMappingFromHeaders,
     validateMapping,
     parseLedgerRowsFromAoA,
+    parseLedgerSheet,
     transactionToExcelRow,
     maxMappedColumn,
     collectMappingFromForm,
@@ -43,6 +44,26 @@ import {
 } from './ledgerColumnMapping.js';
 import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPush.js';
 import { importExcelRows } from './ledgerSyncApply.js';
+import {
+    clearSyncLog,
+    mountSyncLogDrawer,
+    openSyncLogDrawer,
+    syncLog,
+    syncLogBounds,
+} from './ledgerSyncLog.js';
+import {
+    buildSyncFetchRange,
+    parseRangeAddress,
+    reconcileSheetBoundsForSync,
+} from './ledgerSheetRegion.js';
+import {
+    createSyncRunJournal,
+    fetchLastRollbackableRun,
+    fetchSyncRunChangeSummary,
+    journalPushMark,
+    rollbackSyncRun,
+    snapshotTxn,
+} from './ledgerSyncJournal.js';
 
 export { parseLedgerRowsFromAoA };
 
@@ -58,6 +79,22 @@ function opsId(prefix, name) {
 
 function syncEl(name) {
     return document.getElementById(opsId(syncOpsCtx.prefix, name));
+}
+
+/** Read sync form field from admin wizard or finances panel. */
+function syncFormField(name) {
+    const map = {
+        url: ['admin-ledger-sync-url', 'ledger-sync-url'],
+        sheet: ['admin-ledger-sync-sheet', 'ledger-sync-sheet'],
+        range: ['admin-ledger-sync-range', 'ledger-sync-range'],
+        header_row: ['admin-ledger-sync-header-row', 'ledger-sync-header-row'],
+        footer_row: ['admin-ledger-sync-footer-row', 'ledger-sync-footer-row'],
+    };
+    for (const id of map[name] || []) {
+        const v = document.getElementById(id)?.value?.trim();
+        if (v) return v;
+    }
+    return '';
 }
 
 function startAutoSync() {
@@ -221,7 +258,7 @@ export async function listMicrosoftWorksheets(spreadsheetUrl) {
     return (data.value || []).map((ws) => ws.name);
 }
 
-async function fetchMicrosoftRows({ spreadsheetUrl, sheetName }) {
+async function fetchMicrosoftRows({ spreadsheetUrl, sheetName, syncSettings = null }) {
     if (!spreadsheetUrl?.trim()) throw new Error('Paste a Microsoft Excel sharing link (OneDrive or SharePoint).');
     const token = await getAccessTokenForProvider('MICROSOFT');
     const item = await resolveMicrosoftDriveItem(spreadsheetUrl, token);
@@ -232,23 +269,32 @@ async function fetchMicrosoftRows({ spreadsheetUrl, sheetName }) {
         throw new Error('Could not resolve Excel file. Ensure the link is a sharing URL to an .xlsx file.');
     }
     const safeSheet = sheetName.replace(/'/g, "''");
+    const settings = syncSettings || {};
+
     const data = await graphGet(
         `/drives/${driveId}/items/${itemId}/workbook/worksheets('${safeSheet}')/usedRange(valuesOnly=true)`,
         token,
     );
+    const rows = data.values || [];
+    const rangeMeta = data.address ? parseRangeAddress(data.address) : { startRow: 1, endRow: null, startCol: 'A', endCol: 'J' };
+    const reconciled = reconcileSheetBoundsForSync(rows, settings, rangeMeta);
     const shareId = encodeMicrosoftShareId(spreadsheetUrl);
-    return { 
-        rows: data.values || [], 
+    return {
+        rows,
         sourceKey: `microsoft:${shareId.slice(0, 32)}`,
         etag,
         driveId,
         itemId,
         shareId,
         useSharesApi: false,
+        bounds: reconciled.bounds,
+        rangeMeta,
+        boundsPatch: reconciled.settingsPatch,
+        boundsWarnings: reconciled.warnings,
     };
 }
 
-async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheetName, rowsToPush, columnMapping = {} }) {
+async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheetName, rowsToPush, columnMapping = {}, rangeA1, footerRow }) {
     const token = await getAccessTokenForProvider('MICROSOFT');
     return pushMicrosoftRowsGraph({
         accessToken: token,
@@ -259,6 +305,8 @@ async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheet
         sheetName,
         rowsToPush,
         columnMapping,
+        rangeA1,
+        footerRow,
     });
 }
 
@@ -299,6 +347,8 @@ async function saveSyncSettings(patch) {
                 spreadsheet_url: patch.spreadsheet_url,
                 sheet_name: patch.sheet_name,
                 range_a1: patch.range_a1,
+                header_row: patch.header_row,
+                footer_row: patch.footer_row,
                 sync_interval_minutes: patch.sync_interval_minutes,
                 last_synced_at: patch.last_synced_at,
                 last_synced_by: patch.last_synced_by,
@@ -577,7 +627,9 @@ export function renderAdminSyncPanel() {
     `;
 
     const workbookStepBody = `
-      <p class="sync-step-hint">Paste the ${isMicrosoft ? 'OneDrive / SharePoint Excel' : 'Google Sheets'} link your society uses for income &amp; expenses.</p>
+      <p class="sync-step-hint">Paste the ${isMicrosoft ? 'OneDrive / SharePoint Excel' : 'Google Sheets'} link your society uses for income &amp; expenses.
+        If the sheet has a title block above the table, set <strong>Header row</strong> (or leave blank to auto-detect on Load columns).
+        If you have a totals row at the bottom, set <strong>Totals row</strong> — new rows from the app insert above it and Excel shifts totals down.</p>
       <div class="sync-form-grid sync-form-grid--2">
         <label class="sync-field sync-field--full">
           <span>Spreadsheet URL</span>
@@ -589,11 +641,20 @@ export function renderAdminSyncPanel() {
           <span>Sheet / tab name</span>
           <input type="text" id="admin-ledger-sync-sheet" class="expense-combobox" value="${s?.sheet_name || 'Transactions'}" />
         </label>
-        ${isMicrosoft ? '' : `
+        <label class="sync-field">
+          <span>Header row</span>
+          <input type="number" min="1" id="admin-ledger-sync-header-row" class="expense-combobox"
+            value="${s?.header_row || ''}" placeholder="Auto-detect" title="Excel row number for column headers (e.g. 3)" />
+        </label>
+        <label class="sync-field">
+          <span>Totals row</span>
+          <input type="number" min="1" id="admin-ledger-sync-footer-row" class="expense-combobox"
+            value="${s?.footer_row || ''}" placeholder="Auto-detect" title="Excel row number for totals (e.g. 27). Data rows must be above this." />
+        </label>
         <label class="sync-field">
           <span>Column range</span>
           <input type="text" id="admin-ledger-sync-range" class="expense-combobox" value="${s?.range_a1 || 'A:J'}" placeholder="A:J" />
-        </label>`}
+        </label>
       </div>
       <input type="hidden" id="admin-ledger-sync-provider" value="${wizardProvider}" />
       <button type="button" class="btn btn-primary btn--small" id="admin-ledger-save-settings">
@@ -628,7 +689,7 @@ export function renderAdminSyncPanel() {
     `;
 
     const scheduleStepBody = isMicrosoft ? `
-      <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> daily. Societies sync when the interval below has elapsed since the last run.</p>
+      <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> on the deployed site on schedule. Use <strong>Sync now (browser)</strong> below to test with live logs in this tab.</p>
       <div class="sync-schedule-row">
         <select id="admin-bg-sync-interval" class="expense-combobox">
           <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only</option>
@@ -660,10 +721,13 @@ export function renderAdminSyncPanel() {
       </ul>
       <div class="sync-schedule-actions">
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
-          <i class="fa-solid fa-bolt"></i> Run server sync now
+          <i class="fa-solid fa-bolt"></i> Sync now (browser)
         </button>
         <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
           <i class="fa-solid fa-rotate-left"></i> Reset sync state
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-rollback-sync" title="Undo the last completed sync in the database">
+          <i class="fa-solid fa-clock-rotate-left"></i> Rollback last sync
         </button>
         ${s?.last_synced_at ? `<span class="gate-wizard__hint">Last run: ${new Date(s.last_synced_at).toLocaleString('en-IN')}</span>` : ''}
       </div>
@@ -683,10 +747,13 @@ export function renderAdminSyncPanel() {
       </div>
       <div class="sync-schedule-actions">
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
-          <i class="fa-solid fa-bolt"></i> Run server sync now
+          <i class="fa-solid fa-bolt"></i> Sync now (browser)
         </button>
         <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
           <i class="fa-solid fa-rotate-left"></i> Reset sync state
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-rollback-sync" title="Undo the last completed sync in the database">
+          <i class="fa-solid fa-clock-rotate-left"></i> Rollback last sync
         </button>
       </div>
     `;
@@ -794,6 +861,10 @@ export function renderAdminSyncPanel() {
         const sheet = document.getElementById('admin-ledger-sync-sheet')?.value?.trim();
         const provider = document.getElementById('admin-ledger-sync-provider')?.value || wizardProvider;
         const rangeA1 = document.getElementById('admin-ledger-sync-range')?.value?.trim() || 'A:J';
+        const headerRowRaw = document.getElementById('admin-ledger-sync-header-row')?.value?.trim();
+        const footerRowRaw = document.getElementById('admin-ledger-sync-footer-row')?.value?.trim();
+        const header_row = headerRowRaw ? parseInt(headerRowRaw, 10) : null;
+        const footer_row = footerRowRaw ? parseInt(footerRowRaw, 10) : null;
         if (!url) return alert('Enter a spreadsheet URL.');
 
         await withButtonBusy(btn, 'Saving…', async () => {
@@ -802,6 +873,8 @@ export function renderAdminSyncPanel() {
                 sheet_name: sheet,
                 provider,
                 range_a1: rangeA1,
+                header_row: Number.isFinite(header_row) ? header_row : null,
+                footer_row: Number.isFinite(footer_row) ? footer_row : null,
             });
             startAutoSync();
             alert('Workbook saved.');
@@ -846,39 +919,36 @@ export function renderAdminSyncPanel() {
 
     document.getElementById('admin-bg-sync-run')?.addEventListener('click', async () => {
         const btn = document.getElementById('admin-bg-sync-run');
-        await withButtonBusy(btn, 'Running…', async () => {
-            const apartment_id = portalState.access?.activeApartmentId;
-            if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
-            const { data: sess } = await supabase.auth.getSession();
-            const token = sess?.session?.access_token;
-            if (!token) throw new Error('Sign in again to run the server sync.');
-
-            const res = await fetch('/api/sync', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ apartment_id }),
-            });
-            const json = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(json.error || 'Server sync failed.');
-
-            await pullState();
-            refreshFinancesView();
-            renderAdminSyncPanel();
-
-            const r = json.result || {};
-            const skipNote = r.skipped > 0 ? `\nSkipped ${r.skipped} Excel row(s) (missing date/type/amount).` : '';
-            const pullNote = r.excelDataRows != null
-                ? `\nExcel rows read: ${r.excelDataRows}, parsed: ${r.parsed ?? r.imported + r.updated}.`
-                : '';
-            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.${skipNote}${pullNote}`);
-        }).catch((err) => alert(err.message || String(err)));
+        if (isSyncing) return;
+        await withButtonBusy(btn, 'Syncing…', async () => {
+            isSyncing = true;
+            try {
+                syncOpsCtx = { prefix: 'admin-', onRefresh: renderAdminSyncPanel };
+                if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
+                const { imported, skipped, updated, pushed, conflicts, boundsWarnings } = await runSync();
+                let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
+                if (pushed > 0) msg += ` ${pushed} pushed.`;
+                if (conflicts?.length) msg += ` ${conflicts.length} conflict(s).`;
+                if (boundsWarnings?.length) msg += `\n\nSheet bounds:\n• ${boundsWarnings.join('\n• ')}`;
+                alert(msg);
+                renderAdminSyncPanel();
+            } finally {
+                isSyncing = false;
+            }
+        }).catch((err) => {
+            isSyncing = false;
+            syncLog('error', err.message);
+            openSyncLogDrawer();
+            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
+        });
     });
 
     document.getElementById('admin-reset-sync-state')?.addEventListener('click', () => {
         void confirmResetSyncState('admin-reset-sync-state', renderAdminSyncPanel);
+    });
+
+    document.getElementById('admin-rollback-sync')?.addEventListener('click', () => {
+        void confirmRollbackLastSync('admin-rollback-sync', renderAdminSyncPanel);
     });
 
     const opsRoot = document.getElementById('admin-sync-ops-root');
@@ -891,18 +961,31 @@ export function renderAdminSyncPanel() {
     }
 }
 
-async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1 }) {
+async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings = null }) {
     const sheetId = parseGoogleSheetId(spreadsheetUrl);
     if (!sheetId) throw new Error('Paste a valid Google Sheets URL.');
     const token = await getAccessTokenForProvider('GOOGLE');
-    const range = encodeURIComponent(`${sheetName}!${rangeA1}`);
+    const settings = syncSettings || {};
+    const cols = rangeA1 || settings.range_a1 || 'A:J';
+    const fetchRange = buildSyncFetchRange(cols);
+    const range = encodeURIComponent(`${sheetName}!${fetchRange}`);
     const res = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`,
         { headers: { Authorization: `Bearer ${token}` } },
     );
     const json = await res.json();
     if (!res.ok) throw new Error(json.error?.message || 'Google Sheets request failed.');
-    return { rows: json.values || [], sourceKey: `google:${sheetId}` };
+    const rows = json.values || [];
+    const rangeMeta = parseRangeAddress(fetchRange);
+    const reconciled = reconcileSheetBoundsForSync(rows, settings, rangeMeta);
+    return {
+        rows,
+        sourceKey: `google:${sheetId}`,
+        bounds: reconciled.bounds,
+        rangeMeta,
+        boundsPatch: reconciled.settingsPatch,
+        boundsWarnings: reconciled.warnings,
+    };
 }
 
 export async function parseLedgerFile(file) {
@@ -920,14 +1003,14 @@ export async function parseLedgerFile(file) {
     return parseLedgerRowsFromAoA(aoa, `file:${file.name}`);
 }
 
-export async function importLedgerRows(rows, last_sync_at = null) {
+export async function importLedgerRows(rows, last_sync_at = null, journal = null) {
     const apartment_id = portalState.access?.activeApartmentId;
     if (!supabase || !apartment_id) throw new Error('Supabase required.');
     const columnMapping = getSyncSettings()?.column_mapping;
 
     const allLocalTxns = portalState.finances.txns || [];
     const { imported, updated, skipped, deleted, conflicts } = await importExcelRows(
-        supabase, apartment_id, rows, allLocalTxns, columnMapping,
+        supabase, apartment_id, rows, allLocalTxns, columnMapping, { journal },
     );
 
     if (imported > 0 || updated > 0 || deleted > 0) {
@@ -1124,14 +1207,36 @@ async function resolveConflict(idx, winner) {
 }
 
 async function runSync() {
-    const settings = getSyncSettings();
+    let settings = getSyncSettings();
     const apartment_id = portalState.access?.activeApartmentId;
+    mountSyncLogDrawer();
+    clearSyncLog();
+    openSyncLogDrawer();
+    syncLog('info', 'Sync started (browser)', { provider: activeProvider, apartment_id });
     console.log(`Sync starting for Apartment: ${apartment_id}`);
+
+    const headerRowRaw = syncFormField('header_row');
+    const footerRowRaw = syncFormField('footer_row');
+    const boundsPatch = {};
+    if (headerRowRaw) boundsPatch.header_row = parseInt(headerRowRaw, 10);
+    if (footerRowRaw) boundsPatch.footer_row = parseInt(footerRowRaw, 10);
+    if (Object.keys(boundsPatch).length) {
+        syncLog('info', 'Using sheet bounds from form', boundsPatch);
+        try {
+            await saveSyncSettings(boundsPatch);
+            settings = { ...settings, ...boundsPatch };
+        } catch {
+            const fin = portalState.finances ??= {};
+            const sync = fin.ledgerSyncSettings ??= { apartment_id };
+            Object.assign(sync, boundsPatch);
+            settings = { ...settings, ...boundsPatch };
+        }
+    }
     
     const provider = activeProvider;
-    const spreadsheetUrl = document.getElementById('ledger-sync-url')?.value?.trim() || settings?.spreadsheet_url || '';
-    const sheetName = document.getElementById('ledger-sync-sheet')?.value?.trim() || settings?.sheet_name || 'Transactions';
-    const rangeA1 = document.getElementById('ledger-sync-range')?.value?.trim() || settings?.range_a1 || 'A:H';
+    const spreadsheetUrl = syncFormField('url') || settings?.spreadsheet_url || '';
+    const sheetName = syncFormField('sheet') || settings?.sheet_name || 'Transactions';
+    const rangeA1 = syncFormField('range') || settings?.range_a1 || 'A:H';
 
     let rows = [];
     let sourceKey = '';
@@ -1140,39 +1245,46 @@ async function runSync() {
 
     const customMapping = settings?.column_mapping;
 
+    let boundsWarnings = [];
+    let sheetBoundsForJournal = null;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const journal = await createSyncRunJournal(supabase, apartment_id, {
+        created_by: user?.id || null,
+    });
+
+    try {
     if (provider === 'GOOGLE') {
-        const result = await fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1 });
-        rows = parseLedgerRowsFromAoA(result.rows, result.sourceKey, customMapping);
+        const result = await fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings: settings });
+        boundsWarnings = await persistBoundsFromPull(result);
+        sheetBoundsForJournal = result.bounds;
+        syncLogBounds(result.bounds, boundsWarnings);
+        syncLog('info', `Pulled ${result.rows.length} aoa row(s) from Google Sheets`);
+        rows = parseLedgerSheet(result.rows, result.sourceKey, customMapping, result.bounds).parsed;
         sourceKey = result.sourceKey;
-    } else     if (provider === 'MICROSOFT') {
-        // 1. PULL
-        const result = await fetchMicrosoftRows({ spreadsheetUrl, sheetName });
-        console.log(`Excel Pull: Found ${result.rows.length} rows in sheet.`);
+    } else if (provider === 'MICROSOFT') {
+        const result = await fetchMicrosoftRows({ spreadsheetUrl, sheetName, syncSettings: settings });
+        boundsWarnings = await persistBoundsFromPull(result);
+        sheetBoundsForJournal = result.bounds;
+        syncLogBounds(result.bounds, boundsWarnings);
+        syncLog('info', `Pulled ${result.rows.length} aoa row(s) from Excel`, { address: result.rangeMeta });
+        console.log(`Excel Pull: Found ${result.rows.length} rows (header row ${result.bounds?.headerRow}, footer ${result.bounds?.footerRow ?? 'none'}).`);
         if (result.rows.length > 0) {
-            console.log(`  Header row found:`, result.rows[0]);
+            console.log(`  Header row:`, result.bounds?.headersRaw);
         }
-        
-        // Version check
+
         if (settings?.last_sync_etag && settings.last_sync_etag !== result.etag) {
             console.log('Excel has changed externally. Pulling latest changes.');
         }
-        
-        rows = parseLedgerRowsFromAoA(result.rows, result.sourceKey, customMapping);
+
+        rows = parseLedgerSheet(result.rows, result.sourceKey, customMapping, result.bounds).parsed;
         console.log(`Excel Parse: Parsed ${rows.length} valid ledger rows.`);
         sourceKey = result.sourceKey;
         etag = result.etag;
 
         // 2. PUSH (Bidirectional)
-        // Find local transactions that are NOT synced (no external_sync_key)
         const allTxns = portalState.finances.txns || [];
         const localTxns = allTxns.filter(t => !t.external_sync_key);
-        
-        console.log(`Excel Push Diagnostic:`);
-        console.log(`  Total transactions in App: ${allTxns.length}`);
-        console.log(`  Transactions without sync key: ${localTxns.length}`);
-        if (allTxns.length > 0 && localTxns.length === 0) {
-            console.log(`  Sample keys from first 3 txns:`, allTxns.slice(0, 3).map(t => t.external_sync_key));
-        }
 
         if (localTxns.length > 0) {
             console.log(`Pushing ${localTxns.length} local transactions to Excel (one row at a time)...`);
@@ -1184,7 +1296,10 @@ async function runSync() {
                 sheetName,
                 rowsToPush: localTxns,
                 columnMapping: customMapping,
+                rangeA1: settings?.range_a1 || 'A:J',
+                footerRow: result.bounds?.footerRow ?? settings?.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
+                    const before = snapshotTxn(txn);
                     const syncKey = `app:txn:${txn.id}`;
                     const withKey = { ...txn, external_sync_key: syncKey };
                     const syncHash = computeSyncHash(withKey, customMapping);
@@ -1196,6 +1311,13 @@ async function runSync() {
                         excel_row_index: excelRowIndex,
                     }).eq('id', txn.id);
                     if (error) throw new Error(error.message);
+                    await journalPushMark(journal, before, {
+                        ...before,
+                        external_sync_key: syncKey,
+                        sync_hash: syncHash,
+                        sync_anchor_hash: syncAnchorHash,
+                        excel_row_index: excelRowIndex,
+                    });
                 },
             });
             
@@ -1207,19 +1329,29 @@ async function runSync() {
         throw new Error('Choose Google Sheets or Microsoft Excel, or upload a file.');
     }
 
-    const { imported, skipped, updated, deleted, conflicts } = await importLedgerRows(rows, settings?.last_synced_at);
+    const { imported, skipped, updated, deleted, conflicts } = await importLedgerRows(rows, settings?.last_synced_at, journal);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    
+    const syncStatus = conflicts.length > 0 || boundsWarnings.length > 0 ? 'WARN' : 'OK';
     const statusMsg = conflicts.length > 0 
-        ? `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new. ${conflicts.length} CONFLICTS.`
-        : `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new.`;
+        ? `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new. ${conflicts.length} CONFLICTS.${boundsWarnings.length ? ` ${boundsWarnings.join('; ')}` : ''}`
+        : `Pulled: ${imported} new, ${updated} updated, ${deleted} removed. Pushed: ${pushed} new.${boundsWarnings.length ? ` ${boundsWarnings.join('; ')}` : ''}`;
+
+    await journal.complete({
+        imported,
+        updated,
+        deleted,
+        skipped,
+        pushed,
+        status: syncStatus,
+        message: statusMsg,
+        bounds: sheetBoundsForJournal,
+    });
 
     refreshFinancesView();
     
     // Store conflicts in a global-ish state BEFORE saving settings
-    // This ensures they show up even if the DB save fails
     window._ledgerSyncConflicts = conflicts;
+    window._ledgerSyncBoundsWarnings = boundsWarnings;
     console.log(`runSync: Stored ${conflicts.length} conflicts in global state.`);
     
     try {
@@ -1229,7 +1361,7 @@ async function runSync() {
             sheet_name: sheetName,
             range_a1: rangeA1,
             last_synced_at: new Date().toISOString(),
-            last_sync_status: conflicts.length > 0 ? 'WARN' : 'OK',
+            last_sync_status: syncStatus,
             last_sync_message: statusMsg,
             last_sync_imported: imported,
             last_sync_pushed: pushed,
@@ -1241,7 +1373,13 @@ async function runSync() {
     }
 
     renderLedgerSyncPanel();
-    return { imported, skipped, updated, pushed, conflicts, sourceKey };
+    syncOpsCtx.onRefresh?.();
+    return { imported, skipped, updated, deleted, pushed, conflicts, sourceKey, syncRunId: journal.runId, boundsWarnings };
+    } catch (syncErr) {
+        syncLog('error', syncErr.message);
+        await journal.fail(syncErr.message);
+        throw syncErr;
+    }
 }
 
 async function runFileImport(file) {
@@ -1423,6 +1561,54 @@ function mountMappingUI(mapEl, storedMapping, headersRaw, noticeHtml = '') {
     });
 }
 
+async function applyDetectedBounds(prefix, pull) {
+    return prepareSheetBoundsBeforeSync(pull, getSyncSettings(), prefix);
+}
+
+/** Detect header/totals rows on pull, update UI, persist to DB before import. */
+async function prepareSheetBoundsBeforeSync(pull, currentSettings, prefix = '') {
+    const warnings = [...(pull?.boundsWarnings || [])];
+    const bounds = pull?.bounds;
+    if (!bounds) return warnings;
+
+    const p = prefix || syncOpsCtx?.prefix || '';
+    const headerEl = document.getElementById(p ? `${p}ledger-sync-header-row` : 'admin-ledger-sync-header-row')
+        || document.getElementById('admin-ledger-sync-header-row');
+    const footerEl = document.getElementById(p ? `${p}ledger-sync-footer-row` : 'admin-ledger-sync-footer-row')
+        || document.getElementById('admin-ledger-sync-footer-row');
+    if (headerEl && bounds.headerRow) headerEl.value = String(bounds.headerRow);
+    if (footerEl) footerEl.value = bounds.footerRow ? String(bounds.footerRow) : '';
+
+    const saved = currentSettings || {};
+    const patch = { ...(pull.boundsPatch || {}) };
+    if (bounds.headerRow != null && bounds.headerRow !== saved.header_row) {
+        patch.header_row = bounds.headerRow;
+    }
+    if (bounds.footerRow != null && bounds.footerRow !== saved.footer_row) {
+        patch.footer_row = bounds.footerRow;
+    }
+
+    if (!Object.keys(patch).length) return warnings;
+
+    try {
+        await saveSyncSettings(patch);
+    } catch (err) {
+        warnings.push(
+            `Could not save sheet bounds (${err.message}). `
+            + `Using detected header row ${bounds.headerRow ?? '—'}, totals row ${bounds.footerRow ?? '—'} for this sync only.`,
+        );
+        const fin = portalState.finances ??= {};
+        const sync = fin.ledgerSyncSettings ??= { apartment_id: portalState.access?.activeApartmentId };
+        Object.assign(sync, patch);
+    }
+
+    return warnings;
+}
+
+async function persistBoundsFromPull(pull) {
+    return prepareSheetBoundsBeforeSync(pull, getSyncSettings());
+}
+
 async function refreshMappingUI() {
     const mapEl = syncEl('mapping');
     if (!mapEl) return;
@@ -1461,12 +1647,14 @@ async function refreshMappingUI() {
         let headersRaw = [];
 
         if (activeProvider === 'MICROSOFT') {
-            const pull = await fetchMicrosoftRows({ spreadsheetUrl: url, sheetName });
-            headersRaw = pull.rows?.[0] || [];
+            const pull = await fetchMicrosoftRows({ spreadsheetUrl: url, sheetName, syncSettings: settings });
+            headersRaw = pull.bounds?.headersRaw || pull.rows?.[pull.bounds?.headerRowOffset ?? 0] || [];
+            await applyDetectedBounds(p, pull);
         } else if (activeProvider === 'GOOGLE') {
             const rangeA1 = settings?.range_a1 || 'A:J';
-            const pull = await fetchGoogleRows({ spreadsheetUrl: url, sheetName, rangeA1 });
-            headersRaw = pull.rows?.[0] || [];
+            const pull = await fetchGoogleRows({ spreadsheetUrl: url, sheetName, rangeA1, syncSettings: settings });
+            headersRaw = pull.bounds?.headersRaw || pull.rows?.[0] || [];
+            await applyDetectedBounds(p, pull);
         } else if (hasSaved && storedMapping) {
             return;
         } else {
@@ -1591,6 +1779,13 @@ async function testSpreadsheetLink() {
     }
 }
 
+function renderSyncLogToolbarButton() {
+    return `
+      <button type="button" class="btn btn-outline btn--small sync-log-open-btn" data-sync-log-open>
+        <i class="fa-solid fa-terminal"></i> Sync log
+      </button>`;
+}
+
 function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
     const { includeMapping = true, compact = false } = options;
     const id = (n) => opsId(prefix, n);
@@ -1618,6 +1813,8 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
           <div class="ledger-sync-status" style="margin-bottom: 1rem; background: var(--surface-alt);">
             <i class="fa-solid fa-file-excel" style="color: #16a34a; margin-right: 0.5rem;"></i>
             <strong>Sheet:</strong> ${s.sheet_name || 'Transactions'}
+            ${s.header_row ? `<span style="color:var(--text-dim); margin: 0 0.35rem;">· header row ${s.header_row}</span>` : ''}
+            ${s.footer_row ? `<span style="color:var(--text-dim);">· totals row ${s.footer_row}</span>` : ''}
             <span style="color:var(--text-dim); margin: 0 0.35rem;">·</span>
             <a href="${s.spreadsheet_url}" target="_blank" rel="noopener" style="font-size: 0.75rem;">Open workbook</a>
           </div>
@@ -1655,6 +1852,7 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
           <button type="button" class="btn btn-primary btn--small" id="${id('run')}" ${hasUrl ? '' : 'disabled'}>
             <i class="fa-solid fa-rotate"></i> Sync now
           </button>
+          ${renderSyncLogToolbarButton()}
         </div>
 
         <div id="${id('sheet-list')}" class="ledger-sync-sheet-list"></div>
@@ -1674,7 +1872,8 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
         <details class="ledger-sync-advanced" style="margin-top: 1rem;">
           <summary style="font-size:0.75rem; color:var(--text-dim); cursor:pointer;">Advanced / troubleshooting</summary>
           <p class="gate-wizard__hint" style="margin:0.35rem 0 0.5rem;">
-            <strong>Reset sync state</strong> clears <code>external_sync_key</code> and <code>sync_hash</code> on all transactions plus last-sync metadata — use while testing to re-sync from scratch.
+            <strong>Reset sync state</strong> clears sync keys on all transactions plus last-sync metadata.<br>
+            <strong>Rollback last sync</strong> reverses DB changes from the most recent completed sync (inserts deleted, updates restored). Excel is not changed — use OneDrive Version History for the sheet.
           </p>
           <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button type="button" class="btn btn-outline btn--small" id="${id('reset-ms')}">
@@ -1683,9 +1882,53 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
             <button type="button" class="btn btn-outline btn--small" id="${id('reset-sync-state')}" style="color: var(--error);">
               <i class="fa-solid fa-rotate-left"></i> Reset sync state
             </button>
+            <button type="button" class="btn btn-outline btn--small" id="${id('rollback-sync')}" style="color: var(--error);">
+              <i class="fa-solid fa-clock-rotate-left"></i> Rollback last sync
+            </button>
           </div>
         </details>
       </div>`;
+}
+
+function confirmRollbackLastSync(buttonId, onRefresh) {
+    const btn = buttonId ? document.getElementById(buttonId) : null;
+    return withButtonBusy(btn, 'Loading…', async () => {
+        const apartment_id = portalState.access?.activeApartmentId;
+        if (!supabase || !apartment_id) throw new Error('Select a society first.');
+
+        const run = await fetchLastRollbackableRun(supabase, apartment_id);
+        if (!run) {
+            alert('No completed sync run to roll back. If you just installed rollback, run supabase_ledger_sync_journal.sql in Supabase first.');
+            return;
+        }
+
+        const counts = await fetchSyncRunChangeSummary(supabase, run.id);
+        const when = run.completed_at ? new Date(run.completed_at).toLocaleString('en-IN') : 'unknown time';
+        const msg = `Roll back sync from ${when}?
+
+This will reverse in the database:
+• ${counts.insert} inserted → deleted
+• ${counts.update} updated → restored to before
+• ${counts.deleted} removed → re-inserted
+• ${counts.push_mark} pushed → sync keys cleared
+
+Rows you edited in the app after that sync will be skipped.
+Excel is NOT changed — use OneDrive Version History if the sheet needs restoring.
+
+Continue?`;
+        if (!confirm(msg)) return;
+
+        if (btn) setButtonBusy(btn, 'Rolling back…');
+        const result = await rollbackSyncRun(supabase, run.id);
+        await pullState();
+        refreshFinancesView();
+        onRefresh?.();
+
+        let detail = `Rollback complete: ${result.reverted} change(s) reverted`;
+        if (result.skipped) detail += `, ${result.skipped} skipped (edited since sync)`;
+        if (result.errors.length) detail += `\n\n${result.errors.slice(0, 8).join('\n')}`;
+        alert(detail);
+    }).catch((err) => alert(err.message || String(err)));
 }
 
 function confirmResetSyncState(buttonId, onRefresh) {
@@ -1709,6 +1952,7 @@ Continue?`;
 
 function wireSyncOps(rootEl, prefix, onRefresh) {
     syncOpsCtx = { prefix, onRefresh };
+    mountSyncLogDrawer();
     const id = (n) => opsId(prefix, n);
     const q = (n) => rootEl.querySelector(`#${id(n)}`);
 
@@ -1756,6 +2000,10 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
         void confirmResetSyncState(q('reset-sync-state')?.id, onRefresh);
     });
 
+    q('rollback-sync')?.addEventListener('click', () => {
+        void confirmRollbackLastSync(q('rollback-sync')?.id, onRefresh);
+    });
+
     q('run')?.addEventListener('click', async () => {
         const btn = q('run');
         if (!btn || isSyncing) return;
@@ -1764,10 +2012,11 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
             isSyncing = true;
             try {
                 if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
-                const { imported, skipped, updated, pushed, conflicts } = await runSync();
+                const { imported, skipped, updated, pushed, conflicts, boundsWarnings } = await runSync();
                 let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
                 if (pushed > 0) msg += ` ${pushed} pushed.`;
                 if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) — open panel to review.`;
+                if (boundsWarnings?.length) msg += `\n\nSheet bounds:\n• ${boundsWarnings.join('\n• ')}`;
                 alert(msg);
                 onRefresh();
             } finally {
@@ -1775,11 +2024,17 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
             }
         }).catch((err) => {
             isSyncing = false;
-            alert(err.message);
+            syncLog('error', err.message);
+            openSyncLogDrawer();
+            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
         });
     });
 
     q('template')?.addEventListener('click', () => void downloadLedgerTemplate());
+
+    rootEl.querySelectorAll('[data-sync-log-open]').forEach((btn) => {
+        btn.addEventListener('click', () => openSyncLogDrawer());
+    });
 
     rootEl.querySelectorAll('.resolve-conflict').forEach((btn) => {
         btn.addEventListener('click', async () => {
@@ -1840,10 +2095,11 @@ export function renderLedgerSyncPanel() {
             isSyncing = true;
             try {
                 if (activeProvider !== 'FILE') await ensureOAuthConnected(activeProvider);
-                const { imported, skipped, updated, pushed, conflicts } = await runSync();
+                const { imported, skipped, updated, pushed, conflicts, boundsWarnings } = await runSync();
                 let msg = `Sync complete: ${imported} pulled, ${updated} updated, ${skipped} skipped.`;
                 if (pushed > 0) msg += ` ${pushed} pushed.`;
                 if (conflicts?.length) msg += ` ${conflicts.length} conflict(s) — open panel to review.`;
+                if (boundsWarnings?.length) msg += `\n\nSheet bounds:\n• ${boundsWarnings.join('\n• ')}`;
                 alert(msg);
                 renderLedgerSyncPanel();
             } finally {
@@ -1851,7 +2107,9 @@ export function renderLedgerSyncPanel() {
             }
         }).catch((err) => {
             isSyncing = false;
-            alert(err.message);
+            syncLog('error', err.message);
+            openSyncLogDrawer();
+            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
         });
     });
 
@@ -1879,6 +2137,7 @@ async function downloadLedgerTemplate() {
 
 export async function initLedgerSpreadsheetSync() {
     initActiveProvider();
+    mountSyncLogDrawer();
     console.log('initLedgerSpreadsheetSync: checking for redirect...');
     try {
         const handled = await handleOAuthRedirectIfPresent();

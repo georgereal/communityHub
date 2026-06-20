@@ -9,6 +9,7 @@ import {
     getDefaultExportExpr,
     runImportTransform,
     runExportTransform,
+    isImportableDate,
     BUILTIN_FUNCTIONS,
 } from './ledgerTransform.js';
 import {
@@ -20,6 +21,8 @@ import {
     CUSTOM_FN_IMPORT_SAMPLE_EXPRESSION,
     FORMULA_REFERENCES,
 } from './syncCodeEditor.js';
+import { resolveSheetBounds, dataRowsFromAoa, looksLikeFooterRow, skipReasonForRow, isExcelRowInsideTable, aoaIndexToExcelRow } from './ledgerSheetRegion.js';
+import { syncLog } from './ledgerSyncLog.js';
 
 /** @typedef {'sync'|'db_only'|'internal'|'excel_import'|'excel_export'} FieldMode */
 
@@ -335,7 +338,9 @@ export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
     for (const def of TRANSACTION_FIELD_DEFS) {
         if (!def.dbColumn) continue;
         if (m.fields[def.key]?.mode !== 'sync') continue;
-        if (row[def.dbColumn] !== undefined) payload[def.dbColumn] = row[def.dbColumn];
+        if (row[def.dbColumn] === undefined) continue;
+        if (def.dbColumn === 'date' && !isImportableDate(row[def.dbColumn])) continue;
+        payload[def.dbColumn] = row[def.dbColumn];
     }
     if (includeHash && row.sync_hash) payload.sync_hash = row.sync_hash;
     if (row.sync_anchor_hash) payload.sync_anchor_hash = row.sync_anchor_hash;
@@ -347,28 +352,55 @@ export function buildDbSyncPayload(row, mapping, { includeHash = true } = {}) {
 export function buildImportTxnPayload(row, mapping) {
     const payload = buildDbSyncPayload(row, mapping);
     for (const key of ['date', 'type', 'amount', 'cat', 'wallet', 'description']) {
+        if (key === 'date' && row[key] != null && !isImportableDate(row[key])) continue;
         if (row[key] !== undefined && row[key] !== null && payload[key] === undefined) {
             payload[key] = row[key];
         }
     }
+    if (payload.date != null && !isImportableDate(payload.date)) {
+        delete payload.date;
+    }
     return payload;
 }
 
-export function parseLedgerSheet(aoa, sourceKey, customMapping = null) {
-    if (!aoa?.length) return { parsed: [], excelDataRows: 0, skipped: 0 };
-    const headersRaw = (aoa[0] || []).map((h) => String(h || '').trim());
+export function parseLedgerSheet(aoa, sourceKey, customMapping = null, sheetBounds = null) {
+    if (!aoa?.length) return { parsed: [], excelDataRows: 0, skipped: 0, bounds: null };
+
+    const bounds = sheetBounds || resolveSheetBounds(aoa, customMapping ? { column_mapping: customMapping } : {});
+    const headersRaw = bounds.headersRaw?.length
+        ? bounds.headersRaw
+        : (aoa[bounds.headerRowOffset] || []).map((h) => String(h || '').trim());
+
     const mapping = customMapping
         ? normalizeMapping(customMapping)
         : buildMappingFromHeaders(headersRaw);
 
+    const { count: excelDataRows } = dataRowsFromAoa(aoa, bounds);
     const parsed = [];
-    for (let i = 1; i < aoa.length; i += 1) {
+    for (let i = 0; i < aoa.length; i += 1) {
         const row = aoa[i] || [];
-        const item = parseRowFromSheet(row, i + 1, mapping, sourceKey);
-        if (item) parsed.push(item);
+        const excelRow = aoaIndexToExcelRow(bounds, i);
+        const skipReason = skipReasonForRow(bounds, i, row, mapping);
+        if (skipReason) {
+            syncLog('skip', `Excel row ${excelRow}: ${skipReason}`, {
+                a: row[0] ?? '', b: row[1] ?? '', c: row[2] ?? '',
+            });
+            continue;
+        }
+        const item = parseRowFromSheet(row, excelRow, mapping, sourceKey, bounds);
+        if (item) {
+            syncLog('parse', `Excel row ${excelRow}: import`, {
+                date: item.date, type: item.type, amount: item.amount,
+            });
+            parsed.push(item);
+        } else {
+            syncLog('skip', `Excel row ${excelRow}: not a transaction`, {
+                a: row[0] ?? '', b: row[1] ?? '', c: row[2] ?? '',
+            });
+        }
     }
-    const excelDataRows = Math.max(0, aoa.length - 1);
-    return { parsed, excelDataRows, skipped: excelDataRows - parsed.length, mapping };
+    syncLog('info', `Parsed ${parsed.length} row(s) from ${excelDataRows} in-table candidate(s)`);
+    return { parsed, excelDataRows, skipped: excelDataRows - parsed.length, mapping, bounds };
 }
 
 function fieldImportsFromExcel(cfg) {
@@ -392,8 +424,19 @@ function readMappedCell(row, mapping, fieldKey) {
 /**
  * Parse one spreadsheet row using mapping formulas (importExpr per field).
  */
-export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
+export function parseRowFromSheet(row, rowIndex, mapping, sourceKey, sheetBounds = null) {
     const m = normalizeMapping(mapping);
+    if (sheetBounds && !isExcelRowInsideTable(sheetBounds, rowIndex)) return null;
+
+    const dateCol = colForField(m, 'date');
+    if (dateCol >= 0) {
+        const dateRaw = cellStr(row[dateCol]);
+        if (dateRaw && !isImportableDate(dateRaw) && /\b(grand\s*)?total(s)?\b|\bsub\s*total\b|^total$/i.test(dateRaw)) {
+            return null;
+        }
+    }
+
+    if (looksLikeFooterRow(row, m)) return null;
     const record = {};
 
     for (const def of TRANSACTION_FIELD_DEFS) {
@@ -421,7 +464,7 @@ export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
     if (!type && amount > 0) type = 'OUT';
 
     const date = record.date;
-    if (!date) return null;
+    if (!isImportableDate(date)) return null;
     if (!type || amount <= 0) return null;
 
     record.type = type;
@@ -445,8 +488,9 @@ export function parseRowFromSheet(row, rowIndex, mapping, sourceKey) {
     };
 }
 
-export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null) {
-    return parseLedgerSheet(aoa, sourceKey, customMapping).parsed;
+export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null, syncSettings = null, rangeMeta = null) {
+    const bounds = resolveSheetBounds(aoa, syncSettings || {}, rangeMeta || {});
+    return parseLedgerSheet(aoa, sourceKey, customMapping, bounds).parsed;
 }
 
 /** Build a sparse Excel row from a DB transaction using mapping exportExpr formulas. */
@@ -584,9 +628,9 @@ function renderSnippetLibrary(snippets) {
     const rows = Object.entries(snippets || {}).map(([name, body]) => renderSnippetRowHtml(name, body)).join('');
 
     return `
-      <details class="sync-formula-library" open>
+      <details class="sync-formula-library">
         <summary class="sync-formula-library__summary">
-          <span>Custom functions <span class="sync-formula-library__sub">(use as <code>@name</code> in formulas)</span></span>
+          <span class="sync-formula-library__summary-label">Custom functions <span class="sync-formula-library__sub">(use as <code>@name</code> in formulas)</span></span>
           <a href="#sync-fn-help" class="sync-fn-help-link">How to create a function</a>
         </summary>
         <div class="sync-fn-help" id="sync-fn-help">
@@ -656,9 +700,8 @@ function renderFieldCard(def, cfg, headersRaw, colOptions) {
             ${modes.map((o) => `<option value="${o.value}" ${cfg.mode === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
           </select>
         </header>
-        ${syncable ? `
-        <div class="sync-map-card__flows" data-map-formulas>
-          <div class="sync-flow sync-flow--ltr" data-map-export-row>
+        <div class="sync-map-card__flows" data-map-formulas${syncable ? '' : ' hidden'}>
+          <div class="sync-flow sync-flow--ltr" data-map-export-row${cfg.mode === 'excel_import' ? ' hidden' : ''}>
             <span class="sync-flow__dir">DB → Excel</span>
             <code class="sync-flow__db">${dbName}</code>
             <span class="sync-flow__arrow" aria-hidden="true">→</span>
@@ -666,16 +709,16 @@ function renderFieldCard(def, cfg, headersRaw, colOptions) {
             <span class="sync-flow__fn">ƒ</span>
             <input type="text" class="sync-flow__formula" data-map-export-expr value="${escapeAttr(exportExpr)}" spellcheck="false" placeholder="{value}" />
           </div>
-          <div class="sync-flow sync-flow--rtl" data-map-import-row>
+          <div class="sync-flow sync-flow--import" data-map-import-row${cfg.mode === 'excel_export' ? ' hidden' : ''}>
             <span class="sync-flow__dir">Excel → DB</span>
             <input type="text" class="sync-flow__formula" data-map-import-expr value="${escapeAttr(importExpr)}" spellcheck="false" placeholder="NORM_TYPE({value})" />
             <span class="sync-flow__fn">ƒ</span>
             <span class="sync-flow__excel" data-map-excel-display>${escapeAttr(excelHeader)}</span>
-            <span class="sync-flow__arrow" aria-hidden="true">←</span>
+            <span class="sync-flow__arrow" aria-hidden="true">→</span>
             <code class="sync-flow__db">${dbName}</code>
           </div>
-        </div>` : `
-        <p class="sync-map-card__muted">${modeHelpText(cfg.mode)}</p>`}
+        </div>
+        <p class="sync-map-card__muted"${syncable ? ' hidden' : ''}>${modeHelpText(cfg.mode)}</p>
       </article>`;
 }
 
@@ -761,6 +804,7 @@ export function wireMappingFormInteractions(rootEl) {
         const modeSel = block.querySelector('[data-map-mode]');
         const colSel = block.querySelector('[data-map-col]');
         const formulas = block.querySelector('[data-map-formulas]');
+        const muted = block.querySelector('.sync-map-card__muted');
         const importRow = block.querySelector('[data-map-import-row]');
         const exportRow = block.querySelector('[data-map-export-row]');
         const mode = modeSel?.value;
@@ -771,6 +815,10 @@ export function wireMappingFormInteractions(rootEl) {
             if (!syncable) colSel.value = '';
         }
         if (formulas) formulas.hidden = !syncable;
+        if (muted) {
+            muted.hidden = syncable;
+            if (mode) muted.textContent = modeHelpText(mode);
+        }
         if (importRow) importRow.hidden = mode === 'excel_export';
         if (exportRow) exportRow.hidden = mode === 'excel_import';
         updateExcelLabels(block);
@@ -801,6 +849,9 @@ export function wireMappingFormInteractions(rootEl) {
 
     rootEl.querySelector('.sync-fn-help-link')?.addEventListener('click', (e) => {
         e.preventDefault();
+        e.stopPropagation();
+        const details = rootEl.querySelector('.sync-formula-library');
+        if (details && !details.open) details.open = true;
         const help = rootEl.querySelector('#sync-fn-help');
         help?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         help?.classList.add('sync-fn-help--flash');

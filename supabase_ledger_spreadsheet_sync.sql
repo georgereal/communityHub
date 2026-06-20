@@ -22,6 +22,8 @@ create table if not exists public.ledger_sync_settings (
   spreadsheet_url text,
   sheet_name text not null default 'Transactions',
   range_a1 text not null default 'A:H',
+  header_row int,
+  footer_row int,
   last_synced_at timestamptz,
   last_sync_status text,
   last_sync_message text,
@@ -35,7 +37,13 @@ create table if not exists public.ledger_sync_settings (
   updated_at timestamptz not null default now()
 );
 
-alter table public.ledger_sync_settings enable row level security;
+alter table public.ledger_sync_settings
+  add column if not exists header_row int;
+
+alter table public.ledger_sync_settings
+  add column if not exists footer_row int;
+
+-- See supabase_ledger_sync_journal.sql for sync rollback tables
 
 drop policy if exists "ledger_sync_settings read" on public.ledger_sync_settings;
 drop policy if exists "ledger_sync_settings write" on public.ledger_sync_settings;

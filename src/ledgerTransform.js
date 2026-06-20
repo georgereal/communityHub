@@ -108,7 +108,24 @@ function formatDate(val) {
         if (fromSerial) return fromSerial;
     }
     const d = new Date(s);
-    return Number.isNaN(d.getTime()) ? s : d.toISOString().slice(0, 10);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+const NON_DATE_LABEL_RE = /\b(grand\s*)?total(s)?\b|\bsub\s*total\b|\bsum(mary)?\b|^total$/i;
+
+/** True when a parsed import date is safe to insert into timestamptz columns. */
+export function isImportableDate(val) {
+    if (val == null || val === '') return false;
+    if (typeof val === 'number') return excelSerialToIso(val) != null;
+    const s = String(val).trim();
+    if (!s || NON_DATE_LABEL_RE.test(s)) return false;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(0, 10))) {
+        const d = new Date(`${s.slice(0, 10)}T00:00:00Z`);
+        return !Number.isNaN(d.getTime());
+    }
+    if (/^\d+(\.\d+)?$/.test(s)) return excelSerialToIso(parseFloat(s)) != null;
+    const d = new Date(s);
+    return !Number.isNaN(d.getTime());
 }
 
 function cellStr(val) {

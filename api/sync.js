@@ -8,6 +8,16 @@ import {
 } from '../src/ledgerColumnMapping.js';
 import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
 import { importExcelRows } from '../src/ledgerSyncApply.js';
+import {
+    buildSyncFetchRange,
+    parseRangeAddress,
+    reconcileSheetBoundsForSync,
+} from '../src/ledgerSheetRegion.js';
+import {
+    createSyncRunJournal,
+    journalPushMark,
+    snapshotTxn,
+} from '../src/ledgerSyncJournal.js';
 
 // Vercel Serverless Function for background ledger sync
 export default async function handler(req, res) {
@@ -221,15 +231,26 @@ async function performSync(supabase, settings) {
     let etag = null;
     let driveId, itemId, shareId, useSharesApi;
 
+    let sheetBounds = null;
+    let boundsWarnings = [];
+    let boundsPatch = {};
+
     if (provider === 'GOOGLE') {
         const sheetId = parseGoogleSheetId(settings.spreadsheet_url);
-        const range = encodeURIComponent(`${settings.sheet_name}!${settings.range_a1 || 'A:J'}`);
+        const rangeA1 = settings.range_a1 || 'A:J';
+        const fetchRange = buildSyncFetchRange(rangeA1);
+        const range = encodeURIComponent(`${settings.sheet_name}!${fetchRange}`);
         const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`, {
             headers: { Authorization: `Bearer ${accessToken}` },
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message || 'Google Sheets pull failed.');
-        const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping);
+        const rangeMeta = parseRangeAddress(fetchRange);
+        const reconciled = reconcileSheetBoundsForSync(json.values || [], settings, rangeMeta);
+        sheetBounds = reconciled.bounds;
+        boundsWarnings = reconciled.warnings;
+        boundsPatch = reconciled.settingsPatch;
+        const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
     } else if (provider === 'MICROSOFT') {
@@ -238,14 +259,20 @@ async function performSync(supabase, settings) {
         driveId = item.parentReference?.driveId;
         itemId = item.id;
         etag = item.eTag;
-        
+
         const safeSheet = settings.sheet_name.replace(/'/g, "''");
-        const res = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets('${safeSheet}')/usedRange(valuesOnly=true)`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
+        const fetchUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets('${safeSheet}')/usedRange(valuesOnly=true)`;
+        const res = await fetch(fetchUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message || 'Excel pull failed.');
-        const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping);
+        const rangeMeta = json.address ? parseRangeAddress(json.address) : { startRow: 1, endRow: null, startCol: 'A', endCol: 'J' };
+        const reconciled = reconcileSheetBoundsForSync(json.values || [], settings, rangeMeta);
+        sheetBounds = reconciled.bounds;
+        boundsWarnings = reconciled.warnings;
+        boundsPatch = reconciled.settingsPatch;
+        const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
         shareId = shareIdEncoded;
@@ -261,6 +288,12 @@ async function performSync(supabase, settings) {
         );
     }
 
+    const journal = await createSyncRunJournal(supabase, apartment_id, {
+        bounds: sheetBounds,
+        created_by: settings.last_synced_by || null,
+    });
+
+    try {
     // 5. Push to Spreadsheet
     let pushed = 0;
     const localTxns = await getUnsyncedTransactions(supabase, apartment_id);
@@ -278,7 +311,10 @@ async function performSync(supabase, settings) {
                 sheetName: settings.sheet_name,
                 rowsToPush: localTxns,
                 columnMapping: settings.column_mapping,
+                rangeA1: settings.range_a1 || 'A:J',
+                footerRow: sheetBounds?.footerRow ?? settings.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
+                    const before = snapshotTxn(txn);
                     const syncKey = `app:txn:${txn.id}`;
                     const withKey = { ...txn, external_sync_key: syncKey };
                     const syncHash = computeSyncHash(withKey, settings.column_mapping);
@@ -290,6 +326,13 @@ async function performSync(supabase, settings) {
                         excel_row_index: excelRowIndex,
                     }).eq('id', txn.id);
                     if (error) throw new Error(error.message);
+                    await journalPushMark(journal, before, {
+                        ...before,
+                        external_sync_key: syncKey,
+                        sync_hash: syncHash,
+                        sync_anchor_hash: syncAnchorHash,
+                        excel_row_index: excelRowIndex,
+                    });
                 },
             });
     }
@@ -297,7 +340,7 @@ async function performSync(supabase, settings) {
     // 6. Import to DB
     const { data: allTxns } = await supabase.from('transactions').select('*').eq('apartment_id', apartment_id);
     const { imported, updated, skipped, deleted } = await importExcelRows(
-        supabase, apartment_id, rows, allTxns || [], settings.column_mapping,
+        supabase, apartment_id, rows, allTxns || [], settings.column_mapping, { journal },
     );
 
     // 7. Update Settings
@@ -306,16 +349,36 @@ async function performSync(supabase, settings) {
         : '';
     const reconcileMsg = skipped > 0 ? ` ${skipped} unchanged.` : '';
     const deletedMsg = deleted > 0 ? ` ${deleted} removed.` : '';
+    const boundsMsg = boundsWarnings.length ? ` Bounds: ${boundsWarnings.join('; ')}.` : '';
+    const syncStatus = boundsWarnings.length ? 'WARN' : 'OK';
+    const statusMessage = `Auto-sync: Pulled ${imported} new, ${updated} updated, ${deleted} removed. Pushed ${pushed} new.${pullMsg}${reconcileMsg}${deletedMsg}${boundsMsg}`;
+
+    await journal.complete({
+        imported,
+        updated,
+        deleted,
+        skipped,
+        pushed,
+        status: syncStatus,
+        message: statusMessage,
+        bounds: sheetBounds,
+    });
+
     await supabase.from('ledger_sync_settings').update({
+        ...boundsPatch,
         last_synced_at: new Date().toISOString(),
-        last_sync_status: 'OK',
-        last_sync_message: `Auto-sync: Pulled ${imported} new, ${updated} updated, ${deleted} removed. Pushed ${pushed} new.${pullMsg}${reconcileMsg}${deletedMsg}`,
+        last_sync_status: syncStatus,
+        last_sync_message: statusMessage,
         last_sync_imported: imported,
         last_sync_pushed: pushed,
-        last_sync_etag: etag
+        last_sync_etag: etag,
     }).eq('apartment_id', apartment_id);
 
-    return { imported, updated, pushed, skipped, deleted, ...pullStats };
+    return { imported, updated, pushed, skipped, deleted, syncRunId: journal.runId, ...pullStats };
+    } catch (syncErr) {
+        await journal.fail(syncErr.message);
+        throw syncErr;
+    }
 }
 
 async function refreshToken(supabase, conn, app, connTable = 'user_oauth_connections') {

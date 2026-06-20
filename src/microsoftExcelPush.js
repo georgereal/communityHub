@@ -1,16 +1,16 @@
-import { transactionToExcelRow, maxMappedColumn, colForField, normalizeMapping } from './ledgerColumnMapping.js';
+import {
+    transactionToExcelRow,
+    maxMappedColumn,
+    colForField,
+    normalizeMapping,
+} from './ledgerColumnMapping.js';
+import { colIndexToLetters, parseColumnRange } from './ledgerSheetRegion.js';
 
 function colLetter(n) {
-    let letter = '';
-    let i = n;
-    while (i >= 0) {
-        letter = String.fromCharCode((i % 26) + 65) + letter;
-        i = Math.floor(i / 26) - 1;
-    }
-    return letter;
+    return colIndexToLetters(n);
 }
 
-async function graphJson(path, accessToken, init = {}) {
+async function graphRequest(path, accessToken, init = {}) {
     const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
         ...init,
         headers: {
@@ -18,8 +18,55 @@ async function graphJson(path, accessToken, init = {}) {
             ...init.headers,
         },
     });
-    const json = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let json = {};
+    if (text) {
+        try { json = JSON.parse(text); } catch { json = {}; }
+    }
     return { res, json };
+}
+
+function sessionHeaders(sessionId, extra = {}) {
+    return sessionId ? { 'workbook-session-id': sessionId, ...extra } : extra;
+}
+
+async function createWorkbookSession(accessToken, base, sharesBase, driveBase) {
+    const tryCreate = async (apiBase) => {
+        const { res, json } = await graphRequest(
+            `${apiBase}/workbook/createSession`,
+            accessToken,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ persistChanges: true }),
+            },
+        );
+        return { res, json, apiBase };
+    };
+
+    let attempt = await tryCreate(base);
+    if (!attempt.res.ok && sharesBase && base === sharesBase) {
+        attempt = await tryCreate(driveBase);
+    }
+    if (!attempt.res.ok) return null;
+    return { sessionId: attempt.json.id, base: attempt.apiBase };
+}
+
+async function closeWorkbookSession(accessToken, base, sessionId) {
+    if (!sessionId) return;
+    const { res, json } = await graphRequest(
+        `${base}/workbook/closeSession`,
+        accessToken,
+        {
+            method: 'POST',
+            headers: sessionHeaders(sessionId, { 'Content-Type': 'application/json' }),
+            body: '{}',
+        },
+    );
+    if (!res.ok && res.status !== 204) {
+        const msg = json?.error?.message || `HTTP ${res.status}`;
+        throw new Error(`Could not close Excel workbook session: ${msg}`);
+    }
 }
 
 async function resolveWorkbookBase({ accessToken, driveId, itemId, shareId, useSharesApi, safeSheet }) {
@@ -27,13 +74,13 @@ async function resolveWorkbookBase({ accessToken, driveId, itemId, shareId, useS
     const driveBase = `/drives/${driveId}/items/${itemId}`;
     let base = driveId && itemId ? driveBase : (sharesBase || driveBase);
 
-    let used = await graphJson(
+    let used = await graphRequest(
         `${base}/workbook/worksheets('${safeSheet}')/usedRange`,
         accessToken,
     );
     if (!used.res.ok && sharesBase) {
         base = driveBase;
-        used = await graphJson(
+        used = await graphRequest(
             `${base}/workbook/worksheets('${safeSheet}')/usedRange`,
             accessToken,
         );
@@ -58,13 +105,14 @@ async function patchExcelRow({
     safeSheet,
     rangeAddress,
     values,
+    sessionId = null,
 }) {
-    const patchRange = async (apiBase) => graphJson(
+    const patchRange = async (apiBase) => graphRequest(
         `${apiBase}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`,
         accessToken,
         {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: sessionHeaders(sessionId, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({ values: [values] }),
         },
     );
@@ -85,6 +133,38 @@ async function patchExcelRow({
     }
 }
 
+async function insertExcelRow({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    rangeAddress,
+    sessionId = null,
+}) {
+    const insertAt = async (apiBase) => graphRequest(
+        `${apiBase}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')/insert`,
+        accessToken,
+        {
+            method: 'POST',
+            headers: sessionHeaders(sessionId, { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ shift: 'Down' }),
+        },
+    );
+
+    let ins = await insertAt(base);
+    if (!ins.res.ok && sharesBase && base === sharesBase) {
+        const msg = String(ins.json?.error?.message || '');
+        if (msg.includes('not supported for MSA') || msg.includes('Sharing') || ins.res.status === 400) {
+            ins = await insertAt(driveBase);
+        }
+    }
+    if (!ins.res.ok) {
+        const msg = ins.json?.error?.message || `HTTP ${ins.res.status}`;
+        throw new Error(`Insert row in Excel failed: ${msg} (range ${rangeAddress})`);
+    }
+}
+
 function excelRowValues(txn, columnMapping) {
     const { rowData, maxCol } = transactionToExcelRow(txn, columnMapping);
     const width = Math.max(maxCol, maxMappedColumn(columnMapping)) + 1;
@@ -94,8 +174,8 @@ function excelRowValues(txn, columnMapping) {
 }
 
 /**
- * Append transaction rows to Excel one at a time via Microsoft Graph.
- * Calls onRowPushed(txn, excelRowIndex) after each successful row (optional).
+ * Push transaction rows to Excel inside a workbook session (one persist on closeSession).
+ * When footerRow is set, inserts each row before the totals row (shifts totals down).
  */
 export async function pushMicrosoftRows({
     accessToken,
@@ -106,6 +186,8 @@ export async function pushMicrosoftRows({
     sheetName,
     rowsToPush,
     columnMapping = {},
+    rangeA1 = 'A:J',
+    footerRow = null,
     onRowPushed,
 }) {
     if (!rowsToPush?.length) return 0;
@@ -114,7 +196,7 @@ export async function pushMicrosoftRows({
     }
 
     const safeSheet = String(sheetName || 'Transactions').replace(/'/g, "''");
-    const { base, sharesBase, driveBase, nextRowIndex: startRow } = await resolveWorkbookBase({
+    let { base, sharesBase, driveBase, nextRowIndex } = await resolveWorkbookBase({
         accessToken,
         driveId,
         itemId,
@@ -123,31 +205,75 @@ export async function pushMicrosoftRows({
         safeSheet,
     });
 
-    let nextRowIndex = startRow;
+    const session = await createWorkbookSession(accessToken, base, sharesBase, driveBase);
+    let sessionId = session?.sessionId ?? null;
+    if (session?.base) base = session.base;
+
+    if (sessionId) {
+        console.log('Excel push: using workbook session (single persist on close)');
+    } else {
+        console.warn('Excel push: workbook session unavailable — falling back to per-row persist');
+    }
+
+    const { startCol } = parseColumnRange(rangeA1 || 'A:J');
+    const insertBeforeFooter = footerRow != null && footerRow > 0;
+    let targetRow = insertBeforeFooter ? footerRow : nextRowIndex;
+
+    const pendingCallbacks = [];
     let pushed = 0;
     const total = rowsToPush.length;
 
-    for (const txn of rowsToPush) {
-        const { row, maxCol } = excelRowValues(txn, columnMapping);
-        const rangeAddress = `A${nextRowIndex}:${colLetter(maxCol)}${nextRowIndex}`;
+    try {
+        for (const txn of rowsToPush) {
+            const { row, maxCol } = excelRowValues(txn, columnMapping);
+            const writeRange = `${startCol}${targetRow}:${colLetter(maxCol)}${targetRow}`;
 
-        await patchExcelRow({
-            base,
-            sharesBase,
-            driveBase,
-            accessToken,
-            safeSheet,
-            rangeAddress,
-            values: row,
-        });
+            if (insertBeforeFooter) {
+                await insertExcelRow({
+                    base,
+                    sharesBase,
+                    driveBase,
+                    accessToken,
+                    safeSheet,
+                    rangeAddress: writeRange,
+                    sessionId,
+                });
+            }
 
-        pushed += 1;
-        if (onRowPushed) {
-            await onRowPushed(txn, nextRowIndex);
+            await patchExcelRow({
+                base,
+                sharesBase,
+                driveBase,
+                accessToken,
+                safeSheet,
+                rangeAddress: writeRange,
+                values: row.slice(0, maxCol + 1),
+                sessionId,
+            });
+
+            pushed += 1;
+            pendingCallbacks.push({ txn, excelRowIndex: targetRow });
+            console.log(`Excel push: row ${pushed}/${total} → ${writeRange}${insertBeforeFooter ? ' (before totals)' : ''}`);
+            targetRow += 1;
         }
 
-        console.log(`Excel push: row ${pushed}/${total} → ${rangeAddress}`);
-        nextRowIndex += 1;
+        if (sessionId) {
+            await closeWorkbookSession(accessToken, base, sessionId);
+            sessionId = null;
+        }
+
+        for (const { txn, excelRowIndex } of pendingCallbacks) {
+            if (onRowPushed) await onRowPushed(txn, excelRowIndex);
+        }
+    } catch (err) {
+        if (sessionId) {
+            try {
+                await closeWorkbookSession(accessToken, base, sessionId);
+            } catch (closeErr) {
+                console.warn('Excel push: closeSession after error failed:', closeErr.message);
+            }
+        }
+        throw err;
     }
 
     return pushed;
@@ -170,7 +296,7 @@ export async function writeExcelSyncIds({
     if (syncCol < 0) return 0;
 
     const safeSheet = String(sheetName || 'Transactions').replace(/'/g, "''");
-    const { base, sharesBase, driveBase } = await resolveWorkbookBase({
+    let { base, sharesBase, driveBase } = await resolveWorkbookBase({
         accessToken,
         driveId,
         itemId,
@@ -179,21 +305,34 @@ export async function writeExcelSyncIds({
         safeSheet,
     });
 
-    const col = colLetter(syncCol);
-    let written = 0;
-    for (const { rowIndex, syncKey } of assignments) {
-        if (!rowIndex || !syncKey) continue;
-        const rangeAddress = `${col}${rowIndex}:${col}${rowIndex}`;
-        await patchExcelRow({
-            base,
-            sharesBase,
-            driveBase,
-            accessToken,
-            safeSheet,
-            rangeAddress,
-            values: [syncKey],
-        });
-        written += 1;
+    const session = await createWorkbookSession(accessToken, base, sharesBase, driveBase);
+    const sessionId = session?.sessionId ?? null;
+    if (session?.base) base = session.base;
+
+    try {
+        const col = colLetter(syncCol);
+        let written = 0;
+        for (const { rowIndex, syncKey } of assignments) {
+            if (!rowIndex || !syncKey) continue;
+            const rangeAddress = `${col}${rowIndex}:${col}${rowIndex}`;
+            await patchExcelRow({
+                base,
+                sharesBase,
+                driveBase,
+                accessToken,
+                safeSheet,
+                rangeAddress,
+                values: [syncKey],
+                sessionId,
+            });
+            written += 1;
+        }
+        if (sessionId) await closeWorkbookSession(accessToken, base, sessionId);
+        return written;
+    } catch (err) {
+        if (sessionId) {
+            try { await closeWorkbookSession(accessToken, base, sessionId); } catch { /* ignore */ }
+        }
+        throw err;
     }
-    return written;
 }
