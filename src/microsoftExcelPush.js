@@ -133,6 +133,72 @@ async function patchExcelRow({
     }
 }
 
+function rowHasContent(row) {
+    return (row || []).some((c) => String(c ?? '').trim() !== '');
+}
+
+async function fetchRangeValues({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    rangeAddress,
+    sessionId = null,
+}) {
+    const read = async (apiBase) => graphRequest(
+        `${apiBase}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`,
+        accessToken,
+        { headers: sessionHeaders(sessionId) },
+    );
+
+    let result = await read(base);
+    if (!result.res.ok && sharesBase && base === sharesBase) {
+        result = await read(driveBase);
+    }
+    if (!result.res.ok) {
+        const msg = result.json?.error?.message || `HTTP ${result.res.status}`;
+        throw new Error(`Could not read Excel range ${rangeAddress}: ${msg}`);
+    }
+    return result.json.values || [];
+}
+
+/** First Excel row to write into the table body (fills gaps before the totals row). */
+async function resolveFirstPushRow({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    sessionId,
+    headerRow,
+    footerRow,
+    startCol,
+    endCol,
+    fallbackRow,
+}) {
+    if (!footerRow || footerRow <= 1) return fallbackRow;
+
+    const bodyStart = (headerRow && headerRow > 0 ? headerRow : 1) + 1;
+    if (bodyStart >= footerRow) return Math.max(bodyStart, footerRow - 1);
+
+    const rangeAddress = `${startCol}${bodyStart}:${endCol}${footerRow - 1}`;
+    const values = await fetchRangeValues({
+        base,
+        sharesBase,
+        driveBase,
+        accessToken,
+        safeSheet,
+        rangeAddress,
+        sessionId,
+    });
+
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+        if (rowHasContent(values[i])) return bodyStart + i + 1;
+    }
+    return bodyStart;
+}
+
 async function insertExcelRow({
     base,
     sharesBase,
@@ -175,7 +241,8 @@ function excelRowValues(txn, columnMapping) {
 
 /**
  * Push transaction rows to Excel inside a workbook session (one persist on closeSession).
- * When footerRow is set, inserts each row before the totals row (shifts totals down).
+ * When footerRow is set, writes into empty rows above the totals row first; only inserts
+ * (shifting the totals down) when the body is full up to the footer.
  */
 export async function pushMicrosoftRows({
     accessToken,
@@ -187,6 +254,7 @@ export async function pushMicrosoftRows({
     rowsToPush,
     columnMapping = {},
     rangeA1 = 'A:J',
+    headerRow = null,
     footerRow = null,
     onRowPushed,
 }) {
@@ -215,9 +283,29 @@ export async function pushMicrosoftRows({
         console.warn('Excel push: workbook session unavailable — falling back to per-row persist');
     }
 
-    const { startCol } = parseColumnRange(rangeA1 || 'A:J');
+    const { startCol, endCol } = parseColumnRange(rangeA1 || 'A:J');
+    const endColLetter = endCol || colLetter(maxMappedColumn(columnMapping));
     const insertBeforeFooter = footerRow != null && footerRow > 0;
-    let targetRow = insertBeforeFooter ? footerRow : nextRowIndex;
+    let currentFooterRow = footerRow;
+    let targetRow = insertBeforeFooter
+        ? await resolveFirstPushRow({
+            base,
+            sharesBase,
+            driveBase,
+            accessToken,
+            safeSheet,
+            sessionId,
+            headerRow,
+            footerRow,
+            startCol,
+            endCol: endColLetter,
+            fallbackRow: footerRow,
+        })
+        : nextRowIndex;
+
+    if (insertBeforeFooter) {
+        console.log(`Excel push: table body starts at row ${targetRow}, totals at row ${currentFooterRow}`);
+    }
 
     const pendingCallbacks = [];
     let pushed = 0;
@@ -226,19 +314,25 @@ export async function pushMicrosoftRows({
     try {
         for (const txn of rowsToPush) {
             const { row, maxCol } = excelRowValues(txn, columnMapping);
-            const writeRange = `${startCol}${targetRow}:${colLetter(maxCol)}${targetRow}`;
 
-            if (insertBeforeFooter) {
+            if (insertBeforeFooter && targetRow >= currentFooterRow) {
+                const insertRow = currentFooterRow - 1;
+                const insertRange = `${startCol}${insertRow}:${colLetter(maxCol)}${insertRow}`;
                 await insertExcelRow({
                     base,
                     sharesBase,
                     driveBase,
                     accessToken,
                     safeSheet,
-                    rangeAddress: writeRange,
+                    rangeAddress: insertRange,
                     sessionId,
                 });
+                targetRow = insertRow;
+                currentFooterRow += 1;
+                console.log(`Excel push: inserted row ${insertRow} (totals now at ${currentFooterRow})`);
             }
+
+            const writeRange = `${startCol}${targetRow}:${colLetter(maxCol)}${targetRow}`;
 
             await patchExcelRow({
                 base,
@@ -253,7 +347,7 @@ export async function pushMicrosoftRows({
 
             pushed += 1;
             pendingCallbacks.push({ txn, excelRowIndex: targetRow });
-            console.log(`Excel push: row ${pushed}/${total} → ${writeRange}${insertBeforeFooter ? ' (before totals)' : ''}`);
+            console.log(`Excel push: row ${pushed}/${total} → ${writeRange}${insertBeforeFooter ? ' (inside table)' : ''}`);
             targetRow += 1;
         }
 

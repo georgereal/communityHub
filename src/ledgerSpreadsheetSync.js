@@ -297,7 +297,7 @@ async function fetchMicrosoftRows({ spreadsheetUrl, sheetName, syncSettings = nu
     };
 }
 
-async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheetName, rowsToPush, columnMapping = {}, rangeA1, footerRow }) {
+async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheetName, rowsToPush, columnMapping = {}, rangeA1, headerRow, footerRow }) {
     const token = await getAccessTokenForProvider('MICROSOFT');
     return pushMicrosoftRowsGraph({
         accessToken: token,
@@ -309,6 +309,7 @@ async function pushMicrosoftRows({ driveId, itemId, shareId, useSharesApi, sheet
         rowsToPush,
         columnMapping,
         rangeA1,
+        headerRow,
         footerRow,
     });
 }
@@ -1223,7 +1224,10 @@ async function resolveConflict(idx, winner) {
                         useSharesApi: !settings.spreadsheet_url.includes('driveId='),
                         sheetName: settings.sheet_name || 'Transactions',
                         rowsToPush: [conflict.existing],
-                        columnMapping: settings.column_mapping
+                        columnMapping: settings.column_mapping,
+                        rangeA1: settings.range_a1 || 'A:J',
+                        headerRow: settings.header_row ?? null,
+                        footerRow: settings.footer_row ?? null,
                     });
 
                     // Update DB hash to match what we just pushed
@@ -1395,6 +1399,7 @@ async function runSync() {
                 rowsToPush: localTxns,
                 columnMapping: customMapping,
                 rangeA1: settings?.range_a1 || 'A:J',
+                headerRow: result.bounds?.headerRow ?? settings?.header_row ?? null,
                 footerRow: result.bounds?.footerRow ?? settings?.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
                     const before = snapshotTxn(txn);

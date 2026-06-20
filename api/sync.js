@@ -319,6 +319,7 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
                 rowsToPush: localTxns,
                 columnMapping: settings.column_mapping,
                 rangeA1: settings.range_a1 || 'A:J',
+                headerRow: sheetBounds?.headerRow ?? settings.header_row ?? null,
                 footerRow: sheetBounds?.footerRow ?? settings.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
                     const before = snapshotTxn(txn);
