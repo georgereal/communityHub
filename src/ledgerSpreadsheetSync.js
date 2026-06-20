@@ -48,9 +48,11 @@ import {
     clearSyncLog,
     mountSyncLogDrawer,
     openSyncLogDrawer,
+    setRunLogSink,
     syncLog,
     syncLogBounds,
 } from './ledgerSyncLog.js';
+import { renderSyncRunAuditPanel } from './ledgerSyncRunAudit.js';
 import {
     buildSyncFetchRange,
     parseRangeAddress,
@@ -510,6 +512,11 @@ function buildAdminWizardSteps(provider, s, microsoft, google) {
             label: 'Auto-sync',
             done: scheduleOk && (provider !== 'MICROSOFT' || bgOk),
         },
+        {
+            id: 'history',
+            label: 'Run history',
+            done: !!(s?.last_sync_run_id || s?.last_synced_at),
+        },
     ];
 }
 
@@ -688,8 +695,12 @@ export function renderAdminSyncPanel() {
       </div>
     `;
 
+    const historyStepBody = `
+      <div id="admin-sync-run-audit"></div>
+    `;
+
     const scheduleStepBody = isMicrosoft ? `
-      <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> on the deployed site on schedule. Use <strong>Sync now (browser)</strong> below to test with live logs in this tab.</p>
+      <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> on the deployed site. Use <strong>Sync now (browser)</strong> for live logs, or <strong>Test server sync</strong> to exercise the same API path as cron.</p>
       <div class="sync-schedule-row">
         <select id="admin-bg-sync-interval" class="expense-combobox">
           <option value="0" ${(s?.sync_interval_minutes || 0) === 0 ? 'selected' : ''}>Manual only</option>
@@ -723,6 +734,9 @@ export function renderAdminSyncPanel() {
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
           <i class="fa-solid fa-bolt"></i> Sync now (browser)
         </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-bg-server-sync" ${bgSync.ready ? '' : 'disabled'} title="POST /api/sync — same path as Vercel cron">
+          <i class="fa-solid fa-server"></i> Test server sync
+        </button>
         <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
           <i class="fa-solid fa-rotate-left"></i> Reset sync state
         </button>
@@ -749,6 +763,9 @@ export function renderAdminSyncPanel() {
         <button type="button" class="btn btn-outline btn--small" id="admin-bg-sync-run" ${bgSync.ready ? '' : 'disabled'}>
           <i class="fa-solid fa-bolt"></i> Sync now (browser)
         </button>
+        <button type="button" class="btn btn-outline btn--small" id="admin-bg-server-sync" ${bgSync.ready ? '' : 'disabled'} title="POST /api/sync — same path as Vercel cron">
+          <i class="fa-solid fa-server"></i> Test server sync
+        </button>
         <button type="button" class="btn btn-outline btn--small" id="admin-reset-sync-state" title="Testing — clear sync keys and last-run metadata">
           <i class="fa-solid fa-rotate-left"></i> Reset sync state
         </button>
@@ -763,7 +780,7 @@ export function renderAdminSyncPanel() {
         <header class="sync-wizard-header">
           <div>
             <h3 class="sync-wizard-header__title">Spreadsheet sync</h3>
-            <p class="sync-wizard-header__desc">Set up ${isMicrosoft ? 'Microsoft Excel Online' : 'Google Sheets'} in five steps — OAuth, workbook, column mapping, connect, and schedule.</p>
+            <p class="sync-wizard-header__desc">Set up ${isMicrosoft ? 'Microsoft Excel Online' : 'Google Sheets'} in six steps — OAuth, workbook, column mapping, connect, schedule, and run history.</p>
           </div>
           <div class="sync-provider-tabs" role="tablist" aria-label="Spreadsheet provider">
             <button type="button" class="sync-provider-tab${isMicrosoft ? ' sync-provider-tab--active' : ''}" data-sync-provider="MICROSOFT" role="tab" aria-selected="${isMicrosoft}">
@@ -783,6 +800,7 @@ export function renderAdminSyncPanel() {
           ${renderSyncStepCard(3, 'Column mapping', stepStatus(2), mappingStepBody, { open: openIdx === 2, id: 'admin-sync-step-mapping' })}
           ${renderSyncStepCard(4, 'Connect & sync', stepStatus(3), connectStepBody, { open: openIdx === 3, id: 'admin-sync-step-connect' })}
           ${renderSyncStepCard(5, 'Auto-sync schedule', stepStatus(4), scheduleStepBody, { open: openIdx === 4, id: 'admin-sync-step-schedule' })}
+          ${renderSyncStepCard(6, 'Sync run history', stepStatus(5), historyStepBody, { open: openIdx === 5, id: 'admin-sync-step-history' })}
         </div>
       </div>
     `;
@@ -943,6 +961,42 @@ export function renderAdminSyncPanel() {
         });
     });
 
+    document.getElementById('admin-bg-server-sync')?.addEventListener('click', async () => {
+        const btn = document.getElementById('admin-bg-server-sync');
+        await withButtonBusy(btn, 'Running…', async () => {
+            const apartment_id = portalState.access?.activeApartmentId;
+            if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
+            const { data: sess } = await supabase.auth.getSession();
+            const token = sess?.session?.access_token;
+            if (!token) throw new Error('Sign in again to run the server sync.');
+
+            syncLog('info', 'Manual server sync requested', { apartment_id });
+            openSyncLogDrawer();
+
+            const res = await fetch('/api/sync', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ apartment_id }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json.error || 'Server sync failed.');
+
+            await pullState();
+            refreshFinancesView();
+            renderAdminSyncPanel();
+
+            const r = json.result || {};
+            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.\n\nSee step 6 — Sync run history for the full audit log.`);
+        }).catch((err) => {
+            syncLog('error', err.message);
+            openSyncLogDrawer();
+            alert(err.message || String(err));
+        });
+    });
+
     document.getElementById('admin-reset-sync-state')?.addEventListener('click', () => {
         void confirmResetSyncState('admin-reset-sync-state', renderAdminSyncPanel);
     });
@@ -959,6 +1013,8 @@ export function renderAdminSyncPanel() {
     if (hasUrl) {
         void refreshMappingUI();
     }
+
+    void renderSyncRunAuditPanel('admin-sync-run-audit');
 }
 
 async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings = null }) {
@@ -1209,10 +1265,18 @@ async function resolveConflict(idx, winner) {
 async function runSync() {
     let settings = getSyncSettings();
     const apartment_id = portalState.access?.activeApartmentId;
+    const { data: { user } } = await supabase.auth.getUser();
+    const journal = await createSyncRunJournal(supabase, apartment_id, {
+        created_by: user?.id || null,
+        source: 'browser',
+    });
+    setRunLogSink((level, message, detail) => journal.log(level, message, detail));
+
+    try {
     mountSyncLogDrawer();
     clearSyncLog();
     openSyncLogDrawer();
-    syncLog('info', 'Sync started (browser)', { provider: activeProvider, apartment_id });
+    syncLog('info', 'Sync started (browser)', { provider: activeProvider, apartment_id, runId: journal.runId });
     console.log(`Sync starting for Apartment: ${apartment_id}`);
 
     const headerRowRaw = syncFormField('header_row');
@@ -1248,12 +1312,6 @@ async function runSync() {
     let boundsWarnings = [];
     let sheetBoundsForJournal = null;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const journal = await createSyncRunJournal(supabase, apartment_id, {
-        created_by: user?.id || null,
-    });
-
-    try {
     if (provider === 'GOOGLE') {
         const result = await fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings: settings });
         boundsWarnings = await persistBoundsFromPull(result);
@@ -1379,6 +1437,13 @@ async function runSync() {
         syncLog('error', syncErr.message);
         await journal.fail(syncErr.message);
         throw syncErr;
+    } finally {
+        setRunLogSink(null);
+        try {
+            await journal.flushLogs?.();
+        } catch (flushErr) {
+            console.warn('[sync] log flush failed:', flushErr);
+        }
     }
 }
 

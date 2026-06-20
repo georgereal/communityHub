@@ -1,8 +1,27 @@
 /**
- * Sync run journal — log reversible DB changes per sync for rollback.
+ * Sync run journal — log reversible DB changes per sync for rollback + audit trace.
  */
 
 const SYNC_FIELDS = ['external_sync_key', 'sync_hash', 'sync_anchor_hash', 'excel_row_index'];
+const LOG_FLUSH_SIZE = 40;
+
+export function formatRunSource(source) {
+    if (source === 'cron') return 'Vercel cron';
+    if (source === 'manual_api') return 'Server API';
+    return 'Browser';
+}
+
+export function formatRunStatus(status) {
+    const key = String(status || 'unknown').toLowerCase();
+    const labels = {
+        running: 'Running',
+        ok: 'OK',
+        warn: 'Warn',
+        failed: 'Failed',
+        rolled_back: 'Rolled back',
+    };
+    return { key, label: labels[key] || status || 'Unknown' };
+}
 
 export function snapshotTxn(txn) {
     if (!txn) return null;
@@ -24,11 +43,17 @@ function txnContentMatches(current, snapshot) {
 }
 
 /** @returns {Promise<import('./ledgerSyncJournal.js').SyncRunJournal>} */
-export async function createSyncRunJournal(supabase, apartment_id, { bounds = null, created_by = null } = {}) {
+export async function createSyncRunJournal(supabase, apartment_id, {
+    bounds = null,
+    created_by = null,
+    source = 'browser',
+} = {}) {
     const noop = {
         runId: null,
         enabled: false,
+        async log() {},
         async logChange() {},
+        async flushLogs() {},
         async complete() {},
         async fail() {},
     };
@@ -36,16 +61,24 @@ export async function createSyncRunJournal(supabase, apartment_id, { bounds = nu
     if (!supabase || !apartment_id) return noop;
 
     const runId = crypto.randomUUID();
-    const { error } = await supabase.from('ledger_sync_runs').insert({
+    const insertRow = {
         id: runId,
         apartment_id,
         status: 'running',
+        source,
         bounds_snapshot: bounds ? {
             header_row: bounds.headerRow ?? null,
             footer_row: bounds.footerRow ?? null,
         } : null,
         created_by,
-    });
+    };
+
+    let { error } = await supabase.from('ledger_sync_runs').insert(insertRow);
+
+    if (error && /source/i.test(error.message)) {
+        delete insertRow.source;
+        ({ error } = await supabase.from('ledger_sync_runs').insert(insertRow));
+    }
 
     if (error) {
         if (/ledger_sync_runs/i.test(error.message)) {
@@ -56,10 +89,37 @@ export async function createSyncRunJournal(supabase, apartment_id, { bounds = nu
     }
 
     let seq = 0;
+    let logSeq = 0;
+    const logBuffer = [];
+
+    async function flushLogs() {
+        if (!logBuffer.length) return;
+        const batch = logBuffer.splice(0, logBuffer.length);
+        const rows = batch.map((entry) => ({
+            id: crypto.randomUUID(),
+            run_id: runId,
+            seq: entry.seq,
+            level: entry.level,
+            message: entry.message,
+            detail: entry.detail ?? null,
+        }));
+        const { error: logErr } = await supabase.from('ledger_sync_run_logs').insert(rows);
+        if (logErr && !/ledger_sync_run_logs/i.test(logErr.message)) {
+            console.warn('[sync journal] log flush failed:', logErr.message);
+        }
+    }
 
     return {
         runId,
         enabled: true,
+
+        async log(level, message, detail = null) {
+            logSeq += 1;
+            logBuffer.push({ seq: logSeq, level, message, detail });
+            if (logBuffer.length >= LOG_FLUSH_SIZE) await flushLogs();
+        },
+
+        flushLogs,
 
         async logChange({ action, transaction_id, before, after }) {
             seq += 1;
@@ -104,12 +164,15 @@ export async function createSyncRunJournal(supabase, apartment_id, { bounds = nu
             const { error: updErr } = await supabase.from('ledger_sync_runs').update(patch).eq('id', runId);
             if (updErr) throw new Error(updErr.message);
 
+            await flushLogs();
+
             await supabase.from('ledger_sync_settings').update({
                 last_sync_run_id: runId,
             }).eq('apartment_id', apartment_id);
         },
 
         async fail(message) {
+            await flushLogs();
             await supabase.from('ledger_sync_runs').update({
                 completed_at: new Date().toISOString(),
                 status: 'FAILED',
@@ -117,6 +180,45 @@ export async function createSyncRunJournal(supabase, apartment_id, { bounds = nu
             }).eq('id', runId);
         },
     };
+}
+
+export async function fetchSyncRuns(supabase, apartment_id, { limit = 30 } = {}) {
+    if (!supabase || !apartment_id) return [];
+    const fullSelect = 'id, started_at, completed_at, status, source, imported, updated, deleted, skipped, pushed, message';
+    let { data, error } = await supabase
+        .from('ledger_sync_runs')
+        .select(fullSelect)
+        .eq('apartment_id', apartment_id)
+        .order('started_at', { ascending: false })
+        .limit(limit);
+    if (error && /source/i.test(error.message)) {
+        ({ data, error } = await supabase
+            .from('ledger_sync_runs')
+            .select('id, started_at, completed_at, status, imported, updated, deleted, skipped, pushed, message')
+            .eq('apartment_id', apartment_id)
+            .order('started_at', { ascending: false })
+            .limit(limit));
+        data = (data || []).map((row) => ({ ...row, source: 'browser' }));
+    }
+    if (error) {
+        if (/ledger_sync_runs/i.test(error.message)) return [];
+        throw new Error(error.message);
+    }
+    return data || [];
+}
+
+export async function fetchSyncRunLogs(supabase, runId) {
+    if (!supabase || !runId) return [];
+    const { data, error } = await supabase
+        .from('ledger_sync_run_logs')
+        .select('seq, logged_at, level, message, detail')
+        .eq('run_id', runId)
+        .order('seq', { ascending: true });
+    if (error) {
+        if (/ledger_sync_run_logs/i.test(error.message)) return [];
+        throw new Error(error.message);
+    }
+    return data || [];
 }
 
 export async function fetchLastRollbackableRun(supabase, apartment_id) {

@@ -8,6 +8,7 @@ import {
 } from '../src/ledgerColumnMapping.js';
 import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
 import { importExcelRows } from '../src/ledgerSyncApply.js';
+import { setRunLogSink, syncLog, syncLogBounds } from '../src/ledgerSyncLog.js';
 import {
     buildSyncFetchRange,
     parseRangeAddress,
@@ -59,7 +60,7 @@ export default async function handler(req, res) {
                         continue;
                     }
 
-                    const result = await performSync(service, s);
+                    const result = await performSync(service, s, { source: 'cron' });
                     results.push({ apartment: s.apartments?.name, status: 'OK', result });
                 } catch (err) {
                     console.error(`Sync failed for ${s.apartments?.name}:`, err);
@@ -115,7 +116,7 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Spreadsheet sync is not configured for this society yet.' });
         }
 
-        const result = await performSync(service, settings);
+        const result = await performSync(service, settings, { source: 'manual_api' });
         return res.status(200).json({ ok: true, result });
     } catch (err) {
         await service.from('ledger_sync_settings').update({
@@ -209,13 +210,21 @@ async function resolveSyncCredentials(supabase, settings) {
     return { conn, app, connTable: 'user_oauth_connections' };
 }
 
-async function performSync(supabase, settings) {
+async function performSync(supabase, settings, { source = 'cron' } = {}) {
     const { apartment_id, provider } = settings;
     const mapping = normalizeMapping(settings.column_mapping);
     if (colForField(mapping, 'date') < 0) {
         throw new Error('Column mapping is incomplete — map Date to an Excel column in Admin → Spreadsheet sync (step 3), then save.');
     }
 
+    const journal = await createSyncRunJournal(supabase, apartment_id, {
+        source,
+        created_by: settings.last_synced_by || null,
+    });
+    setRunLogSink((level, message, detail) => journal.log(level, message, detail));
+    syncLog('info', `Sync started (${source})`, { apartment_id, provider, runId: journal.runId });
+
+    try {
     const { conn, app, connTable } = await resolveSyncCredentials(supabase, settings);
     // Refresh token if needed
     let accessToken = conn.access_token;
@@ -253,6 +262,8 @@ async function performSync(supabase, settings) {
         const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
+        syncLogBounds(sheetBounds, boundsWarnings);
+        syncLog('info', `Parsed ${rows.length} row(s) from Google Sheets`);
     } else if (provider === 'MICROSOFT') {
         const shareIdEncoded = encodeMicrosoftShareId(settings.spreadsheet_url);
         const item = await resolveMicrosoftDriveItem(settings.spreadsheet_url, accessToken);
@@ -275,6 +286,8 @@ async function performSync(supabase, settings) {
         const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
+        syncLogBounds(sheetBounds, boundsWarnings);
+        syncLog('info', `Parsed ${rows.length} row(s) from Excel`, { address: rangeMeta });
         shareId = shareIdEncoded;
         useSharesApi = false;
     } else {
@@ -288,13 +301,7 @@ async function performSync(supabase, settings) {
         );
     }
 
-    const journal = await createSyncRunJournal(supabase, apartment_id, {
-        bounds: sheetBounds,
-        created_by: settings.last_synced_by || null,
-    });
-
-    try {
-    // 5. Push to Spreadsheet
+    // Push to spreadsheet
     let pushed = 0;
     const localTxns = await getUnsyncedTransactions(supabase, apartment_id);
     
@@ -376,8 +383,16 @@ async function performSync(supabase, settings) {
 
     return { imported, updated, pushed, skipped, deleted, syncRunId: journal.runId, ...pullStats };
     } catch (syncErr) {
+        syncLog('error', syncErr.message);
         await journal.fail(syncErr.message);
         throw syncErr;
+    } finally {
+        setRunLogSink(null);
+        try {
+            await journal.flushLogs?.();
+        } catch (flushErr) {
+            console.warn('[sync] log flush failed:', flushErr);
+        }
     }
 }
 

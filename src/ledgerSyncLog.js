@@ -13,9 +13,18 @@ const LEVEL_CLASS = {
 function store() {
     const g = typeof globalThis !== 'undefined' ? globalThis : {};
     if (!g.__ledgerSyncLog) {
-        g.__ledgerSyncLog = { entries: [], listeners: new Set(), mounted: false };
+        g.__ledgerSyncLog = { entries: [], listeners: new Set(), runSink: null, mounted: false };
     }
     return g.__ledgerSyncLog;
+}
+
+/** Persist syncLog lines to ledger_sync_run_logs via active journal. */
+export function setRunLogSink(sink) {
+    store().runSink = sink || null;
+}
+
+export function getRunLogSink() {
+    return store().runSink;
 }
 
 function drawerEl() {
@@ -62,6 +71,11 @@ export function syncLog(level, message, detail = null) {
     s.entries.push({ t: Date.now(), level, message, detail });
     if (s.entries.length > 2000) s.entries.splice(0, s.entries.length - 2000);
     s.listeners.forEach((fn) => fn());
+    try {
+        s.runSink?.(level, message, detail);
+    } catch (err) {
+        console.warn('[sync log] run sink failed:', err);
+    }
     const tag = level.toUpperCase().padEnd(5);
     const extra = detail ? ` ${JSON.stringify(detail)}` : '';
     console.log(`[sync ${tag}] ${message}${extra}`);
