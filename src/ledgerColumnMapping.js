@@ -363,8 +363,27 @@ export function buildImportTxnPayload(row, mapping) {
     return payload;
 }
 
+/** True when a spreadsheet row has values in mapped import columns (not just blank padding). */
+export function rowHasSheetContent(row, mapping) {
+    if (!row?.length) return false;
+    const m = normalizeMapping(mapping);
+    const cols = [
+        colForField(m, 'date'),
+        colForField(m, 'type'),
+        colForField(m, 'amount'),
+        colForField(m, 'debit_dr'),
+        colForField(m, 'credit_cr'),
+        colForField(m, 'description'),
+        colForField(m, 'external_sync_key'),
+    ].filter((c) => c >= 0);
+    if (cols.length) {
+        return cols.some((c) => String(row[c] ?? '').trim() !== '');
+    }
+    return row.some((c) => String(c ?? '').trim() !== '');
+}
+
 export function parseLedgerSheet(aoa, sourceKey, customMapping = null, sheetBounds = null) {
-    if (!aoa?.length) return { parsed: [], excelDataRows: 0, skipped: 0, bounds: null };
+    if (!aoa?.length) return { parsed: [], excelDataRows: 0, skipped: 0, unparseableNonEmpty: 0, bounds: null };
 
     const bounds = sheetBounds || resolveSheetBounds(aoa, customMapping ? { column_mapping: customMapping } : {});
     const headersRaw = bounds.headersRaw?.length
@@ -377,6 +396,7 @@ export function parseLedgerSheet(aoa, sourceKey, customMapping = null, sheetBoun
 
     const { count: excelDataRows } = dataRowsFromAoa(aoa, bounds);
     const parsed = [];
+    let unparseableNonEmpty = 0;
     for (let i = 0; i < aoa.length; i += 1) {
         const row = aoa[i] || [];
         const excelRow = aoaIndexToExcelRow(bounds, i);
@@ -397,10 +417,14 @@ export function parseLedgerSheet(aoa, sourceKey, customMapping = null, sheetBoun
             syncLog('skip', `Excel row ${excelRow}: not a transaction`, {
                 a: row[0] ?? '', b: row[1] ?? '', c: row[2] ?? '',
             });
+            if (rowHasSheetContent(row, mapping)) unparseableNonEmpty += 1;
         }
     }
     syncLog('info', `Parsed ${parsed.length} row(s) from ${excelDataRows} in-table candidate(s)`);
-    return { parsed, excelDataRows, skipped: excelDataRows - parsed.length, mapping, bounds };
+    if (excelDataRows > 0 && parsed.length === 0 && unparseableNonEmpty === 0) {
+        syncLog('info', 'Excel table rows are empty — pull skipped, push/reconcile can continue');
+    }
+    return { parsed, excelDataRows, skipped: excelDataRows - parsed.length, unparseableNonEmpty, mapping, bounds };
 }
 
 function fieldImportsFromExcel(cfg) {

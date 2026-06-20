@@ -236,7 +236,7 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
 
     // Pull from spreadsheet
     let rows = [];
-    let pullStats = { excelDataRows: 0, parsed: 0, skipped: 0 };
+    let pullStats = { excelDataRows: 0, parsed: 0, skipped: 0, unparseableNonEmpty: 0 };
     let etag = null;
     let driveId, itemId, shareId, useSharesApi;
 
@@ -261,7 +261,12 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
         boundsPatch = reconciled.settingsPatch;
         const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
-        pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
+        pullStats = {
+            excelDataRows: sheet.excelDataRows,
+            parsed: sheet.parsed.length,
+            skipped: sheet.skipped,
+            unparseableNonEmpty: sheet.unparseableNonEmpty ?? 0,
+        };
         syncLogBounds(sheetBounds, boundsWarnings);
         syncLog('info', `Parsed ${rows.length} row(s) from Google Sheets`);
     } else if (provider === 'MICROSOFT') {
@@ -285,7 +290,12 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
         boundsPatch = reconciled.settingsPatch;
         const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping, sheetBounds);
         rows = sheet.parsed;
-        pullStats = { excelDataRows: sheet.excelDataRows, parsed: sheet.parsed.length, skipped: sheet.skipped };
+        pullStats = {
+            excelDataRows: sheet.excelDataRows,
+            parsed: sheet.parsed.length,
+            skipped: sheet.skipped,
+            unparseableNonEmpty: sheet.unparseableNonEmpty ?? 0,
+        };
         syncLogBounds(sheetBounds, boundsWarnings);
         syncLog('info', `Parsed ${rows.length} row(s) from Excel`, { address: rangeMeta });
         shareId = shareIdEncoded;
@@ -294,9 +304,9 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
         throw new Error(`Unsupported sync provider: ${provider || '(none)'}.`);
     }
 
-    if (pullStats.excelDataRows > 0 && pullStats.parsed === 0) {
+    if (pullStats.unparseableNonEmpty > 0) {
         throw new Error(
-            `Pulled ${pullStats.excelDataRows} Excel row(s) but none could be imported. `
+            `Pulled ${pullStats.excelDataRows} Excel row(s) but ${pullStats.unparseableNonEmpty} had data that could not be imported. `
             + 'Check Date, Type, and Amount (or Dr/Cr) on each row match your column mapping.',
         );
     }

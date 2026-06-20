@@ -46,6 +46,7 @@ import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPus
 import { importExcelRows } from './ledgerSyncApply.js';
 import {
     clearSyncLog,
+    hydrateSyncLogFromRun,
     mountSyncLogDrawer,
     openSyncLogDrawer,
     setRunLogSink,
@@ -63,6 +64,7 @@ import {
     createSyncRunJournal,
     fetchLastRollbackableRun,
     fetchSyncRunChangeSummary,
+    fetchSyncRuns,
     journalPushMark,
     rollbackSyncRun,
     snapshotTxn,
@@ -1010,6 +1012,7 @@ export function renderAdminSyncPanel() {
             const token = sess?.session?.access_token;
             if (!token) throw new Error('Sign in again to run the server sync.');
 
+            clearSyncLog();
             syncLog('info', 'Manual server sync requested', { apartment_id });
 
             const res = await fetch('/api/sync', {
@@ -1023,15 +1026,32 @@ export function renderAdminSyncPanel() {
             const json = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(json.error || 'Server sync failed.');
 
+            const r = json.result || {};
+            const runId = r.syncRunId;
+            if (runId) {
+                const loaded = await hydrateSyncLogFromRun(supabase, runId);
+                syncLog('info', 'Server sync complete', { ...r, logLinesLoaded: loaded });
+            } else {
+                syncLog('info', 'Server sync complete', r);
+            }
+
             await pullState();
             refreshFinancesView();
             renderAdminSyncPanel();
 
-            const r = json.result || {};
-            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.\n\nOpen the Run history tab for the full audit log.`);
-        }).catch((err) => {
+            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.\n\nOpen Sync log or Run history for row-by-row details.`);
+        }).catch(async (err) => {
             syncLog('error', err.message);
-            alert(`${err.message || String(err)}\n\nOpen the Run history tab for persisted server run logs.`);
+            try {
+                const apartment_id = portalState.access?.activeApartmentId;
+                if (apartment_id) {
+                    const runs = await fetchSyncRuns(supabase, apartment_id, { limit: 1 });
+                    if (runs[0]?.id) await hydrateSyncLogFromRun(supabase, runs[0].id);
+                }
+            } catch {
+                /* best-effort */
+            }
+            alert(`${err.message || String(err)}\n\nOpen Sync log or the Run history tab for persisted server run logs.`);
         });
     });
 

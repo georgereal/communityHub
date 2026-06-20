@@ -87,6 +87,30 @@ export function getSyncLogEntries() {
     return store().entries.slice();
 }
 
+/** Merge persisted run log lines into the in-browser modal (e.g. after server sync). */
+export function appendSyncLogEntries(entries) {
+    if (!entries?.length) return 0;
+    const s = store();
+    for (const entry of entries) {
+        s.entries.push({
+            t: entry.t ?? (entry.logged_at ? Date.parse(entry.logged_at) : Date.now()),
+            level: entry.level || 'info',
+            message: entry.message || '',
+            detail: entry.detail ?? null,
+        });
+    }
+    if (s.entries.length > 2000) s.entries.splice(0, s.entries.length - 2000);
+    s.listeners.forEach((fn) => fn());
+    return entries.length;
+}
+
+export async function hydrateSyncLogFromRun(supabase, runId) {
+    if (!supabase || !runId) return 0;
+    const { fetchSyncRunLogs } = await import('./ledgerSyncJournal.js');
+    const logs = await fetchSyncRunLogs(supabase, runId);
+    return appendSyncLogEntries(logs);
+}
+
 export function formatSyncLogLine(entry) {
     const time = new Date(entry.t).toLocaleTimeString('en-IN', { hour12: false });
     const tag = entry.level.toUpperCase().padEnd(5);
@@ -106,7 +130,7 @@ function renderDrawerRows() {
     const entries = store().entries;
 
     if (!entries.length) {
-        tbody.innerHTML = '<tr class="sync-log-drawer__empty"><td colspan="3">No sync activity yet — run <strong>Sync now</strong> in step 4, then reopen this log.</td></tr>';
+        tbody.innerHTML = '<tr class="sync-log-drawer__empty"><td colspan="3">No sync activity yet. <strong>Sync now (browser)</strong> streams here live; <strong>Test server sync</strong> loads logs here when the run finishes (or use <strong>Run history</strong>).</td></tr>';
     } else {
         tbody.innerHTML = entries.map((entry) => {
             const time = new Date(entry.t).toLocaleTimeString('en-IN', { hour12: false });
