@@ -55,6 +55,10 @@ export let portalState = {
     email: {
         outbox: [],
     },
+    moduleAccess: {
+        apartment: {},
+        user: {},
+    },
     activeUnitId: null,
     editingTxnId: null
 };
@@ -228,6 +232,23 @@ export const pullState = async () => {
             const vMatch = vehicles.find(veh => veh.id === slot.assigned_vehicle_id);
             return { ...slot, occupant: vMatch ? vMatch.plate : null, unit_num: vMatch ? units.find(ux => ux.id === vMatch.unit_id)?.number : null };
         });
+
+        try {
+            const { loadModuleAccess } = await import('./moduleAccess.js');
+            await loadModuleAccess(activeApartmentId, uid);
+            document.dispatchEvent(new CustomEvent('module-access-loaded'));
+        } catch (modErr) {
+            console.warn('[pullState] module access load skipped:', modErr?.message);
+        }
+
+        try {
+            const { loadUserPageAccess } = await import('./pageAccess.js');
+            const roleKey = portalState.auth?.effectiveRoleKey
+                || (await import('./rbac.js')).v1RoleToV2Key(portalState.auth?.role);
+            await loadUserPageAccess(activeApartmentId, uid, roleKey);
+        } catch (pageErr) {
+            console.warn('[pullState] page access load skipped:', pageErr?.message);
+        }
 
         return true;
     } catch (err) { console.error('Cloud-Link Broken:', err); return false; }

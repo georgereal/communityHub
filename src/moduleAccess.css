@@ -1,0 +1,143 @@
+/* Module access admin toggles */
+
+.module-access-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.module-access-card__title {
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+  margin: 0 0 0.35rem;
+}
+
+.module-access-card__desc {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: 0 0 1.25rem;
+}
+
+.module-access-hint {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 0 0 1rem;
+  line-height: 1.45;
+}
+
+.module-access-hint--error {
+  color: var(--danger);
+}
+
+.module-access-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 900;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.module-toggle-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.module-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fafbfc;
+  cursor: pointer;
+}
+
+.module-toggle-row__lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.module-toggle-row__lead i {
+  margin-top: 0.15rem;
+  color: var(--accent);
+  width: 1.1rem;
+  text-align: center;
+}
+
+.module-toggle-row__lead strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.module-toggle-row__lead small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-weight: 500;
+  margin-top: 0.1rem;
+}
+
+.module-toggle-row input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.module-toggle-row--user {
+  cursor: default;
+}
+
+.module-toggle-row--locked {
+  cursor: default;
+  background: #f8fafc;
+  opacity: 0.92;
+}
+
+.module-toggle-row--locked input[disabled] {
+  cursor: not-allowed;
+}
+
+.module-toggle-row__select {
+  min-width: 140px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.module-access-actions {
+  margin-top: 1rem;
+}
+
+#user-module-access-panel {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+}
+
+#user-access-modal .modal-content {
+  max-width: 520px;
+}
+
+@media (max-width: 520px) {
+  .module-toggle-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .module-toggle-row__select {
+    width: 100%;
+  }
+}

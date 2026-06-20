@@ -110,7 +110,7 @@ as $$
     when 'admin' then true
     when 'property_manager' then perm in (
       'vehicle_registry.view', 'vehicle_registry.edit',
-      'setup.view', 'setup.edit', 'apartment_mgmt.view'
+      'apartment_mgmt.view', 'apartment_mgmt.edit'
     )
     when 'accounts_manager' then perm in (
       'accounts.view', 'accounts.edit', 'apartment_mgmt.view'

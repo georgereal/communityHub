@@ -33,6 +33,9 @@ import { initOperations } from './operations.js';
 import { openTransitionWizard } from './unitTransitions.js';
 import { initParkingOps, renderParkingViolations, refreshParkingUi } from './parkingOps.js';
 import { initPortfolio, renderPortfolioRollup } from './portfolio.js';
+import { initDashboard, renderDashboard } from './dashboard.js';
+import { renderApartmentModulePanel, renderUserModulePanel, saveUserModuleOverridesFromPanel } from './moduleAccessAdmin.js';
+import { renderPageAccessAdmin, renderUserPageAccessPanel, saveUserPageOverridesFromPanel } from './pageAccessAdmin.js';
 import { initGeneralLedger, renderGeneralLedger } from './generalLedger.js';
 import { initEmailOutbox, renderEmailOutbox } from './emailOutbox.js';
 import {
@@ -51,6 +54,7 @@ import {
 import {
     DEFAULT_ROUTE,
     getDefaultRoute,
+    findFirstAllowedRoute,
     applyNavPermissions,
     findPage,
     initNavInteraction,
@@ -144,11 +148,21 @@ const applyAuthToUI = async (session) => {
   const profile = await getProfile(user.id);
   console.log('Profile:', profile);
   const name = profile?.full_name || user.user_metadata?.full_name || profile?.email || user.email || 'User';
-  const role = profile?.role || 'resident_viewer';
-  portalState.auth = { id: user.id, email: user.email || profile?.email || '', name, role };
+  let role = profile?.role || 'resident_viewer';
+  let effectiveRoleKey = v1RoleToV2Key(role);
+  const aptId = portalState.access?.activeApartmentId;
+  if (supabase && aptId && !isPlaceholderApartmentId(aptId)) {
+    const assignments = await loadUserRoleAssignments(user.id);
+    const aptAssignment = assignments.find((a) => a.apartment_id === aptId);
+    if (aptAssignment?.role_key) {
+      effectiveRoleKey = aptAssignment.role_key;
+      role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+    }
+  }
+  portalState.auth = { id: user.id, email: user.email || profile?.email || '', name, role, effectiveRoleKey };
 
   const initials = (name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
-  const roleLabel = formatRoleLabel(role);
+  const roleLabel = formatRoleLabel(effectiveRoleKey || role);
   const topbarInitialsNode = document.getElementById('topbar-user-initials');
   const topbarNameNode = document.getElementById('topbar-user-name');
   const topbarRoleNode = document.getElementById('topbar-user-role');
@@ -164,17 +178,20 @@ const applyAuthToUI = async (session) => {
   if (sidebarRole) sidebarRole.textContent = roleLabel;
 
   portalState.authPermissions = null;
-  const aptId = portalState.access?.activeApartmentId;
   if (aptId && supabase && !isPlaceholderApartmentId(aptId)) {
     console.log('Refreshing permissions for:', aptId);
     await refreshAuthPermissions(aptId);
+    try {
+      const { loadUserPageAccess } = await import('./pageAccess.js');
+      await loadUserPageAccess(aptId, user.id, effectiveRoleKey);
+    } catch { /* tables may not exist yet */ }
   } else {
     portalState.authPermissions = permissionsFromV1Role(role);
   }
 
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
-  if (manageBtn) manageBtn.style.display = can('rbac.view') || can('setup.view') ? 'flex' : 'none';
+  if (manageBtn) manageBtn.style.display = can('rbac.view') ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
 
   // Show "Make me admin" only if no admin exists yet and user isn't admin.
@@ -389,6 +406,13 @@ const setActiveApartment = async (apartmentId) => {
     document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
     renderAccessMappings();
     renderRegistry();
+    if (document.getElementById('view-dashboard')?.classList.contains('active')) {
+      void renderDashboard();
+    }
+    if (document.getElementById('view-setup')?.classList.contains('active')) {
+      void renderApartmentModulePanel();
+    }
+    applyPermissionsToNav(portalState.authPermissions);
     if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
     if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
     if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
@@ -436,14 +460,40 @@ const renderAccessMappings = () => {
   // 2. New User Directory Table (v2)
   const usersListV2 = document.getElementById('access-users-list-v2');
   if (usersListV2) {
-    usersListV2.innerHTML = users.map(u => {
-      const mappedApts = apartments.filter(a => (u.apartment_ids || []).includes(a.id));
-      const aptChips = mappedApts.map(a => `<span class="apt-chip">${a.name}</span>`).join('') || '<span style="color:var(--text-dim); font-style:italic;">No access</span>';
-      const initials = (u.name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
-      const roleLabel = ROLE_OPTIONS.find((r) => r.key === u.role || r.v1Key === u.role)?.label
-        || v2KeyToLabel(u.role) || u.role || 'Viewer';
+    const showUnassigned = document.getElementById('access-users-show-unassigned')?.checked
+      ?? portalState.access.showUnassignedUsers
+      ?? false;
+    portalState.access.showUnassignedUsers = showUnassigned;
 
-      return `
+    const directoryUsers = users.filter((u) => {
+      if (!activeId) return true;
+      const hasSociety = (u.apartment_ids || []).includes(activeId);
+      if (hasSociety) return true;
+      return showUnassigned;
+    });
+
+    const activeAptName = apartments.find((a) => a.id === activeId)?.name || 'this society';
+
+    if (!directoryUsers.length) {
+      usersListV2.innerHTML = `
+        <div class="user-directory-empty" style="padding:2rem; text-align:center; color:var(--text-dim);">
+          <p style="font-weight:600; margin-bottom:0.35rem;">No users found for ${activeAptName}</p>
+          <p style="font-size:0.82rem; max-width:28rem; margin:0 auto;">
+            Residents appear here after they sign up and you assign access, or enable
+            “Include users without society access” to find accounts waiting to be linked.
+          </p>
+        </div>`;
+    } else {
+      usersListV2.innerHTML = directoryUsers.map(u => {
+        const mappedApts = apartments.filter(a => (u.apartment_ids || []).includes(a.id));
+        const aptChips = mappedApts.map(a => `<span class="apt-chip">${a.name}</span>`).join('') || '<span style="color:var(--text-dim); font-style:italic;">No access</span>';
+        const initials = (u.name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+        const aptRole = activeId && u.apartment_roles?.[activeId];
+        const displayRole = aptRole || u.role;
+        const roleLabel = ROLE_OPTIONS.find((r) => r.key === displayRole || r.v1Key === displayRole)?.label
+          || v2KeyToLabel(displayRole) || displayRole || 'Viewer';
+
+        return `
         <div class="user-row">
           <div class="user-info">
             <div class="user-avatar">${initials}</div>
@@ -453,7 +503,7 @@ const renderAccessMappings = () => {
             </div>
           </div>
           <div>
-            <span class="role-badge ${u.role || 'resident_viewer'}">${roleLabel}</span>
+            <span class="role-badge ${displayRole || 'resident_viewer'}">${roleLabel}</span>
           </div>
           <div class="apt-chips">${aptChips}</div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
@@ -463,7 +513,8 @@ const renderAccessMappings = () => {
           </div>
         </div>
       `;
-    }).join('');
+      }).join('');
+    }
   }
 
   // 3. Apartment Portfolio Grid
@@ -624,20 +675,40 @@ const syncAccessFromSupabase = async () => {
     portalState.access.users[0].apartment_ids = (selfMappings || []).map(m => m.apartment_id);
   }
 
-  const { data: profiles } = await supabase.from('profiles').select('id, full_name, email, role').order('full_name');
+  const { data: profiles, error: profilesErr } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, role')
+    .order('full_name');
+  if (profilesErr) console.error('[access] profiles query failed:', profilesErr.message);
+
   if (profiles && profiles.length) {
-    const { data: allMappings } = await supabase.from('user_apartments').select('user_id, apartment_id');
+    const [{ data: allMappings, error: mapErr }, { data: roleRows, error: roleErr }] = await Promise.all([
+      supabase.from('user_apartments').select('user_id, apartment_id'),
+      supabase.from('user_role_assignments').select('user_id, apartment_id, role_key').eq('scope', 'apartment'),
+    ]);
+    if (mapErr) console.error('[access] user_apartments query failed:', mapErr.message);
+    if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
+      console.error('[access] user_role_assignments query failed:', roleErr.message);
+    }
+
     const map = new Map();
     (allMappings || []).forEach(m => {
       if (!map.has(m.user_id)) map.set(m.user_id, []);
       map.get(m.user_id).push(m.apartment_id);
     });
+    const rolesByUser = new Map();
+    (roleRows || []).forEach((r) => {
+      if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
+      rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
+    });
+
     portalState.access.users = profiles.map(p => ({
       id: p.id,
       name: p.full_name || p.email || p.id,
       email: p.email || '',
       role: p.role || 'resident_viewer',
-      apartment_ids: map.get(p.id) || []
+      apartment_ids: map.get(p.id) || [],
+      apartment_roles: rolesByUser.get(p.id) || {},
     }));
 
     if (!portalState.access.activeUserId || !portalState.access.users.some(u => u.id === portalState.access.activeUserId)) {
@@ -746,9 +817,13 @@ let routingGuard = false;
 window.switchView = (v) => {
   if (routingGuard) return;
   const route = resolveRoute(v, portalState.auth?.role);
-  const fallback = getDefaultRoute(portalState.auth?.role);
+  const fallback = findFirstAllowedRoute(portalState.auth?.role);
   if (!routeIsAllowed(route, !supabase)) {
-    if (route === fallback) return;
+    if (route === fallback) {
+      console.warn('[nav] Blocked route matches fallback — no accessible page:', route);
+      alert('You do not have permission to access this page.');
+      return;
+    }
     routingGuard = true;
     alert('You do not have permission to access this page.');
     routingGuard = false;
@@ -815,6 +890,8 @@ window.switchView = (v) => {
   }
   if (page.view === 'portfolio') void renderPortfolioRollup();
   if (page.view === 'email') renderEmailOutbox();
+  if (page.view === 'access-control') void renderPageAccessAdmin();
+  if (page.view === 'dashboard') void renderDashboard();
   if (page.view === 'invoices') window.switchInvoiceSubView(page.subview || 'list');
   if (page.view === 'registry') {
     renderRegistry();
@@ -827,6 +904,7 @@ window.switchView = (v) => {
     document.getElementById('setup-bike').value = portalState.community.defaults.bikes;
     renderAccessMappings();
     void renderResidentLinksAdmin();
+    void renderApartmentModulePanel();
     switchSetupSubView(page.subview || 'society');
   }
   if (page.view === 'apartment') renderResidents();
@@ -1341,6 +1419,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     Array.from(aptSelect.options).forEach(opt => {
       opt.selected = (user?.apartment_ids || []).includes(opt.value);
     });
+    const refreshUserModules = () => {
+      const apartment_ids = Array.from(aptSelect.selectedOptions).map(o => o.value);
+      void renderUserModulePanel(userId, apartment_ids);
+      void renderUserPageAccessPanel(userId, apartment_ids);
+    };
+    aptSelect.onchange = refreshUserModules;
+    document.getElementById('access-user-role-v2').onchange = refreshUserModules;
+    refreshUserModules();
     document.getElementById('user-access-modal').classList.add('active');
   };
   window.closeUserModal = () => document.getElementById('user-access-modal').classList.remove('active');
@@ -1376,11 +1462,23 @@ document.addEventListener('DOMContentLoaded', async () => {
           roleKey: role,
           apartmentIds: apartment_ids,
           previousAssignments,
+          managedApartmentIds: (portalState.access?.apartments || []).map((a) => a.id),
         });
+        await saveUserModuleOverridesFromPanel(prof.id, apartment_ids);
+        await saveUserPageOverridesFromPanel(prof.id, apartment_ids);
       } catch (err) {
         return alert(err?.message || 'Could not save user access.');
       }
       await syncAccessFromSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      if (sess?.session?.user?.id === prof.id) {
+        portalState.authPermissions = null;
+        await applyAuthToUI(sess.session);
+        const currentRoute = window.location.hash.slice(1);
+        if (currentRoute && !routeIsAllowed(currentRoute, !supabase)) {
+          window.switchView(findFirstAllowedRoute(portalState.auth?.role));
+        }
+      }
     } else {
       const user = activeUserIdForEdit 
         ? portalState.access.users.find(u => u.id === activeUserIdForEdit)
@@ -1425,8 +1523,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.deleteUser = async (userId) => {
     if (!confirm('Revoke all access for this user?')) return;
     if (supabase) {
-      await supabase.from('user_apartments').delete().eq('user_id', userId);
-      // We don't delete the profile, just their access mappings.
+      const scopeIds = (portalState.access?.apartments || []).map((a) => a.id);
+      for (const aid of scopeIds) {
+        await supabase.from('user_apartments').delete().eq('user_id', userId).eq('apartment_id', aid);
+        await supabase
+          .from('user_role_assignments')
+          .delete()
+          .eq('user_id', userId)
+          .eq('scope', 'apartment')
+          .eq('apartment_id', aid);
+      }
+      // We don't delete the profile, just their access mappings for societies you manage.
       await syncAccessFromSupabase();
     } else {
       portalState.access.users = portalState.access.users.filter(u => u.id !== userId);
@@ -1497,8 +1604,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (manageBtn) manageBtn.onclick = () => {
     hideUserMenu();
     window.switchView('admin-settings');
-    setTimeout(() => document.getElementById('access-users-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    setTimeout(() => document.getElementById('access-users-list-v2')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
+
+  document.getElementById('access-users-show-unassigned')?.addEventListener('change', () => renderAccessMappings());
 
   const resRefresh = document.getElementById('resident-refresh-btn');
   if (resRefresh) resRefresh.onclick = () => renderResidents();
@@ -1571,6 +1680,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initOperations();
   initParkingOps();
   initPortfolio();
+  initDashboard();
+  document.addEventListener('module-access-loaded', () => {
+    applyPermissionsToNav(portalState.authPermissions);
+  });
   initGeneralLedger();
   window.renderLedgerSyncPanel = renderLedgerSyncPanel;
   initEmailOutbox();

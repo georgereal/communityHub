@@ -29,6 +29,9 @@ export const switchSetupSubView = (id = 'society') => {
     if (view === 'vendors') renderVendorsAdmin();
     if (view === 'subcats') renderSubCatsAdmin();
     if (view === 'staff') renderStaffAdmin();
+    if (view === 'society') {
+        import('./moduleAccessAdmin.js').then((m) => m.renderApartmentModulePanel());
+    }
     if (view === 'sync') {
         renderSyncAdmin();
     } else {

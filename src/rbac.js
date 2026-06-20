@@ -3,6 +3,7 @@
  */
 import { portalState, supabase } from './store.js';
 import { pageIsVisible, findPage } from './navigation.js';
+import { isModuleEnabled } from './moduleAccess.js';
 import { logActivity } from './activityAudit.js';
 
 export const ROLE_OPTIONS = [
@@ -24,7 +25,6 @@ const V1_PERMISSION_MATRIX = {
     ],
     property_manager: [
         'vehicle_registry.view', 'vehicle_registry.edit',
-        'setup.view', 'setup.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
         'portal.view', 'security.view',
     ],
@@ -93,9 +93,10 @@ export function hasClientPermission(perm, perms = resolveEffectivePermissions())
 export function routeIsAllowed(route, offline = !supabase) {
     const meta = findPage(route);
     if (!meta) return false;
+    if (!isModuleEnabled(meta.module.id)) return false;
     const perms = resolveEffectivePermissions();
-    if (offline) return pageIsVisible(meta.page, new Set(perms), true);
-    return pageIsVisible(meta.page, new Set(perms), false);
+    if (offline) return pageIsVisible(meta.page, new Set(perms), true, meta.module.id);
+    return pageIsVisible(meta.page, new Set(perms), false, meta.module.id);
 }
 
 export async function refreshAuthPermissions(apartmentId) {
@@ -103,8 +104,7 @@ export async function refreshAuthPermissions(apartmentId) {
     try {
         const perms = await fetchEffectivePermissions(apartmentId);
         if (perms?.length) {
-            // Union with v1 profile role so a profiles.role upgrade isn't blocked by stale v2 assignments.
-            portalState.authPermissions = Array.from(new Set([...v1Fallback, ...perms]));
+            portalState.authPermissions = perms;
             return portalState.authPermissions;
         }
     } catch { /* ignore */ }
@@ -131,9 +131,20 @@ export function primaryRoleFromAssignments(assignments = []) {
     return assignments[0].role_key;
 }
 
-export async function saveUserAccess({ userId, name, email, roleKey, apartmentIds, previousAssignments = [] }) {
+export async function saveUserAccess({
+    userId,
+    name,
+    email,
+    roleKey,
+    apartmentIds,
+    previousAssignments = [],
+    managedApartmentIds = null,
+}) {
     if (!supabase) throw new Error('Supabase is not configured.');
     const v2Role = v1RoleToV2Key(roleKey);
+    const scopeIds = managedApartmentIds?.length
+        ? managedApartmentIds
+        : (portalState.access?.apartments || []).map((a) => a.id);
 
     const { error: profileErr } = await supabase
         .from('profiles')
@@ -141,19 +152,36 @@ export async function saveUserAccess({ userId, name, email, roleKey, apartmentId
         .eq('id', userId);
     if (profileErr) throw new Error(profileErr.message);
 
-    await supabase.from('user_apartments').delete().eq('user_id', userId);
-    for (const aid of apartmentIds) {
-        const { error } = await supabase.from('user_apartments').upsert({ user_id: userId, apartment_id: aid });
-        if (error) throw new Error(error.message);
+    const targetApartmentIds = Array.from(new Set(apartmentIds.filter(Boolean)));
+    for (const aid of scopeIds) {
+        if (targetApartmentIds.includes(aid)) {
+            const { error } = await supabase
+                .from('user_apartments')
+                .upsert({ user_id: userId, apartment_id: aid }, { onConflict: 'user_id,apartment_id' });
+            if (error) throw new Error(error.message);
+        } else {
+            const { error } = await supabase
+                .from('user_apartments')
+                .delete()
+                .eq('user_id', userId)
+                .eq('apartment_id', aid);
+            if (error) throw new Error(error.message);
+        }
     }
 
-    await supabase
-        .from('user_role_assignments')
-        .delete()
-        .eq('user_id', userId)
-        .eq('scope', 'apartment');
+    for (const aid of scopeIds) {
+        const { error: delErr } = await supabase
+            .from('user_role_assignments')
+            .delete()
+            .eq('user_id', userId)
+            .eq('scope', 'apartment')
+            .eq('apartment_id', aid);
+        if (delErr && !/user_role_assignments/i.test(delErr.message)) {
+            throw new Error(delErr.message);
+        }
+    }
 
-    for (const aid of apartmentIds) {
+    for (const aid of targetApartmentIds) {
         const { error } = await supabase.from('user_role_assignments').insert({
             user_id: userId,
             role_key: v2Role,

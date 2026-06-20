@@ -2,6 +2,10 @@
  * App navigation: modules, pages, routing, and permission gating
  */
 
+import { isModuleEnabled } from './moduleAccess.js';
+import { portalState } from './store.js';
+import { pageAccessBlocksRoute, pageAccessGrantsRoute } from './pageAccessResolve.js';
+
 const OPERATIONS_ROUTES = [
     'ops-helpdesk', 'ops-transitions', 'ops-notices', 'ops-assets',
     'ops-amenities', 'ops-visitors', 'ops-payroll',
@@ -12,6 +16,22 @@ const TREASURY_ROUTES = [
 ];
 
 export const NAV_MODULES = [
+    {
+        id: 'home',
+        label: 'Home',
+        icon: 'fa-house',
+        pages: [
+            {
+                route: 'dashboard',
+                label: 'Dashboard',
+                icon: 'fa-gauge-high',
+                view: 'dashboard',
+                permission: 'vehicle_registry.view',
+                altPermissions: ['apartment_mgmt.view', 'accounts.view', 'security.view', 'setup.view'],
+                legacy: ['home'],
+            },
+        ],
+    },
     {
         id: 'portal',
         label: 'Resident Portal',
@@ -277,13 +297,20 @@ export const NAV_MODULES = [
         icon: 'fa-gear',
         pages: [
             {
+                route: 'admin-access',
+                label: 'Roles & Pages',
+                icon: 'fa-user-lock',
+                view: 'access-control',
+                permission: 'rbac.edit',
+            },
+            {
                 route: 'admin-society',
                 label: 'Society Profile',
                 icon: 'fa-building-user',
                 view: 'setup',
                 subview: 'society',
-                permission: 'setup.view',
-                altPermissions: ['rbac.view', 'system.apartments.manage'],
+                permission: 'rbac.view',
+                altPermissions: ['setup.edit'],
                 legacy: ['admin-settings', 'setup'],
             },
             {
@@ -292,7 +319,7 @@ export const NAV_MODULES = [
                 icon: 'fa-building-columns',
                 view: 'setup',
                 subview: 'bank',
-                permission: 'setup.view',
+                permission: 'setup.edit',
             },
             {
                 route: 'admin-vendors',
@@ -300,7 +327,7 @@ export const NAV_MODULES = [
                 icon: 'fa-truck-field',
                 view: 'setup',
                 subview: 'vendors',
-                permission: 'setup.view',
+                permission: 'setup.edit',
             },
             {
                 route: 'admin-subcats',
@@ -308,7 +335,7 @@ export const NAV_MODULES = [
                 icon: 'fa-tags',
                 view: 'setup',
                 subview: 'subcats',
-                permission: 'setup.view',
+                permission: 'setup.edit',
             },
             {
                 route: 'admin-staff',
@@ -316,7 +343,7 @@ export const NAV_MODULES = [
                 icon: 'fa-users-gear',
                 view: 'setup',
                 subview: 'staff',
-                permission: 'setup.view',
+                permission: 'setup.edit',
             },
             {
                 route: 'admin-sync',
@@ -331,8 +358,8 @@ export const NAV_MODULES = [
                 label: 'Portfolio Rollup',
                 icon: 'fa-layer-group',
                 view: 'portfolio',
-                permission: 'setup.view',
-                altPermissions: ['rbac.view'],
+                permission: 'rbac.view',
+                altPermissions: ['setup.edit'],
             },
             {
                 route: 'admin-email',
@@ -345,15 +372,68 @@ export const NAV_MODULES = [
     },
 ];
 
-export const DEFAULT_ROUTE = 'property-vehicles';
+export function buildPageCatalog() {
+    return NAV_MODULES.flatMap((mod) =>
+        mod.pages.map((page) => ({
+            route: page.route,
+            label: page.label,
+            moduleId: mod.id,
+            moduleLabel: mod.label,
+            moduleIcon: mod.icon,
+            permission: page.permission,
+            altPermissions: page.altPermissions || [],
+            hideFromNav: Boolean(page.hideFromNav),
+        })),
+    );
+}
+
+export function pageCatalogByModule(includeHidden = true) {
+    const groups = new Map();
+    buildPageCatalog().forEach((entry) => {
+        if (!includeHidden && entry.hideFromNav) return;
+        if (!groups.has(entry.moduleId)) {
+            groups.set(entry.moduleId, {
+                moduleId: entry.moduleId,
+                moduleLabel: entry.moduleLabel,
+                moduleIcon: entry.moduleIcon,
+                pages: [],
+            });
+        }
+        groups.get(entry.moduleId).pages.push(entry);
+    });
+    return Array.from(groups.values());
+}
+
+export function pageAllowedByPermissions(page, permSet) {
+    const set = permSet instanceof Set ? permSet : new Set(permSet || []);
+    if (!set.size) return false;
+    if (set.has(page.permission)) return true;
+    return (page.altPermissions || []).some((p) => set.has(p));
+}
+
+export function findCatalogPage(route) {
+    return buildPageCatalog().find((p) => p.route === route) || null;
+}
+
+export const DEFAULT_ROUTE = 'dashboard';
 export const PORTAL_DEFAULT_ROUTE = 'portal-home';
 export const SECURITY_DEFAULT_ROUTE = 'security-gate';
 
-export const getDefaultRoute = (role) => {
+export const getDefaultRoute = (role) => findFirstAllowedRoute(role);
+
+export function findFirstAllowedRoute(role = portalState.auth?.role) {
     if (role === 'resident_viewer') return PORTAL_DEFAULT_ROUTE;
     if (role === 'security') return SECURITY_DEFAULT_ROUTE;
+    const perms = portalState.authPermissions?.length
+        ? new Set(portalState.authPermissions)
+        : null;
+    for (const mod of NAV_MODULES) {
+        for (const page of mod.pages) {
+            if (pageIsVisible(page, perms, false, mod.id)) return page.route;
+        }
+    }
     return DEFAULT_ROUTE;
-};
+}
 
 const legacyMap = new Map();
 NAV_MODULES.forEach((mod) => {
@@ -378,11 +458,15 @@ export const findPage = (route) => {
     return null;
 };
 
-export const pageIsVisible = (page, permSet, offline = false) => {
+export const pageIsVisible = (page, permSet, offline = false, navModuleId = null) => {
+    if (navModuleId && !isModuleEnabled(navModuleId)) return false;
+    if (pageAccessBlocksRoute(page.route)) return false;
+    if (pageAccessGrantsRoute(page.route)) return true;
     if (offline && page.permission === 'vehicle_registry.view') return true;
-    if (!permSet?.size) return true;
-    if (permSet.has(page.permission)) return true;
-    return (page.altPermissions || []).some((p) => permSet.has(p));
+    const set = permSet instanceof Set ? permSet : (permSet ? new Set(permSet) : null);
+    if (!set?.size) return true;
+    if (set.has(page.permission)) return true;
+    return (page.altPermissions || []).some((p) => set.has(p));
 };
 
 const getModuleNavEntries = (mod) => {
@@ -407,14 +491,15 @@ const navEntryIsActive = (entry, route) => {
 };
 
 const navEntryIsVisible = (entry, mod, permSet, offline) => {
+    if (!isModuleEnabled(mod.id)) return false;
     if (entry.tabbed) {
         return entry.routes.some((r) => {
             const page = mod.pages.find((p) => p.route === r);
-            return page && pageIsVisible(page, permSet, offline);
+            return page && pageIsVisible(page, permSet, offline, mod.id);
         });
     }
     const page = mod.pages.find((p) => p.route === entry.route);
-    return page && pageIsVisible(page, permSet, offline);
+    return page && pageIsVisible(page, permSet, offline, mod.id);
 };
 
 const syncModuleExpansion = (route) => {
@@ -439,7 +524,7 @@ export const applyNavPermissions = (permSet, offline = false) => {
         if (!modEl) return;
 
         if (mod.tabbed) {
-            const show = mod.pages.some((page) => pageIsVisible(page, permSet, offline));
+            const show = mod.pages.some((page) => pageIsVisible(page, permSet, offline, mod.id));
             modEl.style.display = show ? 'block' : 'none';
             return;
         }

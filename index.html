@@ -63,9 +63,9 @@
               </select>
             </div>
             <nav class="topbar-breadcrumb" aria-label="Current page">
-              <span id="topbar-nav-module">Property</span>
+              <span id="topbar-nav-module">Home</span>
               <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-              <span id="topbar-nav-page">Parking & Vehicles</span>
+              <span id="topbar-nav-page">Dashboard</span>
             </nav>
           </div>
         </div>
@@ -90,8 +90,13 @@
         </div>
       </div>
 
+      <!-- VIEW: DASHBOARD -->
+      <section id="view-dashboard" class="content-view active">
+        <div id="dashboard-root" class="dashboard"></div>
+      </section>
+
       <!-- VIEW: REGISTRY -->
-      <section id="view-registry" class="content-view active">
+      <section id="view-registry" class="content-view">
         <header class="registry-page-header">
           <div class="header-title registry-page-header__title">
             <h2 id="complex-title" class="page-title">Parking & Vehicles</h2>
@@ -1148,6 +1153,11 @@
         </div>
       </section>
 
+      <!-- VIEW: ROLES & PAGE ACCESS -->
+      <section id="view-access-control" class="content-view">
+        <div style="padding: 1.6rem;" id="page-access-admin-host"></div>
+      </section>
+
       <!-- VIEW: PORTFOLIO ROLLUP -->
       <section id="view-portfolio" class="content-view">
         <header>
@@ -1246,11 +1256,21 @@
           </div>
         </div>
 
+        <div class="module-access-card">
+          <h3 class="module-access-card__title">Enabled modules</h3>
+          <p class="module-access-card__desc">Control which sections appear in the menu for non-admin users in this society.</p>
+          <div id="apartment-module-settings"></div>
+        </div>
+
         <div style="margin-top: 2.5rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
             <div>
               <h3 style="font-size:1.1rem; font-weight:900; color:var(--text-main); letter-spacing:-0.02em;">User Access Directory</h3>
               <p style="font-size:0.8rem; color:var(--text-dim); font-weight:500;">Manage system users and their apartment-level permissions.</p>
+              <label style="display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.5rem; font-size:0.78rem; color:var(--text-dim); cursor:pointer;">
+                <input type="checkbox" id="access-users-show-unassigned" style="accent-color:var(--primary);">
+                Include users without society access
+              </label>
             </div>
             <button class="btn btn-primary" onclick="window.openUserModal()"><i class="fa-solid fa-user-plus"></i> <span>Assign Access</span></button>
           </div>
@@ -2360,7 +2380,7 @@
 
   <!-- USER ACCESS MODAL -->
   <div class="modal-backdrop" id="user-access-modal">
-    <div class="modal-content" style="max-width: 480px;">
+    <div class="modal-content" style="max-width: 560px; max-height: 90vh; overflow: auto;">
       <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1.5rem;">
         <div>
           <h2 style="font-size: 1.25rem; font-weight: 900; letter-spacing: -0.02em;">Assign User Access</h2>
@@ -2385,6 +2405,8 @@
           <select id="access-user-apartments-v2" multiple style="width:100%; min-height:120px; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:600;"></select>
           <p style="font-size:0.65rem; color:var(--text-dim); margin-top:0.4rem;">Hold Ctrl/Cmd to select multiple apartments.</p>
         </div>
+        <div id="user-module-access-panel" hidden></div>
+        <div id="user-page-access-panel" hidden></div>
       </div>
       <div style="margin-top: 2rem; display: flex; gap: 0.75rem;">
         <button class="btn btn-outline" style="flex: 1; padding: 0.7rem;" onclick="window.closeUserModal()">Cancel</button>

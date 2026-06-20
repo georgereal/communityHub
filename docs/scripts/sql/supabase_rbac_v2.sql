@@ -199,9 +199,8 @@ on conflict do nothing;
 insert into public.role_permissions (role_key, permission_key) values
   ('property_manager','vehicle_registry.view'),
   ('property_manager','vehicle_registry.edit'),
-  ('property_manager','setup.view'),
-  ('property_manager','setup.edit'),
   ('property_manager','apartment_mgmt.view'),
+  ('property_manager','apartment_mgmt.edit'),
   ('accounts_manager','accounts.view'),
   ('accounts_manager','accounts.edit'),
   ('accounts_manager','apartment_mgmt.view'),
