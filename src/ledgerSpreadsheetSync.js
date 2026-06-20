@@ -51,6 +51,7 @@ import {
     setRunLogSink,
     syncLog,
     syncLogBounds,
+    teardownSyncLogDrawer,
 } from './ledgerSyncLog.js';
 import { renderSyncRunAuditPanel } from './ledgerSyncRunAudit.js';
 import {
@@ -472,6 +473,26 @@ function getBackgroundSyncReadiness(s, providerOverride) {
 }
 
 const ADMIN_SYNC_TAB_KEY = 'admin_sync_provider_tab';
+const ADMIN_SYNC_VIEW_KEY = 'admin_sync_view';
+
+function getAdminSyncView() {
+    const v = sessionStorage.getItem(ADMIN_SYNC_VIEW_KEY);
+    return v === 'history' ? 'history' : 'setup';
+}
+
+function renderAdminViewTabs(activeView) {
+    return `
+      <nav class="sync-admin-view-tabs" role="tablist" aria-label="Spreadsheet sync sections">
+        <button type="button" class="sync-admin-view-tab${activeView === 'setup' ? ' sync-admin-view-tab--active' : ''}"
+          data-sync-view="setup" role="tab" aria-selected="${activeView === 'setup'}">
+          <i class="fa-solid fa-sliders"></i> Setup
+        </button>
+        <button type="button" class="sync-admin-view-tab${activeView === 'history' ? ' sync-admin-view-tab--active' : ''}"
+          data-sync-view="history" role="tab" aria-selected="${activeView === 'history'}">
+          <i class="fa-solid fa-clock-rotate-left"></i> Run history
+        </button>
+      </nav>`;
+}
 
 function getAdminWizardProvider(s) {
     const tab = sessionStorage.getItem(ADMIN_SYNC_TAB_KEY);
@@ -511,11 +532,6 @@ function buildAdminWizardSteps(provider, s, microsoft, google) {
             id: 'schedule',
             label: 'Auto-sync',
             done: scheduleOk && (provider !== 'MICROSOFT' || bgOk),
-        },
-        {
-            id: 'history',
-            label: 'Run history',
-            done: !!(s?.last_sync_run_id || s?.last_synced_at),
         },
     ];
 }
@@ -581,6 +597,8 @@ export function renderAdminSyncPanel() {
     const openIdx = firstOpenStepIndex(steps);
     const isMicrosoft = wizardProvider === 'MICROSOFT';
     const connMeta = getMyOAuthConnectionMeta(wizardProvider);
+    const adminView = getAdminSyncView();
+    const isSetupView = adminView === 'setup';
 
     const stepStatus = (idx) => {
         if (steps[idx].done) return 'done';
@@ -695,10 +713,6 @@ export function renderAdminSyncPanel() {
       </div>
     `;
 
-    const historyStepBody = `
-      <div id="admin-sync-run-audit"></div>
-    `;
-
     const scheduleStepBody = isMicrosoft ? `
       <p class="sync-step-hint">Vercel cron calls <code>/api/sync</code> on the deployed site. Use <strong>Sync now (browser)</strong> for live logs, or <strong>Test server sync</strong> to exercise the same API path as cron.</p>
       <div class="sync-schedule-row">
@@ -744,6 +758,7 @@ export function renderAdminSyncPanel() {
           <i class="fa-solid fa-clock-rotate-left"></i> Rollback last sync
         </button>
         ${s?.last_synced_at ? `<span class="gate-wizard__hint">Last run: ${new Date(s.last_synced_at).toLocaleString('en-IN')}</span>` : ''}
+        ${renderSyncLogToolbarButton()}
       </div>
     ` : `
       <p class="sync-step-hint">Choose how often the server should pull/push changes. Cron runs once daily on Vercel.</p>
@@ -772,6 +787,7 @@ export function renderAdminSyncPanel() {
         <button type="button" class="btn btn-outline btn--small" id="admin-rollback-sync" title="Undo the last completed sync in the database">
           <i class="fa-solid fa-clock-rotate-left"></i> Rollback last sync
         </button>
+        ${renderSyncLogToolbarButton()}
       </div>
     `;
 
@@ -780,8 +796,11 @@ export function renderAdminSyncPanel() {
         <header class="sync-wizard-header">
           <div>
             <h3 class="sync-wizard-header__title">Spreadsheet sync</h3>
-            <p class="sync-wizard-header__desc">Set up ${isMicrosoft ? 'Microsoft Excel Online' : 'Google Sheets'} in six steps — OAuth, workbook, column mapping, connect, schedule, and run history.</p>
+            <p class="sync-wizard-header__desc">${isSetupView
+        ? `Set up ${isMicrosoft ? 'Microsoft Excel Online' : 'Google Sheets'} in five steps — OAuth, workbook, column mapping, connect, and schedule.`
+        : 'Audit trail for browser sync, server API, and Vercel cron — status and row-by-row logs per run.'}</p>
           </div>
+          ${isSetupView ? `
           <div class="sync-provider-tabs" role="tablist" aria-label="Spreadsheet provider">
             <button type="button" class="sync-provider-tab${isMicrosoft ? ' sync-provider-tab--active' : ''}" data-sync-provider="MICROSOFT" role="tab" aria-selected="${isMicrosoft}">
               <i class="fa-brands fa-microsoft"></i> Excel Online
@@ -789,9 +808,12 @@ export function renderAdminSyncPanel() {
             <button type="button" class="sync-provider-tab${!isMicrosoft ? ' sync-provider-tab--active' : ''}" data-sync-provider="GOOGLE" role="tab" aria-selected="${!isMicrosoft}">
               <i class="fa-brands fa-google"></i> Google Sheets
             </button>
-          </div>
+          </div>` : ''}
         </header>
 
+        ${renderAdminViewTabs(adminView)}
+
+        ${isSetupView ? `
         ${renderWizardRail(steps, openIdx)}
 
         <div class="sync-wizard-steps">
@@ -800,10 +822,28 @@ export function renderAdminSyncPanel() {
           ${renderSyncStepCard(3, 'Column mapping', stepStatus(2), mappingStepBody, { open: openIdx === 2, id: 'admin-sync-step-mapping' })}
           ${renderSyncStepCard(4, 'Connect & sync', stepStatus(3), connectStepBody, { open: openIdx === 3, id: 'admin-sync-step-connect' })}
           ${renderSyncStepCard(5, 'Auto-sync schedule', stepStatus(4), scheduleStepBody, { open: openIdx === 4, id: 'admin-sync-step-schedule' })}
-          ${renderSyncStepCard(6, 'Sync run history', stepStatus(5), historyStepBody, { open: openIdx === 5, id: 'admin-sync-step-history' })}
         </div>
+        <div id="admin-sync-log-host" class="admin-sync-log-host"></div>
+        ` : `
+        <div class="sync-history-page">
+          <div id="admin-sync-run-audit"></div>
+        </div>`}
       </div>
     `;
+
+    el.querySelectorAll('[data-sync-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const view = btn.dataset.syncView;
+            if (!view || view === getAdminSyncView()) return;
+            sessionStorage.setItem(ADMIN_SYNC_VIEW_KEY, view);
+            renderAdminSyncPanel();
+        });
+    });
+
+    if (!isSetupView) {
+        void renderSyncRunAuditPanel('admin-sync-run-audit');
+        return;
+    }
 
     // Provider tabs
     el.querySelectorAll('[data-sync-provider]').forEach((btn) => {
@@ -956,8 +996,7 @@ export function renderAdminSyncPanel() {
         }).catch((err) => {
             isSyncing = false;
             syncLog('error', err.message);
-            openSyncLogDrawer();
-            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
+            alert(`${err.message}\n\nClick Sync log in step 4 or 5 to view row-by-row details.`);
         });
     });
 
@@ -971,7 +1010,6 @@ export function renderAdminSyncPanel() {
             if (!token) throw new Error('Sign in again to run the server sync.');
 
             syncLog('info', 'Manual server sync requested', { apartment_id });
-            openSyncLogDrawer();
 
             const res = await fetch('/api/sync', {
                 method: 'POST',
@@ -989,11 +1027,10 @@ export function renderAdminSyncPanel() {
             renderAdminSyncPanel();
 
             const r = json.result || {};
-            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.\n\nSee step 6 — Sync run history for the full audit log.`);
+            alert(`Server sync complete.\n\nPulled: ${r.imported ?? 0} new, ${r.updated ?? 0} updated.\nPushed: ${r.pushed ?? 0} new.\n\nOpen the Run history tab for the full audit log.`);
         }).catch((err) => {
             syncLog('error', err.message);
-            openSyncLogDrawer();
-            alert(err.message || String(err));
+            alert(`${err.message || String(err)}\n\nOpen the Run history tab for persisted server run logs.`);
         });
     });
 
@@ -1014,7 +1051,12 @@ export function renderAdminSyncPanel() {
         void refreshMappingUI();
     }
 
-    void renderSyncRunAuditPanel('admin-sync-run-audit');
+    teardownSyncLogDrawer();
+    document.getElementById('sync-log-root')?.remove();
+    mountSyncLogDrawer();
+    el.querySelectorAll('[data-sync-log-open]').forEach((btn) => {
+        btn.addEventListener('click', () => openSyncLogDrawer());
+    });
 }
 
 async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings = null }) {
@@ -1273,9 +1315,7 @@ async function runSync() {
     setRunLogSink((level, message, detail) => journal.log(level, message, detail));
 
     try {
-    mountSyncLogDrawer();
     clearSyncLog();
-    openSyncLogDrawer();
     syncLog('info', 'Sync started (browser)', { provider: activeProvider, apartment_id, runId: journal.runId });
     console.log(`Sync starting for Apartment: ${apartment_id}`);
 
@@ -1917,7 +1957,7 @@ function buildSyncOpsHtml(prefix, s, hasUrl, canConnect, options = {}) {
           <button type="button" class="btn btn-primary btn--small" id="${id('run')}" ${hasUrl ? '' : 'disabled'}>
             <i class="fa-solid fa-rotate"></i> Sync now
           </button>
-          ${renderSyncLogToolbarButton()}
+          ${isAdmin ? renderSyncLogToolbarButton() : ''}
         </div>
 
         <div id="${id('sheet-list')}" class="ledger-sync-sheet-list"></div>
@@ -2017,7 +2057,6 @@ Continue?`;
 
 function wireSyncOps(rootEl, prefix, onRefresh) {
     syncOpsCtx = { prefix, onRefresh };
-    mountSyncLogDrawer();
     const id = (n) => opsId(prefix, n);
     const q = (n) => rootEl.querySelector(`#${id(n)}`);
 
@@ -2090,16 +2129,11 @@ function wireSyncOps(rootEl, prefix, onRefresh) {
         }).catch((err) => {
             isSyncing = false;
             syncLog('error', err.message);
-            openSyncLogDrawer();
-            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
+            alert(`${err.message}\n\nUse Administration → Spreadsheet sync → Sync log for details.`);
         });
     });
 
     q('template')?.addEventListener('click', () => void downloadLedgerTemplate());
-
-    rootEl.querySelectorAll('[data-sync-log-open]').forEach((btn) => {
-        btn.addEventListener('click', () => openSyncLogDrawer());
-    });
 
     rootEl.querySelectorAll('.resolve-conflict').forEach((btn) => {
         btn.addEventListener('click', async () => {
@@ -2173,8 +2207,7 @@ export function renderLedgerSyncPanel() {
         }).catch((err) => {
             isSyncing = false;
             syncLog('error', err.message);
-            openSyncLogDrawer();
-            alert(`${err.message}\n\nOpen the Sync log panel at the bottom of the screen for row-by-row details.`);
+            alert(err.message);
         });
     });
 
@@ -2202,7 +2235,8 @@ async function downloadLedgerTemplate() {
 
 export async function initLedgerSpreadsheetSync() {
     initActiveProvider();
-    mountSyncLogDrawer();
+    teardownSyncLogDrawer();
+    document.getElementById('sync-log-root')?.remove();
     console.log('initLedgerSpreadsheetSync: checking for redirect...');
     try {
         const handled = await handleOAuthRedirectIfPresent();

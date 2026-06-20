@@ -1,4 +1,6 @@
-/** In-app sync trace — row-by-row pull/import/push decisions (GCP-style console). */
+/** In-app sync trace — admin-only modal (opened on demand). */
+
+const ADMIN_LOG_HOST_ID = 'admin-sync-log-host';
 
 const LEVEL_CLASS = {
     error: 'sync-log-drawer__level--error',
@@ -13,7 +15,7 @@ const LEVEL_CLASS = {
 function store() {
     const g = typeof globalThis !== 'undefined' ? globalThis : {};
     if (!g.__ledgerSyncLog) {
-        g.__ledgerSyncLog = { entries: [], listeners: new Set(), runSink: null, mounted: false };
+        g.__ledgerSyncLog = { entries: [], listeners: new Set(), runSink: null };
     }
     return g.__ledgerSyncLog;
 }
@@ -27,12 +29,12 @@ export function getRunLogSink() {
     return store().runSink;
 }
 
-function drawerEl() {
-    return document.getElementById('sync-log-drawer');
+function modalEl() {
+    return document.getElementById('sync-log-modal');
 }
 
-function fabEl() {
-    return document.getElementById('sync-log-drawer-fab');
+function drawerEl() {
+    return document.getElementById('sync-log-drawer');
 }
 
 function rowsEl() {
@@ -104,7 +106,7 @@ function renderDrawerRows() {
     const entries = store().entries;
 
     if (!entries.length) {
-        tbody.innerHTML = '<tr class="sync-log-drawer__empty"><td colspan="3">No sync activity yet — click <strong>Sync now</strong> (step 4 or Finances) to see row-by-row output.</td></tr>';
+        tbody.innerHTML = '<tr class="sync-log-drawer__empty"><td colspan="3">No sync activity yet — run <strong>Sync now</strong> in step 4, then reopen this log.</td></tr>';
     } else {
         tbody.innerHTML = entries.map((entry) => {
             const time = new Date(entry.t).toLocaleTimeString('en-IN', { hour12: false });
@@ -128,34 +130,26 @@ function renderDrawerRows() {
     if (body) body.scrollTop = body.scrollHeight;
 }
 
-function setDrawerState(state) {
-    const drawer = drawerEl();
-    const fab = fabEl();
-    if (!drawer) return;
-    drawer.dataset.state = state;
-    drawer.hidden = state === 'closed';
-    if (fab) fab.hidden = state !== 'closed';
+function setModalOpen(open) {
+    const modal = modalEl();
+    if (!modal) return;
+    modal.hidden = !open;
+    document.body.classList.toggle('sync-log-modal-open', open);
 }
 
 export function openSyncLogDrawer() {
-    mountSyncLogDrawer();
-    setDrawerState('open');
+    if (!mountSyncLogDrawer()) return;
+    setModalOpen(true);
     renderDrawerRows();
 }
 
 export function closeSyncLogDrawer() {
-    setDrawerState('closed');
+    setModalOpen(false);
 }
 
 export function toggleSyncLogDrawer() {
-    const drawer = drawerEl();
-    if (!drawer || drawer.hidden || drawer.dataset.state === 'closed') {
-        openSyncLogDrawer();
-    } else if (drawer.dataset.state === 'minimized') {
-        setDrawerState('open');
-    } else {
-        setDrawerState('minimized');
-    }
+    if (modalEl()?.hidden !== false) openSyncLogDrawer();
+    else closeSyncLogDrawer();
 }
 
 function wireDrawerResize() {
@@ -169,7 +163,7 @@ function wireDrawerResize() {
 
     const onMove = (e) => {
         const dy = startY - e.clientY;
-        const next = Math.min(Math.max(startH + dy, 120), window.innerHeight * 0.85);
+        const next = Math.min(Math.max(startH + dy, 160), window.innerHeight * 0.75);
         drawer.style.setProperty('--sync-log-drawer-height', `${next}px`);
     };
 
@@ -187,72 +181,62 @@ function wireDrawerResize() {
     });
 }
 
-/** Mount fixed bottom log viewer on document.body (survives panel re-renders). */
+/** Remove legacy global drawer (older builds mounted on body). */
+export function teardownSyncLogDrawer() {
+    closeSyncLogDrawer();
+    document.getElementById('sync-log-root')?.remove();
+    document.body.classList.remove('sync-log-modal-open');
+}
+
+/** Mount modal log viewer inside admin sync panel only. Returns false if host missing. */
 export function mountSyncLogDrawer() {
-    const s = store();
-    if (s.mounted && drawerEl()) {
+    const host = document.getElementById(ADMIN_LOG_HOST_ID);
+    if (!host) return false;
+
+    if (host.querySelector('#sync-log-modal')) {
         renderDrawerRows();
-        return;
+        return true;
     }
 
-    document.getElementById('sync-log-root')?.remove();
-    s.mounted = true;
-
-    const root = document.createElement('div');
-    root.id = 'sync-log-root';
-    root.innerHTML = `
-      <div id="sync-log-drawer" class="sync-log-drawer" data-state="closed" hidden aria-live="polite">
-        <div class="sync-log-drawer__resize" title="Drag to resize"></div>
-        <header class="sync-log-drawer__header">
-          <div class="sync-log-drawer__header-left">
-            <i class="fa-solid fa-terminal" aria-hidden="true"></i>
-            <span class="sync-log-drawer__title">Sync log</span>
-            <span id="sync-log-drawer-count" class="sync-log-drawer__count">0 entries</span>
+    host.innerHTML = `
+      <div id="sync-log-modal" class="sync-log-modal" hidden aria-live="polite" role="dialog" aria-labelledby="sync-log-drawer-title">
+        <button type="button" class="sync-log-modal__backdrop" data-sync-log-close aria-label="Close sync log"></button>
+        <div id="sync-log-drawer" class="sync-log-drawer">
+          <div class="sync-log-drawer__resize" title="Drag to resize"></div>
+          <header class="sync-log-drawer__header">
+            <div class="sync-log-drawer__header-left">
+              <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+              <span class="sync-log-drawer__title" id="sync-log-drawer-title">Sync log</span>
+              <span id="sync-log-drawer-count" class="sync-log-drawer__count">0 entries</span>
+            </div>
+            <div class="sync-log-drawer__actions">
+              <button type="button" class="sync-log-drawer__btn" id="sync-log-drawer-clear" title="Clear log">Clear</button>
+              <button type="button" class="sync-log-drawer__btn sync-log-drawer__btn--icon" id="sync-log-drawer-close" title="Close" aria-label="Close">×</button>
+            </div>
+          </header>
+          <div class="sync-log-drawer__body">
+            <table class="sync-log-drawer__table">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Severity</th>
+                  <th scope="col">Message</th>
+                </tr>
+              </thead>
+              <tbody id="sync-log-drawer-rows"></tbody>
+            </table>
           </div>
-          <div class="sync-log-drawer__actions">
-            <button type="button" class="sync-log-drawer__btn" id="sync-log-drawer-clear" title="Clear log">Clear</button>
-            <button type="button" class="sync-log-drawer__btn" id="sync-log-drawer-minimize" title="Minimize">Minimize</button>
-            <button type="button" class="sync-log-drawer__btn sync-log-drawer__btn--icon" id="sync-log-drawer-close" title="Close" aria-label="Close">×</button>
-          </div>
-        </header>
-        <div class="sync-log-drawer__body">
-          <table class="sync-log-drawer__table">
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">Severity</th>
-                <th scope="col">Message</th>
-              </tr>
-            </thead>
-            <tbody id="sync-log-drawer-rows"></tbody>
-          </table>
         </div>
-      </div>
-      <button type="button" id="sync-log-drawer-fab" class="sync-log-drawer-fab" hidden title="Open sync log">
-        <i class="fa-solid fa-terminal"></i>
-        <span>Sync log</span>
-      </button>`;
-    document.body.appendChild(root);
+      </div>`;
 
-    document.getElementById('sync-log-drawer-clear')?.addEventListener('click', () => clearSyncLog());
-    document.getElementById('sync-log-drawer-close')?.addEventListener('click', () => closeSyncLogDrawer());
-    document.getElementById('sync-log-drawer-minimize')?.addEventListener('click', () => {
-        const drawer = drawerEl();
-        if (drawer?.dataset.state === 'minimized') setDrawerState('open');
-        else setDrawerState('minimized');
-    });
-    fabEl()?.addEventListener('click', () => openSyncLogDrawer());
+    host.querySelector('#sync-log-drawer-clear')?.addEventListener('click', () => clearSyncLog());
+    host.querySelector('#sync-log-drawer-close')?.addEventListener('click', () => closeSyncLogDrawer());
+    host.querySelector('[data-sync-log-close]')?.addEventListener('click', () => closeSyncLogDrawer());
 
     wireDrawerResize();
     onSyncLog(renderDrawerRows);
     renderDrawerRows();
-}
-
-/** @deprecated Use mountSyncLogDrawer — kept for callers that pass a container id. */
-export function renderSyncLogHtml() {
-    mountSyncLogDrawer();
-    openSyncLogDrawer();
-    return onSyncLog(renderDrawerRows);
+    return true;
 }
 
 export function syncLogBounds(bounds, warnings = []) {

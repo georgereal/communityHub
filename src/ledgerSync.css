@@ -1698,6 +1698,47 @@
   line-height: 1.45;
 }
 
+.sync-admin-view-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  padding: 0.25rem;
+  background: var(--surface-alt);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.sync-admin-view-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sync-admin-view-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sync-admin-view-tab--active {
+  background: var(--surface);
+  color: var(--text-main);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.sync-history-page {
+  margin-top: 0.25rem;
+}
+
 .sync-provider-tabs {
   display: inline-flex;
   padding: 0.2rem;
@@ -2118,32 +2159,48 @@
   margin-top: 0.15rem;
 }
 
-/* ── Sync log drawer (GCP Console-style) ── */
-.sync-log-drawer {
-  --sync-log-drawer-height: min(42vh, 420px);
+/* ── Sync log modal (admin only, on demand) ── */
+.admin-sync-log-host {
+  display: contents;
+}
+
+.sync-log-modal {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 10050;
   display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.sync-log-modal[hidden] {
+  display: none !important;
+}
+
+.sync-log-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+}
+
+.sync-log-drawer {
+  --sync-log-drawer-height: min(52vh, 480px);
+  position: relative;
+  z-index: 1;
+  display: flex;
   flex-direction: column;
+  width: min(960px, 100%);
   height: var(--sync-log-drawer-height);
-  max-height: 85vh;
+  max-height: calc(100vh - 2rem);
   background: #0b1220;
-  border-top: 1px solid #334155;
+  border: 1px solid #334155;
+  border-radius: 10px 10px 0 0;
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.sync-log-drawer[data-state="minimized"] {
-  height: auto;
-  max-height: none;
-}
-
-.sync-log-drawer[data-state="minimized"] .sync-log-drawer__body,
-.sync-log-drawer[data-state="minimized"] .sync-log-drawer__resize {
-  display: none;
+  overflow: hidden;
 }
 
 .sync-log-drawer__resize {
@@ -2291,30 +2348,8 @@
   font-family: system-ui, sans-serif;
 }
 
-.sync-log-drawer-fab {
-  position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 10040;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid #334155;
-  background: #1e293b;
-  color: #e2e8f0;
-  font-size: 0.78rem;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.sync-log-drawer-fab:hover {
-  background: #334155;
-}
-
 .sync-log-open-btn {
-  margin-left: auto;
+  flex-shrink: 0;
 }
 
 @media (max-width: 640px) {
@@ -2328,7 +2363,7 @@
   }
 }
 
-/* ── Sync run audit (admin step 6) ── */
+/* ── Sync run audit (admin Run history tab) ── */
 .sync-run-audit__toolbar {
   display: flex;
   align-items: flex-start;

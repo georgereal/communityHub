@@ -4,6 +4,7 @@
 import { portalState, supabase, pullState } from './store.js';
 import { refreshExpenseReferences } from './finances.js';
 import { renderLedgerSyncPanel, renderAdminSyncPanel } from './ledgerSpreadsheetSync.js';
+import { closeSyncLogDrawer, teardownSyncLogDrawer } from './ledgerSyncLog.js';
 import { withButtonBusy, bindBusyClick } from './buttonBusy.js';
 
 const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
@@ -28,7 +29,11 @@ export const switchSetupSubView = (id = 'society') => {
     if (view === 'vendors') renderVendorsAdmin();
     if (view === 'subcats') renderSubCatsAdmin();
     if (view === 'staff') renderStaffAdmin();
-    if (view === 'sync') renderSyncAdmin();
+    if (view === 'sync') {
+        renderSyncAdmin();
+    } else {
+        teardownSyncLogDrawer();
+    }
 };
 window.switchSetupSubView = switchSetupSubView;
 
