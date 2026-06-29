@@ -678,13 +678,13 @@
       </section>
 
       <!-- VIEW: UNITS -->
-      <section id="view-units" class="content-view">
-        <header>
+      <section id="view-units" class="content-view directory-page">
+        <header class="directory-page__header">
           <div class="header-title">
             <h2>Unit Directory</h2>
             <p>Flat master data — area, slots, owners & tenants (bulk update via Excel)</p>
           </div>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+          <div class="directory-page__actions">
             <button class="btn btn-outline" type="button" id="unit-directory-download">
               <i class="fa-solid fa-download"></i> <span>Download template</span>
             </button>
@@ -694,7 +694,7 @@
             <input type="file" id="unit-directory-xlsx" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
           </div>
         </header>
-        <div class="invoice-toolbar">
+        <div class="invoice-toolbar directory-page__toolbar">
           <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
             <i class="fa-solid fa-magnifying-glass"></i>
             <input type="search" id="unit-directory-filter" placeholder="Search flat, block, BHK…" autocomplete="off" />
@@ -711,13 +711,13 @@
       </section>
 
       <!-- VIEW: APARTMENT MANAGEMENT -->
-      <section id="view-apartment" class="content-view">
-        <header>
+      <section id="view-apartment" class="content-view directory-page">
+        <header class="directory-page__header">
           <div class="header-title">
             <h2>Residents</h2>
             <p>Owner and tenant directory — used for billing emails and notices</p>
           </div>
-          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+          <div class="directory-page__actions">
             <button class="btn btn-outline" id="resident-export-btn"><i class="fa-solid fa-download"></i> <span>Export</span></button>
             <button class="btn btn-outline" id="resident-import-btn"><i class="fa-solid fa-file-import"></i> <span>Import file</span></button>
             <button class="btn btn-outline" id="resident-refresh-btn"><i class="fa-solid fa-rotate"></i> <span>Refresh</span></button>
@@ -725,8 +725,8 @@
             <input type="file" id="resident-import-file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
           </div>
         </header>
-        <div style="padding: 0 1.6rem 0.75rem;">
-          <div class="invoice-toolbar resident-toolbar">
+        <div class="directory-page__toolbar-wrap">
+          <div class="invoice-toolbar resident-toolbar directory-page__toolbar">
             <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
               <i class="fa-solid fa-magnifying-glass"></i>
               <input type="search" id="resident-filter" placeholder="Search name, flat, phone, email…" autocomplete="off" />
@@ -757,7 +757,7 @@
             </label>
           </div>
         </div>
-        <div style="padding: 0 1.6rem 1.6rem;">
+        <div class="directory-page__body">
           <div id="resident-items" class="resident-items-panel"></div>
         </div>
       </section>

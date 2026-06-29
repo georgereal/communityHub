@@ -1992,6 +1992,37 @@ header {
   gap: 1rem;
 }
 
+/* Unit directory + Residents shared page chrome */
+.directory-page__header {
+  padding: 1.15rem 1.6rem 1rem;
+}
+
+.directory-page__actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.directory-page__toolbar-wrap,
+.directory-page__toolbar {
+  padding: 0 1.6rem 0.75rem;
+}
+
+.directory-page__body {
+  padding: 0 1.6rem 1.6rem;
+}
+
+.directory-page .invoice-toolbar {
+  gap: 0.55rem;
+}
+
+.directory-page .search-container {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 420px;
+}
+
 .resident-summary {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
@@ -3758,6 +3789,16 @@ header {
   #resident-items .apt-row > :nth-child(4),
   #resident-items .apt-row > :nth-child(5) {
     display: none !important;
+  }
+
+  .resident-unit-group__summary {
+    flex-wrap: wrap;
+  }
+
+  .resident-unit-group__names {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
   }
 
   /* Reports + Setup: single column */
@@ -8750,6 +8791,319 @@ header {
   .unit-directory-expanded__toolbar .btn {
     width: 100%;
     justify-content: center;
+  }
+}
+
+/* Unit directory + Residents — mobile card layouts */
+@media (max-width: 768px) {
+  .directory-page__header,
+  .directory-page__toolbar-wrap,
+  .directory-page__toolbar,
+  .directory-page__body {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  .directory-page__header {
+    padding-top: 1rem;
+    padding-bottom: 0.65rem;
+  }
+
+  .directory-page__actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .directory-page__actions .btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+    justify-content: center;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .directory-page__actions .btn span {
+    font-size: 0.78rem;
+  }
+
+  .directory-page .invoice-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .directory-page .search-container {
+    max-width: none;
+    width: 100%;
+  }
+
+  .directory-page .invoice-filter-status,
+  .directory-page .resident-primary-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .directory-page .invoice-filter-status select {
+    width: 100%;
+  }
+
+  .directory-page #unit-directory-block-filter,
+  .directory-page #unit-directory-block-filter select {
+    width: 100%;
+  }
+
+  /* --- Unit directory: cards instead of table grid --- */
+  .unit-directory-list {
+    margin: 0 0.85rem 1rem;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
+  .registry-list.unit-directory-list > .registry-header.unit-directory-header {
+    display: none;
+  }
+
+  .unit-directory-group {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 0.55rem;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .unit-directory-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .unit-directory-group__summary {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "flat actions"
+      "meta meta"
+      "status status"
+      "owners owners"
+      "dues dues";
+    gap: 0.35rem 0.5rem;
+    padding: 0.75rem 0.85rem;
+    align-items: start;
+    width: 100%;
+  }
+
+  .unit-directory-group__summary > * {
+    display: block !important;
+    border: none !important;
+    padding: 0 !important;
+    min-width: 0;
+    text-align: left !important;
+  }
+
+  .unit-directory-group__flat {
+    grid-area: flat;
+    font-size: 1.05rem;
+  }
+
+  .unit-directory-group__block,
+  .unit-directory-group__meta {
+    grid-area: meta;
+    display: inline !important;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+
+  .unit-directory-group__block::after {
+    content: ' · ';
+  }
+
+  .unit-directory-group__tenants,
+  .unit-directory-group__vehicles {
+    display: none !important;
+  }
+
+  .unit-directory-group__status {
+    grid-area: status;
+    flex-wrap: wrap;
+  }
+
+  .unit-directory-group__owners {
+    grid-area: owners;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .unit-directory-group__owners::before {
+    content: 'Residents: ';
+    font-weight: 700;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    display: block;
+    margin-bottom: 0.15rem;
+  }
+
+  .unit-directory-group__dues-col {
+    grid-area: dues;
+    text-align: left !important;
+  }
+
+  .unit-directory-group__dues-col::before {
+    content: 'Outstanding dues: ';
+    font-weight: 700;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-right: 0.35rem;
+  }
+
+  .unit-directory-group__actions {
+    grid-area: actions;
+    align-self: start;
+    justify-content: flex-end !important;
+  }
+
+  .unit-directory-group__actions-inner {
+    display: none;
+  }
+
+  .unit-directory-group__chevron {
+    font-size: 0.85rem;
+    padding: 0.35rem;
+  }
+
+  .unit-directory-expanded {
+    padding: 0.65rem 0.85rem 0.85rem;
+  }
+
+  .unit-directory-expanded__stats {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .unit-directory-stat {
+    flex: 1 1 calc(50% - 0.2rem);
+    min-width: 0;
+  }
+
+  /* --- Residents page --- */
+  .resident-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .resident-summary-card {
+    min-height: 3.75rem;
+    padding: 0.55rem 0.65rem;
+  }
+
+  .resident-summary-card__value {
+    font-size: 1.15rem;
+  }
+
+  .resident-summary-legend {
+    display: none;
+  }
+
+  .resident-active-filters {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .resident-active-filters .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .resident-unit-group__summary {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .resident-unit-group__title {
+    flex: 1 1 calc(100% - 2.5rem);
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.45rem;
+  }
+
+  .resident-unit-group__unit {
+    font-size: 1rem;
+  }
+
+  .resident-unit-group__names {
+    flex: 1 1 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.4;
+    font-size: 0.78rem;
+  }
+
+  .resident-unit-group__summary-actions {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .resident-kind-section__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.35rem 0 0;
+  }
+
+  .resident-group-header {
+    display: none;
+  }
+
+  .resident-group-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.3rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+  }
+
+  .resident-group-row .resident-phone,
+  .resident-group-row .resident-email {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    word-break: break-word;
+  }
+
+  .resident-group-row .resident-phone::before,
+  .resident-group-row .resident-email::before {
+    content: attr(data-label) ': ';
+    font-weight: 700;
+    color: var(--text-main);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    display: block;
+    margin-bottom: 0.1rem;
+  }
+
+  .resident-group-row .resident-actions {
+    justify-content: flex-start;
+    margin-top: 0.25rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .resident-unit-group__body {
+    padding: 0.5rem 0.65rem 0.65rem;
   }
 }
 

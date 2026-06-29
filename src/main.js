@@ -1025,8 +1025,8 @@ const renderResidentRow = (r, esc) => {
   return `
     <div class="apt-row resident-group-row" data-resident-id="${r.id}">
       <div class="resident-name">${esc(r.full_name)}${r.is_primary ? ' <span class="resident-primary-badge">Primary</span>' : ''}${residingBadge}</div>
-      <div class="resident-phone">${esc(r.phone || '—')}</div>
-      <div class="resident-email">${esc(r.email || '—')}</div>
+      <div class="resident-phone" data-label="Phone">${esc(r.phone || '—')}</div>
+      <div class="resident-email" data-label="Email">${esc(r.email || '—')}</div>
       <div class="resident-actions">
         <button class="btn btn-outline btn--icon" data-action="portal" title="Portal access"><i class="fa-solid fa-link"></i></button>
         <button class="btn btn-outline btn--icon" data-action="edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
