@@ -1,7 +1,9 @@
 /**
  * Phase 2.1 — Cross-module activity audit trail
+ * Office manager entries enter PENDING review until association office bearers approve.
  */
 import { portalState, supabase } from './store.js';
+import { canReviewAudit, isOfficeManager } from './rbac.js';
 
 const ENTITY_LABELS = {
     INVOICE: 'Invoice',
@@ -10,6 +12,9 @@ const ENTITY_LABELS = {
     ALLOCATION: 'Payment allocation',
     REMINDER: 'Reminder',
     BANK_MATCH: 'Bank reconciliation',
+    VISITOR: 'Visitor',
+    PARKING_VIOLATION: 'Parking violation',
+    PAYMENT_INTENT: 'Payment',
 };
 
 const ACTION_LABELS = {
@@ -26,6 +31,12 @@ const ACTION_LABELS = {
     IGNORE: 'Ignored',
 };
 
+const REVIEW_LABELS = {
+    PENDING: 'Awaiting review',
+    APPROVED: 'Approved',
+    REJECTED: 'Rejected',
+};
+
 const actorLabel = async () => {
     if (portalState.auth?.name) return portalState.auth.name;
     if (portalState.auth?.email) return portalState.auth.email;
@@ -33,6 +44,8 @@ const actorLabel = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     return user?.email || user?.id || 'System';
 };
+
+const reviewStatusForActor = () => (isOfficeManager() ? 'PENDING' : 'APPROVED');
 
 export async function logActivity({
     entityType,
@@ -46,6 +59,7 @@ export async function logActivity({
     if (!supabase || !apartmentId) return null;
 
     const { data: { user } } = await supabase.auth.getUser();
+    const reviewStatus = reviewStatusForActor();
     const row = {
         id: crypto.randomUUID(),
         apartment_id: apartmentId,
@@ -57,21 +71,47 @@ export async function logActivity({
         summary: summary || `${ACTION_LABELS[action] || action} ${ENTITY_LABELS[entityType] || entityType}`,
         old_data: oldData,
         new_data: newData,
+        review_status: reviewStatus,
     };
 
-    const { data, error } = await supabase.from('activity_audit_log').insert(row).select('id').single();
+    const { data, error } = await supabase.from('activity_audit_log').insert(row).select('id, review_status').single();
     if (error) {
         if (/activity_audit_log/i.test(error.message)) {
             console.warn('[audit] activity_audit_log table missing — run supabase_activity_audit_log.sql');
             return null;
         }
+        if (/review_status/i.test(error.message)) {
+            delete row.review_status;
+            const { data: fallback, error: fallbackErr } = await supabase
+                .from('activity_audit_log')
+                .insert(row)
+                .select('id')
+                .single();
+            if (fallbackErr) {
+                console.warn('[audit] log failed:', fallbackErr.message);
+                return null;
+            }
+            return { id: fallback?.id || null, reviewStatus: 'APPROVED' };
+        }
         console.warn('[audit] log failed:', error.message);
         return null;
     }
-    return data?.id || null;
+    return { id: data?.id || null, reviewStatus: data?.review_status || reviewStatus };
 }
 
-export async function fetchActivityLog(apartmentId, { entityType = '', fromDate = '', toDate = '', actor = '', limit = 200 } = {}) {
+/** Message shown after office manager submits an auditable action */
+export function auditSubmitHint(result) {
+    const status = typeof result === 'object' ? result?.reviewStatus : null;
+    if (status === 'PENDING') {
+        return 'Saved — this entry is pending review by an association office bearer before it appears in the official activity log.';
+    }
+    return null;
+}
+
+export async function fetchActivityLog(
+    apartmentId,
+    { entityType = '', fromDate = '', toDate = '', actor = '', reviewStatus = '', limit = 200 } = {},
+) {
     if (!supabase || !apartmentId) return [];
     let q = supabase
         .from('activity_audit_log')
@@ -84,19 +124,81 @@ export async function fetchActivityLog(apartmentId, { entityType = '', fromDate 
     if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
     if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
     if (actor) q = q.ilike('actor_label', `%${actor}%`);
+    if (reviewStatus) {
+        q = q.eq('review_status', reviewStatus);
+    } else if (isOfficeManager()) {
+        q = q.in('review_status', ['APPROVED', 'PENDING']);
+    } else if (!canReviewAudit()) {
+        q = q.eq('review_status', 'APPROVED');
+    }
 
     const { data, error } = await q;
     if (error) {
         if (/activity_audit_log/i.test(error.message)) return [];
+        if (/review_status/i.test(error.message)) {
+            return fetchActivityLogLegacy(apartmentId, { entityType, fromDate, toDate, actor, limit });
+        }
         throw error;
     }
     return data || [];
 }
 
+async function fetchActivityLogLegacy(apartmentId, { entityType, fromDate, toDate, actor, limit }) {
+    let q = supabase
+        .from('activity_audit_log')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+    if (entityType) q = q.eq('entity_type', entityType);
+    if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
+    if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
+    if (actor) q = q.ilike('actor_label', `%${actor}%`);
+    const { data, error } = await q;
+    if (error) return [];
+    return data || [];
+}
+
+export async function fetchPendingAuditEntries(apartmentId, limit = 50) {
+    if (!supabase || !apartmentId || !canReviewAudit()) return [];
+    const { data, error } = await supabase
+        .from('activity_audit_log')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .eq('review_status', 'PENDING')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+    if (error) {
+        if (/review_status/i.test(error.message)) return [];
+        throw error;
+    }
+    return data || [];
+}
+
+export async function reviewAuditEntry(entryId, approved, notes = '') {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!canReviewAudit()) throw new Error('Only association office bearers can review audit entries.');
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+        .from('activity_audit_log')
+        .update({
+            review_status: approved ? 'APPROVED' : 'REJECTED',
+            reviewed_by: user?.id || null,
+            reviewed_at: new Date().toISOString(),
+            review_notes: notes?.trim() || null,
+        })
+        .eq('id', entryId)
+        .eq('review_status', 'PENDING')
+        .select('id, review_status, summary')
+        .single();
+    if (error) throw new Error(error.message);
+    return data;
+}
+
 export async function fetchEntityActivity(entityType, entityId, limit = 20) {
     if (!supabase) return [];
     const apartmentId = portalState.access?.activeApartmentId;
-    const { data, error } = await supabase
+    let q = supabase
         .from('activity_audit_log')
         .select('*')
         .eq('apartment_id', apartmentId)
@@ -104,6 +206,8 @@ export async function fetchEntityActivity(entityType, entityId, limit = 20) {
         .eq('entity_id', String(entityId))
         .order('created_at', { ascending: false })
         .limit(limit);
+    if (!canReviewAudit()) q = q.eq('review_status', 'APPROVED');
+    const { data, error } = await q;
     if (error) return [];
     return data || [];
 }
@@ -113,6 +217,12 @@ const formatWhen = (iso) => {
     return new Date(iso).toLocaleString('en-GB', {
         day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
+};
+
+const reviewBadgeHtml = (status) => {
+    if (!status || status === 'APPROVED') return '';
+    const cls = status === 'PENDING' ? 'activity-review-badge--pending' : 'activity-review-badge--rejected';
+    return `<span class="activity-review-badge ${cls}">${REVIEW_LABELS[status] || status}</span>`;
 };
 
 export const renderActivityLogList = (rows, containerId = 'activity-log-list') => {
@@ -129,8 +239,60 @@ export const renderActivityLogList = (rows, containerId = 'activity-log-list') =
         <div class="activity-log-row__when">${formatWhen(r.created_at)}</div>
         <div><span class="activity-entity-badge">${ENTITY_LABELS[r.entity_type] || r.entity_type}</span></div>
         <div class="activity-log-row__summary"><strong>${r.summary || '—'}</strong>
+          ${reviewBadgeHtml(r.review_status)}
           <span>${ACTION_LABELS[r.action] || r.action} · ${r.actor_label || '—'}</span></div>
       </div>`).join('');
+};
+
+export const renderPendingAuditQueue = async () => {
+    const wrap = document.getElementById('activity-review-queue');
+    const list = document.getElementById('activity-review-list');
+    if (!wrap || !list) return;
+
+    if (!canReviewAudit()) {
+        wrap.style.display = 'none';
+        return;
+    }
+
+    const apartmentId = portalState.access?.activeApartmentId;
+    const pending = await fetchPendingAuditEntries(apartmentId);
+    wrap.style.display = pending.length ? 'block' : 'none';
+
+    if (!pending.length) {
+        list.innerHTML = '';
+        return;
+    }
+
+    list.innerHTML = pending.map((r) => `
+      <div class="apt-row activity-review-row" data-audit-id="${r.id}">
+        <div class="activity-log-row__when">${formatWhen(r.created_at)}</div>
+        <div><span class="activity-entity-badge">${ENTITY_LABELS[r.entity_type] || r.entity_type}</span></div>
+        <div class="activity-log-row__summary">
+          <strong>${r.summary || '—'}</strong>
+          <span>${ACTION_LABELS[r.action] || r.action} · ${r.actor_label || '—'}</span>
+        </div>
+        <div class="activity-review-row__actions">
+          <button type="button" class="btn btn-primary btn--small activity-review-approve" data-id="${r.id}" title="Approve">
+            <i class="fa-solid fa-check"></i> Approve
+          </button>
+          <button type="button" class="btn btn-outline btn--small activity-review-reject" data-id="${r.id}" title="Reject">
+            <i class="fa-solid fa-xmark"></i> Reject
+          </button>
+        </div>
+      </div>`).join('');
+};
+
+const handleReviewAction = async (entryId, approved) => {
+    const notes = approved
+        ? ''
+        : (window.prompt('Reason for rejection (optional):') || '');
+    try {
+        await reviewAuditEntry(entryId, approved, notes);
+        await renderPendingAuditQueue();
+        await renderActivityLogPage();
+    } catch (err) {
+        alert(err?.message || 'Review action failed.');
+    }
 };
 
 export const renderInvoiceActivityHistory = async (invoiceId, containerId = 'invoice-detail-history') => {
@@ -153,6 +315,7 @@ export const renderActivityLogPage = async () => {
     const toDate = document.getElementById('activity-filter-to')?.value || '';
     const actor = (document.getElementById('activity-filter-actor')?.value || '').trim();
 
+    await renderPendingAuditQueue();
     const rows = await fetchActivityLog(apartmentId, { entityType, fromDate, toDate, actor });
     renderActivityLogList(rows);
 };
@@ -165,6 +328,13 @@ export const initActivityAuditUi = () => {
         ['activity-filter-entity', 'activity-filter-from', 'activity-filter-to', 'activity-filter-actor']
             .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
         renderActivityLogPage().catch(() => {});
+    });
+
+    document.getElementById('activity-review-list')?.addEventListener('click', (e) => {
+        const approveBtn = e.target.closest('.activity-review-approve');
+        const rejectBtn = e.target.closest('.activity-review-reject');
+        if (approveBtn) handleReviewAction(approveBtn.dataset.id, true);
+        if (rejectBtn) handleReviewAction(rejectBtn.dataset.id, false);
     });
 };
 

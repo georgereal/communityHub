@@ -3,7 +3,7 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { getGroupById, getUnitIdsForGroup } from './billingGroups.js';
-import { logActivity } from './activityAudit.js';
+import { logActivity, auditSubmitHint } from './activityAudit.js';
 import { getUnitBlock } from './blockFilter.js';
 import { deriveBlockFromFlat } from './parkingImport.js';
 
@@ -316,13 +316,14 @@ export async function saveResident(payload, residentId = null) {
 
     clearResidentsCache();
     await loadResidents(true);
-    await logActivity({
+    const auditResult = await logActivity({
         entityType: 'RESIDENT',
         entityId: residentId || unit_number,
         action: residentId ? 'UPDATE' : 'CREATE',
         summary: `${residentId ? 'Updated' : 'Added'} resident ${full_name} (${unit_number})`,
         newData: row,
     });
+    return auditSubmitHint(auditResult);
 }
 
 export async function deleteResident(id) {

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="stylesheet" href="/src/ledgerSync.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -385,6 +385,18 @@
         </div>
 
         <div id="subview-activity" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div id="activity-review-queue" class="activity-review-queue" style="display:none;">
+            <div class="activity-review-queue__head">
+              <h3><i class="fa-solid fa-clipboard-check"></i> Pending review — office manager entries</h3>
+              <p class="activity-review-queue__hint">Association office bearers must approve these entries before they appear in the official activity log.</p>
+            </div>
+            <div class="registry-list">
+              <div class="registry-header activity-review-header">
+                <span>When</span><span>Type</span><span>Summary</span><span>Actions</span>
+              </div>
+              <div id="activity-review-list"></div>
+            </div>
+          </div>
           <div class="invoice-toolbar activity-log-toolbar">
             <label class="invoice-filter-status">
               <span>Entity</span>

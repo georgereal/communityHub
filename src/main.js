@@ -1414,10 +1414,11 @@ const saveResident = async () => {
     is_residing: document.getElementById('resident-residing').value !== 'false',
   };
   try {
-    await persistResident(payload, editingResidentId);
+    const reviewHint = await persistResident(payload, editingResidentId);
     closeResidentModal();
     renderResidents();
     window.refreshUnitDetailIfOpen?.();
+    if (reviewHint) alert(reviewHint);
   } catch (err) {
     alert(err?.message || 'Could not save resident.');
   }

@@ -7,8 +7,8 @@ import { isModuleEnabled } from './moduleAccess.js';
 import { logActivity } from './activityAudit.js';
 
 export const ROLE_OPTIONS = [
-    { key: 'apartment_admin', v1Key: 'admin', label: 'Apartment Admin' },
-    { key: 'property_manager', v1Key: 'property_manager', label: 'Property Manager' },
+    { key: 'apartment_admin', v1Key: 'admin', label: 'Association Office Bearer' },
+    { key: 'property_manager', v1Key: 'property_manager', label: 'Office Manager' },
     { key: 'accounts_manager', v1Key: 'accounts_manager', label: 'Accounts Manager' },
     { key: 'security', v1Key: 'security', label: 'Security' },
     { key: 'resident_viewer', v1Key: 'resident_viewer', label: 'Resident Viewer' },
@@ -204,4 +204,14 @@ export async function saveUserAccess({
             newData: { role_key: v2Role, apartment_ids: apartmentIds },
         });
     }
+}
+
+/** Office manager role — operational staff whose audit entries require review */
+export function isOfficeManager(roleKey = portalState.auth?.effectiveRoleKey) {
+    return roleKey === 'property_manager';
+}
+
+/** Association office bearers who can approve/reject pending audit entries */
+export function canReviewAudit(roleKey = portalState.auth?.effectiveRoleKey) {
+    return roleKey === 'apartment_admin' || roleKey === 'accounts_manager';
 }

@@ -70,6 +70,7 @@ export const NAV_MODULES = [
             { route: 'ops-amenities' },
             { route: 'ops-visitors' },
             { route: 'ops-payroll' },
+            { route: 'property-activity' },
         ],
         pages: [
             {
@@ -152,6 +153,15 @@ export const NAV_MODULES = [
                 view: 'operations',
                 subview: 'payroll',
                 permission: 'accounts.edit',
+            },
+            {
+                route: 'property-activity',
+                label: 'Activity Log',
+                icon: 'fa-clock-rotate-left',
+                view: 'accounts',
+                subview: 'activity',
+                permission: 'apartment_mgmt.view',
+                altPermissions: ['accounts.view', 'rbac.view'],
             },
         ],
     },
@@ -267,7 +277,7 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'activity',
                 permission: 'accounts.view',
-                altPermissions: ['rbac.view'],
+                altPermissions: ['rbac.view', 'apartment_mgmt.view'],
                 hideFromNav: true,
             },
             {
