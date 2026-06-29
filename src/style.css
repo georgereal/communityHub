@@ -602,7 +602,109 @@ body:not(.nav-expanded) .nav-modules {
   background: #fef2f2;
 }
 
+.topbar-notifications-btn {
+  position: relative;
+}
+
+.topbar-notif-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.notifications-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  width: min(360px, calc(100vw - 2rem));
+  max-height: min(420px, 70vh);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notifications-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+
+.notifications-panel__list {
+  overflow-y: auto;
+  max-height: 340px;
+}
+
+.notifications-panel__empty {
+  padding: 1.25rem 0.85rem;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.notifications-panel__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+}
+
+.notifications-panel__item:hover {
+  background: var(--sidebar-hover);
+}
+
+.notifications-panel__item--unread {
+  background: #f0f9ff;
+}
+
+.notifications-panel__item--unread:hover {
+  background: #e0f2fe;
+}
+
+.notifications-panel__item-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-main);
+}
+
+.notifications-panel__item-body {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.notifications-panel__item-when {
+  font-size: 0.68rem;
+  color: var(--text-placeholder);
+}
+
 .topbar-right {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.5rem;

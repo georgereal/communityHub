@@ -71,6 +71,17 @@
           </div>
         </div>
         <div class="topbar-right">
+          <button id="topbar-notifications-btn" class="topbar-icon-btn topbar-notifications-btn" type="button" aria-label="Notifications" aria-expanded="false" title="Notifications" style="display:none;">
+            <i class="fa-solid fa-bell" aria-hidden="true"></i>
+            <span class="topbar-notif-badge" id="topbar-notif-badge" hidden>0</span>
+          </button>
+          <div id="topbar-notifications-panel" class="notifications-panel" hidden>
+            <div class="notifications-panel__head">
+              <strong>Notifications</strong>
+              <button type="button" class="btn btn-outline btn--small" id="topbar-notifications-mark-all">Mark all read</button>
+            </div>
+            <div id="topbar-notifications-list" class="notifications-panel__list"></div>
+          </div>
           <button id="topbar-logout-btn" class="topbar-icon-btn" type="button" aria-label="Sign out" title="Sign out">
             <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
           </button>

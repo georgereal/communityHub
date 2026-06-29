@@ -3,7 +3,8 @@
  */
 import './dashboard.css';
 import { portalState } from './store.js';
-import { hasClientPermission } from './rbac.js';
+import { hasClientPermission, canReviewAudit } from './rbac.js';
+import { fetchPendingAuditEntries } from './activityAudit.js';
 import { isModuleEnabled } from './moduleAccess.js';
 import { invoiceBalance, invoiceStatus } from './maintenanceBilling.js';
 import { countPendingVehicleAudit } from './vehicleAudit.js';
@@ -146,6 +147,20 @@ async function buildActionItems(parking, billing, ops, syncInfo) {
             detail: 'Review the parking change log and reconcile with Excel.',
             route: 'property-vehicles',
         });
+    }
+
+    if (canReviewAudit()) {
+        const aptId = portalState.access?.activeApartmentId;
+        const pendingAudit = aptId ? (await fetchPendingAuditEntries(aptId, 100)).length : 0;
+        if (pendingAudit > 0) {
+            items.push({
+                severity: 'warn',
+                icon: 'fa-clipboard-check',
+                title: `${pendingAudit} audit entry(ies) awaiting review`,
+                detail: 'Office manager submissions need association office bearer approval.',
+                route: 'property-activity',
+            });
+        }
     }
 
     if ((parking.overlimitCars + parking.overlimitBikes) > 0 && can('vehicle_registry.view')) {

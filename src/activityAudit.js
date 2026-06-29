@@ -4,6 +4,7 @@
  */
 import { portalState, supabase } from './store.js';
 import { canReviewAudit, isOfficeManager } from './rbac.js';
+import { getReviewerUserIds, queueStaffNotifications, refreshStaffNotifications } from './staffNotifications.js';
 
 const ENTITY_LABELS = {
     INVOICE: 'Invoice',
@@ -46,6 +47,38 @@ const actorLabel = async () => {
 };
 
 const reviewStatusForActor = () => (isOfficeManager() ? 'PENDING' : 'APPROVED');
+
+async function notifyReviewersOfPendingEntry({ entryId, summary, actorLabel, apartmentId, actorId }) {
+    const reviewerIds = await getReviewerUserIds(apartmentId, actorId);
+    if (!reviewerIds.length) return 0;
+    const count = await queueStaffNotifications(reviewerIds.map((user_id) => ({
+        apartment_id: apartmentId,
+        user_id,
+        activity_audit_log_id: entryId,
+        title: 'Audit entry awaiting review',
+        body: `${actorLabel || 'Office manager'} submitted: ${summary || 'New activity entry'}. Review and approve or reject.`,
+    })));
+    if (count) refreshStaffNotifications().catch(() => {});
+    return count;
+}
+
+async function notifyActorOfReviewOutcome({ entry, approved, reviewerLabel, notes }) {
+    if (!entry?.actor_id || entry.actor_id === portalState.auth?.id) return 0;
+    const apartmentId = entry.apartment_id || portalState.access?.activeApartmentId;
+    const statusWord = approved ? 'approved' : 'rejected';
+    const body = approved
+        ? `${reviewerLabel || 'An office bearer'} approved your entry: ${entry.summary || '—'}.`
+        : `${reviewerLabel || 'An office bearer'} rejected your entry: ${entry.summary || '—'}${notes ? ` — ${notes}` : ''}.`;
+    const count = await queueStaffNotifications([{
+        apartment_id: apartmentId,
+        user_id: entry.actor_id,
+        activity_audit_log_id: entry.id,
+        title: `Audit entry ${statusWord}`,
+        body,
+    }]);
+    if (count) refreshStaffNotifications().catch(() => {});
+    return count;
+}
 
 export async function logActivity({
     entityType,
@@ -96,14 +129,24 @@ export async function logActivity({
         console.warn('[audit] log failed:', error.message);
         return null;
     }
-    return { id: data?.id || null, reviewStatus: data?.review_status || reviewStatus };
+    const result = { id: data?.id || null, reviewStatus: data?.review_status || reviewStatus };
+    if (result.reviewStatus === 'PENDING' && result.id) {
+        await notifyReviewersOfPendingEntry({
+            entryId: result.id,
+            summary: row.summary,
+            actorLabel: row.actor_label,
+            apartmentId,
+            actorId: user?.id,
+        });
+    }
+    return result;
 }
 
 /** Message shown after office manager submits an auditable action */
 export function auditSubmitHint(result) {
     const status = typeof result === 'object' ? result?.reviewStatus : null;
     if (status === 'PENDING') {
-        return 'Saved — this entry is pending review by an association office bearer before it appears in the official activity log.';
+        return 'Saved — submitted for review. Association office bearers have been notified.';
     }
     return null;
 }
@@ -179,6 +222,7 @@ export async function reviewAuditEntry(entryId, approved, notes = '') {
     if (!supabase) throw new Error('Supabase is not configured.');
     if (!canReviewAudit()) throw new Error('Only association office bearers can review audit entries.');
     const { data: { user } } = await supabase.auth.getUser();
+    const reviewerLabel = portalState.auth?.name || portalState.auth?.email || 'Reviewer';
     const { data, error } = await supabase
         .from('activity_audit_log')
         .update({
@@ -189,9 +233,10 @@ export async function reviewAuditEntry(entryId, approved, notes = '') {
         })
         .eq('id', entryId)
         .eq('review_status', 'PENDING')
-        .select('id, review_status, summary')
+        .select('id, review_status, summary, actor_id, actor_label, entity_type, action, apartment_id')
         .single();
     if (error) throw new Error(error.message);
+    await notifyActorOfReviewOutcome({ entry: data, approved, reviewerLabel, notes });
     return data;
 }
 
@@ -290,6 +335,7 @@ const handleReviewAction = async (entryId, approved) => {
         await reviewAuditEntry(entryId, approved, notes);
         await renderPendingAuditQueue();
         await renderActivityLogPage();
+        refreshStaffNotifications().catch(() => {});
     } catch (err) {
         alert(err?.message || 'Review action failed.');
     }

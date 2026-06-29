@@ -25,6 +25,7 @@ import { initUnitDirectory, renderUnitDirectory, deleteFlatWithResidents, flatDe
 import { initResidentImport } from './residentImport.js';
 import { initSetupAdmin, switchSetupSubView } from './admin.js';
 import { initActivityAuditUi, renderActivityLogPage } from './activityAudit.js';
+import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
 import { initBankReconciliationUi, renderBankReconciliation } from './bankReconciliation.js';
 import { initResidentPortal, renderPortalSubview } from './residentPortal.js';
 import { initSecurityPortal, renderSecuritySubview } from './securityPortal.js';
@@ -211,6 +212,7 @@ const applyAuthToUIInner = async (session) => {
   const manageBtn = document.getElementById('user-menu-manage');
   if (manageBtn) manageBtn.style.display = can('rbac.view') ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
+  refreshStaffNotifications().catch(() => {});
 
   // Show "Make me admin" only if no admin exists yet and user isn't admin.
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
@@ -439,6 +441,7 @@ const setActiveApartment = async (apartmentId) => {
       void renderApartmentModulePanel();
     }
     applyPermissionsToNav(portalState.authPermissions);
+    refreshStaffNotifications().catch(() => {});
     if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
     if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
     if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
@@ -1999,6 +2002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMaintenanceBilling();
   initBulkCollectionImport();
   initActivityAuditUi();
+  initStaffNotificationsUi();
   initBankReconciliationUi();
   initUnitDirectory();
   initResidentImport();

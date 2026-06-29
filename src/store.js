@@ -68,7 +68,8 @@ export let portalState = {
         user: {},
     },
     activeUnitId: null,
-    editingTxnId: null
+    editingTxnId: null,
+    notifications: { items: [], unreadCount: 0 },
 };
 
 /**
