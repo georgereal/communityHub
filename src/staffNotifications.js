@@ -1,11 +1,15 @@
 /**
- * Staff in-app notifications — bell UI + user_notifications queue
+ * Staff in-app notifications — bell popover + optional toast on new alerts
  */
 import { portalState, supabase } from './store.js';
 import { routeIsAllowed } from './rbac.js';
 
 const REVIEWER_V2 = new Set(['apartment_admin', 'accounts_manager']);
 const REVIEWER_V1 = new Set(['admin', 'accounts_manager']);
+
+let panelOpen = false;
+let toastTimer = null;
+let lastUnreadCount = null;
 
 const formatWhen = (iso) => {
     if (!iso) return '';
@@ -160,18 +164,29 @@ const navigateForNotification = async (note) => {
     }
 };
 
-export async function refreshStaffNotifications() {
-    const btn = document.getElementById('topbar-notifications-btn');
-    if (!staffNotificationsEnabled()) {
-        if (btn) btn.style.display = 'none';
-        return;
+function hideToast() {
+    const toast = document.getElementById('notification-toast');
+    if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
     }
-    if (btn) btn.style.display = '';
+    if (toast) toast.hidden = true;
+}
 
-    const notes = await fetchStaffNotifications({ limit: 40 });
-    portalState.notifications = { items: notes, unreadCount: notes.filter((n) => !n.read_at).length };
-    renderNotificationBadge();
-    renderNotificationPanel();
+function showNotificationToast(note) {
+    if (!note || panelOpen) return;
+    const toast = document.getElementById('notification-toast');
+    if (!toast) return;
+
+    toast.innerHTML = `
+      <span class="notification-toast__title">${esc(note.title)}</span>
+      <span class="notification-toast__body">${esc(note.body)}</span>`;
+    toast.dataset.notifId = note.id || '';
+    toast.dataset.auditId = note.activity_audit_log_id || '';
+    toast.hidden = false;
+
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 6000);
 }
 
 function renderNotificationBadge() {
@@ -187,9 +202,8 @@ function renderNotificationBadge() {
 }
 
 function renderNotificationPanel() {
-    const panel = document.getElementById('topbar-notifications-panel');
     const list = document.getElementById('topbar-notifications-list');
-    if (!panel || !list) return;
+    if (!list || !panelOpen) return;
 
     const notes = portalState.notifications?.items || [];
     if (!notes.length) {
@@ -210,8 +224,38 @@ function setPanelOpen(open) {
     const panel = document.getElementById('topbar-notifications-panel');
     const btn = document.getElementById('topbar-notifications-btn');
     if (!panel) return;
+
+    panelOpen = open;
     panel.hidden = !open;
     if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+    if (open) {
+        hideToast();
+        renderNotificationPanel();
+    }
+}
+
+export async function refreshStaffNotifications({ showToast = true } = {}) {
+    const anchor = document.getElementById('topbar-notifications-anchor');
+    if (!staffNotificationsEnabled()) {
+        if (anchor) anchor.hidden = true;
+        setPanelOpen(false);
+        return;
+    }
+    if (anchor) anchor.hidden = false;
+
+    const notes = await fetchStaffNotifications({ limit: 40 });
+    const unreadCount = notes.filter((n) => !n.read_at).length;
+    const latestUnread = notes.find((n) => !n.read_at) || null;
+
+    if (showToast && lastUnreadCount !== null && unreadCount > lastUnreadCount && latestUnread) {
+        showNotificationToast(latestUnread);
+    }
+    lastUnreadCount = unreadCount;
+
+    portalState.notifications = { items: notes, unreadCount };
+    renderNotificationBadge();
+    if (panelOpen) renderNotificationPanel();
 }
 
 export function initStaffNotificationsUi() {
@@ -219,18 +263,25 @@ export function initStaffNotificationsUi() {
     const panel = document.getElementById('topbar-notifications-panel');
     const list = document.getElementById('topbar-notifications-list');
     const markAll = document.getElementById('topbar-notifications-mark-all');
+    const toast = document.getElementById('notification-toast');
 
     if (!btn || !panel) return;
 
+    setPanelOpen(false);
+
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        setPanelOpen(panel.hidden);
-        if (!panel.hidden) refreshStaffNotifications().catch(() => {});
+        const opening = !panelOpen;
+        setPanelOpen(opening);
+        if (opening) {
+            refreshStaffNotifications({ showToast: false }).catch(() => {});
+        }
     });
 
-    markAll?.addEventListener('click', () => {
+    markAll?.addEventListener('click', (e) => {
+        e.stopPropagation();
         markAllNotificationsRead()
-            .then(() => refreshStaffNotifications())
+            .then(() => refreshStaffNotifications({ showToast: false }))
             .catch((err) => alert(err?.message || 'Could not mark notifications read.'));
     });
 
@@ -239,16 +290,29 @@ export function initStaffNotificationsUi() {
         if (!item) return;
         const id = item.dataset.notifId;
         markNotificationRead(id)
-            .then(() => refreshStaffNotifications())
+            .then(() => refreshStaffNotifications({ showToast: false }))
             .then(() => navigateForNotification({ activity_audit_log_id: item.dataset.auditId || null }))
             .catch((err) => alert(err?.message || 'Could not open notification.'));
         setPanelOpen(false);
     });
 
+    toast?.addEventListener('click', () => {
+        hideToast();
+        setPanelOpen(true);
+        refreshStaffNotifications({ showToast: false }).catch(() => {});
+    });
+
     document.addEventListener('click', (e) => {
-        if (panel.hidden) return;
+        if (!panelOpen) return;
         if (e.target.closest('#topbar-notifications-panel') || e.target.closest('#topbar-notifications-btn')) return;
         setPanelOpen(false);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (panelOpen) setPanelOpen(false);
+            hideToast();
+        }
     });
 }
 
