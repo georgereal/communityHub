@@ -2,7 +2,7 @@
  * Sentry Portal Modular Entry (Vercel Edition)
  * Primary Boot Sequence & View Coordination
  */
-import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig, isPlaceholderApartmentId } from './store.js';
+import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig, isPlaceholderApartmentId, withTimeout } from './store.js';
 import {
   processAnalytics,
   renderRegistry,
@@ -17,10 +17,12 @@ import {
   refreshCapacityUnitList,
 } from './registry.js';
 import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports } from './finances.js';
-import { renderLedgerSyncPanel, initLedgerSpreadsheetSync } from './ledgerSpreadsheetSync.js';
+import { renderLedgerSyncPanel } from './ledgerSpreadsheetSync.js';
 import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
 import { initMaintenanceBilling } from './maintenanceBilling.js';
-import { initUnitDirectory, renderUnitDirectory } from './unitDirectory.js';
+import { initBulkCollectionImport } from './bulkCollectionImport.js';
+import { initUnitDirectory, renderUnitDirectory, deleteFlatWithResidents, flatDeleteConfirmMessage } from './unitDirectory.js';
+import { initResidentImport } from './residentImport.js';
 import { initSetupAdmin, switchSetupSubView } from './admin.js';
 import { initActivityAuditUi, renderActivityLogPage } from './activityAudit.js';
 import { initBankReconciliationUi, renderBankReconciliation } from './bankReconciliation.js';
@@ -84,6 +86,16 @@ import {
   getResidents,
   dedupeResidents,
   groupResidentsByUnit,
+  splitResidentsByKind,
+  classifyUnitOccupancy,
+  computeResidentPageSummary,
+  occupancySummaryLabel,
+  occupancySummaryBadge,
+  occupancySummaryHint,
+  unitMissingOwners,
+  normUnit,
+  filterResidentsByOptions,
+  unitPassesOccupancyFilter,
 } from './residents.js';
 import {
   getBlockOptions,
@@ -109,22 +121,28 @@ const hideAuth = () => {
   if (err) { err.style.display = 'none'; err.textContent = ''; }
 };
 
+let authApplyInflight = null;
+let bootAuthHandled = false;
+
 const getProfile = async (userId) => {
   if (!supabase || !userId) return null;
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, role, email, last_apartment_id')
-      .eq('id', userId)
-      .maybeSingle();
-    
+    const { data, error } = await withTimeout(
+      supabase
+        .from('profiles')
+        .select('id, full_name, role, email, last_apartment_id')
+        .eq('id', userId)
+        .maybeSingle(),
+      15000,
+      'Profile load',
+    );
     if (error) {
       console.warn('[Auth] Profile fetch error:', error.message);
       return null;
     }
     return data;
   } catch (err) {
-    console.error('[Auth] Profile fetch failed:', err.message);
+    console.warn('[Auth] Profile fetch failed:', err.message);
     return null;
   }
 };
@@ -140,7 +158,7 @@ const applyPermissionsToNav = (perms) => {
     applyNavPermissions(new Set(perms || resolveEffectivePermissions()), !supabase);
 };
 
-const applyAuthToUI = async (session) => {
+const applyAuthToUIInner = async (session) => {
   const user = session?.user;
   if (!user) return;
   console.group('[Auth] Applying to UI');
@@ -205,6 +223,14 @@ const applyAuthToUI = async (session) => {
     }
   }
   console.groupEnd();
+};
+
+const applyAuthToUI = (session) => {
+  if (authApplyInflight) return authApplyInflight;
+  authApplyInflight = applyAuthToUIInner(session).finally(() => {
+    authApplyInflight = null;
+  });
+  return authApplyInflight;
 };
 
 const isSignedIn = () => Boolean(portalState.auth?.id);
@@ -552,28 +578,46 @@ const resolveActiveApartment = async (uid, profile) => {
   if (!supabase || !uid) return { apartments: [], activeId: null };
   console.group('[Access] Resolving active apartment');
 
-  const [{ data: apartmentsRaw, error: aptError }, { data: mappings, error: mapError }] = await Promise.all([
-    supabase.from('apartments').select('id, name').order('name'),
-    supabase.from('user_apartments').select('apartment_id').eq('user_id', uid),
-  ]);
-
-  if (aptError) console.error('[access] apartments query failed:', aptError.message);
+  const { data: mappings, error: mapError } = await withTimeout(
+    supabase
+      .from('user_apartments')
+      .select('apartment_id, apartments(id, name)')
+      .eq('user_id', uid),
+    15000,
+    'Apartment access',
+  );
   if (mapError) console.error('[access] user_apartments query failed:', mapError.message);
 
-  console.log('Apartments Raw:', apartmentsRaw);
-  console.log('Mappings:', mappings);
+  let pool = (mappings || [])
+    .map((m) => m.apartments)
+    .filter((a) => a && a.name !== '__SYSTEM__');
 
-  const allApartments = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
-  const mappedIds = new Set((mappings || []).map((m) => m.apartment_id));
-  const permitted = mappedIds.size
-    ? allApartments.filter((a) => mappedIds.has(a.id))
-    : allApartments;
+  if (!pool.length && !mapError && (mappings || []).length) {
+    const ids = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: apartmentsRaw } = await withTimeout(
+        supabase.from('apartments').select('id, name').in('id', ids),
+        15000,
+        'Apartments list',
+      );
+      pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
+    }
+  }
 
-  const pool = permitted.length ? permitted : allApartments;
+  if (!pool.length && (profile?.role === 'admin' || portalState.auth?.role === 'admin')) {
+    const { data: apartmentsRaw, error: aptError } = await withTimeout(
+      supabase.from('apartments').select('id, name').order('name'),
+      15000,
+      'Apartments list',
+    );
+    if (aptError) console.error('[access] apartments query failed:', aptError.message);
+    pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
+  }
+
   console.log('Pool:', pool);
 
   if (!pool.length) {
-    console.error('[access] No apartments in pool for user', uid, { mapped: mappedIds.size, total: allApartments.length });
+    console.error('[access] No apartments in pool for user', uid);
     console.groupEnd();
     return { apartments: [], activeId: null };
   }
@@ -609,25 +653,70 @@ const resolveActiveApartment = async (uid, profile) => {
     }
   }
 
-  if (pool.length > 1) {
-    const counts = await Promise.all(pool.map(async (a) => {
-      const { count, error } = await supabase
-        .from('units')
-        .select('*', { count: 'exact', head: true })
-        .eq('apartment_id', a.id);
-      return { id: a.id, count: error ? 0 : (count || 0) };
-    }));
-    const best = [...counts].sort((a, b) => b.count - a.count)[0];
-    if (best?.count > 0) {
-      console.log('Using best (most units):', best.id);
-      console.groupEnd();
-      return { apartments: pool, activeId: best.id };
-    }
-  }
-
   console.log('Using first in pool:', pool[0].id);
   console.groupEnd();
   return { apartments: pool, activeId: pool[0].id };
+};
+
+const loadAccessUserDirectory = async (activeId, uid) => {
+  if (!supabase || !activeId) return;
+  try {
+    const [{ data: aptMappings, error: mapErr }, { data: roleRows, error: roleErr }] = await Promise.all([
+      withTimeout(
+        supabase.from('user_apartments').select('user_id, apartment_id').eq('apartment_id', activeId),
+        15000,
+        'User mappings',
+      ),
+      withTimeout(
+        supabase.from('user_role_assignments').select('user_id, apartment_id, role_key').eq('scope', 'apartment').eq('apartment_id', activeId),
+        15000,
+        'Role assignments',
+      ),
+    ]);
+    if (mapErr) console.error('[access] user_apartments query failed:', mapErr.message);
+    if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
+      console.error('[access] user_role_assignments query failed:', roleErr.message);
+    }
+
+    const userIds = [...new Set((aptMappings || []).map((m) => m.user_id))];
+    if (!userIds.length) return;
+
+    const { data: profiles, error: profilesErr } = await withTimeout(
+      supabase.from('profiles').select('id, full_name, email, role').in('id', userIds).order('full_name'),
+      15000,
+      'User directory',
+    );
+    if (profilesErr) console.error('[access] profiles query failed:', profilesErr.message);
+    if (!profiles?.length) return;
+
+    const map = new Map();
+    (aptMappings || []).forEach((m) => {
+      if (!map.has(m.user_id)) map.set(m.user_id, []);
+      map.get(m.user_id).push(m.apartment_id);
+    });
+    const rolesByUser = new Map();
+    (roleRows || []).forEach((r) => {
+      if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
+      rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
+    });
+
+    portalState.access.users = profiles.map((p) => ({
+      id: p.id,
+      name: p.full_name || p.email || p.id,
+      email: p.email || '',
+      role: p.role || 'resident_viewer',
+      apartment_ids: map.get(p.id) || [],
+      apartment_roles: rolesByUser.get(p.id) || {},
+    }));
+
+    if (!portalState.access.activeUserId || !portalState.access.users.some((u) => u.id === portalState.access.activeUserId)) {
+      portalState.access.activeUserId = uid;
+    }
+    persist();
+    renderAccessMappings();
+  } catch (err) {
+    console.warn('[access] User directory load skipped:', err.message);
+  }
 };
 
 const syncAccessFromSupabase = async () => {
@@ -670,54 +759,18 @@ const syncAccessFromSupabase = async () => {
   await refreshAuthPermissions(activeId);
   applyPermissionsToNav(portalState.authPermissions);
 
-  const { data: selfMappings } = await supabase.from('user_apartments').select('apartment_id').eq('user_id', uid);
+  const { data: selfMappings } = await withTimeout(
+    supabase.from('user_apartments').select('apartment_id').eq('user_id', uid),
+    15000,
+    'Your apartment access',
+  );
   if (portalState.access.users?.length) {
-    portalState.access.users[0].apartment_ids = (selfMappings || []).map(m => m.apartment_id);
-  }
-
-  const { data: profiles, error: profilesErr } = await supabase
-    .from('profiles')
-    .select('id, full_name, email, role')
-    .order('full_name');
-  if (profilesErr) console.error('[access] profiles query failed:', profilesErr.message);
-
-  if (profiles && profiles.length) {
-    const [{ data: allMappings, error: mapErr }, { data: roleRows, error: roleErr }] = await Promise.all([
-      supabase.from('user_apartments').select('user_id, apartment_id'),
-      supabase.from('user_role_assignments').select('user_id, apartment_id, role_key').eq('scope', 'apartment'),
-    ]);
-    if (mapErr) console.error('[access] user_apartments query failed:', mapErr.message);
-    if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
-      console.error('[access] user_role_assignments query failed:', roleErr.message);
-    }
-
-    const map = new Map();
-    (allMappings || []).forEach(m => {
-      if (!map.has(m.user_id)) map.set(m.user_id, []);
-      map.get(m.user_id).push(m.apartment_id);
-    });
-    const rolesByUser = new Map();
-    (roleRows || []).forEach((r) => {
-      if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
-      rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
-    });
-
-    portalState.access.users = profiles.map(p => ({
-      id: p.id,
-      name: p.full_name || p.email || p.id,
-      email: p.email || '',
-      role: p.role || 'resident_viewer',
-      apartment_ids: map.get(p.id) || [],
-      apartment_roles: rolesByUser.get(p.id) || {},
-    }));
-
-    if (!portalState.access.activeUserId || !portalState.access.users.some(u => u.id === portalState.access.activeUserId)) {
-      portalState.access.activeUserId = uid;
-    }
+    portalState.access.users[0].apartment_ids = (selfMappings || []).map((m) => m.apartment_id);
   }
 
   persist();
   renderAccessMappings();
+  void loadAccessUserDirectory(activeId, uid);
   return true;
 };
 
@@ -741,6 +794,13 @@ const repairLocalCache = () => {
   }
 };
 
+const setBootLoaderMessage = (message) => {
+  const label = document.querySelector('#sentry-boot-loader div div:last-child');
+  if (label) label.textContent = message;
+};
+
+const removeBootLoader = () => document.getElementById('sentry-boot-loader')?.remove();
+
 const boot = async () => {
   document.body.prepend(Object.assign(document.createElement('div'), { id: 'sentry-boot-loader', innerHTML: '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; color:#fff;"><i class="fa-solid fa-hotel fa-spin" style="font-size:2rem; margin-bottom:1rem; color:var(--accent);"></i><div style="font-weight:900; letter-spacing:1px; text-transform:uppercase; font-size:0.75rem;">Initializing CommunityHub</div></div>' }));
 
@@ -748,58 +808,72 @@ const boot = async () => {
   let bootSession = null;
   let accessSynced = false;
 
-  if (supabase) {
-    const { data } = await supabase.auth.getSession();
-    if (!data?.session) {
-      document.getElementById('sentry-boot-loader')?.remove();
-      showAuth();
-      return;
+  try {
+    if (supabase) {
+      setBootLoaderMessage('Checking session…');
+      const { data } = await withTimeout(supabase.auth.getSession(), 15000, 'Session check');
+      if (!data?.session) {
+        showAuth();
+        return;
+      }
+      bootHasSupabaseSession = true;
+      bootSession = data.session;
+      bootAuthHandled = true;
+      repairLocalCache();
+      setBootLoaderMessage('Loading profile…');
+      await applyAuthToUI(bootSession);
+      setBootLoaderMessage('Loading society data…');
+      accessSynced = await withTimeout(syncAccessFromSupabase(), 120000, 'Society sync');
     }
-    bootHasSupabaseSession = true;
-    bootSession = data.session;
-    repairLocalCache();
-    await applyAuthToUI(bootSession);
-    accessSynced = await syncAccessFromSupabase();
-  }
 
-  if (!accessSynced && bootHasSupabaseSession && bootSession?.user?.id) {
-    const profile = await getProfile(bootSession.user.id);
-    const { apartments, activeId } = await resolveActiveApartment(bootSession.user.id, profile);
-    if (apartments.length && activeId) {
-      portalState.access = portalState.access || { users: [], activeUserId: bootSession.user.id };
-      portalState.access.apartments = apartments;
-      portalState.access.activeApartmentId = activeId;
+    if (!accessSynced && bootHasSupabaseSession && bootSession?.user?.id) {
+      setBootLoaderMessage('Resolving society access…');
+      const profile = await getProfile(bootSession.user.id);
+      const { apartments, activeId } = await resolveActiveApartment(bootSession.user.id, profile);
+      if (apartments.length && activeId) {
+        portalState.access = portalState.access || { users: [], activeUserId: bootSession.user.id };
+        portalState.access.apartments = apartments;
+        portalState.access.activeApartmentId = activeId;
+        renderAccessMappings();
+        accessSynced = await setActiveApartment(activeId);
+      }
+    }
+
+    if (!accessSynced && !bootHasSupabaseSession) {
+      ensureAccessState();
+      const connected = await migrateAndRecover({ signedIn: false });
+      if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
+      ensureAccessState();
+
+      if (!isPlaceholderApartmentId(portalState.access?.activeApartmentId)) {
+        await setActiveApartment(portalState.access.activeApartmentId);
+      }
+    } else if (!accessSynced && bootHasSupabaseSession) {
+      await applyAuthToUI(bootSession);
       renderAccessMappings();
-      accessSynced = await setActiveApartment(activeId);
+      showWorkspaceGate('Could not load society data automatically. Select your society below, or check the browser console.');
+    } else if (bootSession) {
+      await applyAuthToUI(bootSession);
     }
-  }
 
-  if (!accessSynced && !bootHasSupabaseSession) {
-    ensureAccessState();
-    const connected = await migrateAndRecover({ signedIn: false });
-    if (!connected) console.warn('Cloud Registry Offline - Falling back to local cache.');
-    ensureAccessState();
-
-    if (!isPlaceholderApartmentId(portalState.access?.activeApartmentId)) {
-      await setActiveApartment(portalState.access.activeApartmentId);
-    }
-  } else if (!accessSynced && bootHasSupabaseSession) {
-    await applyAuthToUI(bootSession);
     renderAccessMappings();
-    showWorkspaceGate();
-  } else if (bootSession) {
-    await applyAuthToUI(bootSession);
+    processAnalytics();
+    processFinances();
+    renderRegistry();
+
+    const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
+    window.switchView(route);
+  } catch (err) {
+    console.error('[boot] failed:', err);
+    if (bootHasSupabaseSession) {
+      renderAccessMappings();
+      showWorkspaceGate(err?.message || 'Startup failed. Select your society below or refresh the page.');
+    } else {
+      showAuth(err?.message || 'Startup failed. Please refresh and try again.');
+    }
+  } finally {
+    removeBootLoader();
   }
-
-  document.getElementById('sentry-boot-loader')?.remove();
-  renderAccessMappings();
-
-  processAnalytics();
-  processFinances();
-  renderRegistry();
-
-  const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
-  window.switchView(route);
 };
 
 export const initializeSeedData = async () => {
@@ -892,7 +966,7 @@ window.switchView = (v) => {
   if (page.view === 'email') renderEmailOutbox();
   if (page.view === 'access-control') void renderPageAccessAdmin();
   if (page.view === 'dashboard') void renderDashboard();
-  if (page.view === 'invoices') window.switchInvoiceSubView(page.subview || 'list');
+  if (page.view === 'invoices') window.switchInvoiceSubView(page.subview || 'pending-dues');
   if (page.view === 'registry') {
     renderRegistry();
     refreshParkingUi();
@@ -909,6 +983,98 @@ window.switchView = (v) => {
   }
   if (page.view === 'apartment') renderResidents();
   if (page.view === 'units') void renderUnitDirectory();
+};
+
+let residentSummaryFilter = '';
+
+const getResidentFilterOptions = () => ({
+  filterQ: (document.getElementById('resident-filter')?.value || '').trim().toLowerCase(),
+  kind: document.getElementById('resident-kind-filter')?.value || '',
+  residency: document.getElementById('resident-residency-filter')?.value || '',
+  primaryOnly: document.getElementById('resident-primary-filter')?.checked || false,
+});
+
+const hasResidentPersonFilters = (opts) =>
+  Boolean(opts.filterQ || opts.kind || opts.residency || opts.primaryOnly);
+
+const hasAnyResidentFilters = (opts) =>
+  Boolean(hasResidentPersonFilters(opts) || residentSummaryFilter);
+
+const buildScopedUnitNumbers = (block, allResidents) => {
+  const fromUnits = (portalState.units || [])
+    .filter((u) => u.is_community !== true)
+    .filter((u) => !block || unitNumberMatchesBlock(u.number, block))
+    .map((u) => u.number);
+  const fromResidents = [...new Set((allResidents || []).map((r) => r.unit_number))];
+  const merged = [...fromUnits];
+  fromResidents.forEach((n) => {
+    if (!block || unitNumberMatchesBlock(n, block)) {
+      if (!merged.some((x) => normUnit(x) === normUnit(n))) merged.push(n);
+    }
+  });
+  return merged;
+};
+
+const renderResidentRow = (r, esc) => {
+  const residingBadge = (r.kind || '').toUpperCase() !== 'TENANT' && r.is_residing === false
+    ? ' <span class="resident-residing-badge resident-residing-badge--away">Non-residing</span>'
+    : '';
+  return `
+    <div class="apt-row resident-group-row" data-resident-id="${r.id}">
+      <div class="resident-name">${esc(r.full_name)}${r.is_primary ? ' <span class="resident-primary-badge">Primary</span>' : ''}${residingBadge}</div>
+      <div class="resident-phone">${esc(r.phone || '—')}</div>
+      <div class="resident-email">${esc(r.email || '—')}</div>
+      <div class="resident-actions">
+        <button class="btn btn-outline btn--icon" data-action="portal" title="Portal access"><i class="fa-solid fa-link"></i></button>
+        <button class="btn btn-outline btn--icon" data-action="edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn btn-outline btn--icon btn--danger" data-action="del" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+      </div>
+    </div>`;
+};
+
+const formatResidentNameList = (list, esc) => {
+  if (!list.length) return '';
+  return list.map((r) => {
+    const primary = r.is_primary ? ' ★' : '';
+    const away = (r.kind || '').toUpperCase() !== 'TENANT' && r.is_residing === false ? ' (away)' : '';
+    return `${esc(r.full_name)}${primary}${away}`;
+  }).join(' · ');
+};
+
+const previewNamesForUnit = (occ, owners, tenants) => {
+  if (occ === 'TENANT_OCCUPIED') return tenants;
+  if (occ === 'OWNER_OCCUPIED') return owners.filter((r) => r.is_residing !== false);
+  if (occ === 'VACANT') return owners.filter((r) => r.is_residing === false);
+  return [];
+};
+
+const previewFallbackLabel = (occ) => {
+  if (occ === 'NON_ALLOTABLE') return 'Non-allotable';
+  if (occ === 'VACANT') return 'Nobody residing';
+  if (occ === 'UNDER_RENOVATION') return 'Under renovation';
+  if (occ === 'LOCKED') return 'Locked';
+  if (occ === 'DEVELOPER_HOLD') return 'Developer hold';
+  return 'No residents';
+};
+
+const renderResidentKindSection = (label, list, esc) => {
+  if (!list.length) {
+    return `
+      <div class="resident-kind-section">
+        <h4 class="resident-kind-section__title">${label} <span class="resident-kind-section__count">0</span></h4>
+        <p class="resident-kind-section__empty">None recorded</p>
+      </div>`;
+  }
+  return `
+    <div class="resident-kind-section">
+      <h4 class="resident-kind-section__title">${label} <span class="resident-kind-section__count">${list.length}</span></h4>
+      <div class="resident-kind-section__rows">
+        <div class="registry-header resident-group-header resident-group-header--kind">
+          <span>Name</span><span>Phone</span><span>Email</span><span style="text-align:right;">Action</span>
+        </div>
+        ${list.map((r) => renderResidentRow(r, esc)).join('')}
+      </div>
+    </div>`;
 };
 
 const renderResidents = async () => {
@@ -929,63 +1095,190 @@ const renderResidents = async () => {
     return;
   }
 
-  const filterQ = (document.getElementById('resident-filter')?.value || '').trim().toLowerCase();
   const block = getSelectedBlock();
+  const filterOpts = getResidentFilterOptions();
+  const blockFiltered = (data || []).filter((r) => !block || unitNumberMatchesBlock(r.unit_number, block));
+  const { residents: allUnique } = dedupeResidents(blockFiltered);
 
-  const filtered = (data || []).filter((r) => {
-    if (block && !unitNumberMatchesBlock(r.unit_number, block)) return false;
-    if (!filterQ) return true;
-    const hay = [r.unit_number, r.kind, r.full_name, r.phone, r.email, r.notes]
-      .map((x) => String(x || '').toLowerCase())
-      .join(' ');
-    return hay.includes(filterQ);
+  const personFiltered = filterResidentsByOptions(allUnique, filterOpts);
+  const { residents: uniqueResidents, hiddenCount } = dedupeResidents(personFiltered);
+
+  const scopedUnits = buildScopedUnitNumbers(block, allUnique);
+  const summary = computeResidentPageSummary(allUnique, scopedUnits);
+
+  const residentsByUnit = new Map();
+  allUnique.forEach((r) => {
+    const key = normUnit(r.unit_number);
+    if (!residentsByUnit.has(key)) residentsByUnit.set(key, []);
+    residentsByUnit.get(key).push(r);
   });
 
-  const { residents: uniqueResidents, hiddenCount } = dedupeResidents(filtered);
-  const groups = groupResidentsByUnit(uniqueResidents);
+  const personFilteredIds = new Set(uniqueResidents.map((r) => r.id));
+  const showKindOnly = residentSummaryFilter === 'owners' ? 'OWNER'
+    : residentSummaryFilter === 'tenants' ? 'TENANT' : filterOpts.kind;
 
-  if (!groups.length) {
-    list.innerHTML = '<p class="maintenance-dues-empty">No residents match your filters.</p>';
+  const visibleGroups = [];
+  scopedUnits.forEach((unitNum) => {
+    const unitRecord = portalState.units.find((u) => normUnit(u.number) === normUnit(unitNum));
+    const allForUnit = residentsByUnit.get(normUnit(unitNum)) || [];
+    const occ = classifyUnitOccupancy(allForUnit, unitRecord);
+    const missingOwners = unitMissingOwners(allForUnit);
+
+    if (!unitPassesOccupancyFilter(occ, residentSummaryFilter, { missingOwners })) return;
+
+    const hasPersonFilter = hasResidentPersonFilters(filterOpts);
+    if (hasPersonFilter) {
+      const matching = allForUnit.filter((r) => personFilteredIds.has(r.id));
+      const showEmptyFlat = !matching.length && (
+        (occ === 'VACANT' && residentSummaryFilter === 'VACANT')
+        || (occ === 'NON_ALLOTABLE' && residentSummaryFilter === 'NON_ALLOTABLE')
+        || (missingOwners && residentSummaryFilter === 'no_owner')
+      );
+      if (showEmptyFlat) {
+        visibleGroups.push({ block: unitRecord?.block || '—', unit: unitNum, residents: [], occ, missingOwners });
+        return;
+      }
+      if (!matching.length) return;
+      visibleGroups.push({
+        block: groupResidentsByUnit(matching)[0]?.block || '—',
+        unit: unitNum,
+        residents: matching,
+        occ,
+        missingOwners,
+      });
+      return;
+    }
+
+    if ((occ === 'VACANT' || occ === 'NON_ALLOTABLE') && residentSummaryFilter
+      && residentSummaryFilter !== occ && residentSummaryFilter !== 'all' && residentSummaryFilter !== 'no_owner') {
+      return;
+    }
+    if (residentSummaryFilter === 'no_owner' && !missingOwners) return;
+
+    visibleGroups.push({
+      block: allForUnit.length ? (groupResidentsByUnit(allForUnit)[0]?.block || '—') : (unitRecord?.block || '—'),
+      unit: unitNum,
+      residents: allForUnit,
+      occ,
+      missingOwners,
+    });
+  });
+
+  visibleGroups.sort((a, b) => {
+    const blockCmp = String(a.block).localeCompare(String(b.block), undefined, { numeric: true });
+    if (blockCmp) return blockCmp;
+    return String(a.unit).localeCompare(String(b.unit), undefined, { numeric: true });
+  });
+
+  if (!visibleGroups.length) {
+    list.innerHTML = `<p class="maintenance-dues-empty">${hasAnyResidentFilters(filterOpts) ? 'No residents match your filters.' : 'No residents recorded yet. Use Import file or Add to get started.'}</p>`;
     return;
   }
 
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
+  const summaryCards = [
+    { key: 'all', label: 'Flats', value: summary.totalFlats, tone: '', hint: 'All flats in scope. Status cards count flats once each.' },
+    {
+      key: 'OWNER_OCCUPIED',
+      label: 'Owner residing',
+      value: summary.ownerOccupied,
+      tone: 'owner',
+      sub: `${summary.totalOwners} owners · ${summary.nonResidingOwners} non-residing`,
+      hint: occupancySummaryHint('OWNER_OCCUPIED'),
+    },
+    {
+      key: 'TENANT_OCCUPIED',
+      label: 'Tenant occupied',
+      value: summary.tenantOccupied,
+      tone: 'tenant',
+      sub: `${summary.totalTenants} tenants`,
+      hint: occupancySummaryHint('TENANT_OCCUPIED'),
+    },
+    { key: 'VACANT', label: 'Vacant', value: summary.vacant, tone: 'vacant', hint: occupancySummaryHint('VACANT') },
+    { key: 'NON_ALLOTABLE', label: 'Non-allotable', value: summary.nonAllotable, tone: 'non-allotable', hint: occupancySummaryHint('NON_ALLOTABLE') },
+    { key: 'no_owner', label: 'No owner', value: summary.noOwnerFlats, tone: 'warn', hint: occupancySummaryHint('NO_OWNER') },
+  ].filter((c) => c.value > 0 || ['all', 'VACANT', 'NON_ALLOTABLE', 'OWNER_OCCUPIED', 'TENANT_OCCUPIED', 'no_owner'].includes(c.key));
+
+  if (summary.underRenovation) summaryCards.push({ key: 'UNDER_RENOVATION', label: 'Renovation', value: summary.underRenovation, tone: 'reno' });
+  if (summary.locked) summaryCards.push({ key: 'LOCKED', label: 'Locked', value: summary.locked, tone: 'locked' });
+  if (summary.developerHold) summaryCards.push({ key: 'DEVELOPER_HOLD', label: 'Dev hold', value: summary.developerHold, tone: 'dev' });
+
+  const activeFilterLabel = summaryCards.find((c) => c.key === residentSummaryFilter)?.label;
+
   list.innerHTML = `
+    <section class="resident-summary" aria-label="Occupancy summary">
+      ${summaryCards.map((c) => `
+        <button type="button" class="resident-summary-card resident-summary-card--${c.tone || 'default'}${residentSummaryFilter === c.key ? ' resident-summary-card--active' : ''}" data-summary-filter="${c.key}" title="${esc(c.hint || `Filter by ${c.label}`)}">
+          <span class="resident-summary-card__label">${esc(c.label)}</span>
+          <strong class="resident-summary-card__value">${c.value}</strong>
+          ${c.sub ? `<span class="resident-summary-card__sub">${esc(c.sub)}</span>` : ''}
+        </button>`).join('')}
+      <p class="resident-summary-legend"><strong>Vacant</strong> = nobody residing. <strong>Non-allotable</strong> = no owner and no tenant on record. Click a flat row to expand details.</p>
+    </section>
+    ${(hasAnyResidentFilters(filterOpts)) ? `
+      <div class="resident-active-filters">
+        <span><i class="fa-solid fa-filter"></i> Filtered${activeFilterLabel ? `: ${esc(activeFilterLabel)}` : ''}${filterOpts.filterQ ? ` · “${esc(filterOpts.filterQ)}”` : ''}</span>
+        <button type="button" class="btn btn-outline btn--small" id="resident-clear-filters">Clear filters</button>
+      </div>` : ''}
     ${hiddenCount ? `<p class="resident-dupe-hint"><i class="fa-solid fa-circle-info"></i> ${hiddenCount} duplicate record(s) hidden. Delete extras via the trash icon if they appear after refresh.</p>` : ''}
     <div class="resident-unit-groups">
-      ${groups.map((g) => {
-        const kindSummary = [...new Set(g.residents.map((r) => r.kind))].join(', ');
+      ${visibleGroups.map((g) => {
+        const occ = g.occ || classifyUnitOccupancy(g.residents, portalState.units.find((u) => normUnit(u.number) === normUnit(g.unit)));
+        let { owners, tenants } = splitResidentsByKind(g.residents);
+        if (showKindOnly === 'OWNER') tenants = [];
+        else if (showKindOnly === 'TENANT') owners = [];
+        const blockLabel = g.block && g.block !== '—' ? g.block : '';
+        const noOwnerFlag = g.missingOwners ?? unitMissingOwners(g.residents);
+        const previewList = previewNamesForUnit(occ, owners, tenants);
+        const previewNamesHtml = previewList.length
+          ? formatResidentNameList(previewList, esc)
+          : `<span class="resident-unit-group__names-muted">${esc(previewFallbackLabel(occ))}</span>`;
         return `
-        <section class="resident-unit-group">
-          <header class="resident-unit-group__header">
+        <details class="resident-unit-group${noOwnerFlag ? ' resident-unit-group--no-owner' : ''}">
+          <summary class="resident-unit-group__summary">
             <div class="resident-unit-group__title">
-              ${g.block !== '—' ? `<span class="resident-unit-group__block">Block ${esc(g.block)}</span>` : ''}
+              ${blockLabel ? `<span class="resident-unit-group__block">Block ${esc(blockLabel)}</span>` : ''}
               <strong class="resident-unit-group__unit">${esc(g.unit)}</strong>
+              <span class="occupancy-badge ${occupancySummaryBadge(occ)}">${esc(occupancySummaryLabel(occ))}</span>
+              ${noOwnerFlag ? '<span class="occupancy-badge occ-no-owner" title="No owner on record">No owner</span>' : ''}
             </div>
-            <span class="resident-unit-group__meta">${g.residents.length} resident${g.residents.length === 1 ? '' : 's'} · ${esc(kindSummary)}</span>
-          </header>
-          <div class="resident-unit-group__rows">
-            <div class="registry-header resident-group-header">
-              <span>Type</span><span>Name</span><span>Phone</span><span>Email</span><span style="text-align:right;">Action</span>
-            </div>
-            ${g.residents.map((r) => `
-              <div class="apt-row resident-group-row" data-resident-id="${r.id}">
-                <div class="resident-kind">${esc(r.kind)}</div>
-                <div class="resident-name">${esc(r.full_name)}${r.is_primary ? ' <span class="resident-primary-badge">Primary</span>' : ''}</div>
-                <div class="resident-phone">${esc(r.phone || '—')}</div>
-                <div class="resident-email">${esc(r.email || '—')}</div>
-                <div class="resident-actions">
-                  <button class="btn btn-outline btn--icon" data-action="portal" title="Portal access"><i class="fa-solid fa-link"></i></button>
-                  <button class="btn btn-outline btn--icon" data-action="edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
-                  <button class="btn btn-outline btn--icon btn--danger" data-action="del" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
-                </div>
-              </div>
-            `).join('')}
+            <span class="resident-unit-group__names">${previewNamesHtml}</span>
+            <span class="resident-unit-group__summary-actions">
+              <i class="fa-solid fa-chevron-down resident-unit-group__chevron" aria-hidden="true"></i>
+              <button type="button" class="btn btn-outline btn--small btn--danger resident-unit-delete" data-unit="${esc(g.unit)}" title="Delete flat and all residents">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </span>
+          </summary>
+          <div class="resident-unit-group__body">
+            ${renderResidentKindSection('Owners', owners, esc)}
+            ${renderResidentKindSection('Tenants', tenants, esc)}
           </div>
-        </section>`;
+        </details>`;
       }).join('')}
     </div>`;
+
+  list.querySelectorAll('[data-summary-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.summaryFilter;
+      residentSummaryFilter = residentSummaryFilter === key ? '' : key;
+      renderResidents();
+    });
+  });
+
+  document.getElementById('resident-clear-filters')?.addEventListener('click', () => {
+    residentSummaryFilter = '';
+    const search = document.getElementById('resident-filter');
+    const kind = document.getElementById('resident-kind-filter');
+    const residency = document.getElementById('resident-residency-filter');
+    const primary = document.getElementById('resident-primary-filter');
+    if (search) search.value = '';
+    if (kind) kind.value = '';
+    if (residency) residency.value = '';
+    if (primary) primary.checked = false;
+    renderResidents();
+  });
 
   list.querySelectorAll('.resident-group-row').forEach((row) => {
     const id = row.dataset.residentId;
@@ -1011,7 +1304,24 @@ const renderResidents = async () => {
       }
     });
   });
+
+  list.querySelectorAll('.resident-unit-delete').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const unitNumber = btn.dataset.unit;
+      const unitResidents = allUnique.filter((r) => normUnit(r.unit_number) === normUnit(unitNumber));
+      if (!confirm(flatDeleteConfirmMessage(unitNumber, unitResidents))) return;
+      await withButtonBusy(btn, 'Deleting…', async () => {
+        await deleteFlatWithResidents(unitNumber);
+        await renderResidents();
+        window.refreshUnitDetailIfOpen?.();
+      }).catch((err) => alert(err?.message || 'Could not delete flat.'));
+    });
+  });
 };
+
+window.renderResidents = renderResidents;
 
 const populateResidentBlockFilter = () => {
   const sel = document.getElementById('resident-block-filter');
@@ -1030,16 +1340,10 @@ const populateResidentBlockFilter = () => {
 const exportResidentsExcel = async () => {
   const ExcelJS = (await import('exceljs')).default;
   await loadResidents(true);
-  const filterQ = (document.getElementById('resident-filter')?.value || '').trim().toLowerCase();
   const block = getSelectedBlock();
-  const rows = getResidents().filter((r) => {
-    if (block && !unitNumberMatchesBlock(r.unit_number, block)) return false;
-    if (!filterQ) return true;
-    const hay = [r.unit_number, r.kind, r.full_name, r.phone, r.email, r.notes]
-      .map((x) => String(x || '').toLowerCase())
-      .join(' ');
-    return hay.includes(filterQ);
-  });
+  const filterOpts = getResidentFilterOptions();
+  const rows = filterResidentsByOptions(getResidents(), filterOpts)
+    .filter((r) => !block || unitNumberMatchesBlock(r.unit_number, block));
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Residents');
@@ -1063,6 +1367,18 @@ const exportResidentsExcel = async () => {
 };
 
 let editingResidentId = null;
+
+const syncResidentModalFields = () => {
+  const kind = document.getElementById('resident-kind')?.value || 'OWNER';
+  const isOwner = kind === 'OWNER';
+  const residingWrap = document.getElementById('resident-residing-wrap');
+  const primaryWrap = document.getElementById('resident-primary-wrap');
+  const hint = document.getElementById('resident-residing-hint');
+  if (residingWrap) residingWrap.style.display = isOwner ? '' : 'none';
+  if (primaryWrap) primaryWrap.style.display = isOwner ? '' : 'none';
+  if (hint) hint.style.display = isOwner ? '' : 'none';
+};
+
 const openResidentModal = (r = null) => {
   editingResidentId = r?.id || null;
   document.getElementById('resident-unit').value = r?.unit_number || '';
@@ -1071,6 +1387,9 @@ const openResidentModal = (r = null) => {
   document.getElementById('resident-phone').value = r?.phone || '';
   document.getElementById('resident-email').value = r?.email || '';
   document.getElementById('resident-notes').value = r?.notes || '';
+  document.getElementById('resident-residing').value = r?.is_residing === false ? 'false' : 'true';
+  document.getElementById('resident-primary').checked = !!r?.is_primary;
+  syncResidentModalFields();
   document.getElementById('resident-modal').classList.add('active');
 };
 
@@ -1083,13 +1402,16 @@ window.closeResidentModal = closeResidentModal;
 window.openTransitionWizard = openTransitionWizard;
 
 const saveResident = async () => {
+  const kind = document.getElementById('resident-kind').value;
   const payload = {
     unit_number: document.getElementById('resident-unit').value.trim(),
-    kind: document.getElementById('resident-kind').value,
+    kind,
     full_name: document.getElementById('resident-name').value.trim(),
     phone: document.getElementById('resident-phone').value.trim(),
     email: document.getElementById('resident-email').value.trim(),
     notes: document.getElementById('resident-notes').value.trim(),
+    is_primary: document.getElementById('resident-primary').checked,
+    is_residing: document.getElementById('resident-residing').value !== 'false',
   };
   try {
     await persistResident(payload, editingResidentId);
@@ -1195,6 +1517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (supabase) {
     supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'INITIAL_SESSION' && !bootAuthHandled) return;
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
         await applyAuthToUI(session);
         if (event === 'SIGNED_IN') {
@@ -1619,8 +1942,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (resCancel) resCancel.onclick = () => closeResidentModal();
   const resSave = document.getElementById('resident-save-btn');
   if (resSave) resSave.onclick = () => saveResident();
+  document.getElementById('resident-kind')?.addEventListener('change', syncResidentModalFields);
   populateResidentBlockFilter();
   document.getElementById('resident-filter')?.addEventListener('input', () => renderResidents());
+  document.getElementById('resident-kind-filter')?.addEventListener('change', () => renderResidents());
+  document.getElementById('resident-residency-filter')?.addEventListener('change', () => renderResidents());
+  document.getElementById('resident-primary-filter')?.addEventListener('change', () => renderResidents());
   document.addEventListener('block-filter-change', () => {
     const sel = document.getElementById('resident-block-filter');
     if (sel) sel.value = getSelectedBlock();
@@ -1669,9 +1996,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   initExpenseModal();
   initMaintenanceBilling();
+  initBulkCollectionImport();
   initActivityAuditUi();
   initBankReconciliationUi();
   initUnitDirectory();
+  initResidentImport();
   initResidentPortal();
   initSecurityPortal();
   initResidentLinks();
@@ -1866,6 +2195,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('Main: Starting boot sequence...');
   await boot();
   console.log('Main: Boot complete. Initializing ledger sync...');
-  await initLedgerSpreadsheetSync();
-  console.log('Main: Ledger sync initialized.');
+  import('./ledgerSpreadsheetSync.js')
+    .then(({ initLedgerSpreadsheetSync }) => initLedgerSpreadsheetSync())
+    .catch((err) => console.warn('[boot] Ledger sync init skipped:', err?.message));
+  console.log('Main: Ledger sync init scheduled.');
 });

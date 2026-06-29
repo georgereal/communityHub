@@ -373,12 +373,18 @@ const syncExpenseWalletUI = () => syncBankWalletUI();
 
 const syncWalletPills = (containerId, wallet) => {
     document.querySelectorAll(`#${containerId} .expense-wallet-pill`).forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.wallet === wallet);
+        const on = btn.dataset.wallet === wallet;
+        btn.classList.toggle('active', on);
+        const radio = btn.querySelector('input[type="radio"]');
+        if (radio) radio.checked = on;
     });
 };
 
-const getActiveWallet = (containerId) =>
-    document.querySelector(`#${containerId} .expense-wallet-pill.active`)?.dataset.wallet || 'CASH';
+const getActiveWallet = (containerId) => {
+    const checked = document.querySelector(`#${containerId} input[type="radio"]:checked`);
+    if (checked?.value) return checked.value;
+    return document.querySelector(`#${containerId} .expense-wallet-pill.active`)?.dataset.wallet || 'CASH';
+};
 
 const resetReceiptUI = (existingPaths = []) => {
     const paths = Array.isArray(existingPaths)
@@ -557,12 +563,25 @@ export const initExpenseModal = () => {
     const wirePillGroup = (container, afterSelect) => {
         if (!container || container.dataset.wired) return;
         container.dataset.wired = '1';
-        container.addEventListener('click', (e) => {
-            const btn = e.target.closest('.expense-wallet-pill');
-            if (!btn || !container.contains(btn)) return;
-            container.querySelectorAll('.expense-wallet-pill').forEach((b) => b.classList.remove('active'));
-            btn.classList.add('active');
+        const selectWallet = (pill) => {
+            const wallet = pill.dataset.wallet;
+            container.querySelectorAll('.expense-wallet-pill').forEach((b) => {
+                const on = b.dataset.wallet === wallet;
+                b.classList.toggle('active', on);
+                const radio = b.querySelector('input[type="radio"]');
+                if (radio) radio.checked = on;
+            });
             afterSelect?.();
+        };
+        container.addEventListener('click', (e) => {
+            const pill = e.target.closest('.expense-wallet-pill');
+            if (!pill || !container.contains(pill)) return;
+            selectWallet(pill);
+        });
+        container.addEventListener('change', (e) => {
+            if (e.target.type !== 'radio') return;
+            const pill = e.target.closest('.expense-wallet-pill');
+            if (pill) selectWallet(pill);
         });
     };
     wirePillGroup(document.getElementById('expense-wallet-pills'), syncBankWalletUI);
@@ -849,8 +868,15 @@ export const saveCashData = async () => {
     const bankRefEl = document.getElementById(isIncome ? 'income-bank-ref' : 'expense-bank-ref');
 
     const amt = parseFloat(amtEl?.value);
-    const desc = descEl?.value?.trim() || null;
+    let desc = descEl?.value?.trim() || null;
     const cat = resolveCategory(catInput?.value, isIncome ? INCOME_CATS : EXPENSE_CATS);
+    if (isIncome && cat === 'Maintenance Collection') {
+        const unitNumber = document.getElementById('maintenance-unit-input')?.value?.trim();
+        if (unitNumber && !String(desc || '').toUpperCase().includes(unitNumber.toUpperCase())) {
+            desc = desc ? `${desc} · Flat ${unitNumber}` : `Maintenance collection — ${unitNumber}`;
+        }
+    }
+
     const wallet = getActiveWallet(walletContainer);
     const sub_category = !isIncome ? (subCatEl?.value?.trim() || null) : null;
     const bank_payment_type = wallet === 'BANK' ? getActiveBankType() : null;

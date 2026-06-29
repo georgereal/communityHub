@@ -3,7 +3,7 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { logActivity } from './activityAudit.js';
-import { getUnitLabel } from './maintenanceBilling.js';
+import { getUnitLabel, applyFlatCreditToOpenInvoices } from './maintenanceBilling.js';
 
 const FEE_DEFAULTS = {
     'owner-move-in': 0,
@@ -275,6 +275,17 @@ export async function applyTransitionFee({ unitId, transitionId, transitionType,
     }
 
     await pullState();
+
+    if (fee.settle !== 'paid') {
+        const apartment_id = portalState.access?.activeApartmentId;
+        try {
+            await applyFlatCreditToOpenInvoices(apartment_id, [unitId]);
+            await pullState();
+        } catch (err) {
+            console.warn('Flat credit auto-apply failed:', err?.message || err);
+        }
+    }
+
     document.dispatchEvent(new CustomEvent('maintenance-payment-saved', {
         detail: { unitNumber: getUnitLabel(unitId), transitionFee: true },
     }));

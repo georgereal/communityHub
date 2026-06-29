@@ -61,7 +61,7 @@ import {
 } from './blockFilter.js';
 import { clearResidentsCache } from './residents.js';
 import { logActivity, renderInvoiceActivityHistory } from './activityAudit.js';
-import { withButtonBusy } from './buttonBusy.js';
+import { deriveBlockFromFlat } from './parkingImport.js';
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -149,6 +149,171 @@ export const populateUnitDatalist = () => {
     });
 };
 
+const invoiceAppliesToUnit = (inv, unitId) => {
+    if (!inv || !unitId) return false;
+    if (inv.unit_id === unitId) return true;
+    if (inv.billing_group_id && getUnitIdsForGroup(inv.billing_group_id).includes(unitId)) return true;
+    return false;
+};
+
+export const getTxnUnallocatedAmount = (txnId) => {
+    const txn = portalState.finances.txns.find((t) => t.id === txnId);
+    if (!txn) return 0;
+    const allocated = getAllocationsForTxn(txnId).reduce((s, a) => s + parseFloat(a.amount || 0), 0);
+    return Math.max(0, roundMoney(parseFloat(txn.amount || 0) - allocated));
+};
+
+const parseFlatFromMaintenanceTxn = (txn) => {
+    const desc = String(txn?.description || '').trim();
+    if (!desc) return null;
+    const maintMatch = desc.match(/Maintenance collection\s*[—–-]\s*(.+?)(?:\s*·|$)/i);
+    if (maintMatch) return maintMatch[1].trim();
+    const flatMatch = desc.match(/·\s*Flat\s+(.+)$/i);
+    if (flatMatch) return flatMatch[1].trim();
+    const needle = desc.toUpperCase();
+    const hit = portalState.units.find((u) => {
+        const num = String(u.number || '').trim();
+        return num && needle.includes(num.toUpperCase());
+    });
+    return hit?.number || null;
+};
+
+const maintenanceTxnBelongsToUnit = (txn, unitId) => {
+    const allocs = getAllocationsForTxn(txn.id);
+    if (allocs.length) {
+        return allocs.some((a) => {
+            const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === a.invoice_id);
+            return inv && invoiceAppliesToUnit(inv, unitId);
+        });
+    }
+    const flatNum = parseFlatFromMaintenanceTxn(txn);
+    const unit = flatNum ? getUnitByNumber(flatNum) : null;
+    return unit?.id === unitId;
+};
+
+/** Unallocated maintenance collection balance per flat (oldest payment first). */
+export const getMaintenanceCreditTxnsForUnit = (unitId) =>
+    (portalState.finances.txns || [])
+        .filter((t) => t.type === 'IN' && t.cat === 'Maintenance Collection')
+        .filter((t) => maintenanceTxnBelongsToUnit(t, unitId))
+        .map((t) => ({ txnId: t.id, available: getTxnUnallocatedAmount(t.id), date: t.date }))
+        .filter((t) => t.available > 0.001)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+export const getFlatCreditBalance = (unitId) =>
+    getMaintenanceCreditTxnsForUnit(unitId).reduce((s, t) => s + t.available, 0);
+
+/** Apply unallocated flat credit to open invoices (oldest due first). */
+export async function applyFlatCreditToOpenInvoices(apartment_id, unitIds = []) {
+    if (!supabase || !apartment_id || !unitIds?.length) {
+        return { allocationCount: 0, unitsProcessed: 0 };
+    }
+
+    const uniqueUnits = [...new Set(unitIds.filter(Boolean))];
+    const toInsert = [];
+    const toUpdate = [];
+
+    for (const unitId of uniqueUnits) {
+        const creditTxns = getMaintenanceCreditTxnsForUnit(unitId);
+        if (!creditTxns.length) continue;
+
+        const openInvoices = getOpenInvoicesForUnit(unitId);
+
+        for (const { txnId, available } of creditTxns) {
+            let remaining = available;
+            if (remaining <= 0.001) continue;
+
+            const existingByInvoice = new Map(
+                getAllocationsForTxn(txnId).map((a) => [a.invoice_id, a]),
+            );
+
+            for (const inv of openInvoices) {
+                if (remaining <= 0.001) break;
+                const bal = invoiceBalance(inv);
+                if (bal <= 0.001) continue;
+
+                const apply = Math.min(remaining, bal);
+                if (apply <= 0.001) continue;
+
+                const existing = existingByInvoice.get(inv.id);
+                if (existing) {
+                    toUpdate.push({
+                        id: existing.id,
+                        amount: roundMoney(parseFloat(existing.amount || 0) + apply),
+                    });
+                } else {
+                    toInsert.push({
+                        id: crypto.randomUUID(),
+                        apartment_id,
+                        transaction_id: txnId,
+                        invoice_id: inv.id,
+                        amount: roundMoney(apply),
+                    });
+                }
+
+                inv.amount_paid = roundMoney(parseFloat(inv.amount_paid || 0) + apply);
+                remaining = roundMoney(remaining - apply);
+            }
+        }
+    }
+
+    if (!toInsert.length && !toUpdate.length) {
+        return { allocationCount: 0, unitsProcessed: uniqueUnits.length };
+    }
+
+    for (const row of toUpdate) {
+        const { error } = await supabase
+            .from('maintenance_payment_allocations')
+            .update({ amount: row.amount })
+            .eq('id', row.id);
+        if (error) throw new Error(error.message);
+    }
+
+    if (toInsert.length) {
+        const { error } = await supabase.from('maintenance_payment_allocations').insert(toInsert);
+        if (error) throw new Error(error.message);
+    }
+
+    const allocationCount = toInsert.length + toUpdate.length;
+    await logActivity({
+        entityType: 'ALLOCATION',
+        entityId: toInsert[0]?.transaction_id || toUpdate[0]?.id,
+        action: 'CREATE',
+        summary: `Auto-applied flat credit to ${allocationCount} invoice(s)`,
+        newData: { inserted: toInsert, updated: toUpdate },
+    });
+
+    return { allocationCount, unitsProcessed: uniqueUnits.length };
+}
+
+const toggleMaintenancePaymentModalLayout = (active) => {
+    document.querySelector('#cash-modal .modal-content')
+        ?.classList.toggle('expense-modal--maintenance-payment', !!active);
+    document.getElementById('income-form-view')
+        ?.classList.toggle('expense-form--maintenance-payment', !!active);
+};
+
+const maybeAutoApplyMaintenanceAllocations = (paymentAmount, hasExistingAllocs) => {
+    const pay = parseFloat(paymentAmount) || 0;
+    if (pay > 0 && !hasExistingAllocs) autoApplyOldestFirst();
+    else updateAllocationSummary(pay);
+};
+
+const fillInvoiceAllocation = (invoiceId) => {
+    const check = document.querySelector(`.maintenance-alloc-check[data-invoice-id="${invoiceId}"]`);
+    const amtInput = document.querySelector(`.maintenance-alloc-amt[data-invoice-id="${invoiceId}"]`);
+    if (!check || !amtInput) return;
+    const pay = parseFloat(document.getElementById('income-amt')?.value) || 0;
+    const current = parseFloat(amtInput.value) || 0;
+    const { total } = collectAllocationDraft();
+    const remaining = pay - total + (check.checked ? current : 0);
+    const max = parseFloat(amtInput.max) || 0;
+    const apply = Math.min(max, Math.max(0, remaining));
+    check.checked = apply > 0;
+    amtInput.value = apply > 0 ? apply.toFixed(2) : '';
+    updateAllocationSummary(pay);
+};
+
 const renderAllocationRows = (unitId, paymentAmount, existingAllocs = []) => {
     const container = document.getElementById('maintenance-allocation-rows');
     const summary = document.getElementById('maintenance-allocation-summary');
@@ -157,51 +322,101 @@ const renderAllocationRows = (unitId, paymentAmount, existingAllocs = []) => {
     if (!unitId) {
         container.innerHTML = '<p class="maintenance-alloc-hint">Select a flat to see outstanding invoices.</p>';
         if (summary) summary.textContent = '';
+        updateAllocationSummary(parseFloat(paymentAmount) || 0);
         return;
     }
 
     const open = getOpenInvoicesForUnit(unitId);
     if (!open.length) {
-        container.innerHTML = '<p class="maintenance-alloc-hint">No outstanding invoices for this flat. Payment can be saved as unallocated advance.</p>';
+        container.innerHTML = '<p class="maintenance-alloc-hint">No open invoices for this flat. The full payment will be saved as <strong>flat credit</strong> for future invoices.</p>';
         if (summary) summary.textContent = '';
+        updateAllocationSummary(parseFloat(paymentAmount) || 0);
         return;
     }
 
     const existingByInvoice = new Map(existingAllocs.map((a) => [a.invoice_id, parseFloat(a.amount)]));
-    container.innerHTML = open.map((inv) => {
+    container.innerHTML = `
+      <div class="maintenance-alloc-head">
+        <span aria-hidden="true"></span>
+        <span>Invoice</span>
+        <span>Balance</span>
+        <span>Apply</span>
+      </div>
+      ${open.map((inv) => {
         const bal = invoiceBalance(inv);
-        const prefill = existingByInvoice.get(inv.id) ?? '';
+        const prefill = existingByInvoice.get(inv.id);
+        const prefillVal = prefill != null && prefill > 0 ? prefill : '';
+        const checked = prefillVal !== '' ? 'checked' : '';
         const due = inv.due_date
             ? new Date(`${inv.due_date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
             : '—';
         return `<label class="maintenance-alloc-row">
-          <input type="checkbox" class="maintenance-alloc-check" data-invoice-id="${inv.id}" ${prefill ? 'checked' : ''} />
+          <input type="checkbox" class="maintenance-alloc-check" data-invoice-id="${inv.id}" ${checked} />
           <span class="maintenance-alloc-row__meta">
             <strong>${inv.period_label}${inv.billing_group_id ? ` · ${getInvoiceDisplayLabel(inv)}` : ''}</strong>
-            <span>Due ${due} · Balance ${formatMoney(bal)}</span>
+            <span>Due ${due}</span>
           </span>
-          <input type="number" class="maintenance-alloc-amt expense-combobox" data-invoice-id="${inv.id}"
-            min="0" max="${bal}" step="0.01" placeholder="0" value="${prefill || ''}" inputmode="decimal" />
+          <span class="maintenance-alloc-row__balance">${formatMoney(bal)}</span>
+          <span class="maintenance-alloc-row__apply">
+            <input type="number" class="maintenance-alloc-amt expense-combobox" data-invoice-id="${inv.id}"
+              min="0" max="${bal}" step="0.01" placeholder="0" value="${prefillVal}" inputmode="decimal" />
+            <button type="button" class="maintenance-alloc-fill-btn" data-invoice-id="${inv.id}" title="Apply up to balance">Full</button>
+          </span>
         </label>`;
-    }).join('');
+    }).join('')}`;
 
     container.querySelectorAll('.maintenance-alloc-check, .maintenance-alloc-amt').forEach((el) => {
         el.addEventListener('change', () => updateAllocationSummary(paymentAmount));
-        el.addEventListener('input', () => updateAllocationSummary(paymentAmount));
+        el.addEventListener('input', () => {
+            if (el.classList.contains('maintenance-alloc-amt')) {
+                const row = el.closest('.maintenance-alloc-row');
+                const check = row?.querySelector('.maintenance-alloc-check');
+                const val = parseFloat(el.value);
+                if (check && val > 0) check.checked = true;
+                if (check && (!val || val <= 0)) check.checked = false;
+            }
+            updateAllocationSummary(paymentAmount);
+        });
     });
-    updateAllocationSummary(paymentAmount);
+    container.querySelectorAll('.maintenance-alloc-fill-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            fillInvoiceAllocation(btn.dataset.invoiceId);
+        });
+    });
+    updateAllocationSummary(parseFloat(paymentAmount) || 0);
 };
 
 export const updateAllocationSummary = (paymentAmount) => {
     const summary = document.getElementById('maintenance-allocation-summary');
+    const creditEl = document.getElementById('maintenance-alloc-credit');
     if (!summary) return;
-    const { total } = collectAllocationDraft();
+    const { total, rows } = collectAllocationDraft();
     const pay = parseFloat(paymentAmount) || 0;
     const unallocated = Math.max(0, pay - total);
-    summary.innerHTML = pay > 0
-        ? `Allocated <strong>${formatMoney(total)}</strong> of ${formatMoney(pay)}`
-            + (unallocated > 0.001 ? ` · <span class="maintenance-alloc-unalloc">${formatMoney(unallocated)} unallocated</span>` : '')
-        : `Allocated ${formatMoney(total)}`;
+
+    if (pay > 0) {
+        const parts = [`Applied to invoices: <strong>${formatMoney(total)}</strong> of ${formatMoney(pay)}`];
+        if (rows.length === 0 && pay > 0) {
+            parts.push(`<span class="maintenance-alloc-credit-tag">All ${formatMoney(pay)} → flat credit</span>`);
+        } else if (unallocated > 0.001) {
+            parts.push(`<span class="maintenance-alloc-credit-tag">${formatMoney(unallocated)} → flat credit</span>`);
+        }
+        summary.innerHTML = parts.join(' · ');
+    } else {
+        summary.innerHTML = rows.length
+            ? `Selected ${formatMoney(total)} across ${rows.length} invoice(s) — enter payment amount above`
+            : 'Select invoices and enter how much to apply to each (partial amounts OK).';
+    }
+
+    if (creditEl) {
+        const showCredit = pay > 0.001 && (unallocated > 0.001 || rows.length === 0);
+        creditEl.hidden = !showCredit;
+        creditEl.innerHTML = showCredit
+            ? `<i class="fa-solid fa-piggy-bank"></i> ${formatMoney(unallocated > 0.001 ? unallocated : pay)} will remain as <strong>flat credit</strong> and auto-apply to open invoices when the next invoice is raised (oldest first).`
+            : '';
+    }
 };
 
 export const collectAllocationDraft = () => {
@@ -240,44 +455,56 @@ export const autoApplyOldestFirst = () => {
     updateAllocationSummary(parseFloat(amtEl?.value) || 0);
 };
 
-export const syncMaintenanceIncomeSection = (catKey, txnId = null) => {
+export const syncMaintenanceIncomeSection = (catKey, txnId = null, prefilledAllocs = null) => {
     const section = document.getElementById('income-maintenance-section');
+    const flatWrap = document.getElementById('payment-record-flat-wrap');
     if (!section) return;
     const isMaintenance = catKey === 'Maintenance Collection';
     section.hidden = !isMaintenance;
+    if (flatWrap) flatWrap.hidden = !isMaintenance;
+    toggleMaintenancePaymentModalLayout(isMaintenance);
     if (!isMaintenance) return;
 
     populateUnitDatalist();
     const unitInput = document.getElementById('maintenance-unit-input');
-    const existing = txnId ? getAllocationsForTxn(txnId) : [];
+    const existing = txnId
+        ? getAllocationsForTxn(txnId)
+        : (prefilledAllocs || []);
     let unitId = null;
     if (existing.length) {
         const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === existing[0].invoice_id);
         unitId = inv?.unit_id;
-        if (unitInput && inv) unitInput.value = getUnitLabel(inv.unit_id);
+        if (unitInput && inv) {
+            const flat = getUnitLabel(inv.unit_id);
+            if (flat && flat !== '—') unitInput.value = flat;
+        }
     } else if (unitInput?.value) {
         unitId = getUnitByNumber(unitInput.value)?.id;
     }
 
     const payAmt = parseFloat(document.getElementById('income-amt')?.value) || 0;
     renderAllocationRows(unitId, payAmt, existing);
+    maybeAutoApplyMaintenanceAllocations(payAmt, existing.length > 0);
 };
 
 export const wireMaintenanceIncomeForm = () => {
     const unitInput = document.getElementById('maintenance-unit-input');
     const amtInput = document.getElementById('income-amt');
 
-    unitInput?.addEventListener('change', () => {
-        const unit = getUnitByNumber(unitInput.value);
-        renderAllocationRows(unit?.id, parseFloat(amtInput?.value) || 0);
-    });
-    unitInput?.addEventListener('blur', () => {
-        const unit = getUnitByNumber(unitInput.value);
-        renderAllocationRows(unit?.id, parseFloat(amtInput?.value) || 0);
-    });
-    amtInput?.addEventListener('input', () => updateAllocationSummary(parseFloat(amtInput.value) || 0));
+    const refreshUnitAllocations = () => {
+        const unit = getUnitByNumber(unitInput?.value);
+        const pay = parseFloat(amtInput?.value) || 0;
+        renderAllocationRows(unit?.id, pay);
+        maybeAutoApplyMaintenanceAllocations(pay, false);
+    };
 
-    document.getElementById('maintenance-auto-apply-btn')?.addEventListener('click', autoApplyOldestFirst);
+    unitInput?.addEventListener('change', refreshUnitAllocations);
+    unitInput?.addEventListener('blur', refreshUnitAllocations);
+    amtInput?.addEventListener('input', () => {
+        const section = document.getElementById('income-maintenance-section');
+        if (section?.hidden) return;
+        maybeAutoApplyMaintenanceAllocations(parseFloat(amtInput.value) || 0, false);
+    });
 };
 
 export const validateMaintenanceAllocations = (paymentAmount, catKey) => {
@@ -296,7 +523,7 @@ export const validateMaintenanceAllocations = (paymentAmount, catKey) => {
         if (row.amount > invoiceBalance(inv) + 0.001) {
             return `Allocation for ${inv.period_label} exceeds the outstanding balance.`;
         }
-        if (unit && inv.unit_id !== unit.id) {
+        if (unit && !invoiceAppliesToUnit(inv, unit.id)) {
             return 'All selected invoices must belong to the chosen flat.';
         }
     }
@@ -339,6 +566,114 @@ export async function saveMaintenanceAllocations(apartment_id, txnId, catKey) {
     });
 
     return { ok: true };
+}
+
+export async function recordMaintenanceCollectionPayment({
+    unitNumber,
+    amount,
+    date,
+    description,
+    wallet = 'BANK',
+    bankReference = null,
+    bankPaymentType = 'UPI',
+    allocations = [],
+}) {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+
+    const unit = getUnitByNumber(unitNumber);
+    if (!unit) throw new Error(`Unknown flat: ${unitNumber}`);
+
+    const pay = parseFloat(amount);
+    if (!Number.isFinite(pay) || pay <= 0) throw new Error('Invalid payment amount.');
+
+    if (bankReference) {
+        const dup = (portalState.finances.txns || []).some(
+            (t) => (t.bank_reference || '').trim().toLowerCase() === bankReference.trim().toLowerCase(),
+        );
+        if (dup) throw new Error(`Reference ${bankReference} already recorded.`);
+    }
+
+    let allocRows = allocations;
+    if (!allocRows?.length) {
+        let remaining = pay;
+        allocRows = [];
+        getOpenInvoicesForUnit(unit.id).forEach((inv) => {
+            if (remaining <= 0.001) return;
+            const bal = invoiceBalance(inv);
+            const apply = Math.min(remaining, bal);
+            if (apply <= 0) return;
+            allocRows.push({ invoice_id: inv.id, amount: apply });
+            remaining -= apply;
+        });
+    }
+
+    const allocTotal = allocRows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+    if (allocTotal > pay + 0.001) throw new Error('Allocations exceed payment amount.');
+
+    const txnId = crypto.randomUUID();
+    for (const row of allocRows) {
+        const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === row.invoice_id);
+        if (!inv) throw new Error('Invoice not found for allocation.');
+        if (unit && !invoiceAppliesToUnit(inv, unit.id)) {
+            throw new Error('Invoice does not belong to this flat.');
+        }
+        if (row.amount > invoiceBalance(inv) + 0.001) {
+            throw new Error(`Allocation exceeds balance for ${inv.period_label}.`);
+        }
+    }
+
+    const dateIso = new Date(`${date}T12:00:00`).toISOString();
+    const desc = description || `Maintenance collection — ${unitNumber}`;
+
+    const core = {
+        id: txnId,
+        apartment_id,
+        amount: pay,
+        cat: 'Maintenance Collection',
+        description: desc,
+        wallet,
+        type: 'IN',
+        date: dateIso,
+    };
+
+    let payload = {
+        ...core,
+        bank_payment_type: bankPaymentType,
+        bank_reference: bankReference,
+    };
+
+    let { error } = await supabase.from('transactions').insert(payload);
+    if (error && /bank_payment_type|bank_reference/i.test(error.message)) {
+        ({ error } = await supabase.from('transactions').insert(core));
+    }
+    if (error) throw new Error(error.message);
+
+    if (allocRows.length) {
+        const { error: allocErr } = await supabase.from('maintenance_payment_allocations').insert(
+            allocRows.map((r) => ({
+                id: crypto.randomUUID(),
+                apartment_id,
+                transaction_id: txnId,
+                invoice_id: r.invoice_id,
+                amount: r.amount,
+            })),
+        );
+        if (allocErr && !/maintenance_payment_allocations/i.test(allocErr.message)) {
+            throw new Error(allocErr.message);
+        }
+    }
+
+    await logActivity({
+        entityType: 'TRANSACTION',
+        entityId: txnId,
+        action: 'CREATE',
+        summary: `Bulk collection ${formatMoney(pay)} for ${unitNumber}`,
+        newData: { txnId, unitNumber, allocations: allocRows },
+    });
+
+    return { txnId };
 }
 
 export async function createBulkMaintenanceInvoices({
@@ -593,8 +928,22 @@ export async function createBulkMaintenanceInvoices({
         }
     }
 
+    const affectedUnitIds = [];
+    toCreateIndividual.forEach((row) => affectedUnitIds.push(row.unit.id));
+    groupsToCreate.forEach(({ rows }) => rows.forEach((row) => affectedUnitIds.push(row.unit.id)));
+
     clearResidentsCache();
     await pullState();
+
+    if (affectedUnitIds.length) {
+        try {
+            await applyFlatCreditToOpenInvoices(apartment_id, affectedUnitIds);
+            await pullState();
+        } catch (err) {
+            console.warn('Flat credit auto-apply failed:', err?.message || err);
+        }
+    }
+
     renderInvoicesPage();
 
     if (batch_id) {
@@ -825,7 +1174,7 @@ export async function deleteMaintenanceInvoice(id) {
     renderInvoicesPage();
 }
 
-let activeInvoiceSubView = 'list';
+let activeInvoiceSubView = 'pending-dues';
 let detailInvoiceId = null;
 
 const filteredInvoices = () => {
@@ -856,6 +1205,105 @@ const filteredInvoices = () => {
     });
 
     return invoices;
+};
+
+const getPendingDuesRows = () => {
+    const filterQ = (document.getElementById('pending-dues-filter')?.value || '').trim().toUpperCase();
+    let rows = [];
+
+    portalState.units
+        .filter((u) => u.is_community !== true)
+        .filter((u) => unitMatchesBlock(u.id))
+        .forEach((unit) => {
+            const openInvs = getOpenInvoicesForUnit(unit.id).filter((inv) => invoiceMatchesBlock(inv));
+            if (!openInvs.length) return;
+
+            let directOutstanding = 0;
+            const shared = [];
+            openInvs.forEach((inv) => {
+                const bal = invoiceBalance(inv);
+                if (inv.billing_group_id && inv.unit_id !== unit.id) {
+                    shared.push({ inv, bal });
+                } else {
+                    directOutstanding += bal;
+                }
+            });
+
+            const displayOutstanding = directOutstanding > 0.001
+                ? directOutstanding
+                : shared.reduce((s, x) => s + x.bal, 0);
+            if (displayOutstanding <= 0.001) return;
+
+            const oldestDue = openInvs.reduce((min, inv) => {
+                if (!inv.due_date) return min;
+                return !min || inv.due_date < min ? inv.due_date : min;
+            }, null);
+
+            rows.push({
+                unit,
+                block: unit.block || deriveBlockFromFlat(unit.number) || '—',
+                displayOutstanding,
+                isSharedOnly: directOutstanding <= 0.001 && shared.length > 0,
+                shared,
+                openCount: openInvs.length,
+                oldestDue,
+                periods: [...new Set(openInvs.map((i) => i.period_label).filter(Boolean))],
+            });
+        });
+
+    if (filterQ) {
+        rows = rows.filter((r) =>
+            String(r.unit.number || '').toUpperCase().includes(filterQ)
+            || String(r.block || '').toUpperCase().includes(filterQ));
+    }
+
+    rows.sort((a, b) => {
+        if (b.displayOutstanding !== a.displayOutstanding) return b.displayOutstanding - a.displayOutstanding;
+        return String(a.unit.number).localeCompare(String(b.unit.number), undefined, { numeric: true });
+    });
+
+    return rows;
+};
+
+export const renderPendingDues = () => {
+    const list = document.getElementById('pending-dues-items');
+    if (!list) return;
+
+    const rows = getPendingDuesRows();
+    list.innerHTML = '';
+
+    if (!rows.length) {
+        list.innerHTML = '<p class="maintenance-dues-empty">No pending dues — all flats are clear for the selected block.</p>';
+        return;
+    }
+
+    rows.forEach((row) => {
+        const { unit, block, displayOutstanding, isSharedOnly, shared, openCount, oldestDue, periods } = row;
+        const dueLabel = oldestDue
+            ? new Date(`${oldestDue}T12:00:00`).toLocaleDateString('en-GB')
+            : '—';
+        const periodLabel = periods.slice(0, 3).join(', ') + (periods.length > 3 ? ` +${periods.length - 3}` : '');
+        const sharedNote = isSharedOnly && shared.length
+            ? `<span class="invoice-combined-badge">Combined</span> ${getInvoiceDisplayLabel(shared[0].inv)}`
+            : '';
+
+        const el = document.createElement('div');
+        el.className = 'apt-row pending-dues-row';
+        el.innerHTML = `
+          <div class="maintenance-dues-flat inv-col-flat">${unit.number}</div>
+          <div class="inv-col-block">${block}</div>
+          <div class="inv-col-money inv-col-balance" style="color:var(--danger);">
+            ${formatMoney(displayOutstanding)}${isSharedOnly ? ' <span class="pending-dues-shared-hint">shared</span>' : ''}
+          </div>
+          <div class="inv-col-open">${openCount}</div>
+          <div class="inv-col-due">${dueLabel}</div>
+          <div class="inv-col-periods">${periodLabel || '—'}${sharedNote ? `<div class="pending-dues-combined">${sharedNote}</div>` : ''}</div>
+          <div class="inv-col-actions">
+            <button type="button" class="btn btn-primary btn--small" onclick="window.openMaintenanceCollectionForFlat('${unit.number}')">Record payment</button>
+            <button type="button" class="btn btn-outline btn--small" onclick="window.viewPendingDuesInvoices('${unit.number}')">Invoices</button>
+          </div>`;
+        list.appendChild(el);
+    });
 };
 
 export const renderInvoiceMetrics = () => {
@@ -914,92 +1362,29 @@ export const renderInvoiceList = () => {
         const row = document.createElement('div');
         row.className = 'apt-row maintenance-dues-row';
         row.innerHTML = `
-          <div class="maintenance-dues-flat">${inv.billing_group_id
+          <div class="maintenance-dues-flat inv-col-flat">${inv.billing_group_id
             ? `<span class="invoice-combined-badge">Combined</span> ${getInvoiceDisplayLabel(inv)}`
             : getInvoiceDisplayLabel(inv)}</div>
-          <div>${inv.period_label}</div>
-          <div>${inv.due_date ? new Date(`${inv.due_date}T12:00:00`).toLocaleDateString('en-GB') : '—'}</div>
-          <div style="text-align:right;">${formatMoney(inv.amount)}</div>
-          <div style="text-align:right;">${formatMoney(inv.amount_paid)}</div>
-          <div style="text-align:right; font-weight:800; color:${bal > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(bal)}</div>
-          <div>${statusBadge(inv)}</div>
-          <div style="text-align:right; display:flex; gap:0.35rem; justify-content:flex-end;">
-            <button type="button" class="btn btn-outline" style="padding:0.2rem 0.4rem;" title="Download PDF"
+          <div class="inv-col-period">${inv.period_label}</div>
+          <div class="inv-col-due">${inv.due_date ? new Date(`${inv.due_date}T12:00:00`).toLocaleDateString('en-GB') : '—'}</div>
+          <div class="inv-col-money">${formatMoney(inv.amount)}</div>
+          <div class="inv-col-money">${formatMoney(inv.amount_paid)}</div>
+          <div class="inv-col-money inv-col-balance" style="color:${bal > 0 ? 'var(--danger)' : 'var(--success)'};">${formatMoney(bal)}</div>
+          <div class="inv-col-status">${statusBadge(inv)}</div>
+          <div class="inv-col-actions">
+            ${bal > 0.001 ? `<button type="button" class="btn btn-primary btn--small" title="Record payment"
+              onclick="window.openMaintenanceCollectionForFlat('${getUnitLabel(inv.unit_id).replace(/'/g, "\\'")}', 'BANK', { invoiceId: '${inv.id}', amount: ${bal}, allocationAmount: ${bal} })">
+              <i class="fa-solid fa-indian-rupee-sign"></i></button>` : ''}
+            <button type="button" class="btn btn-outline btn--small" title="Download PDF"
               onclick="window.downloadInvoicePdf('${inv.id}')"><i class="fa-solid fa-file-pdf"></i></button>
-            <button type="button" class="btn btn-outline" style="padding:0.2rem 0.4rem;" title="View details"
+            <button type="button" class="btn btn-outline btn--small" title="View details"
               onclick="window.viewInvoiceDetail('${inv.id}')"><i class="fa-solid fa-eye"></i></button>
-            <button type="button" class="btn btn-outline" style="padding:0.2rem 0.4rem; color:var(--danger);"
+            <button type="button" class="btn btn-outline btn--small btn--danger" title="Delete"
               onclick="window.deleteMaintenanceInvoice('${inv.id}')" ${parseFloat(inv.amount_paid || 0) > 0 ? 'disabled title="Has payments applied"' : ''}>
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>`;
         list.appendChild(row);
-    });
-};
-
-export const renderInvoicesByFlat = () => {
-    const container = document.getElementById('invoice-by-flat-items');
-    if (!container) return;
-
-    const filterQ = (document.getElementById('invoice-flat-filter')?.value || '').trim().toUpperCase();
-    const byUnit = new Map();
-
-    (portalState.finances.maintenanceInvoices || []).forEach((inv) => {
-        if (!byUnit.has(inv.unit_id)) {
-            byUnit.set(inv.unit_id, { invoices: [], outstanding: 0, collected: 0, openCount: 0 });
-        }
-        const bucket = byUnit.get(inv.unit_id);
-        bucket.invoices.push(inv);
-        const bal = invoiceBalance(inv);
-        bucket.outstanding += bal;
-        bucket.collected += parseFloat(inv.amount_paid || 0);
-        if (invoiceStatus(inv) !== 'PAID') bucket.openCount += 1;
-    });
-
-    let units = portalState.units
-        .filter((u) => byUnit.has(u.id))
-        .filter((u) => unitMatchesBlock(u.id))
-        .map((u) => ({ unit: u, ...byUnit.get(u.id) }));
-
-    if (filterQ) {
-        units = units.filter(({ unit }) => String(unit.number || '').toUpperCase().includes(filterQ));
-    }
-
-    units.sort((a, b) => String(a.unit.number).localeCompare(String(b.unit.number), undefined, { numeric: true }));
-
-    container.innerHTML = '';
-    if (!units.length) {
-        container.innerHTML = '<p class="maintenance-dues-empty">No invoice history yet. Raise invoices from the header or filter a different flat.</p>';
-        return;
-    }
-
-    units.forEach(({ unit, outstanding, collected, openCount, invoices }) => {
-        const combinedOpen = (portalState.finances.maintenanceInvoices || []).filter((inv) => {
-            if (!inv.billing_group_id || invoiceStatus(inv) === 'PAID') return false;
-            return getUnitIdsForGroup(inv.billing_group_id).includes(unit.id);
-        });
-        const combinedNote = combinedOpen.length
-            ? `<p class="invoice-flat-combined-note"><span class="invoice-combined-badge">Combined</span> ${combinedOpen.map((inv) => `${getInvoiceDisplayLabel(inv)} · ${formatMoney(invoiceBalance(inv))}`).join('; ')}</p>`
-            : '';
-
-        const card = document.createElement('div');
-        card.className = 'invoice-flat-card';
-        card.innerHTML = `
-          <div class="invoice-flat-card__head">
-            <strong>${unit.number}</strong>
-            ${openCount ? `<span class="maintenance-dues-badge dues-open">${openCount} open</span>` : '<span class="maintenance-dues-badge dues-paid">Clear</span>'}
-          </div>
-          <div class="invoice-flat-card__stats">
-            <div><span>Outstanding</span><strong style="color:${outstanding > 0 ? 'var(--danger)' : 'var(--success)'}">${formatMoney(outstanding)}</strong></div>
-            <div><span>Collected</span><strong>${formatMoney(collected)}</strong></div>
-            <div><span>Invoices</span><strong>${invoices.length}</strong></div>
-          </div>
-          ${combinedNote}
-          <div class="invoice-flat-card__actions">
-            <button type="button" class="btn btn-outline" onclick="window.filterInvoicesByFlat('${unit.number}')">View invoices</button>
-            <button type="button" class="btn btn-primary" onclick="window.openMaintenanceCollectionForFlat('${unit.number}')">Record payment</button>
-          </div>`;
-        container.appendChild(card);
     });
 };
 
@@ -1013,7 +1398,7 @@ export const renderInvoiceCollections = () => {
 
     list.innerHTML = '';
     if (!collections.length) {
-        list.innerHTML = '<p class="maintenance-dues-empty">No maintenance collections recorded yet. Use Record Collection to log payments against flat invoices.</p>';
+        list.innerHTML = '<p class="maintenance-dues-empty">No maintenance collections recorded yet. Use Record payment to log payments against flat invoices.</p>';
         return;
     }
 
@@ -1041,18 +1426,26 @@ export const renderInvoiceCollections = () => {
 export const renderInvoicesPage = () => {
     renderBlockKpiStrip('billing-block-kpi');
     renderInvoiceMetrics();
-    if (activeInvoiceSubView === 'list') renderInvoiceList();
-    else if (activeInvoiceSubView === 'by-flat') renderInvoicesByFlat();
+    if (activeInvoiceSubView === 'pending-dues') renderPendingDues();
+    else if (activeInvoiceSubView === 'list') renderInvoiceList();
     else if (activeInvoiceSubView === 'batches') renderBillingRunsList();
     else if (activeInvoiceSubView === 'aging') void renderAgingPage();
     else renderInvoiceCollections();
 };
 
+const INVOICE_SUBVIEW_LABELS = {
+    'pending-dues': 'Flats with an outstanding balance — use this to collect payments and follow up.',
+    list: 'Every invoice record raised (individual, combined group, corrections) — the billing ledger.',
+    collections: 'Maintenance payments recorded and how they were applied. Bulk-import from bank or NoBroker statements.',
+    batches: 'Bulk raise-invoice runs and what was created or skipped.',
+    aging: 'Overdue balances by age bucket for reminders.',
+};
+
 export const switchInvoiceSubView = (sv) => {
     activeInvoiceSubView = sv;
     const views = {
+        'pending-dues': 'invoice-subview-pending',
         list: 'invoice-subview-list',
-        'by-flat': 'invoice-subview-by-flat',
         collections: 'invoice-subview-collections',
         batches: 'invoice-subview-batches',
         aging: 'invoice-subview-aging',
@@ -1062,7 +1455,22 @@ export const switchInvoiceSubView = (sv) => {
         if (el) el.style.display = key === sv ? 'block' : 'none';
     });
 
+    document.querySelectorAll('[data-invoice-subview]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.invoiceSubview === sv);
+    });
+    const desc = document.getElementById('invoice-subview-desc');
+    if (desc) desc.textContent = INVOICE_SUBVIEW_LABELS[sv] || '';
+
     renderInvoicesPage();
+};
+
+export const viewPendingDuesInvoices = (flatNumber) => {
+    switchInvoiceSubView('list');
+    const input = document.getElementById('invoice-list-filter');
+    const status = document.getElementById('invoice-status-filter');
+    if (input) input.value = flatNumber;
+    if (status) status.value = 'open';
+    renderInvoiceList();
 };
 
 export const filterInvoicesByFlat = (flatNumber) => {
@@ -1419,6 +1827,11 @@ export const openMaintenanceCollectionForFlat = (flatNumber, wallet = 'BANK', op
     if (options.context === 'move-out') {
         if (titleEl) titleEl.textContent = 'Clear dues for move-out';
         if (descEl) descEl.textContent = `Record payment for ${flatNumber} and apply to outstanding invoices.`;
+    } else {
+        if (titleEl) titleEl.textContent = 'Record payment';
+        if (descEl) {
+            descEl.textContent = `How much did ${flatNumber} pay? Invoices on the right update as you type. Add bank details and notes below if needed.`;
+        }
     }
     const unitInput = document.getElementById('maintenance-unit-input');
     if (unitInput) unitInput.value = flatNumber;
@@ -1430,8 +1843,13 @@ export const openMaintenanceCollectionForFlat = (flatNumber, wallet = 'BANK', op
     }
     const descInput = document.getElementById('income-desc');
     if (options.description && descInput) descInput.value = options.description;
-    syncMaintenanceIncomeSection('Maintenance Collection');
-    if (options.autoApply) autoApplyOldestFirst();
+
+    syncMaintenanceIncomeSection('Maintenance Collection', null, null);
+    setTimeout(() => {
+        const amt = document.getElementById('income-amt');
+        if (options.amount == null) amt?.focus();
+        else amt?.select();
+    }, 50);
 };
 
 export const closeInvoiceDetailModal = () => {
@@ -1525,9 +1943,13 @@ export const viewInvoiceDetail = (invoiceId) => {
         collectBtn.onclick = () => {
             closeInvoiceDetailModal();
             const flatLabel = inv.billing_group_id
-                ? getUnitLabel(getUnitIdsForGroup(inv.billing_group_id)[0])
+                ? getUnitLabel(inv.unit_id || getUnitIdsForGroup(inv.billing_group_id)[0])
                 : getUnitLabel(inv.unit_id);
-            openMaintenanceCollectionForFlat(flatLabel);
+            openMaintenanceCollectionForFlat(flatLabel, 'BANK', {
+                invoiceId: inv.id,
+                amount: bal,
+                allocationAmount: bal,
+            });
         };
     }
 
@@ -1546,6 +1968,7 @@ window.closeRaiseInvoiceModal = closeRaiseInvoiceModal;
 window.openMaintenanceCollection = openMaintenanceCollection;
 window.openMaintenanceCollectionForFlat = openMaintenanceCollectionForFlat;
 window.filterInvoicesByFlat = filterInvoicesByFlat;
+window.viewPendingDuesInvoices = viewPendingDuesInvoices;
 window.viewInvoiceDetail = viewInvoiceDetail;
 
 export const initMaintenanceBilling = () => {
@@ -1560,9 +1983,14 @@ export const initMaintenanceBilling = () => {
     renderBlockFilterSelect('billing-block-filter', () => renderInvoicesPage());
     initBlockFilterListener(() => renderInvoicesPage());
 
+    document.getElementById('pending-dues-filter')?.addEventListener('input', renderPendingDues);
     document.getElementById('invoice-list-filter')?.addEventListener('input', renderInvoiceList);
     document.getElementById('invoice-status-filter')?.addEventListener('change', renderInvoiceList);
-    document.getElementById('invoice-flat-filter')?.addEventListener('input', renderInvoicesByFlat);
+    document.querySelectorAll('[data-invoice-subview]').forEach((btn) => {
+        btn.addEventListener('click', () => switchInvoiceSubView(btn.dataset.invoiceSubview));
+    });
+
+    switchInvoiceSubView(activeInvoiceSubView);
 
     document.querySelectorAll('input[name="bulk-unit-scope"]').forEach((el) => {
         el.addEventListener('change', () => {

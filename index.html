@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CommunityHub | Society Operations Portal</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -527,7 +528,7 @@
               <i class="fa-solid fa-paper-plane"></i> <span>Send Invoices</span>
             </button>
             <button class="btn btn-outline" type="button" onclick="window.openMaintenanceCollection()">
-              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record Collection</span>
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record payment</span>
             </button>
           </div>
         </header>
@@ -556,8 +557,32 @@
           <div id="billing-block-filter"></div>
         </div>
 
+        <nav class="invoice-subview-tabs" aria-label="Billing views">
+          <button type="button" class="active" data-invoice-subview="pending-dues">Pending Dues</button>
+          <button type="button" data-invoice-subview="list">All Invoices</button>
+          <button type="button" data-invoice-subview="collections">Collections</button>
+          <button type="button" data-invoice-subview="batches">Billing Runs</button>
+          <button type="button" data-invoice-subview="aging">Aging</button>
+        </nav>
+        <p id="invoice-subview-desc" class="invoice-subview-desc"></p>
 
-        <div id="invoice-subview-list" class="invoice-subview">
+        <div id="invoice-subview-pending" class="invoice-subview">
+          <div class="invoice-toolbar">
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="pending-dues-filter" placeholder="Search flat or block…" autocomplete="off" />
+            </form>
+          </div>
+          <div class="registry-list pending-dues-table">
+            <div class="registry-header pending-dues-header">
+              <span>Flat</span><span>Block</span><span>Outstanding</span>
+              <span>Open</span><span>Oldest due</span><span>Open periods</span><span>Action</span>
+            </div>
+            <div id="pending-dues-items"></div>
+          </div>
+        </div>
+
+        <div id="invoice-subview-list" class="invoice-subview" style="display:none;">
           <div class="invoice-toolbar">
             <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
               <i class="fa-solid fa-magnifying-glass"></i>
@@ -572,27 +597,22 @@
               </select>
             </label>
           </div>
-          <div class="registry-list">
+          <div class="registry-list invoice-list-table">
             <div class="registry-header maintenance-dues-header">
               <span>Flat</span><span>Period</span><span>Due</span>
-              <span style="text-align:right;">Billed</span><span style="text-align:right;">Paid</span>
-              <span style="text-align:right;">Balance</span><span>Status</span><span style="text-align:right;">Action</span>
+              <span>Billed</span><span>Paid</span>
+              <span>Balance</span><span>Status</span><span>Action</span>
             </div>
             <div id="invoice-list-items"></div>
           </div>
         </div>
 
-        <div id="invoice-subview-by-flat" class="invoice-subview" style="display:none;">
-          <div class="invoice-toolbar">
-            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input type="search" id="invoice-flat-filter" placeholder="Search flat…" autocomplete="off" />
-            </form>
-          </div>
-          <div id="invoice-by-flat-items" class="invoice-flat-grid"></div>
-        </div>
-
         <div id="invoice-subview-collections" class="invoice-subview" style="display:none;">
+          <div class="invoice-toolbar">
+            <button type="button" class="btn btn-primary" id="bulk-collection-open-btn">
+              <i class="fa-solid fa-file-import"></i> Bulk apply from statement
+            </button>
+          </div>
           <div class="registry-list">
             <div class="registry-header invoice-collections-header">
               <span>Date</span><span>Flat</span><span>Applied to</span><span>Wallet</span>
@@ -657,9 +677,8 @@
         </div>
         <div class="registry-list unit-directory-list">
           <div class="registry-header unit-directory-header">
-            <span>Flat</span><span>Block</span><span>BHK</span>
-            <span style="text-align:right;">Sq ft</span><span style="text-align:center;">Car / Bike</span>
-            <span>Occupancy</span><span>Owners</span><span>Tenants</span><span style="text-align:right;">View</span>
+            <span>Flat</span><span>Block</span><span>Unit info</span><span>Status</span>
+            <span>Owners</span><span>Tenants</span><span>Parking</span><span>Dues</span><span></span>
           </div>
           <div id="unit-directory-items"></div>
         </div>
@@ -674,16 +693,38 @@
           </div>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button class="btn btn-outline" id="resident-export-btn"><i class="fa-solid fa-download"></i> <span>Export</span></button>
+            <button class="btn btn-outline" id="resident-import-btn"><i class="fa-solid fa-file-import"></i> <span>Import file</span></button>
             <button class="btn btn-outline" id="resident-refresh-btn"><i class="fa-solid fa-rotate"></i> <span>Refresh</span></button>
             <button class="btn btn-primary" id="resident-add-btn"><i class="fa-solid fa-plus"></i> <span>Add</span></button>
+            <input type="file" id="resident-import-file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
           </div>
         </header>
         <div style="padding: 0 1.6rem 0.75rem;">
-          <div class="invoice-toolbar">
+          <div class="invoice-toolbar resident-toolbar">
             <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
               <i class="fa-solid fa-magnifying-glass"></i>
-              <input type="search" id="resident-filter" placeholder="Search name, flat, email…" autocomplete="off" />
+              <input type="search" id="resident-filter" placeholder="Search name, flat, phone, email…" autocomplete="off" />
             </form>
+            <label class="invoice-filter-status">
+              <span>Type</span>
+              <select id="resident-kind-filter">
+                <option value="">All types</option>
+                <option value="OWNER">Owners</option>
+                <option value="TENANT">Tenants</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status">
+              <span>Residency</span>
+              <select id="resident-residency-filter">
+                <option value="">Any</option>
+                <option value="residing">Residing</option>
+                <option value="non-residing">Non-residing</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status resident-primary-filter">
+              <input type="checkbox" id="resident-primary-filter" />
+              <span>Primary only</span>
+            </label>
             <label class="invoice-filter-status">
               <span>Block</span>
               <select id="resident-block-filter"><option value="">All blocks</option></select>
@@ -1632,93 +1673,100 @@
       </div>
 
       <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
-        <div class="expense-form__section expense-form__section--wallet">
-          <div class="expense-wallet-row">
-            <span class="expense-label expense-label--inline">Received into</span>
-            <div class="expense-wallet-pills expense-wallet-pills--compact" id="income-wallet-pills" role="group" aria-label="Received into">
-              <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
-                <i class="fa-solid fa-wallet"></i> Petty Cash
-              </button>
-              <button type="button" class="expense-wallet-pill" data-wallet="BANK">
-                <i class="fa-solid fa-building-columns"></i> Bank
-              </button>
+        <div class="payment-record__details">
+          <div class="payment-record__amount-row payment-record__amount-row--lead">
+            <div class="expense-form__section expense-form__section--amount">
+              <label class="expense-label" for="income-amt">Amount (₹)</label>
+              <input type="number" id="income-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" autofocus />
             </div>
+            <div class="expense-form__section expense-form__section--date">
+              <label class="expense-label" for="income-date">Date</label>
+              <input type="date" id="income-date" class="expense-date" />
+            </div>
+          </div>
+
+          <div class="payment-record__flat-row expense-form__section" id="payment-record-flat-wrap" hidden>
+            <label class="expense-label" for="maintenance-unit-input">Flat / unit</label>
+            <input type="text" id="maintenance-unit-input" class="expense-combobox" list="maintenance-unit-datalist"
+              placeholder="e.g. A-101" autocomplete="off" />
+            <datalist id="maintenance-unit-datalist"></datalist>
+          </div>
+
+          <fieldset class="expense-form__section expense-form__section--wallet payment-method-fieldset">
+            <legend class="expense-label">Payment method</legend>
+            <div class="payment-method-radios" id="income-wallet-pills" role="radiogroup" aria-label="Payment method">
+              <label class="payment-method-radio expense-wallet-pill expense-wallet-pill--cash active" data-wallet="CASH">
+                <input type="radio" name="income-wallet-method" value="CASH" class="payment-method-radio__input" checked />
+                <span class="payment-method-radio__control" aria-hidden="true"></span>
+                <span class="payment-method-radio__label">Petty cash</span>
+              </label>
+              <label class="payment-method-radio expense-wallet-pill expense-wallet-pill--bank" data-wallet="BANK">
+                <input type="radio" name="income-wallet-method" value="BANK" class="payment-method-radio__input" />
+                <span class="payment-method-radio__control" aria-hidden="true"></span>
+                <span class="payment-method-radio__label">Bank <span class="payment-method-radio__hint">UPI · cheque · NEFT</span></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="income-bank-section" class="expense-form__section expense-form__section--bank" hidden>
+            <div class="expense-bank-panel">
+              <label class="expense-label">Bank receipt</label>
+              <div class="expense-bank-pills" id="income-bank-type-pills">
+                <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
+                <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
+                <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
+              </div>
+              <label class="expense-label" for="income-bank-ref" id="income-bank-ref-label">Cheque number</label>
+              <input type="text" id="income-bank-ref" class="expense-combobox"
+                placeholder="e.g. 004521" autocomplete="off" />
+              <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
+              <div class="expense-receipt-box">
+                <input type="file" id="cash-income-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
+                <p class="expense-receipt-hint">Deposit slip, passbook entry, or payment confirmation.</p>
+                <ul id="cash-income-bank-proof-list" class="expense-receipt-list" hidden></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="expense-form__section expense-form__section--cats">
+            <label class="expense-label" for="income-cat-input">Income type</label>
+            <input type="text" id="income-cat-input" class="expense-combobox" list="income-cat-datalist"
+              placeholder="Type to search… e.g. Maintenance collection" autocomplete="off" />
+            <datalist id="income-cat-datalist"></datalist>
+          </div>
+
+          <div id="income-extra-section" class="expense-form__section expense-form__section--income-extra" hidden>
+            <p id="income-extra-hint" class="income-extra-hint"></p>
+            <div class="expense-form__section--vendor-invoice income-extra-fields">
+              <div id="income-extra-vendor-wrap" class="expense-form__section expense-form__section--vendor" hidden>
+                <label class="expense-label" for="income-vendor-input" id="income-vendor-label">Vendor</label>
+                <input type="text" id="income-vendor-input" class="expense-combobox" list="income-vendor-datalist"
+                  placeholder="e.g. ABC Builders" autocomplete="off" />
+                <datalist id="income-vendor-datalist"></datalist>
+              </div>
+              <div id="income-extra-ref-wrap" class="expense-form__section expense-form__section--invoice" hidden>
+                <label class="expense-label" for="income-reference-input" id="income-reference-label">Reference</label>
+                <input type="text" id="income-reference-input" class="expense-combobox"
+                  placeholder="e.g. Contract #12" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <div class="expense-form__section expense-form__section--desc">
+            <label class="expense-label" for="income-desc">Notes <span class="expense-optional">(optional)</span></label>
+            <textarea id="income-desc" class="expense-desc expense-textarea" rows="2"
+              placeholder="e.g. Monthly maintenance collection from Block A"></textarea>
           </div>
         </div>
 
-        <div id="income-bank-section" class="expense-form__section expense-form__section--bank" hidden>
-          <div class="expense-bank-panel">
-            <label class="expense-label">Bank receipt</label>
-            <div class="expense-bank-pills" id="income-bank-type-pills">
-              <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
-              <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
-              <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
-            </div>
-            <label class="expense-label" for="income-bank-ref" id="income-bank-ref-label">Cheque number</label>
-            <input type="text" id="income-bank-ref" class="expense-combobox"
-              placeholder="e.g. 004521" autocomplete="off" />
-            <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
-            <div class="expense-receipt-box">
-              <input type="file" id="cash-income-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
-              <p class="expense-receipt-hint">Deposit slip, passbook entry, or payment confirmation.</p>
-              <ul id="cash-income-bank-proof-list" class="expense-receipt-list" hidden></ul>
-            </div>
-          </div>
-        </div>
-
-        <div class="expense-form__section expense-form__section--amount">
-          <label class="expense-label" for="income-amt">Amount (₹)</label>
-          <input type="number" id="income-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
-        </div>
-
-        <div class="expense-form__section expense-form__section--date">
-          <label class="expense-label" for="income-date">Date</label>
-          <input type="date" id="income-date" class="expense-date" />
-        </div>
-
-        <div class="expense-form__section expense-form__section--cats">
-          <label class="expense-label" for="income-cat-input">Income type</label>
-          <input type="text" id="income-cat-input" class="expense-combobox" list="income-cat-datalist"
-            placeholder="Type to search… e.g. Maintenance collection" autocomplete="off" />
-          <datalist id="income-cat-datalist"></datalist>
-        </div>
-
-        <div id="income-maintenance-section" class="expense-form__section expense-form__section--maintenance" hidden>
-          <label class="expense-label" for="maintenance-unit-input">Flat / unit</label>
-          <input type="text" id="maintenance-unit-input" class="expense-combobox" list="maintenance-unit-datalist"
-            placeholder="e.g. A-101" autocomplete="off" />
-          <datalist id="maintenance-unit-datalist"></datalist>
-          <div class="maintenance-alloc-toolbar">
-            <span class="expense-label" style="margin:0;">Apply to past dues</span>
-            <button type="button" class="btn btn-outline" id="maintenance-auto-apply-btn" style="padding:0.25rem 0.55rem; font-size:0.72rem;">
-              Oldest first
-            </button>
+        <div id="income-maintenance-section" class="expense-form__section expense-form__section--maintenance payment-record__alloc" hidden>
+          <div class="payment-record__alloc-head">
+            <h3 class="payment-record__alloc-title">Apply to invoices</h3>
+            <span class="payment-record__alloc-hint">Oldest first — adjust if needed</span>
           </div>
           <div id="maintenance-allocation-rows" class="maintenance-allocation-rows"></div>
           <p id="maintenance-allocation-summary" class="maintenance-alloc-summary"></p>
-        </div>
-
-        <div id="income-extra-section" class="expense-form__section expense-form__section--income-extra" hidden>
-          <p id="income-extra-hint" class="income-extra-hint"></p>
-          <div class="expense-form__section--vendor-invoice income-extra-fields">
-            <div id="income-extra-vendor-wrap" class="expense-form__section expense-form__section--vendor" hidden>
-              <label class="expense-label" for="income-vendor-input" id="income-vendor-label">Vendor</label>
-              <input type="text" id="income-vendor-input" class="expense-combobox" list="income-vendor-datalist"
-                placeholder="e.g. ABC Builders" autocomplete="off" />
-              <datalist id="income-vendor-datalist"></datalist>
-            </div>
-            <div id="income-extra-ref-wrap" class="expense-form__section expense-form__section--invoice" hidden>
-              <label class="expense-label" for="income-reference-input" id="income-reference-label">Reference</label>
-              <input type="text" id="income-reference-input" class="expense-combobox"
-                placeholder="e.g. Contract #12" autocomplete="off" />
-            </div>
-          </div>
-        </div>
-
-        <div class="expense-form__section expense-form__section--desc">
-          <label class="expense-label" for="income-desc">Notes <span class="expense-optional">(optional)</span></label>
-          <textarea id="income-desc" class="expense-desc expense-textarea" rows="2"
-            placeholder="e.g. Monthly maintenance collection from Block A"></textarea>
+          <p id="maintenance-alloc-credit" class="maintenance-alloc-credit" hidden></p>
         </div>
       </div>
 
@@ -1747,6 +1795,38 @@
         <button class="btn btn-outline" type="button"
           onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button>
         <button class="btn btn-primary" type="button" id="save-cash-btn">Save Expense</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="bulk-collection-modal">
+    <div class="modal-content" style="max-width: 960px; width: 96vw;">
+      <div class="expense-modal__header">
+        <div>
+          <h2>Bulk apply collections</h2>
+          <p>Import bank credits or NoBroker payment export — match flats, apply to oldest open invoices, record in one step.</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" id="bulk-collection-close-btn" aria-label="Close">&times;</button>
+      </div>
+      <div style="padding: 0 1.15rem 1rem;">
+        <div class="bulk-collection-import-bar">
+          <label class="invoice-filter-status">
+            <span>Format</span>
+            <select id="bulk-collection-format">
+              <option value="bank">Bank statement (credits)</option>
+              <option value="nobroker">NoBroker export</option>
+            </select>
+          </label>
+          <label class="btn btn-outline" style="cursor:pointer; margin:0;">
+            <i class="fa-solid fa-upload"></i> Choose file
+            <input type="file" id="bulk-collection-file" accept=".xlsx,.xls,.csv" hidden />
+          </label>
+        </div>
+        <div id="bulk-collection-preview"></div>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+          <button type="button" class="btn btn-outline" id="bulk-collection-close-btn-footer">Cancel</button>
+          <button type="button" class="btn btn-primary" id="bulk-collection-apply-btn">Apply selected</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2146,7 +2226,7 @@
         <button type="button" class="btn btn-outline" id="invoice-detail-email-btn">
           <i class="fa-solid fa-envelope"></i> Email
         </button>
-        <button type="button" class="btn btn-primary" id="invoice-detail-collect-btn">Record Collection</button>
+        <button type="button" class="btn btn-primary" id="invoice-detail-collect-btn">Record payment</button>
       </div>
     </div>
   </div>
@@ -2273,6 +2353,69 @@
     </div>
   </div>
 
+  <!-- RESIDENT FILE IMPORT -->
+  <div class="modal-backdrop" id="resident-import-modal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 900;">Import owners &amp; tenants</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
+            Excel (.xlsx) or CSV — upload one file at a time for delta updates.
+          </p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" id="resident-import-close" type="button">&times;</button>
+      </div>
+      <div id="resident-import-pick">
+        <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
+          <strong>Excel:</strong> sheets <strong>owner details</strong> and/or <strong>tenant details</strong>.
+          <strong>CSV:</strong> one file per type (name file with "owner" or "tenant", or use owner_name / tenant_name columns).
+          Columns: <strong>apartment_name</strong>, name, primary/secondary, <strong>residing_status</strong> (owners).
+        </p>
+        <div class="import-mode-options" style="margin-bottom: 0.75rem;">
+          <label class="import-mode-option">
+            <input type="radio" name="resident-legacy-import-mode" value="update_listed" checked />
+            <span><strong>Delta merge</strong> — add or update rows in file; keep everything else</span>
+          </label>
+          <label class="import-mode-option">
+            <input type="radio" name="resident-legacy-import-mode" value="replace_listed" />
+            <span><strong>Replace listed flats</strong> — remove &amp; re-import residents for flats in file</span>
+          </label>
+          <label class="import-mode-option">
+            <input type="radio" name="resident-legacy-import-mode" value="full_replace" />
+            <span><strong>Full replace</strong> — delete all residents, then import file</span>
+          </label>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="resident-import-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="resident-import-choose">
+            <i class="fa-solid fa-file-arrow-up"></i> Choose file
+          </button>
+        </div>
+      </div>
+      <div id="resident-import-preview" hidden>
+        <div id="resident-import-filename" style="font-weight: 700; margin-bottom: 0.5rem;"></div>
+        <div id="resident-import-summary" class="import-preview-box"></div>
+        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="resident-import-back">Back</button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="resident-import-apply">Apply import</button>
+        </div>
+      </div>
+      <div id="resident-import-done" hidden>
+        <div class="import-preview-box" style="margin-bottom: 0.75rem;">
+          <strong>Import applied.</strong> Upload another file to continue building up data, or click Done.
+        </div>
+        <div id="resident-import-log" style="margin-bottom: 1rem;"></div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" style="flex: 1;" id="resident-import-another">
+            <i class="fa-solid fa-plus"></i> Import another file
+          </button>
+          <button type="button" class="btn btn-primary" style="flex: 1;" id="resident-import-done-btn">Done</button>
+        </div>
+      </div>
+      <p id="resident-import-error" class="nb-form-error" hidden style="margin-top: 1rem;"></p>
+    </div>
+  </div>
+
   <!-- RESIDENT MODAL -->
   <div class="modal-backdrop" id="resident-modal">
     <div class="modal-content" style="max-width: 520px;">
@@ -2306,6 +2449,20 @@
           <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Notes</label>
           <textarea id="resident-notes" rows="3" style="width:100%; padding:0.6rem; border:1px solid var(--border); border-radius:10px; resize: vertical;"></textarea>
         </div>
+        <div id="resident-residing-wrap">
+          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Residing</label>
+          <select id="resident-residing" style="width:100%; padding:0.6rem; border:1px solid var(--border); border-radius:10px;">
+            <option value="true">Residing — lives at this flat</option>
+            <option value="false">Non-residing — owner does not live here</option>
+          </select>
+        </div>
+        <div id="resident-primary-wrap" style="display:flex; align-items:end; padding-bottom:0.15rem;">
+          <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; cursor:pointer;">
+            <input id="resident-primary" type="checkbox" />
+            Primary owner
+          </label>
+        </div>
+        <p id="resident-residing-hint" style="grid-column:1/-1; margin:0; font-size:0.75rem; color:var(--text-dim); line-height:1.4;">If all owners are non-residing and there is no tenant, the flat shows as <strong>Vacant</strong>.</p>
       </div>
       <div style="margin-top: 1rem; display:flex; gap:0.75rem;">
         <button class="btn btn-outline" style="flex:1;" id="resident-cancel-btn">Cancel</button>
@@ -2602,13 +2759,15 @@
                     <label class="expense-label" for="unit-edit-occupancy">Status</label>
                     <select id="unit-edit-occupancy" class="expense-combobox">
                       <option value="">— Auto from residents —</option>
-                      <option value="OWNER_OCCUPIED">Owner occupied</option>
+                      <option value="OWNER_OCCUPIED">Owner residing</option>
                       <option value="TENANT_OCCUPIED">Tenant occupied</option>
                       <option value="VACANT">Vacant</option>
+                      <option value="NON_ALLOTABLE">Non-allotable</option>
                       <option value="UNDER_RENOVATION">Under renovation</option>
                       <option value="LOCKED">Locked / dispute</option>
                       <option value="DEVELOPER_HOLD">Developer hold</option>
                     </select>
+                    <p class="unit-detail-form__hint">Leave auto unless renovation, locked, or developer hold. Owner / tenant / vacant is derived from resident records.</p>
                   </div>
                 </section>
 
@@ -2634,6 +2793,9 @@
           <i class="fa-solid fa-car"></i> Parking registry
         </button>
         <div class="unit-detail-footer__actions">
+          <button type="button" class="btn btn-outline btn--danger" id="unit-detail-delete" hidden>
+            <i class="fa-solid fa-trash-can"></i> Delete flat
+          </button>
           <button type="button" class="btn btn-outline" id="unit-edit-cancel">Cancel</button>
           <button type="submit" form="unit-edit-form" class="btn btn-primary" id="unit-edit-save">Save changes</button>
         </div>
@@ -2657,6 +2819,7 @@
         <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
           <strong>Units</strong> sheet: flat details + occupancy flag.
           <strong>Residents</strong> sheet: one row per owner/tenant (multiple per flat).
+          Or legacy <strong>owner details</strong> / <strong>tenant details</strong> sheets.
           Blank cells keep existing values. Re-download template if columns changed.
         </p>
         <div class="import-mode-options" style="margin-bottom: 0.75rem;">

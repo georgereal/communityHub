@@ -8,6 +8,14 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+/** Reject hung Supabase calls so boot UI does not spin forever. */
+export const withTimeout = (promise, ms, label = 'Request') => Promise.race([
+    promise,
+    new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+    }),
+]);
+
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
@@ -80,8 +88,8 @@ export const pullState = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         const uid = user?.id;
 
-        console.log('Running 49 parallel queries...');
-        const results = await Promise.all([
+        console.log('Running parallel queries...');
+        const queriesPromise = Promise.all([
             supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
             supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
@@ -107,7 +115,9 @@ export const pullState = async () => {
             supabase.from('payment_intents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('apartment_payment_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
             supabase.from('society_notices').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('notice_read_log').select('*'),
+            uid
+                ? supabase.from('notice_read_log').select('*').eq('user_id', uid)
+                : Promise.resolve({ data: [], error: null }),
             supabase.from('resident_portal_invites').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('helpdesk_tickets').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('unit_transitions').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
@@ -133,6 +143,7 @@ export const pullState = async () => {
             supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id, account_meta').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
             supabase.rpc('get_ledger_sync_service_status', { p_apartment_id: activeApartmentId }),
         ]);
+        const results = await withTimeout(queriesPromise, 90000, 'Society data load');
 
         const [
             u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,

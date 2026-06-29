@@ -88,6 +88,160 @@ export const groupResidentsByUnit = (residents) => {
     });
 };
 
+export const OCCUPANCY_SUMMARY = {
+    OWNER_OCCUPIED: {
+        label: 'Owner residing',
+        shortLabel: 'Owner residing',
+        hint: 'Flat where at least one owner lives there (no tenant).',
+        badge: 'occ-owner',
+    },
+    TENANT_OCCUPIED: {
+        label: 'Tenant occupied',
+        shortLabel: 'Tenant occupied',
+        hint: 'Flat with a tenant — includes rented units even if owner is non-residing.',
+        badge: 'occ-tenant',
+    },
+    VACANT: {
+        label: 'Vacant',
+        shortLabel: 'Vacant',
+        hint: 'Nobody is residing — no tenant and no owner living there (owner may be on record but non-residing).',
+        badge: 'occ-vacant',
+    },
+    NON_ALLOTABLE: {
+        label: 'Non-allotable',
+        shortLabel: 'Non-allotable',
+        hint: 'No owner and no tenant on record — not assigned / not allotable yet.',
+        badge: 'occ-non-allotable',
+    },
+    NO_OWNER: {
+        label: 'No owner',
+        shortLabel: 'No owner',
+        hint: 'Flat has no owner on record (may still have a tenant).',
+        badge: 'occ-no-owner',
+    },
+    UNDER_RENOVATION: { label: 'Under renovation', shortLabel: 'Renovation', hint: '', badge: 'occ-reno' },
+    LOCKED: { label: 'Locked', shortLabel: 'Locked', hint: '', badge: 'occ-locked' },
+    DEVELOPER_HOLD: { label: 'Developer hold', shortLabel: 'Dev hold', hint: '', badge: 'occ-dev' },
+};
+
+export const occupancySummaryLabel = (key) => OCCUPANCY_SUMMARY[key]?.label || key || '—';
+export const occupancySummaryHint = (key) => OCCUPANCY_SUMMARY[key]?.hint || '';
+export const occupancySummaryBadge = (key) => OCCUPANCY_SUMMARY[key]?.badge || 'occ-unknown';
+
+export function unitMissingOwners(residents) {
+    return !residents.some((r) => (r.kind || '').toUpperCase() === 'OWNER');
+}
+
+export function classifyUnitOccupancy(residents, unitRecord = null) {
+    const owners = residents.filter((r) => (r.kind || '').toUpperCase() === 'OWNER');
+    const tenants = residents.filter((r) => (r.kind || '').toUpperCase() === 'TENANT');
+    const residingOwners = owners.filter((r) => r.is_residing !== false);
+    const explicit = unitRecord?.occupancy_status;
+
+    if (explicit && ['UNDER_RENOVATION', 'LOCKED', 'DEVELOPER_HOLD'].includes(explicit)) {
+        return explicit;
+    }
+    if (!owners.length && !tenants.length) return 'NON_ALLOTABLE';
+    if (tenants.length) return 'TENANT_OCCUPIED';
+    if (residingOwners.length) return 'OWNER_OCCUPIED';
+    return 'VACANT';
+}
+
+export function splitResidentsByKind(residents) {
+    const owners = residents.filter((r) => (r.kind || '').toUpperCase() !== 'TENANT');
+    const tenants = residents.filter((r) => (r.kind || '').toUpperCase() === 'TENANT');
+    return { owners, tenants };
+}
+
+export function computeResidentPageSummary(residents, unitNumbersInScope = []) {
+    const byUnit = new Map();
+    residents.forEach((r) => {
+        const u = normUnit(r.unit_number);
+        if (!byUnit.has(u)) byUnit.set(u, []);
+        byUnit.get(u).push(r);
+    });
+
+    const counts = {
+        totalFlats: 0,
+        ownerOccupied: 0,
+        tenantOccupied: 0,
+        vacant: 0,
+        nonAllotable: 0,
+        noOwnerFlats: 0,
+        underRenovation: 0,
+        locked: 0,
+        developerHold: 0,
+        totalOwners: 0,
+        totalTenants: 0,
+        residingOwners: 0,
+        nonResidingOwners: 0,
+    };
+
+    unitNumbersInScope.forEach((unitNum) => {
+        const key = normUnit(unitNum);
+        const unitRecord = portalState.units.find((u) => normUnit(u.number) === key && u.is_community !== true);
+        const unitResidents = byUnit.get(key) || [];
+        const occ = classifyUnitOccupancy(unitResidents, unitRecord);
+
+        counts.totalFlats += 1;
+        if (occ === 'OWNER_OCCUPIED') counts.ownerOccupied += 1;
+        else if (occ === 'TENANT_OCCUPIED') counts.tenantOccupied += 1;
+        else if (occ === 'VACANT') counts.vacant += 1;
+        else if (occ === 'NON_ALLOTABLE') counts.nonAllotable += 1;
+        if (unitMissingOwners(unitResidents)) counts.noOwnerFlats += 1;
+        else if (occ === 'UNDER_RENOVATION') counts.underRenovation += 1;
+        else if (occ === 'LOCKED') counts.locked += 1;
+        else if (occ === 'DEVELOPER_HOLD') counts.developerHold += 1;
+
+        unitResidents.forEach((r) => {
+            if ((r.kind || '').toUpperCase() === 'TENANT') counts.totalTenants += 1;
+            else {
+                counts.totalOwners += 1;
+                if (r.is_residing !== false) counts.residingOwners += 1;
+                else counts.nonResidingOwners += 1;
+            }
+        });
+    });
+
+    return counts;
+}
+
+export function residentMatchesSearch(r, filterQ) {
+    if (!filterQ) return true;
+    const hay = [
+        r.unit_number,
+        r.kind,
+        r.full_name,
+        r.phone,
+        r.email,
+        r.notes,
+        r.is_primary ? 'primary' : '',
+        r.is_residing === false ? 'non-residing non residing' : 'residing',
+    ]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ');
+    return hay.includes(filterQ.toLowerCase());
+}
+
+export function filterResidentsByOptions(residents, { filterQ = '', kind = '', residency = '', primaryOnly = false } = {}) {
+    return residents.filter((r) => {
+        if (!residentMatchesSearch(r, filterQ)) return false;
+        if (kind && (r.kind || '').toUpperCase() !== kind.toUpperCase()) return false;
+        if (residency === 'residing' && r.is_residing === false) return false;
+        if (residency === 'non-residing' && r.is_residing !== false) return false;
+        if (primaryOnly && !r.is_primary) return false;
+        return true;
+    });
+}
+
+export function unitPassesOccupancyFilter(occ, filterKey, { missingOwners = false } = {}) {
+    if (!filterKey || filterKey === 'all') return true;
+    if (filterKey === 'owners') return occ === 'OWNER_OCCUPIED' || occ === 'VACANT';
+    if (filterKey === 'tenants') return occ === 'TENANT_OCCUPIED';
+    if (filterKey === 'no_owner') return missingOwners;
+    return occ === filterKey;
+}
+
 const getUnitLabel = (unitId) =>
     portalState.units.find((u) => u.id === unitId)?.number || '—';
 
@@ -150,6 +304,9 @@ export async function saveResident(payload, residentId = null) {
         email: payload.email?.trim() || null,
         notes: payload.notes?.trim() || null,
         is_primary: !!payload.is_primary,
+        is_residing: (payload.kind || 'OWNER').toUpperCase() === 'TENANT'
+            ? true
+            : payload.is_residing !== false,
     };
 
     const { error } = residentId
@@ -233,6 +390,8 @@ export async function importResidentsFromSheet(residents, mode = 'update_listed'
                     phone: p.phone || null,
                     email: p.email || null,
                     notes: p.notes || null,
+                    is_primary: !!(p.is_primary ?? p.isPrimary),
+                    is_residing: p.is_residing ?? p.isResiding ?? true,
                 };
                 if (existing) {
                     const { error } = await supabase.from('residents').update(row).eq('id', existing.id);
@@ -253,6 +412,8 @@ export async function importResidentsFromSheet(residents, mode = 'update_listed'
                 phone: p.phone || null,
                 email: p.email || null,
                 notes: p.notes || null,
+                is_primary: !!(p.is_primary ?? p.isPrimary),
+                is_residing: p.is_residing ?? p.isResiding ?? true,
             }));
             const { error: insErr } = await supabase.from('residents').insert(payload);
             if (insErr) throw new Error(insErr.message);

@@ -3,12 +3,22 @@
  */
 import { portalState, supabase, pullState } from './store.js';
 import { deriveBlockFromFlat } from './parkingImport.js';
+import { mergeLegacyResidentsFromWorkbook } from './residentImport.js';
 import {
     importResidentsFromSheet,
     deleteResident,
     loadResidents,
     fetchResidentsForApartment,
+    clearResidentsCache,
+    normUnit,
+    getResidents,
+    classifyUnitOccupancy,
+    occupancySummaryLabel,
+    occupancySummaryBadge,
+    unitMissingOwners,
+    splitResidentsByKind,
 } from './residents.js';
+import { logActivity } from './activityAudit.js';
 import { renderBlockFilterSelect, unitMatchesBlock, initBlockFilterListener } from './blockFilter.js';
 import {
     getOpenInvoicesForUnit,
@@ -23,9 +33,10 @@ import { getDocumentsForUnit, saveUnitDocument, deleteUnitDocument } from './ope
 import { withButtonBusy } from './buttonBusy.js';
 
 export const OCCUPANCY_STATUSES = {
-    OWNER_OCCUPIED: { label: 'Owner occupied', short: 'Owner' },
+    OWNER_OCCUPIED: { label: 'Owner residing', short: 'Owner' },
     TENANT_OCCUPIED: { label: 'Tenant occupied', short: 'Tenant' },
     VACANT: { label: 'Vacant', short: 'Vacant' },
+    NON_ALLOTABLE: { label: 'Non-allotable', short: 'N/A' },
     UNDER_RENOVATION: { label: 'Under renovation', short: 'Renovation' },
     LOCKED: { label: 'Locked / dispute', short: 'Locked' },
     DEVELOPER_HOLD: { label: 'Developer hold', short: 'Dev hold' },
@@ -76,8 +87,6 @@ const RESIDENT_COL_ALIASES = {
 const normHeader = (v) =>
     String(v ?? '').trim().toLowerCase().replace(/[\s_]+/g, ' ');
 
-const normUnit = (v) => String(v ?? '').trim().toUpperCase();
-
 const parseNum = (v) => {
     if (v == null || v === '') return null;
     const n = parseFloat(String(v).replace(/,/g, ''));
@@ -109,6 +118,8 @@ const parseOccupancy = (raw) => {
         VACANT: 'VACANT',
         NOT_OCCUPIED: 'VACANT',
         EMPTY: 'VACANT',
+        NON_ALLOTABLE: 'NON_ALLOTABLE',
+        NON_ALLOTABLE_FLAT: 'NON_ALLOTABLE',
         UNDER_RENOVATION: 'UNDER_RENOVATION',
         RENOVATION: 'UNDER_RENOVATION',
         LOCKED: 'LOCKED',
@@ -138,6 +149,65 @@ const findUnit = (unitNumber) => {
     return portalState.units.find((u) => normUnit(u.number) === needle);
 };
 
+export const flatDeleteConfirmMessage = (unitNumber, residents = []) => {
+    const unit = findUnit(unitNumber);
+    const people = residents.length;
+    const vehicles = unit ? (unit.vehicles || []).length : 0;
+    const parts = [`Delete ${unitNumber} and all ${people} owner/tenant record(s)?`];
+    if (unit) {
+        parts.push(`Removes the flat from the unit directory${vehicles ? ` and ${vehicles} registered vehicle(s)` : ''}.`);
+    } else {
+        parts.push('No unit directory record exists for this flat number — only resident records will be removed.');
+    }
+    parts.push('Linked billing or history may block deletion if invoices exist for this flat.');
+    parts.push('This cannot be undone.');
+    return parts.join('\n\n');
+};
+
+/** Delete a flat (if in units table), its vehicles, and all owner/tenant records. */
+export async function deleteFlatWithResidents(unitNumber) {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+
+    const needle = normUnit(unitNumber);
+    const unit = findUnit(unitNumber);
+
+    await loadResidents(true);
+    const residentRows = getResidents().filter((r) => normUnit(r.unit_number) === needle);
+    const residentIds = [...new Set(residentRows.map((r) => r.id))];
+
+    if (unit) {
+        const { error: vehErr } = await supabase.from('vehicles').delete().eq('unit_id', unit.id);
+        if (vehErr) throw new Error(vehErr.message);
+
+        const { error: unitErr } = await supabase.from('units').delete().eq('id', unit.id);
+        if (unitErr) throw new Error(unitErr.message);
+    }
+
+    if (residentIds.length) {
+        const { error: resErr } = await supabase.from('residents').delete().in('id', residentIds);
+        if (resErr) throw new Error(resErr.message);
+    }
+
+    if (!unit && !residentIds.length) {
+        throw new Error(`Nothing to delete for ${unitNumber}.`);
+    }
+
+    clearResidentsCache();
+    await pullState();
+
+    await logActivity({
+        entityType: 'UNIT',
+        entityId: unit?.id || unitNumber,
+        action: 'DELETE',
+        summary: `Deleted flat ${unitNumber} (${residentIds.length} resident(s)${unit ? ', unit record' : ''})`,
+        newData: { unitNumber, residentCount: residentIds.length, unitDeleted: !!unit },
+    });
+
+    return { unitDeleted: !!unit, residentsDeleted: residentIds.length, vehiclesRemoved: unit ? (unit.vehicles || []).length : 0 };
+};
+
 const indexResidents = (residents) => {
     const byUnit = new Map();
     (residents || []).forEach((r) => {
@@ -151,30 +221,18 @@ const indexResidents = (residents) => {
 };
 
 export const occupancyLabel = (status) =>
-    OCCUPANCY_STATUSES[status]?.label || status || '—';
+    occupancySummaryLabel(status) || OCCUPANCY_STATUSES[status]?.label || status || '—';
 
-export const occupancyBadgeClass = (status) => {
-    const map = {
-        OWNER_OCCUPIED: 'occ-owner',
-        TENANT_OCCUPIED: 'occ-tenant',
-        VACANT: 'occ-vacant',
-        UNDER_RENOVATION: 'occ-reno',
-        LOCKED: 'occ-locked',
-        DEVELOPER_HOLD: 'occ-dev',
-    };
-    return map[status] || 'occ-unknown';
-};
+export const occupancyBadgeClass = (status) => occupancySummaryBadge(status);
+
+export const deriveUnitOccupancy = (unit, residents = []) =>
+    classifyUnitOccupancy(residents, unit);
 
 export const buildUnitDirectoryRows = (units, residents = []) => {
     const resIndex = indexResidents(residents);
     return units.map((u) => {
-        const res = resIndex.get(normUnit(u.number)) || { owners: [], tenants: [] };
-        let occ = u.occupancy_status || null;
-        if (!occ) {
-            if (res.tenants.length) occ = 'TENANT_OCCUPIED';
-            else if (res.owners.length) occ = 'OWNER_OCCUPIED';
-            else occ = 'VACANT';
-        }
+        const unitResidents = [...(resIndex.get(normUnit(u.number))?.owners || []), ...(resIndex.get(normUnit(u.number))?.tenants || [])];
+        const occ = deriveUnitOccupancy(u, unitResidents);
         return [
             u.number,
             u.block || deriveBlockFromFlat(u.number) || '',
@@ -347,7 +405,7 @@ export async function parseUnitDirectoryExcel(file) {
     });
     if (!rows.length) throw new Error('No data rows on Units sheet.');
 
-    const residents = [];
+    let residents = [];
     const rs = wb.getWorksheet('Residents');
     if (rs) {
         const resColMap = mapHeaders(rs.getRow(1), RESIDENT_COL_ALIASES);
@@ -362,6 +420,9 @@ export async function parseUnitDirectoryExcel(file) {
                 }
             });
         }
+    }
+    if (!residents.length) {
+        residents = mergeLegacyResidentsFromWorkbook(wb, residents);
     }
 
     return { unitRows: rows, residents, sheetName: ws.name };
@@ -452,10 +513,274 @@ function formatDbError(error, unitNumber) {
     return new Error(msg);
 }
 
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+/** Owner names for list column — primary owner first. */
+const ownersForDisplay = (owners) => {
+    if (!owners.length) return [];
+    const primary = owners.find((r) => r.is_primary);
+    if (primary) return [primary, ...owners.filter((r) => r.id !== primary.id)];
+    return owners;
+};
+const tenantsForDisplay = (tenants) => {
+    if (!tenants.length) return [];
+    const primary = tenants.find((r) => r.is_primary);
+    if (primary) return [primary, ...tenants.filter((r) => r.id !== primary.id)];
+    return tenants;
+};
+
+const formatResidentCell = (list, emptyLabel = '—', { showAway = false } = {}) => {
+    if (!list.length) return `<span class="unit-directory-cell--empty">${emptyLabel}</span>`;
+    const rows = list.map((r) => {
+        const primary = r.is_primary ? '<span class="unit-dir-name__tag">★</span>' : '';
+        const away = showAway && (r.kind || '').toUpperCase() !== 'TENANT' && r.is_residing === false
+            ? '<span class="unit-dir-name__tag">away</span>'
+            : '';
+        return `<span class="unit-dir-name">${esc(r.full_name)}${primary}${away}</span>`;
+    });
+    return `<span class="unit-directory-names">${rows.join('')}</span>`;
+};
+
+const computeUnitVehicleStats = (unit) => {
+    let slotCars = 0;
+    let slotBikes = 0;
+    let activeCars = 0;
+    let activeBikes = 0;
+    (unit.vehicles || []).forEach((v) => {
+        if (v.is_parking_active === false) return;
+        const isCar = (v.type || 'CAR').toUpperCase() === 'CAR';
+        if (isCar) activeCars += 1;
+        else activeBikes += 1;
+        const allocType = effectiveAllocationType(v);
+        if (allocType === 'COMMON' || allocType === 'NEIGHBOR') return;
+        if (isCar) slotCars += 1;
+        else slotBikes += 1;
+    });
+    const carLimit = unit.car_limit || 0;
+    const bikeLimit = unit.bike_limit || 0;
+    const violations = (portalState.parking?.violations || [])
+        .filter((v) => v.unit_id === unit.id && (v.status || 'PENDING') === 'PENDING');
+    return {
+        activeCars,
+        activeBikes,
+        slotCars,
+        slotBikes,
+        carLimit,
+        bikeLimit,
+        carsOver: slotCars > carLimit,
+        bikesOver: slotBikes > bikeLimit,
+        violations,
+    };
+};
+
+const formatSlotUsage = (icon, used, limit, label, over, activeTotal) => {
+    const fraction = limit > 0 ? `${used}/${limit}` : String(used || 0);
+    const poolExtra = activeTotal > used ? ` · ${activeTotal} total` : '';
+    const title = limit > 0
+        ? `${used} of ${limit} ${label} slot${limit === 1 ? '' : 's'} in use${poolExtra}${over ? ' — over limit' : ''}`
+        : `${activeTotal || used} active ${label}${used !== activeTotal ? ` (${used} on base slots)` : ''}`;
+    return `<span class="unit-directory-slot${over ? ' unit-directory-slot--over' : ''}" title="${esc(title)}">
+      <i class="fa-solid ${icon}" aria-hidden="true"></i>
+      <strong>${fraction}</strong>
+      <span class="unit-directory-slot__label">${label}</span>
+    </span>`;
+};
+
+const formatVehicleSummary = (unit) => {
+    const {
+        activeCars, activeBikes, slotCars, slotBikes,
+        carLimit, bikeLimit, carsOver, bikesOver, violations,
+    } = computeUnitVehicleStats(unit);
+    const hasParking = carLimit || bikeLimit || slotCars || slotBikes || activeCars || activeBikes;
+    if (!hasParking && !violations.length) {
+        return '<span class="unit-directory-cell--empty">—</span>';
+    }
+    const parts = [];
+    if (carLimit || slotCars || activeCars) {
+        parts.push(formatSlotUsage('fa-car', slotCars, carLimit, 'car', carsOver, activeCars));
+    }
+    if (bikeLimit || slotBikes || activeBikes) {
+        parts.push(formatSlotUsage('fa-motorcycle', slotBikes, bikeLimit, 'bike', bikesOver, activeBikes));
+    }
+    const flags = violations.length
+        ? [`<span class="unit-directory-vehicle-flag unit-directory-vehicle-flag--violation" title="Pending parking violations">${violations.length} violation${violations.length === 1 ? '' : 's'}</span>`]
+        : [];
+    return `<span class="unit-directory-vehicle-summary">${parts.join('')}${flags.length ? `<span class="unit-directory-vehicle-flags">${flags.join('')}</span>` : ''}</span>`;
+};
+
 const formatResidentList = (list) => {
     if (!list?.length) return '<span class="unit-card__empty">—</span>';
     if (list.length === 1) return `<strong>${list[0].full_name}</strong>`;
     return `<strong>${list[0].full_name}</strong> <span class="unit-directory-more">+${list.length - 1}</span>`;
+};
+
+const renderUnitDirectoryPerson = (r) => {
+    const isTenant = (r.kind || '').toUpperCase() === 'TENANT';
+    const residingBadge = !isTenant && r.is_residing === false
+        ? '<span class="occupancy-badge occ-no-owner">Non-residing</span>'
+        : '';
+    const primaryBadge = r.is_primary ? '<span class="resident-primary-badge">Primary</span>' : '';
+    const phone = (r.phone || '').trim();
+    const email = (r.email || '').trim();
+    const contactParts = [
+        phone ? `<span class="unit-dir-person__contact"><i class="fa-solid fa-phone" aria-hidden="true"></i>${esc(phone)}</span>` : '',
+        email ? `<span class="unit-dir-person__contact"><i class="fa-solid fa-envelope" aria-hidden="true"></i>${esc(email)}</span>` : '',
+    ].filter(Boolean);
+    const metaHtml = contactParts.length
+        ? `<div class="unit-dir-person__meta">${contactParts.join('')}</div>`
+        : '';
+    return `
+      <div class="unit-dir-person">
+        <div class="unit-dir-person__main">
+          <strong class="unit-dir-person__name">${esc(r.full_name)}</strong>${primaryBadge}${residingBadge}
+          <button type="button" class="unit-dir-person__edit unit-dir-edit-resident" data-id="${r.id}" title="Edit name, phone, and email">
+            <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          </button>
+        </div>
+        ${metaHtml}
+      </div>`;
+};
+
+const renderUnitDirectoryVehicle = (v, unit) => {
+    const active = v.is_parking_active !== false;
+    const icon = v.type === 'BIKE' ? 'fa-motorcycle' : 'fa-car';
+    const alloc = effectiveAllocationType(v);
+    let statusNote = '';
+    if (!active) statusNote = 'Dormant';
+    else if (alloc === 'COMMON' || alloc === 'NEIGHBOR') statusNote = 'Pool / reallocated';
+    else if (v.slotStatus === 'OVERLIMIT') statusNote = 'Over limit';
+    return `
+      <div class="unit-dir-vehicle${active ? '' : ' unit-dir-vehicle--dormant'}">
+        <span><i class="fa-solid ${icon}"></i> <strong>${esc(v.plate || '—')}</strong></span>
+        <span class="unit-dir-vehicle__meta">${esc(v.type || '—')}${statusNote ? ` · ${statusNote}` : ''}</span>
+      </div>`;
+};
+
+const vehiclesWithSlotStatus = (unit) => {
+    let baseCars = 0;
+    let baseBikes = 0;
+    return [...(unit.vehicles || [])].map((v) => {
+        if (v.is_parking_active === false) return { ...v, slotStatus: 'INACTIVE' };
+        const allocType = effectiveAllocationType(v);
+        if (allocType === 'COMMON' || allocType === 'NEIGHBOR') return { ...v, slotStatus: 'POOL' };
+        if ((v.type || 'CAR').toUpperCase() === 'CAR') {
+            baseCars += 1;
+            return { ...v, slotStatus: baseCars <= (unit.car_limit || 0) ? 'OK' : 'OVERLIMIT' };
+        }
+        baseBikes += 1;
+        return { ...v, slotStatus: baseBikes <= (unit.bike_limit || 0) ? 'OK' : 'OVERLIMIT' };
+    }).sort((a, b) => (a.plate || '').localeCompare(b.plate || ''));
+};
+
+const renderUnitDirectoryInvoice = (inv) => {
+    const bal = invoiceBalance(inv);
+    const due = inv.due_date
+        ? new Date(`${inv.due_date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+        : '—';
+    return `
+      <div class="unit-dir-invoice">
+        <div class="unit-dir-invoice__main">
+          <strong>${esc(inv.period_label || 'Invoice')}</strong>
+          ${invoiceStatusBadge(inv)}
+        </div>
+        <div class="unit-dir-invoice__meta">
+          <span>Due ${due}</span>
+          <span class="${bal > 0 ? 'unit-detail-kpi--warn' : ''}">${formatMoney(bal)} due</span>
+        </div>
+        <button type="button" class="btn btn-outline btn--small unit-dir-view-invoice" data-id="${inv.id}">View</button>
+      </div>`;
+};
+
+const renderUnitDirectoryExpanded = (u, unitResidents, occ) => {
+    const { owners, tenants } = splitResidentsByKind(unitResidents);
+    const vehicles = vehiclesWithSlotStatus(u);
+    const invoices = getUnitInvoices(u.id);
+    const open = getOpenInvoicesForUnit(u.id);
+    const outstanding = open.reduce((s, inv) => s + invoiceBalance(inv), 0);
+    const vStats = computeUnitVehicleStats(u);
+
+    const sectionCard = (title, count, body, empty) => `
+      <section class="unit-directory-panel">
+        <header class="unit-directory-panel__head">
+          <h4 class="unit-directory-panel__title">${title}</h4>
+          <span class="unit-directory-panel__count">${count}</span>
+        </header>
+        <div class="unit-directory-panel__body">
+          ${body || `<p class="unit-directory-panel__empty">${empty}</p>`}
+        </div>
+      </section>`;
+
+    return `
+      <div class="unit-directory-expanded">
+        <div class="unit-directory-expanded__toolbar">
+          <div class="unit-directory-expanded__stats">
+            <span class="unit-directory-stat${outstanding > 0 ? ' unit-directory-stat--warn' : ''}">
+              <i class="fa-solid fa-indian-rupee-sign"></i> ${outstanding > 0 ? formatMoney(outstanding) : 'Clear'}
+            </span>
+            <span class="unit-directory-stat">
+              <i class="fa-solid fa-user-group"></i> ${owners.length} owner${owners.length === 1 ? '' : 's'} · ${tenants.length} tenant${tenants.length === 1 ? '' : 's'}
+            </span>
+            <span class="unit-directory-stat">
+              <i class="fa-solid fa-car"></i> ${vStats.activeCars}/${vStats.carLimit || 0} car · ${vStats.activeBikes}/${vStats.bikeLimit || 0} bike
+            </span>
+            <span class="occupancy-badge ${occupancyBadgeClass(occ)}">${esc(occupancyLabel(occ))}</span>
+          </div>
+          <button type="button" class="btn btn-primary btn--small unit-directory-open-modal" data-unit-id="${u.id}" data-tab="overview">
+            <i class="fa-solid fa-up-right-from-square"></i> Open full details
+          </button>
+        </div>
+        <div class="unit-directory-expanded__grid">
+          ${sectionCard('Owners', owners.length, owners.map(renderUnitDirectoryPerson).join(''), 'No owners recorded')}
+          ${sectionCard('Tenants', tenants.length, tenants.map(renderUnitDirectoryPerson).join(''), 'No tenants recorded')}
+          ${sectionCard('Parking', vehicles.length, vehicles.map((v) => renderUnitDirectoryVehicle(v, u)).join(''), 'No vehicles registered')}
+          ${sectionCard('Invoices', invoices.length, invoices.length
+        ? `<div class="unit-directory-panel__summary">
+              <span>Outstanding <strong class="${outstanding > 0 ? 'unit-detail-kpi--warn' : ''}">${formatMoney(outstanding)}</strong></span>
+              <span>${open.length} open</span>
+            </div>${invoices.slice(0, 5).map(renderUnitDirectoryInvoice).join('')}`
+        : '', 'No invoices yet')}
+        </div>
+        <nav class="unit-directory-expanded__nav" aria-label="Flat detail shortcuts">
+          <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="overview">Edit flat</button>
+          <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="residents">Residents</button>
+          <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="billing">Billing</button>
+          <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="vehicles">Vehicles</button>
+          <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="documents">Documents</button>
+        </nav>
+      </div>`;
+};
+
+const wireUnitDirectoryRowActions = (root, residents) => {
+    root.querySelectorAll('.unit-directory-open-modal').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void openUnitDetailModal(btn.dataset.unitId, btn.dataset.tab || 'overview');
+        });
+    });
+    wireUnitDirectoryExpanded(root, residents);
+};
+
+const wireUnitDirectoryExpanded = (root, residents) => {
+    root.querySelectorAll('.unit-dir-edit-resident').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const r = residents.find((x) => x.id === btn.dataset.id);
+            if (r && typeof window.openResidentModal === 'function') window.openResidentModal(r);
+        });
+    });
+    root.querySelectorAll('.unit-dir-view-invoice').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            viewInvoiceDetail(btn.dataset.id);
+        });
+    });
+    root.querySelectorAll('.unit-directory-full-detail').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void openUnitDetailModal(btn.dataset.unitId, btn.dataset.tab || 'overview');
+        });
+    });
 };
 
 let editingUnitId = null;
@@ -573,21 +898,33 @@ const renderUnitDetailResidents = (u) => {
 
     const personRow = (r) => {
         const isTenant = (r.kind || '').toUpperCase() === 'TENANT';
+        const residingBadge = !isTenant && r.is_residing === false
+            ? ' <span class="occupancy-badge occ-no-owner">Non-residing</span>'
+            : '';
+        const phone = (r.phone || '').trim();
+        const email = (r.email || '').trim();
+        const notes = (r.notes || '').trim();
+        const metaParts = [
+            phone ? `<span><i class="fa-solid fa-phone" aria-hidden="true"></i> ${esc(phone)}</span>` : '',
+            email ? `<span><i class="fa-solid fa-envelope" aria-hidden="true"></i> ${esc(email)}</span>` : '',
+            notes ? `<span class="unit-detail-person__notes">${esc(notes)}</span>` : '',
+        ].filter(Boolean);
+        const metaHtml = metaParts.length
+            ? `<div class="unit-detail-person__meta">${metaParts.join('')}</div>`
+            : '';
         return `
       <div class="unit-detail-person">
         <div class="unit-detail-person__main">
-          <strong>${r.full_name}</strong>
-          <span class="unit-detail-person__role ${isTenant ? 'unit-detail-person__role--tenant' : ''}">${(r.kind || 'OWNER').toUpperCase()}</span>
+          <strong>${esc(r.full_name)}</strong>
+          <span class="unit-detail-person__role ${isTenant ? 'unit-detail-person__role--tenant' : ''}">${(r.kind || 'OWNER').toUpperCase()}</span>${residingBadge}
+          <button type="button" class="unit-detail-person__edit unit-detail-edit-resident" data-id="${r.id}" title="Edit name, phone, and email">
+            <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="unit-detail-person__delete unit-detail-del-resident" data-id="${r.id}" title="Delete">
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+          </button>
         </div>
-        <div class="unit-detail-person__meta">
-          ${r.phone ? `<span><i class="fa-solid fa-phone"></i> ${r.phone}</span>` : ''}
-          ${r.email ? `<span><i class="fa-solid fa-envelope"></i> ${r.email}</span>` : ''}
-          ${r.notes ? `<span class="unit-detail-person__notes">${r.notes}</span>` : ''}
-        </div>
-        <div class="unit-detail-person__actions">
-          <button type="button" class="btn btn-outline btn--small unit-detail-edit-resident" data-id="${r.id}" title="Edit"><i class="fa-solid fa-pen"></i></button>
-          <button type="button" class="btn btn-outline btn--small unit-detail-del-resident" data-id="${r.id}" title="Delete" style="color:var(--danger);"><i class="fa-solid fa-trash-can"></i></button>
-        </div>
+        ${metaHtml}
       </div>`;
     };
 
@@ -867,9 +1204,15 @@ export const openUnitDetailModal = async (unitId, tab = 'overview') => {
     editingUnitId = unitId;
     const apartmentId = portalState.access?.activeApartmentId;
     editingUnitResidents = apartmentId ? await fetchResidentsForApartment(apartmentId) : [];
+    const unitResidents = editingUnitResidents.filter((r) => normUnit(r.unit_number) === normUnit(u.number));
+    const derivedOcc = deriveUnitOccupancy(u, unitResidents);
 
     document.getElementById('unit-detail-title').textContent = u.number;
-    document.getElementById('unit-detail-subtitle').textContent = unitSubtitle(u);
+    document.getElementById('unit-detail-subtitle').textContent = [
+        unitSubtitle(u),
+        occupancyLabel(derivedOcc),
+        u.occupancy_status && u.occupancy_status !== derivedOcc ? `(manual: ${occupancyLabel(u.occupancy_status)})` : '',
+    ].filter(Boolean).join(' · ');
     document.getElementById('unit-edit-block').value = u.block || deriveBlockFromFlat(u.number) || '';
     document.getElementById('unit-edit-bhk').value = u.bhk || '';
     document.getElementById('unit-edit-area').value = u.area_sqft ?? '';
@@ -880,6 +1223,8 @@ export const openUnitDetailModal = async (unitId, tab = 'overview') => {
 
     renderUnitDetailKpis(u);
     switchUnitDetailTab(tab);
+    const deleteBtn = document.getElementById('unit-detail-delete');
+    if (deleteBtn) deleteBtn.hidden = false;
     document.getElementById('unit-detail-modal')?.classList.add('active');
 };
 
@@ -946,7 +1291,16 @@ export const renderUnitDirectory = async () => {
 
     const units = directoryUnits()
         .filter((u) => unitMatchesBlock(u.id))
-        .filter((u) => !filterQ || String(u.number).toUpperCase().includes(filterQ));
+        .filter((u) => {
+            if (!filterQ) return true;
+            const res = resIndex.get(normUnit(u.number)) || { owners: [], tenants: [] };
+            const hay = [
+                u.number, u.block, u.bhk, u.notes,
+                ...res.owners.map((r) => r.full_name),
+                ...res.tenants.map((r) => r.full_name),
+            ].join(' ').toUpperCase();
+            return hay.includes(filterQ);
+        });
 
     list.innerHTML = '';
     if (!units.length) {
@@ -954,36 +1308,69 @@ export const renderUnitDirectory = async () => {
         return;
     }
 
-    units.forEach((u) => {
+    const html = units.map((u) => {
         const res = resIndex.get(normUnit(u.number)) || { owners: [], tenants: [] };
-        let occ = u.occupancy_status;
-        if (!occ) {
-            if (res.tenants.length) occ = 'TENANT_OCCUPIED';
-            else if (res.owners.length) occ = 'OWNER_OCCUPIED';
-            else occ = 'VACANT';
-        }
-        const row = document.createElement('div');
-        row.className = 'apt-row unit-directory-row unit-directory-row--clickable';
-        row.innerHTML = `
-          <div class="maintenance-dues-flat">${u.number}</div>
-          <div>${u.block || deriveBlockFromFlat(u.number) || '—'}</div>
-          <div>${formatUnitTypeLabel(u.bhk) || '—'}</div>
-          <div style="text-align:right;">${u.area_sqft != null && u.area_sqft !== '' ? u.area_sqft : '—'}</div>
-          <div style="text-align:center;">${u.car_limit ?? 0} / ${u.bike_limit ?? 0}</div>
-          <div><span class="occupancy-badge ${occupancyBadgeClass(occ)}">${occupancyLabel(occ)}</span></div>
-          <div class="unit-directory-resident">${formatResidentList(res.owners)}</div>
-          <div class="unit-directory-resident">${formatResidentList(res.tenants)}</div>
-          <div style="text-align:right;">
-            <button type="button" class="btn btn-outline btn--small unit-directory-view" title="View flat details">
-              <i class="fa-solid fa-arrow-right"></i>
-            </button>
-          </div>`;
-        row.addEventListener('click', () => void openUnitDetailModal(u.id));
-        row.querySelector('.unit-directory-view')?.addEventListener('click', (e) => {
+        const unitResidents = res.owners.concat(res.tenants);
+        const occ = deriveUnitOccupancy(u, unitResidents);
+        const missingOwners = unitMissingOwners(unitResidents);
+        const { owners, tenants } = splitResidentsByKind(unitResidents);
+        const ownerList = ownersForDisplay(owners);
+        const tenantList = tenantsForDisplay(tenants);
+        const block = u.block || deriveBlockFromFlat(u.number) || '—';
+        const bhk = formatUnitTypeLabel(u.bhk) || '—';
+        const area = u.area_sqft != null && u.area_sqft !== '' ? `${u.area_sqft} sq ft` : '—';
+        const outstanding = getOpenInvoicesForUnit(u.id).reduce((s, inv) => s + invoiceBalance(inv), 0);
+        const duesHtml = outstanding > 0
+            ? `<span class="unit-directory-group__dues unit-directory-group__dues--warn">${formatMoney(outstanding)}</span>`
+            : `<span class="unit-directory-group__dues">—</span>`;
+
+        return `
+        <details class="unit-directory-group${missingOwners ? ' resident-unit-group--no-owner' : ''}">
+          <summary class="unit-directory-group__summary">
+            <strong class="unit-directory-group__flat">${esc(u.number)}</strong>
+            <span class="unit-directory-group__block">${esc(block)}</span>
+            <span class="unit-directory-group__meta">${esc(bhk)} · ${esc(area)}</span>
+            <span class="unit-directory-group__status">
+              <span class="occupancy-badge ${occupancyBadgeClass(occ)}">${esc(occupancyLabel(occ))}</span>
+              ${missingOwners ? '<span class="occupancy-badge occ-no-owner">No owner</span>' : ''}
+            </span>
+            <span class="unit-directory-group__owners">${formatResidentCell(ownerList, '—', { showAway: true })}</span>
+            <span class="unit-directory-group__tenants">${formatResidentCell(tenantList)}</span>
+            <span class="unit-directory-group__vehicles">${formatVehicleSummary(u)}</span>
+            <span class="unit-directory-group__dues-col">${duesHtml}</span>
+            <span class="unit-directory-group__actions">
+              <span class="unit-directory-group__actions-inner">
+              <button type="button" class="btn btn-outline btn--small unit-directory-open-modal" data-unit-id="${u.id}" data-tab="overview" title="Open full flat details">
+                <i class="fa-solid fa-up-right-from-square"></i>
+              </button>
+              <i class="fa-solid fa-chevron-down unit-directory-group__chevron" aria-hidden="true"></i>
+              <button type="button" class="btn btn-outline btn--small btn--danger unit-directory-delete" data-unit-id="${u.id}" data-unit-number="${esc(u.number)}" title="Delete flat">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+              </span>
+            </span>
+          </summary>
+          ${renderUnitDirectoryExpanded(u, unitResidents, occ)}
+        </details>`;
+    }).join('');
+
+    list.innerHTML = html;
+    wireUnitDirectoryRowActions(list, residents);
+
+    list.querySelectorAll('.unit-directory-delete').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
             e.stopPropagation();
-            void openUnitDetailModal(u.id);
+            const unitNumber = btn.dataset.unitNumber;
+            const unitResidents = residents.filter((r) => normUnit(r.unit_number) === normUnit(unitNumber));
+            if (!confirm(flatDeleteConfirmMessage(unitNumber, unitResidents))) return;
+            await withButtonBusy(btn, '…', async () => {
+                await deleteFlatWithResidents(unitNumber);
+                if (editingUnitId === btn.dataset.unitId) closeUnitDetailModal();
+                await renderUnitDirectory();
+                window.renderResidents?.();
+            }).catch((err) => alert(err?.message || 'Could not delete flat.'));
         });
-        list.appendChild(row);
     });
 };
 
@@ -1004,6 +1391,19 @@ export const initUnitDirectory = () => {
     });
     document.getElementById('unit-detail-close')?.addEventListener('click', closeUnitDetailModal);
     document.getElementById('unit-edit-cancel')?.addEventListener('click', closeUnitDetailModal);
+    document.getElementById('unit-detail-delete')?.addEventListener('click', async () => {
+        const u = portalState.units.find((x) => x.id === editingUnitId);
+        if (!u) return;
+        const residents = editingUnitResidents.filter((r) => normUnit(r.unit_number) === normUnit(u.number));
+        if (!confirm(flatDeleteConfirmMessage(u.number, residents))) return;
+        const btn = document.getElementById('unit-detail-delete');
+        await withButtonBusy(btn, 'Deleting…', async () => {
+            await deleteFlatWithResidents(u.number);
+            closeUnitDetailModal();
+            await renderUnitDirectory();
+            window.renderResidents?.();
+        }).catch((err) => alert(err?.message || 'Could not delete flat.'));
+    });
     document.getElementById('unit-edit-parking-link')?.addEventListener('click', () => {
         const id = editingUnitId;
         closeUnitDetailModal();
