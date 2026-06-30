@@ -12,7 +12,7 @@ import { buildMockFinanceState, buildMockNoBrokerLines } from './mockFinanceStat
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const outDir = process.env.SCREENSHOT_DIR || '/opt/cursor/artifacts/screenshots';
+const outDir = process.env.SCREENSHOT_DIR || join(root, 'docs/screenshots');
 const port = 5173;
 const baseUrl = `http://127.0.0.1:${port}`;
 
