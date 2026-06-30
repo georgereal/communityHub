@@ -3,8 +3,18 @@
  * expense-sheet pivot, and income/expense trend projections.
  */
 import { portalState } from './store.js';
-import { getMatchedTransactionIds, getUnmatchedBankLines, getUnmatchedLedgerTxns } from './bankReconciliation.js';
-import { parseNoBrokerCollectionLines } from './bulkCollectionImport.js';
+import {
+    getMatchedTransactionIds,
+    getUnmatchedBankLines,
+    getUnmatchedLedgerTxns,
+    getNoBrokerDump,
+    loadNoBrokerDumpFile,
+    clearNoBrokerDump,
+    autoMatchByDateAndAmount,
+    autoCreateFromUnmatchedLines,
+    reconcileBankWithNoBroker,
+    getDateTolerance,
+} from './bankReconciliation.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -156,8 +166,8 @@ const linearProject = (values, futureCount) => {
 };
 
 let trendChartInstance = null;
-let nobrokerDumpLines = [];
-let nobrokerFileName = '';
+
+const getNobrokerState = () => getNoBrokerDump();
 
 const getSettings = () => ({
     monthCount: parseInt(document.getElementById('fa-month-range')?.value || '12', 10),
@@ -234,6 +244,8 @@ const renderNoBrokerPanel = (months) => {
     const el = document.getElementById('fa-nobroker-panel');
     if (!el) return;
 
+    const { lines: nobrokerDumpLines, fileName: nobrokerFileName } = getNobrokerState();
+
     if (!nobrokerDumpLines.length) {
         el.innerHTML = `
           <div class="fa-panel__head">
@@ -271,9 +283,16 @@ const renderNoBrokerPanel = (months) => {
         .join('');
 
     el.innerHTML = `
-      <div class="fa-panel__head">
-        <h3><i class="fa-solid fa-building"></i> NoBroker collections alignment</h3>
-        <p>Comparing <strong>${nobrokerFileName}</strong> (${nobrokerDumpLines.length} rows) to ledger maintenance collections.</p>
+      <div class="fa-panel__head fa-panel__head--row">
+        <div>
+          <h3><i class="fa-solid fa-building"></i> NoBroker collections alignment</h3>
+          <p>Comparing <strong>${nobrokerFileName}</strong> (${nobrokerDumpLines.length} rows) to ledger maintenance collections.</p>
+        </div>
+        <div class="fa-toolbar__actions">
+          <button type="button" class="btn btn-outline btn--small" id="fa-auto-match-btn"><i class="fa-solid fa-link"></i> Auto-match by date</button>
+          <button type="button" class="btn btn-primary btn--small" id="fa-nobroker-reconcile-btn"><i class="fa-solid fa-building-circle-check"></i> Reconcile bank + NoBroker</button>
+          <button type="button" class="btn btn-outline btn--small" id="fa-auto-create-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Create ledger entries</button>
+        </div>
       </div>
       <div class="fa-table-wrap">
         <table class="fa-pivot-table">
@@ -493,6 +512,7 @@ export const renderFinanceAnalytics = () => {
 
     renderBalanceMetrics();
     renderNoBrokerPanel(months);
+    wireNoBrokerActions();
     renderTrendChart(months, settings.sheetOnly, settings.projectMonths);
     renderExpensePivot(months, settings.pivotDimension, settings.sheetOnly);
 };
@@ -500,18 +520,69 @@ export const renderFinanceAnalytics = () => {
 const handleNoBrokerUpload = async (file) => {
     if (!file) return;
     try {
-        nobrokerDumpLines = await parseNoBrokerCollectionLines(file);
-        nobrokerFileName = file.name;
+        const count = await loadNoBrokerDumpFile(file);
+        alert(`Loaded ${count} NoBroker payment row(s).`);
         renderFinanceAnalytics();
+        window.renderBankReconciliation?.();
     } catch (err) {
         alert(err.message || 'Could not parse NoBroker file.');
     }
 };
 
+const wireNoBrokerActions = () => {
+    document.getElementById('fa-auto-match-btn')?.addEventListener('click', async () => {
+        const tol = getDateTolerance();
+        if (!confirm(`Auto-match bank statement lines to ledger entries (${tol === 0 ? 'exact date' : `±${tol} days`}, same amount)?`)) return;
+        try {
+            const { matched, errors } = await autoMatchByDateAndAmount();
+            renderFinanceAnalytics();
+            window.renderBankReconciliation?.();
+            window.renderCashLedger?.();
+            alert(`Matched ${matched.length} line(s).${errors.length ? `\n\n${errors.slice(0, 6).join('\n')}` : ''}`);
+        } catch (err) {
+            alert(err?.message || 'Auto-match failed.');
+        }
+    }, { once: true });
+
+    document.getElementById('fa-nobroker-reconcile-btn')?.addEventListener('click', async () => {
+        const tol = getDateTolerance();
+        if (!confirm(`Reconcile bank credits with NoBroker dump (${tol === 0 ? 'exact date' : `±${tol} days`}) and create missing collections?`)) return;
+        try {
+            const { matchedLedger, created, unmatched, errors } = await reconcileBankWithNoBroker({ createMissing: true });
+            renderFinanceAnalytics();
+            window.renderBankReconciliation?.();
+            window.renderCashLedger?.();
+            window.processFinances?.();
+            alert([
+                `Matched ${matchedLedger} to existing ledger.`,
+                created ? `Created ${created} collection(s).` : '',
+                unmatched.length ? `${unmatched.length} bank line(s) without NoBroker match.` : '',
+                errors.length ? `\n${errors.slice(0, 6).join('\n')}` : '',
+            ].filter(Boolean).join('\n'));
+        } catch (err) {
+            alert(err?.message || 'Reconcile failed.');
+        }
+    }, { once: true });
+
+    document.getElementById('fa-auto-create-btn')?.addEventListener('click', async () => {
+        if (!confirm('Create ledger entries for unmatched bank lines (matching existing entries by date/amount first)?')) return;
+        try {
+            const { created, matchedExisting, errors } = await autoCreateFromUnmatchedLines({ includeDebits: true });
+            renderFinanceAnalytics();
+            window.renderBankReconciliation?.();
+            window.renderCashLedger?.();
+            window.processFinances?.();
+            alert(`Created ${created}, linked ${matchedExisting}.${errors.length ? `\n\n${errors.slice(0, 6).join('\n')}` : ''}`);
+        } catch (err) {
+            alert(err?.message || 'Auto-create failed.');
+        }
+    }, { once: true });
+};
+
 export const initFinanceAnalyticsUi = () => {
     const rerender = () => renderFinanceAnalytics();
 
-    ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months'].forEach((id) => {
+    ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', rerender);
     });
 
@@ -526,9 +597,9 @@ export const initFinanceAnalyticsUi = () => {
     });
 
     document.getElementById('fa-clear-nobroker-btn')?.addEventListener('click', () => {
-        nobrokerDumpLines = [];
-        nobrokerFileName = '';
+        clearNoBrokerDump();
         renderFinanceAnalytics();
+        window.renderBankReconciliation?.();
     });
 
     document.getElementById('fa-goto-bank-recon')?.addEventListener('click', () => {

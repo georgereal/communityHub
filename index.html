@@ -381,9 +381,32 @@
 
         <div id="subview-bank-recon" style="display:none; padding: 0 1.6rem 1.6rem;">
           <div class="invoice-toolbar bank-recon-toolbar">
-            <button type="button" class="btn btn-outline btn--small" id="bank-recon-template-btn"><i class="fa-solid fa-download"></i> Download template</button>
-            <button type="button" class="btn btn-primary btn--small" id="bank-recon-import-btn"><i class="fa-solid fa-file-arrow-up"></i> Import statement</button>
-            <input type="file" id="bank-recon-file" accept=".xlsx,.xls,.csv" hidden />
+            <div class="bank-recon-toolbar__filters">
+              <label class="fa-filter">
+                <span>Date tolerance</span>
+                <select id="bank-recon-date-tolerance" class="expense-combobox">
+                  <option value="0">Exact date</option>
+                  <option value="3" selected>±3 days</option>
+                  <option value="7">±7 days</option>
+                </select>
+              </label>
+              <label class="fa-filter fa-filter--check">
+                <input type="checkbox" id="bank-recon-include-debits" checked />
+                <span>Include debits when auto-creating</span>
+              </label>
+              <span id="bank-recon-nobroker-meta" class="bank-recon-nobroker-meta"></span>
+            </div>
+            <div class="bank-recon-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-template-btn"><i class="fa-solid fa-download"></i> Template</button>
+              <button type="button" class="btn btn-primary btn--small" id="bank-recon-import-btn"><i class="fa-solid fa-file-arrow-up"></i> Import statement</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-nobroker-upload-btn"><i class="fa-solid fa-building"></i> NoBroker dump</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-auto-match-btn"><i class="fa-solid fa-link"></i> Auto-match by date</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-nobroker-reconcile-btn"><i class="fa-solid fa-building-circle-check"></i> Reconcile NoBroker</button>
+              <button type="button" class="btn btn-primary btn--small" id="bank-recon-auto-create-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Create ledger entries</button>
+              <input type="file" id="bank-recon-file" accept=".xlsx,.xls,.csv" hidden />
+              <input type="file" id="bank-recon-nobroker-file" accept=".xlsx,.xls,.csv" hidden />
+            </div>
           </div>
           <section class="dashboard-metrics bank-recon-metrics" id="bank-recon-stats"></section>
           <div class="bank-recon-split">
@@ -472,6 +495,14 @@
                   <option value="1">1 month</option>
                   <option value="3" selected>3 months</option>
                   <option value="6">6 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Match dates</span>
+                <select id="fa-date-tolerance" class="expense-combobox">
+                  <option value="0">Exact date</option>
+                  <option value="3" selected>±3 days</option>
+                  <option value="7">±7 days</option>
                 </select>
               </label>
               <label class="fa-filter fa-filter--check">

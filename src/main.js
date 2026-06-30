@@ -2023,6 +2023,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGeneralLedger();
   window.renderLedgerSyncPanel = renderLedgerSyncPanel;
   window.renderFinanceAnalytics = renderFinanceAnalytics;
+  window.processFinances = processFinances;
   initEmailOutbox();
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));
