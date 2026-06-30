@@ -448,22 +448,68 @@
         </div>
 
         <div id="subview-reports" style="display:none; padding: 0 1.6rem 1.6rem;">
-          <div class="reports-grid" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-            <div class="metric-card"
-              style="padding: 1rem; min-height: 360px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border);">
-              <h3
-                style="font-size: 0.65rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem;">
-                Annual Expense Trend (Burn Rate)</h3>
-              <div style="flex:1; position:relative;"><canvas id="expense-chart"></canvas></div>
+          <div class="fa-toolbar invoice-toolbar">
+            <div class="fa-toolbar__filters">
+              <label class="fa-filter">
+                <span>History</span>
+                <select id="fa-month-range" class="expense-combobox">
+                  <option value="6">Last 6 months</option>
+                  <option value="12" selected>Last 12 months</option>
+                  <option value="18">Last 18 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Pivot by</span>
+                <select id="fa-pivot-dimension" class="expense-combobox">
+                  <option value="cat">Category</option>
+                  <option value="sub_category">Sub-category</option>
+                  <option value="vendor">Vendor</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Forecast</span>
+                <select id="fa-project-months" class="expense-combobox">
+                  <option value="1">1 month</option>
+                  <option value="3" selected>3 months</option>
+                  <option value="6">6 months</option>
+                </select>
+              </label>
+              <label class="fa-filter fa-filter--check">
+                <input type="checkbox" id="fa-sheet-only" checked />
+                <span>Expenses from sheets only</span>
+              </label>
             </div>
-            <div class="metric-card"
-              style="padding: 1rem; overflow: auto; background: #fff; border: 1px solid var(--border);">
-              <h3
-                style="font-size: 0.65rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 1rem;">
-                Monthly Category Matrix</h3>
-              <div id="audit-matrix" style="font-size:0.75rem;"></div>
+            <div class="fa-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fa-goto-bank-recon"><i class="fa-solid fa-scale-balanced"></i> Bank reconciliation</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-nobroker-upload-btn"><i class="fa-solid fa-file-arrow-up"></i> Upload NoBroker dump</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
+              <input type="file" id="fa-nobroker-file" accept=".xlsx,.xls,.csv" hidden />
             </div>
           </div>
+
+          <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
+
+          <section class="fa-panel" id="fa-nobroker-panel"></section>
+
+          <div class="fa-charts-grid">
+            <div class="metric-card fa-chart-card">
+              <h3 class="fa-panel__title">Income &amp; expense trend</h3>
+              <p class="fa-panel__hint">Solid lines = actuals from ledger. Expenses use synced expense-sheet entries when the filter above is on.</p>
+              <div class="fa-chart-wrap"><canvas id="fa-trend-chart"></canvas></div>
+            </div>
+            <div class="metric-card fa-projection-card" id="fa-projection-summary"></div>
+          </div>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Expense pivot</h3>
+                <p class="fa-panel__hint">Monthly breakdown aligned to your expense spreadsheet categories.</p>
+              </div>
+              <div id="fa-expense-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-expense-pivot"></div>
+          </section>
         </div>
 
         <div id="subview-gl" style="display:none; padding: 0 1.6rem 1.6rem;">

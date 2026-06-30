@@ -282,7 +282,7 @@ export const NAV_MODULES = [
             },
             {
                 route: 'finance-reports',
-                label: 'Financial Reports',
+                label: 'Reports & Reconciliation',
                 icon: 'fa-chart-line',
                 view: 'accounts',
                 subview: 'reports',

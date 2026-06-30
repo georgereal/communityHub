@@ -3,6 +3,7 @@
  */
 import { portalState, persist, supabase, pullState } from './store.js';
 import { isTransactionReconciled } from './bankReconciliation.js';
+import { renderFinanceAnalytics } from './financeAnalytics.js';
 import {
     formatAllocationSummary,
     saveMaintenanceAllocations,
@@ -721,29 +722,6 @@ export const renderCashLedger = () => {
     });
 };
 
-let expenseChartInstance = null;
-export const renderAuditReports = () => {
-    const txns = portalState.finances.txns.filter(t => t.type === 'OUT'); const now = new Date(); const months = [];
-    for (let i = 5; i >= 0; i--) { const d = new Date(); d.setMonth(now.getMonth() - i); months.push({ label: d.toLocaleDateString('en-GB', { month: 'short' }), m: d.getMonth(), y: d.getFullYear() }); }
-    const matrix = document.getElementById('audit-matrix'); const cats = [...new Set(txns.map(t => t.cat))];
-    const monthTotals = months.map(m => txns.filter(t => new Date(t.date).getMonth() === m.m && new Date(t.date).getFullYear() === m.y).reduce((s, t) => s + parseFloat(t.amount), 0));
-
-    let h = `<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#f8fafc;"><th style="padding:0.6rem; text-align:left;">Category</th>${months.map(m => `<th style="padding:0.6rem; text-align:right;">${m.label}</th>`).join('')}<th style="padding:0.6rem; text-align:right; border-left:1px solid var(--border); background:#f1f5f9;">TOTAL</th></tr></thead><tbody>`;
-    cats.forEach(c => {
-        let rowSum = 0; h += `<tr><td style="padding:0.6rem; font-weight:700; border-bottom:1px solid var(--border);">${getLabel(c)}</td>`;
-        months.forEach(m => {
-            const val = txns.filter(t => t.cat === c && new Date(t.date).getMonth() === m.m && new Date(t.date).getFullYear() === m.y).reduce((sum, t) => sum + parseFloat(t.amount), 0);
-            rowSum += val; h += `<td style="padding:0.6rem; text-align:right; border-bottom:1px solid var(--border); color:${val > 0 ? '#ef4444' : '#94a3b8'};">₹${val.toLocaleString()}</td>`;
-        });
-        h += `<td style="padding:0.6rem; text-align:right; font-weight:800; border-bottom:1px solid var(--border); border-left:1px solid var(--border); background:#f8fafc;">₹${rowSum.toLocaleString()}</td></tr>`;
-    });
-    h += `<tr style="background:#f1f5f9; font-weight:900;"><td style="padding:0.6rem;">Monthly Total</td>`;
-    monthTotals.forEach(v => h += `<td style="padding:0.6rem; text-align:right;">₹${v.toLocaleString()}</td>`);
-    const grandTotal = monthTotals.reduce((a, b) => a + b, 0);
-    h += `<td style="padding:0.6rem; text-align:right; color:var(--accent); border-left:1px solid var(--border);">₹${grandTotal.toLocaleString()}</td></tr></tbody></table>`;
-    matrix.innerHTML = h;
-};
-
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
     const stem = (file.name.replace(/\.[^.]+$/, '') || 'file')
         .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -1241,7 +1219,7 @@ window.switchSubView = (sv) => {
         if (el) el.style.display = key === sv ? 'block' : 'none';
     });
 
-    if (sv === 'reports') renderAuditReports();
+    if (sv === 'reports') renderFinanceAnalytics();
     if (sv === 'bank-recon') window.renderBankReconciliation?.();
     if (sv === 'activity') window.renderActivityLogPage?.();
     if (sv === 'gl') window.renderGeneralLedger?.();

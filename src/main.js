@@ -16,7 +16,8 @@ import {
   saveCapacityAllocation,
   refreshCapacityUnitList,
 } from './registry.js';
-import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports } from './finances.js';
+import { processFinances, renderCashLedger, saveCashData, initExpenseModal } from './finances.js';
+import { initFinanceAnalyticsUi, renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerSyncPanel } from './ledgerSpreadsheetSync.js';
 import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
 import { initMaintenanceBilling } from './maintenanceBilling.js';
@@ -443,7 +444,7 @@ const setActiveApartment = async (apartmentId) => {
     applyPermissionsToNav(portalState.authPermissions);
     refreshStaffNotifications().catch(() => {});
     if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
-    if (typeof window.renderAuditReports === 'function') window.renderAuditReports();
+    if (typeof window.renderFinanceAnalytics === 'function') window.renderFinanceAnalytics();
     if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
   }
   console.groupEnd();
@@ -952,7 +953,7 @@ window.switchView = (v) => {
   }
   if (page.view === 'accounts') {
     window.switchSubView(page.subview || 'ledger');
-    if (page.subview === 'reports') renderAuditReports();
+    if (page.subview === 'reports') renderFinanceAnalytics();
     else if (page.subview === 'bank-recon') renderBankReconciliation();
     else if (page.subview === 'activity') void renderActivityLogPage();
     else if (page.subview === 'gl') renderGeneralLedger();
@@ -2004,6 +2005,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initActivityAuditUi();
   initStaffNotificationsUi();
   initBankReconciliationUi();
+  initFinanceAnalyticsUi();
   initUnitDirectory();
   initResidentImport();
   initResidentPortal();
@@ -2020,6 +2022,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   initGeneralLedger();
   window.renderLedgerSyncPanel = renderLedgerSyncPanel;
+  window.renderFinanceAnalytics = renderFinanceAnalytics;
   initEmailOutbox();
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));
