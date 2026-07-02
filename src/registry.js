@@ -29,6 +29,29 @@ const auditVehicleChange = async (opts) => {
     void refreshAuditBadge();
 };
 
+const findUnitById = (unitId) => portalState.units.find((x) => x.id == unitId);
+
+const patchVehicleInState = (unitId, vehicleId, patch) => {
+    const unit = findUnitById(unitId);
+    const vehicle = unit?.vehicles?.find((veh) => veh.id === vehicleId);
+    if (vehicle) Object.assign(vehicle, patch);
+};
+
+const removeVehicleFromState = (unitId, vehicleId) => {
+    const unit = findUnitById(unitId);
+    if (!unit?.vehicles) return;
+    unit.vehicles = unit.vehicles.filter((veh) => veh.id !== vehicleId);
+};
+
+const addVehicleToState = (unitId, row) => {
+    const unit = findUnitById(unitId);
+    if (!unit || !row) return;
+    if (!unit.vehicles) unit.vehicles = [];
+    const idx = unit.vehicles.findIndex((veh) => veh.id === row.id);
+    if (idx >= 0) unit.vehicles[idx] = { ...unit.vehicles[idx], ...row };
+    else unit.vehicles.push(row);
+};
+
 /** Active vehicles consuming this unit's base car/bike quota (excludes pool + neighbor). */
 export const countBaseSlotUsage = (unit) => {
     let baseCars = 0;
@@ -627,6 +650,31 @@ function syncNewVehicleType(type) {
     });
 }
 
+const patchUnitInState = (unitId, patch) => {
+    const unit = findUnitById(unitId);
+    if (unit) Object.assign(unit, patch);
+};
+
+const syncVehicleUi = (uid, { pull = false } = {}) => {
+    if (pull) {
+        void pullState().then(() => refreshVehicleUi(uid));
+        return;
+    }
+    refreshVehicleUi(uid);
+};
+
+const refreshVehicleUi = (uid) => {
+    const u = findUnitById(uid);
+    if (!u) return;
+    processAnalytics();
+    renderRegistry();
+    if (document.getElementById('apt-modal')?.classList.contains('active')) {
+        updateMdlMeta(u);
+        renderMdlList(u);
+    }
+    void window.refreshUnitDetailVehiclesIfOpen?.();
+};
+
 const updateMdlMeta = (u) => {
     const meta = document.getElementById('mdl-apt-meta');
     if (!meta) return;
@@ -845,64 +893,29 @@ const renderMdlList = (u) => {
 
     stableVehicles.forEach(v => {
         const d = document.createElement('div');
-        d.className = 'unit-parking-vehicle modal-list-item vehicle-row-card';
-        const status = (v.status || 'ALLOWED').toUpperCase();
-        const type = (v.type || 'CAR').toLowerCase();
-        const icon = type === 'car' ? 'fa-car' : 'fa-motorcycle';
-        const alloc = effectiveAllocationType(v);
-        const statusChip = status === 'OVERLIMIT'
-            ? `<span class="alloc-status-chip overlimit">Over limit</span>`
-            : (status === 'REALLOCATED'
-                ? `<span class="alloc-status-chip reallocated">Reallocated</span>`
-                : (status === 'INACTIVE' ? `<span class="alloc-status-chip inactive">Inactive</span>` : ''));
-        if (status === 'OVERLIMIT') d.classList.add('is-overlimit');
+        d.className = 'unit-parking-vehicle unit-parking-vehicle--simple';
+        const type = (v.type || 'CAR').toUpperCase();
+        const icon = type === 'CAR' ? 'fa-car' : 'fa-motorcycle';
+        const active = v.is_parking_active !== false;
+        const allocLabel = parkingAllocationLabel(v);
+        const meta = formatRegistryMetaLine(v);
 
         d.innerHTML = `
-        <div class="unit-parking-vehicle__head">
-          <div class="unit-parking-vehicle__identity">
-            <span class="unit-parking-vehicle__icon unit-parking-vehicle__icon--${type}" aria-hidden="true">
-              <i class="fa-solid ${icon}"></i>
-            </span>
-            <div class="unit-parking-vehicle__plate-wrap">
-              <input type="text" class="vehicle-plate-input" aria-label="Plate number" spellcheck="false" autocomplete="off" />
-              ${formatParkingAllocLine(v)}
-            </div>
-          </div>
-          <div class="unit-parking-vehicle__aside">
-            <div class="unit-parking-vehicle__badges">${statusChip}</div>
-            <button type="button" class="btn btn-outline unit-parking-vehicle__delete vehicle-del-btn" onclick="window.delVeh('${u.id}', '${v.id}')" aria-label="Remove vehicle">
-              <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-            </button>
-          </div>
-        </div>
-        ${formatRegistryMetaLine(v)}
-        <div class="unit-parking-vehicle__controls apt-alloc-controls ${alloc !== 'BASE' ? 'with-target' : ''}">
+        <div class="unit-parking-vehicle__row">
+          <span class="unit-parking-vehicle__icon unit-parking-vehicle__icon--${type.toLowerCase()}" aria-hidden="true">
+            <i class="fa-solid ${icon}"></i>
+          </span>
+          <input type="text" class="vehicle-plate-input" aria-label="Plate number" spellcheck="false" autocomplete="off" data-vehicle-id="${v.id}" />
           <label class="vehicle-active-toggle">
-            <input type="checkbox" ${v.is_parking_active ? 'checked' : ''} onchange="window.toggleVehicleActive('${u.id}', '${v.id}', this.checked)" />
-            <span>${v.is_parking_active ? 'Active' : 'Dormant'}</span>
+            <input type="checkbox" ${active ? 'checked' : ''} onchange="window.toggleVehicleActive('${u.id}', '${v.id}', this.checked)" />
+            <span>${active ? 'Active' : 'Dormant'}</span>
           </label>
-          <div class="unit-parking-vehicle__field">
-            <span class="unit-parking-vehicle__field-label">Space</span>
-            <select class="form-select apt-alloc-select" aria-label="Space type" onchange="window.updateAllocation('${v.id}', '${u.id}', this.value)">
-              <option value="BASE" ${alloc === 'BASE' ? 'selected' : ''}>Base slot</option>
-              <option value="COMMON" ${alloc === 'COMMON' ? 'selected' : ''}>Community pool</option>
-              <option value="NEIGHBOR" ${alloc === 'NEIGHBOR' ? 'selected' : ''}>Neighbor unit</option>
-            </select>
-          </div>
-          ${alloc !== 'BASE' ? `
-          <div class="unit-parking-vehicle__field">
-            <span class="unit-parking-vehicle__field-label">Target</span>
-            <select class="form-select apt-alloc-select" aria-label="Allocation target" onchange="window.updateAllocationTarget('${v.id}', '${u.id}', this.value)">
-              <option value="">Choose target…</option>
-              ${alloc === 'COMMON'
-                    ? portalState.slots
-                        .filter(s => !s.occupant || s.assigned_vehicle_id === v.id)
-                        .map(s => `<option value="${s.id}" ${v.allocation_target_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')
-                    : portalState.units.filter(ux => ux.id !== u.id).map(ux => `<option value="${ux.id}" ${v.allocation_target_id === ux.id ? 'selected' : ''}>Unit ${ux.number}</option>`).join('')
-                }
-            </select>
-          </div>` : ''}
-        </div>`;
+          <button type="button" class="btn btn-outline unit-parking-vehicle__delete" onclick="window.delVeh('${u.id}', '${v.id}')" aria-label="Remove vehicle">
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
+        ${allocLabel ? `<p class="unit-parking-vehicle__alloc">${allocLabel}</p>` : ''}
+        ${meta}`;
         const plateInput = d.querySelector('.vehicle-plate-input');
         if (plateInput) {
             plateInput.value = v.plate || '';
@@ -918,18 +931,80 @@ const renderMdlList = (u) => {
                 }
             });
             plateInput.addEventListener('blur', () => {
-                void window.updateVehiclePlate(u.id, v.id, plateInput);
+                void updateVehiclePlate(u.id, v.id, plateInput);
             });
         }
         c.appendChild(d);
     });
 };
 
-export const updateVehiclePlate = async (uid, vid, inputEl) => {
-    if (!supabase || !inputEl) return;
-    const u = portalState.units.find((x) => x.id === uid);
-    const v = u?.vehicles.find((veh) => veh.id === vid);
-    if (!u || !v) return;
+const flushPendingPlateEdits = async (uid) => {
+    const inputs = document.querySelectorAll('#mdl-vehicle-list .vehicle-plate-input');
+    for (const input of inputs) {
+        const vid = input.dataset.vehicleId;
+        if (!vid) continue;
+        const original = (input.dataset.original || '').trim().toUpperCase();
+        const current = input.value.trim().toUpperCase();
+        if (current && current !== original) {
+            await updateVehiclePlate(uid, vid, input, { skipRefresh: true });
+        }
+    }
+};
+
+export const addVehicleToUnit = async (unitId, plate, type = 'CAR') => {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const u = portalState.units.find((x) => x.id === unitId);
+    if (!u) throw new Error('Flat not found.');
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+
+    const normalizedPlate = String(plate || '').trim().toUpperCase();
+    if (!normalizedPlate) throw new Error('Plate number is required.');
+    const vehicleType = type === 'BIKE' ? 'BIKE' : 'CAR';
+
+    const duplicate = portalState.units.some((unit) =>
+        unit.vehicles.some((veh) => (veh.plate || '').trim().toUpperCase() === normalizedPlate),
+    );
+    if (duplicate) throw new Error(`Plate ${normalizedPlate} is already registered in this apartment.`);
+
+    const { data: inserted, error } = await supabase
+        .from('vehicles')
+        .insert({
+            apartment_id,
+            unit_id: u.id,
+            plate: normalizedPlate,
+            type: vehicleType,
+            is_parking_active: true,
+        })
+        .select('id, plate, type, is_parking_active, unit_id, allocation_type')
+        .single();
+    if (error) throw new Error(error.message);
+    if (!inserted?.id) throw new Error('Could not add vehicle — check permissions.');
+
+    if (inserted?.id) {
+        addVehicleToState(unitId, inserted);
+        const after = vehicleAuditSnapshot(
+            { plate: normalizedPlate, type: vehicleType, is_parking_active: true, allocation_type: 'BASE' },
+            u.number,
+        );
+        await auditVehicleChange({
+            action: 'insert',
+            source: 'ui',
+            vehicleId: inserted.id,
+            unitNumber: u.number,
+            plate: normalizedPlate,
+            after,
+        });
+    }
+
+    syncVehicleUi(unitId);
+};
+
+export const updateVehiclePlate = async (uid, vid, inputEl, opts = {}) => {
+    if (!supabase || !inputEl) return false;
+    const u = findUnitById(uid);
+    const v = u?.vehicles?.find((veh) => veh.id === vid);
+    if (!u || !v) return false;
 
     const plate = inputEl.value.trim().toUpperCase();
     const original = (inputEl.dataset.original || v.plate || '').trim().toUpperCase();
@@ -948,11 +1023,22 @@ export const updateVehiclePlate = async (uid, vid, inputEl) => {
     }
 
     const before = vehicleAuditSnapshot(v, u.number);
-    const { error } = await supabase.from('vehicles').update({ plate }).eq('id', vid);
+    const { data, error } = await supabase
+        .from('vehicles')
+        .update({ plate })
+        .eq('id', vid)
+        .select('id, plate')
+        .maybeSingle();
     if (error) {
         inputEl.value = original;
         return alert(`Could not update plate: ${error.message}`);
     }
+    if (!data) {
+        inputEl.value = original;
+        return alert('Could not update plate — no rows updated. Check permissions.');
+    }
+
+    patchVehicleInState(uid, vid, { plate: data.plate });
 
     await auditVehicleChange({
         action: 'update',
@@ -966,10 +1052,9 @@ export const updateVehiclePlate = async (uid, vid, inputEl) => {
 
     inputEl.dataset.original = plate;
     inputEl.value = plate;
-    await pullState();
-    processAnalytics();
-    renderRegistry();
-    openMdl(uid);
+    if (opts.skipRefresh) return true;
+    syncVehicleUi(uid);
+    return true;
 };
 
 export const updateAllocation = async (vid, uid, type) => {
@@ -992,7 +1077,8 @@ export const updateAllocation = async (vid, uid, type) => {
             after: { ...before, allocation_type: type, allocation_target: null },
         });
     }
-    await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
+    await pullState();
+    refreshVehicleUi(uid);
 };
 
 export const updateAllocationTarget = async (vid, uid, targetId) => {
@@ -1024,96 +1110,98 @@ export const updateAllocationTarget = async (vid, uid, targetId) => {
             after: { ...before, allocation_target: targetLabel },
         });
     }
-    await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
+    await pullState();
+    refreshVehicleUi(uid);
 };
 
 export const delVeh = async (uid, vid) => {
     if (!supabase) return;
-    const u = portalState.units.find((x) => x.id === uid);
-    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const u = findUnitById(uid);
+    const v = u?.vehicles?.find((veh) => veh.id === vid);
     const before = v ? vehicleAuditSnapshot(v, u.number) : null;
     const { error } = await supabase.from('vehicles').delete().eq('id', vid);
-    if (!error) {
-        if (before && v) {
-            await auditVehicleChange({
-                action: 'delete',
-                source: 'ui',
-                vehicleId: vid,
-                unitNumber: u.number,
-                plate: v.plate,
-                before,
-            });
-        }
-        await pullState(); processAnalytics(); renderRegistry(); openMdl(uid);
+    if (error) return alert(`Could not remove vehicle: ${error.message}`);
+    if (before && v) {
+        await auditVehicleChange({
+            action: 'delete',
+            source: 'ui',
+            vehicleId: vid,
+            unitNumber: u.number,
+            plate: v.plate,
+            before,
+        });
     }
+    removeVehicleFromState(uid, vid);
+    syncVehicleUi(uid);
 };
 
 export const toggleVehicleActive = async (uid, vid, isActive) => {
     if (!supabase) return;
-    const u = portalState.units.find((x) => x.id === uid);
-    const v = u?.vehicles.find((veh) => veh.id === vid);
+    const u = findUnitById(uid);
+    const v = u?.vehicles?.find((veh) => veh.id === vid);
     const before = v ? vehicleAuditSnapshot(v, u.number) : null;
-    const { error } = await supabase.from('vehicles').update({ is_parking_active: isActive }).eq('id', vid);
-    if (!error) {
-        if (before && v) {
-            await auditVehicleChange({
-                action: 'update',
-                source: 'ui',
-                vehicleId: vid,
-                unitNumber: u.number,
-                plate: v.plate,
-                before,
-                after: { ...before, is_parking_active: isActive },
-            });
-        }
-        await pullState();
-        processAnalytics();
-        renderRegistry();
-        openMdl(uid);
+    const { data, error } = await supabase
+        .from('vehicles')
+        .update({ is_parking_active: isActive })
+        .eq('id', vid)
+        .select('id, is_parking_active')
+        .maybeSingle();
+    if (error) return alert(`Could not update vehicle: ${error.message}`);
+    if (!data) return alert('Could not update vehicle — no rows updated. Check permissions.');
+    patchVehicleInState(uid, vid, { is_parking_active: isActive });
+    if (before && v) {
+        await auditVehicleChange({
+            action: 'update',
+            source: 'ui',
+            vehicleId: vid,
+            unitNumber: u.number,
+            plate: v.plate,
+            before,
+            after: { ...before, is_parking_active: isActive },
+        });
     }
+    syncVehicleUi(uid);
 };
 
 export const saveMdlData = async () => {
     if (!supabase) return;
     const u = portalState.units.find(x => x.id == portalState.activeUnitId);
-    const plate = document.getElementById('new-v-plate').value.trim();
-    const type = document.getElementById('new-v-type').value;
+    if (!u) return alert('Flat not found. Close and reopen this dialog.');
     const apartment_id = portalState.access?.activeApartmentId;
     if (!apartment_id) return alert('No active apartment selected.');
 
-    // 1. Update Unit Policy
-    const car_limit = parseInt(document.getElementById('mdl-car-slots').value);
-    const bike_limit = parseInt(document.getElementById('mdl-bike-slots').value);
-    const areaRaw = document.getElementById('mdl-area-sqft')?.value;
-    const area_sqft = areaRaw === '' || areaRaw == null ? null : parseFloat(areaRaw);
-    await supabase.from('units').update({ car_limit, bike_limit, area_sqft }).eq('id', u.id);
+    try {
+        await flushPendingPlateEdits(u.id);
 
-    // 2. Insert New Vehicle
-    if (plate) {
-        const { data: inserted, error } = await supabase
-            .from('vehicles')
-            .insert({ apartment_id, unit_id: u.id, plate, type, is_parking_active: true })
-            .select('id')
-            .single();
-        if (!error && inserted?.id) {
-            const after = vehicleAuditSnapshot(
-                { plate, type, is_parking_active: true, allocation_type: 'BASE' },
-                u.number,
-            );
-            await auditVehicleChange({
-                action: 'insert',
-                source: 'ui',
-                vehicleId: inserted.id,
-                unitNumber: u.number,
-                plate,
-                after,
-            });
+        const car_limit = parseInt(document.getElementById('mdl-car-slots').value, 10) || 0;
+        const bike_limit = parseInt(document.getElementById('mdl-bike-slots').value, 10) || 0;
+        const areaRaw = document.getElementById('mdl-area-sqft')?.value;
+        const area_sqft = areaRaw === '' || areaRaw == null ? null : parseFloat(areaRaw);
+        const { data: unitRow, error: unitError } = await supabase
+            .from('units')
+            .update({ car_limit, bike_limit, area_sqft })
+            .eq('id', u.id)
+            .select('id, car_limit, bike_limit, area_sqft')
+            .maybeSingle();
+        if (unitError) throw new Error(unitError.message);
+        if (!unitRow) throw new Error('Could not save slot limits — check permissions.');
+        patchUnitInState(u.id, { car_limit, bike_limit, area_sqft });
+
+        const plate = document.getElementById('new-v-plate')?.value?.trim();
+        if (plate) {
+            const type = document.getElementById('new-v-type')?.value || 'CAR';
+            await addVehicleToUnit(u.id, plate, type);
+            document.getElementById('new-v-plate').value = '';
+        } else {
+            syncVehicleUi(u.id);
         }
-    }
 
-    document.getElementById('new-v-plate').value = '';
-    await pullState(); processAnalytics(); renderRegistry(); persist(); window.closeMdl();
-}
+        persist();
+        window.closeMdl();
+    } catch (err) {
+        alert(err?.message || 'Could not save changes.');
+    }
+};
 
 export const handleCSVImport = async (file) => {
     console.log('🔄 [Ingestion] Starting Bulk CSV Ingestion Engine...');
@@ -1243,3 +1331,8 @@ window.closeCapacityModal = closeCapacityModal;
 window.applyCapacityDefaultsToAll = applyCapacityDefaultsToAll;
 window.saveCapacityAllocation = saveCapacityAllocation;
 window.refreshCapacityUnitList = refreshCapacityUnitList;
+window.updateVehiclePlate = updateVehiclePlate;
+window.toggleVehicleActive = toggleVehicleActive;
+window.delVeh = delVeh;
+window.updateAllocation = updateAllocation;
+window.updateAllocationTarget = updateAllocationTarget;

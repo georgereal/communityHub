@@ -8,6 +8,8 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+let pullStateChain = Promise.resolve(true);
+
 /** Reject hung Supabase calls so boot UI does not spin forever. */
 export const withTimeout = (promise, ms, label = 'Request') => Promise.race([
     promise,
@@ -27,7 +29,7 @@ export let portalState = {
         activeApartmentId: 'apt-default',
         activeUserId: 'usr-default'
     },
-    admin: { bankAccount: null, staff: [] },
+    admin: { bankAccount: null, staff: [], externalConnections: [] },
     portal: {
         residentLinks: [],
         portalInvites: [],
@@ -76,6 +78,7 @@ export let portalState = {
  * Platinum Cloud Pull: Deep-fetch all relational partitions
  */
 export const pullState = async () => {
+    const run = async () => {
     if (!supabase) return false;
     try {
         const activeApartmentId = portalState.access?.activeApartmentId;
@@ -143,13 +146,14 @@ export const pullState = async () => {
             supabase.from('ledger_sync_oauth_apps').select('id, apartment_id, provider, client_id, tenant_id, redirect_uri, enabled, client_secret_set, updated_at').eq('apartment_id', activeApartmentId),
             supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id, account_meta').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
             supabase.rpc('get_ledger_sync_service_status', { p_apartment_id: activeApartmentId }),
+            supabase.from('apartment_external_connections').select('id, apartment_id, provider, connection_key, display_name, base_url, client_id, workflow_id, enabled, api_key_set, updated_at').eq('apartment_id', activeApartmentId),
         ]);
         const results = await withTimeout(queriesPromise, 90000, 'Society data load');
 
         const [
             u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,
             rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
-            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc, ssa,
+            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc, ssa, aec,
         ] = results;
 
         console.log('Queries finished.');
@@ -173,7 +177,10 @@ export const pullState = async () => {
 
         const units = u.error ? [] : (u.data || []);
         const vehicles = v.error ? [] : (v.data || []);
-        portalState.units = units.map(unit => ({ ...unit, vehicles: vehicles.filter(veh => veh.unit_id === unit.id) }));
+        portalState.units = units.map((unit) => ({
+            ...unit,
+            vehicles: vehicles.filter((veh) => veh.unit_id == unit.id),
+        }));
         portalState.lastPullMeta = {
             apartmentId: activeApartmentId,
             unitCount: units.length,
@@ -198,6 +205,7 @@ export const pullState = async () => {
         portalState.finances.bankStatementLines = bsl.error ? [] : (bsl.data || []);
         portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
         portalState.admin.staff = staff.error ? [] : (staff.data || []);
+        portalState.admin.externalConnections = aec.error ? [] : (aec.data || []);
 
         if (!portalState.portal) portalState.portal = {};
         portalState.portal.residentLinks = rul.error ? [] : (rul.data || []);
@@ -264,6 +272,9 @@ export const pullState = async () => {
 
         return true;
     } catch (err) { console.error('Cloud-Link Broken:', err); return false; }
+    };
+    pullStateChain = pullStateChain.then(run, run);
+    return pullStateChain;
 };
 
 export const persist = () => {

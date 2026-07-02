@@ -29,6 +29,12 @@ import {
     viewInvoiceDetail,
 } from './maintenanceBilling.js';
 import { effectiveAllocationType, resolveAllocationTargetLabel } from './allocation.js';
+import {
+    addVehicleToUnit,
+    updateVehiclePlate,
+    toggleVehicleActive,
+    delVeh,
+} from './registry.js';
 import { getDocumentsForUnit, saveUnitDocument, deleteUnitDocument } from './operations.js';
 import { withButtonBusy } from './buttonBusy.js';
 
@@ -784,6 +790,7 @@ const wireUnitDirectoryExpanded = (root, residents) => {
 };
 
 let editingUnitId = null;
+let unitDetailRefreshGen = 0;
 let editingUnitResidents = [];
 let activeUnitDetailTab = 'overview';
 
@@ -988,47 +995,119 @@ const renderUnitDetailVehicles = (u) => {
         if (aa !== bb) return aa - bb;
         return (a.plate || '').localeCompare(b.plate || '');
     });
+    const activeFleet = vehicles.filter((v) => v.is_parking_active !== false);
+    const activeCars = activeFleet.filter((v) => (v.type || 'CAR').toUpperCase() === 'CAR').length;
+    const activeBikes = activeFleet.filter((v) => (v.type || 'CAR').toUpperCase() === 'BIKE').length;
 
     const row = (v) => {
+        const type = (v.type || 'CAR').toUpperCase();
+        const icon = type === 'CAR' ? 'fa-car' : 'fa-motorcycle';
         const active = v.is_parking_active !== false;
         const alloc = effectiveAllocationType(v);
-        const target = resolveAllocationTargetLabel(v);
-        const icon = v.type === 'BIKE' ? 'fa-motorcycle' : 'fa-car';
-        return `<div class="unit-detail-vehicle ${active ? '' : 'unit-detail-vehicle--dormant'}">
-          <div class="unit-detail-vehicle__plate"><i class="fa-solid ${icon}"></i> <strong>${v.plate || '—'}</strong></div>
-          <div class="unit-detail-vehicle__meta">
-            <span>${v.type || '—'}</span>
-            <span>${alloc}${target && alloc !== 'BASE' ? ` · ${target}` : ''}</span>
-            <span class="unit-detail-vehicle__status">${active ? 'Active' : 'Dormant'}</span>
-            ${v.status === 'OVERLIMIT' ? '<span class="unit-detail-vehicle__over">Over limit</span>' : ''}
-          </div>
-          <button type="button" class="btn btn-outline btn--small unit-detail-edit-vehicle" data-id="${v.id}" title="Edit in parking registry"><i class="fa-solid fa-pen"></i></button>
-        </div>`;
+        const allocLabel = alloc !== 'BASE' ? resolveAllocationTargetLabel(v) : '';
+        return `<tr class="unit-vehicles-row${active ? '' : ' unit-vehicles-row--dormant'}" data-vehicle-id="${v.id}">
+          <td class="unit-vehicles-row__plate">
+            <i class="fa-solid ${icon}" aria-hidden="true"></i>
+            <input type="text" class="unit-vehicles-plate-input" value="${esc(v.plate || '')}" data-original="${esc(v.plate || '')}" data-vehicle-id="${v.id}" spellcheck="false" autocomplete="off" aria-label="Plate number" />
+          </td>
+          <td class="unit-vehicles-row__type">${type === 'BIKE' ? 'Bike' : 'Car'}</td>
+          <td class="unit-vehicles-row__status">
+            <label class="unit-vehicles-active">
+              <input type="checkbox" class="unit-vehicles-active-input" data-vehicle-id="${v.id}" ${active ? 'checked' : ''} />
+              <span>${active ? 'Active' : 'Dormant'}</span>
+            </label>
+            ${allocLabel ? `<span class="unit-vehicles-row__alloc">${esc(allocLabel)}</span>` : ''}
+            ${v.status === 'OVERLIMIT' ? '<span class="unit-vehicles-row__warn">Over limit</span>' : ''}
+          </td>
+          <td class="unit-vehicles-row__actions">
+            <button type="button" class="btn btn-outline btn--small unit-vehicles-delete" data-vehicle-id="${v.id}" title="Remove vehicle">
+              <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+            </button>
+          </td>
+        </tr>`;
     };
 
     el.innerHTML = `
+      <div class="unit-vehicles-summary">
+        <span><i class="fa-solid fa-car" aria-hidden="true"></i> ${activeCars} / ${u.car_limit ?? 0} cars</span>
+        <span><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> ${activeBikes} / ${u.bike_limit ?? 0} bikes</span>
+        <span class="unit-vehicles-summary__hint">Slot limits — edit in Overview</span>
+      </div>
+      <div class="unit-vehicles-table-wrap">
+        <table class="unit-vehicles-table">
+          <thead>
+            <tr><th>Plate</th><th>Type</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${vehicles.length ? vehicles.map(row).join('') : '<tr><td colspan="4" class="unit-detail-empty">No vehicles registered for this flat.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div class="unit-vehicles-add">
+        <select id="unit-detail-new-v-type" class="expense-combobox unit-vehicles-add__type" aria-label="Vehicle type">
+          <option value="CAR">Car</option>
+          <option value="BIKE">Bike</option>
+        </select>
+        <input type="text" id="unit-detail-new-v-plate" class="expense-combobox unit-vehicles-add__plate" placeholder="Plate number" spellcheck="false" autocapitalize="characters" autocomplete="off" />
+        <button type="button" class="btn btn-primary btn--small" id="unit-detail-add-vehicle">Add vehicle</button>
+      </div>
       <div class="unit-detail-panel__toolbar">
         <button type="button" class="btn btn-outline btn--small" id="unit-detail-parking-registry">
-          <i class="fa-solid fa-car"></i> Full parking registry
+          <i class="fa-solid fa-car"></i> Parking slot limits
         </button>
-      </div>
-      <div class="unit-detail-vehicle-list">
-      ${vehicles.length
-        ? vehicles.map(row).join('')
-        : '<p class="unit-detail-empty">No vehicles registered for this flat.</p>'}
       </div>`;
 
-    el.querySelectorAll('.unit-detail-edit-vehicle').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            closeUnitDetailModal();
-            window.location.hash = 'property-vehicles';
-            setTimeout(() => window.openMdl?.(u.id), 150);
+    el.querySelectorAll('.unit-vehicles-plate-input').forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+            }
+            if (e.key === 'Escape') {
+                input.value = input.dataset.original || '';
+                input.blur();
+            }
+        });
+        input.addEventListener('blur', () => {
+            void updateVehiclePlate(u.id, input.dataset.vehicleId, input);
         });
     });
+
+    el.querySelectorAll('.unit-vehicles-active-input').forEach((input) => {
+        input.addEventListener('change', () => {
+            void toggleVehicleActive(u.id, input.dataset.vehicleId, input.checked);
+        });
+    });
+
+    el.querySelectorAll('.unit-vehicles-delete').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Remove this vehicle from the flat?')) return;
+            await delVeh(u.id, btn.dataset.vehicleId);
+        });
+    });
+
+    document.getElementById('unit-detail-add-vehicle')?.addEventListener('click', async () => {
+        const plate = document.getElementById('unit-detail-new-v-plate')?.value || '';
+        const type = document.getElementById('unit-detail-new-v-type')?.value || 'CAR';
+        const btn = document.getElementById('unit-detail-add-vehicle');
+        try {
+            await withButtonBusy(btn, 'Adding…', () => addVehicleToUnit(u.id, plate, type));
+            const plateEl = document.getElementById('unit-detail-new-v-plate');
+            if (plateEl) plateEl.value = '';
+        } catch (err) {
+            alert(err?.message || 'Could not add vehicle.');
+        }
+    });
+
+    document.getElementById('unit-detail-new-v-plate')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('unit-detail-add-vehicle')?.click();
+        }
+    });
+
     document.getElementById('unit-detail-parking-registry')?.addEventListener('click', () => {
-        closeUnitDetailModal();
-        window.location.hash = 'property-vehicles';
-        setTimeout(() => window.openMdl?.(u.id), 150);
+        if (typeof window.openMdl === 'function') window.openMdl(u.id);
     });
 };
 
@@ -1185,15 +1264,32 @@ const renderUnitDetailDocuments = (u) => {
 
 export const refreshUnitDetailIfOpen = async () => {
     if (!editingUnitId) return;
-    const u = portalState.units.find((x) => x.id === editingUnitId);
-    if (!u) return;
+    const gen = ++unitDetailRefreshGen;
     const apartmentId = portalState.access?.activeApartmentId;
-    if (apartmentId) editingUnitResidents = await fetchResidentsForApartment(apartmentId);
+    if (apartmentId) {
+        try {
+            editingUnitResidents = await fetchResidentsForApartment(apartmentId);
+        } catch {
+            /* keep prior resident list */
+        }
+    }
+    if (gen !== unitDetailRefreshGen) return;
+    const u = portalState.units.find((x) => x.id == editingUnitId);
+    if (!u) return;
     renderUnitDetailKpis(u);
     if (activeUnitDetailTab === 'residents') renderUnitDetailResidents(u);
     if (activeUnitDetailTab === 'vehicles') renderUnitDetailVehicles(u);
     if (activeUnitDetailTab === 'billing') renderUnitDetailBilling(u);
     if (activeUnitDetailTab === 'documents') renderUnitDetailDocuments(u);
+    void renderUnitDirectory();
+};
+
+export const refreshUnitDetailVehiclesIfOpen = () => {
+    if (!editingUnitId) return;
+    const u = portalState.units.find((x) => x.id == editingUnitId);
+    if (!u) return;
+    renderUnitDetailKpis(u);
+    if (activeUnitDetailTab === 'vehicles') renderUnitDetailVehicles(u);
     void renderUnitDirectory();
 };
 
@@ -1267,6 +1363,7 @@ window.openUnitEditModal = openUnitEditModal;
 window.closeUnitDetailModal = closeUnitDetailModal;
 window.closeUnitEditModal = closeUnitEditModal;
 window.refreshUnitDetailIfOpen = refreshUnitDetailIfOpen;
+window.refreshUnitDetailVehiclesIfOpen = refreshUnitDetailVehiclesIfOpen;
 
 export const renderUnitDirectory = async () => {
     const list = document.getElementById('unit-directory-items');
@@ -1405,10 +1502,7 @@ export const initUnitDirectory = () => {
         }).catch((err) => alert(err?.message || 'Could not delete flat.'));
     });
     document.getElementById('unit-edit-parking-link')?.addEventListener('click', () => {
-        const id = editingUnitId;
-        closeUnitDetailModal();
-        window.location.hash = 'property-vehicles';
-        if (id) setTimeout(() => window.openMdl?.(id), 150);
+        if (editingUnitId && typeof window.openMdl === 'function') window.openMdl(editingUnitId);
     });
     document.getElementById('unit-detail-modal')?.addEventListener('click', (e) => {
         if (e.target.id === 'unit-detail-modal') closeUnitDetailModal();

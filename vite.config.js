@@ -8,7 +8,8 @@ export default defineConfig(({ mode }) => {
   const useLocalApi = env.VITE_LOCAL_API !== '0';
 
   return {
-    plugins: useLocalApi ? [viteApiDevPlugin(env)] : [],
+    // Always register local api/*.js handlers when present; proxy only fills gaps (VITE_LOCAL_API=0).
+    plugins: [viteApiDevPlugin(env)],
     server: {
       // Prevent Vite from serving api/*.js as static modules (breaks POST /api/*).
       fs: {

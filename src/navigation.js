@@ -15,6 +15,14 @@ const TREASURY_ROUTES = [
     'finance-ledger', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-gl',
 ];
 
+export const ACCOUNTS_SUBVIEW_ROUTES = {
+    ledger: 'finance-ledger',
+    reports: 'finance-reports',
+    'bank-recon': 'finance-bank-recon',
+    activity: 'finance-activity',
+    gl: 'finance-gl',
+};
+
 export const NAV_MODULES = [
     {
         id: 'home',
@@ -184,24 +192,16 @@ export const NAV_MODULES = [
                 ],
             },
             { route: 'finance-parking-fines' },
-            {
-                tabbed: true,
-                label: 'Income & Expenses',
-                icon: 'fa-book',
-                defaultRoute: 'finance-ledger',
-                routes: [
-                    'finance-ledger',
-                    'finance-bank-recon',
-                    'finance-activity',
-                    'finance-reports',
-                    'finance-gl',
-                ],
-            },
+            { route: 'finance-ledger' },
+            { route: 'finance-reports' },
+            { route: 'finance-bank-recon' },
+            { route: 'finance-activity' },
+            { route: 'finance-gl' },
         ],
         pages: [
             {
                 route: 'finance-ledger',
-                label: 'Income & Expenses',
+                label: 'Ledger',
                 icon: 'fa-book',
                 view: 'accounts',
                 subview: 'ledger',
@@ -268,7 +268,6 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'bank-recon',
                 permission: 'accounts.edit',
-                hideFromNav: true,
             },
             {
                 route: 'finance-activity',
@@ -288,7 +287,6 @@ export const NAV_MODULES = [
                 subview: 'reports',
                 permission: 'accounts.view',
                 legacy: ['treasury-reports'],
-                hideFromNav: true,
             },
             {
                 route: 'finance-gl',
@@ -297,7 +295,6 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'gl',
                 permission: 'accounts.edit',
-                hideFromNav: true,
             },
         ],
     },
@@ -353,6 +350,14 @@ export const NAV_MODULES = [
                 icon: 'fa-users-gear',
                 view: 'setup',
                 subview: 'staff',
+                permission: 'setup.edit',
+            },
+            {
+                route: 'admin-connections',
+                label: 'External Connections',
+                icon: 'fa-plug',
+                view: 'setup',
+                subview: 'connections',
                 permission: 'setup.edit',
             },
             {
@@ -550,6 +555,14 @@ export const applyNavPermissions = (permSet, offline = false) => {
         });
 
         modEl.style.display = visiblePages ? 'block' : 'none';
+    });
+
+    Object.entries(ACCOUNTS_SUBVIEW_ROUTES).forEach(([subview, route]) => {
+        const btn = document.querySelector(`[data-accounts-subview="${subview}"]`);
+        if (!btn) return;
+        const meta = findPage(route);
+        const show = meta && pageIsVisible(meta.page, permSet, offline, meta.module.id);
+        btn.style.display = show ? '' : 'none';
     });
 };
 

@@ -4,5 +4,10 @@
       "path": "/api/sync",
       "schedule": "0 6 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/passbook-parse.js": {
+      "maxDuration": 300
+    }
+  }
 }

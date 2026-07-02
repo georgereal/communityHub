@@ -10,6 +10,7 @@ import {
     syncMaintenanceIncomeSection,
     validateMaintenanceAllocations,
 } from './maintenanceBilling.js';
+import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
 
 const CAT_LABELS = {
     Security: 'Security / Guards',
@@ -1204,6 +1205,28 @@ window.editTxn = (id) => {
     document.getElementById('cash-cat-select').value = t.cat;
     document.getElementById('cash-wallet-select').value = t.wallet || 'CASH';
     document.getElementById('cash-modal').classList.add('active');
+};
+
+const ROUTE_TO_ACCOUNTS_SUBVIEW = Object.fromEntries(
+    Object.entries(ACCOUNTS_SUBVIEW_ROUTES).map(([subview, route]) => [route, subview]),
+);
+
+export const syncAccountsSubViewTabs = (route) => {
+    const subview = ROUTE_TO_ACCOUNTS_SUBVIEW[route] || 'ledger';
+    document.querySelectorAll('[data-accounts-subview]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.accountsSubview === subview);
+    });
+};
+
+export const initAccountsSubViewTabs = () => {
+    document.querySelectorAll('[data-accounts-subview]').forEach((btn) => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+            const route = ACCOUNTS_SUBVIEW_ROUTES[btn.dataset.accountsSubview];
+            if (route && typeof window.switchView === 'function') window.switchView(route);
+        });
+    });
 };
 
 window.switchSubView = (sv) => {

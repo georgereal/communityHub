@@ -7,7 +7,7 @@ export async function readApiJson(res) {
             json: {},
             error: res.ok
                 ? null
-                : `API unavailable (${res.status}). Restart \`npm run dev\` after config changes. For localhost, add SUPABASE_SERVICE_ROLE_KEY to .env.local, or set VITE_LOCAL_API=0 to proxy to production.`,
+                : `API unavailable (${res.status}). Restart \`npm run dev\` after config changes.`,
         };
     }
     try {

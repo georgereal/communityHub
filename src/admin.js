@@ -4,13 +4,14 @@
 import { portalState, supabase, pullState } from './store.js';
 import { refreshExpenseReferences } from './finances.js';
 import { renderLedgerSyncPanel, renderAdminSyncPanel } from './ledgerSpreadsheetSync.js';
+import { renderExternalConnectionsAdmin } from './externalConnections.js';
 import { closeSyncLogDrawer, teardownSyncLogDrawer } from './ledgerSyncLog.js';
 import { withButtonBusy, bindBusyClick } from './buttonBusy.js';
 
 const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
 const STAFF_ROLES = ['Manager', 'Security Guard', 'Housekeeping', 'Maintenance', 'Accounts', 'Other'];
 
-const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff', 'sync'];
+const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff', 'connections', 'sync'];
 let editingVendorId = null;
 let editingSubCatId = null;
 let editingStaffId = null;
@@ -29,6 +30,7 @@ export const switchSetupSubView = (id = 'society') => {
     if (view === 'vendors') renderVendorsAdmin();
     if (view === 'subcats') renderSubCatsAdmin();
     if (view === 'staff') renderStaffAdmin();
+    if (view === 'connections') renderExternalConnectionsAdmin();
     if (view === 'society') {
         import('./moduleAccessAdmin.js').then((m) => m.renderApartmentModulePanel());
     }
@@ -64,6 +66,8 @@ export const renderBankAdmin = () => {
     set('admin-bank-ifsc', bank?.ifsc);
     set('admin-bank-upi', bank?.upi_id);
     set('admin-bank-notes', bank?.notes);
+    set('admin-bank-opening-date', bank?.opening_balance_date);
+    set('admin-bank-opening-amount', bank?.opening_balance ?? '');
     const hint = document.getElementById('admin-bank-hint');
     if (hint) {
         hint.textContent = bank?.updated_at
@@ -88,6 +92,13 @@ const saveBankAccount = async () => {
         ifsc: document.getElementById('admin-bank-ifsc')?.value?.trim() || null,
         upi_id: document.getElementById('admin-bank-upi')?.value?.trim() || null,
         notes: document.getElementById('admin-bank-notes')?.value?.trim() || null,
+        opening_balance_date: document.getElementById('admin-bank-opening-date')?.value || null,
+        opening_balance: (() => {
+            const raw = document.getElementById('admin-bank-opening-amount')?.value?.trim();
+            if (raw === '' || raw == null) return null;
+            const n = parseFloat(raw);
+            return Number.isNaN(n) ? null : n;
+        })(),
         updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from('apartment_bank_accounts').upsert(payload, { onConflict: 'apartment_id' });

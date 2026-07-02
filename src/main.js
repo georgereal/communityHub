@@ -7,6 +7,7 @@ import {
   processAnalytics,
   renderRegistry,
   saveMdlData,
+  addVehicleToUnit,
   handleCSVImport,
   downloadVehicleRegistryXlsx,
   addCommunityPoolSlot,
@@ -16,7 +17,7 @@ import {
   saveCapacityAllocation,
   refreshCapacityUnitList,
 } from './registry.js';
-import { processFinances, renderCashLedger, saveCashData, initExpenseModal } from './finances.js';
+import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports, initAccountsSubViewTabs, syncAccountsSubViewTabs } from './finances.js';
 import { initFinanceAnalyticsUi, renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerSyncPanel } from './ledgerSpreadsheetSync.js';
 import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
@@ -952,6 +953,7 @@ window.switchView = (v) => {
     window.switchOperationsSubView?.(page.subview || 'helpdesk');
   }
   if (page.view === 'accounts') {
+    syncAccountsSubViewTabs(route);
     window.switchSubView(page.subview || 'ledger');
     if (page.subview === 'reports') renderFinanceAnalytics();
     else if (page.subview === 'bank-recon') renderBankReconciliation();
@@ -1395,6 +1397,7 @@ const openResidentModal = (r = null) => {
   document.getElementById('resident-primary').checked = !!r?.is_primary;
   syncResidentModalFields();
   document.getElementById('resident-modal').classList.add('active');
+  requestAnimationFrame(() => document.getElementById('resident-name')?.focus());
 };
 
 const closeResidentModal = () => {
@@ -1987,7 +1990,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (activeUserSelect) activeUserSelect.onchange = (e) => setActiveUser(e.target.value);
 
   // Modal Unified Button Hooks
-  document.getElementById('save-mdl-btn').onclick = () => saveMdlData();
+  document.getElementById('save-mdl-btn')?.addEventListener('click', () => {
+    void withButtonBusy(document.getElementById('save-mdl-btn'), 'Saving…', saveMdlData);
+  });
+
+  document.getElementById('add-vehicle-btn')?.addEventListener('click', () => {
+    const uid = portalState.activeUnitId;
+    const plate = document.getElementById('new-v-plate')?.value || '';
+    const type = document.getElementById('new-v-type')?.value || 'CAR';
+    const btn = document.getElementById('add-vehicle-btn');
+    void withButtonBusy(btn, 'Adding…', async () => {
+      if (!uid) throw new Error('Flat not found. Close and reopen this dialog.');
+      await addVehicleToUnit(uid, plate, type);
+      const plateEl = document.getElementById('new-v-plate');
+      if (plateEl) plateEl.value = '';
+    }).catch((err) => alert(err?.message || 'Could not add vehicle.'));
+  });
+
+  document.getElementById('new-v-plate')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('add-vehicle-btn')?.click();
+    }
+  });
 
   document.querySelectorAll('.unit-parking-type__btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2000,6 +2025,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     void withButtonBusy(document.getElementById('save-cash-btn'), 'Saving…', saveCashData);
   };
   initExpenseModal();
+  initAccountsSubViewTabs();
   initMaintenanceBilling();
   initBulkCollectionImport();
   initActivityAuditUi();
