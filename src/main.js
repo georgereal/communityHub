@@ -17,7 +17,7 @@ import {
   saveCapacityAllocation,
   refreshCapacityUnitList,
 } from './registry.js';
-import { processFinances, renderCashLedger, saveCashData, initExpenseModal, renderAuditReports, initAccountsSubViewTabs, syncAccountsSubViewTabs } from './finances.js';
+import { processFinances, renderCashLedger, saveCashData, initExpenseModal, initAccountsSubViewTabs, syncAccountsSubViewTabs } from './finances.js';
 import { initFinanceAnalyticsUi, renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerSyncPanel } from './ledgerSpreadsheetSync.js';
 import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
@@ -55,6 +55,10 @@ import {
     primaryRoleFromAssignments,
     v2KeyToLabel,
     v1RoleToV2Key,
+    isApartmentAdminUser,
+    isSystemAdminUser,
+    userHasSystemAdminRole,
+    loadAllUserRoleAssignments,
 } from './rbac.js';
 import {
     DEFAULT_ROUTE,
@@ -171,16 +175,30 @@ const applyAuthToUIInner = async (session) => {
   const name = profile?.full_name || user.user_metadata?.full_name || profile?.email || user.email || 'User';
   let role = profile?.role || 'resident_viewer';
   let effectiveRoleKey = v1RoleToV2Key(role);
+  let isSystemAdmin = false;
   const aptId = portalState.access?.activeApartmentId;
-  if (supabase && aptId && !isPlaceholderApartmentId(aptId)) {
-    const assignments = await loadUserRoleAssignments(user.id);
-    const aptAssignment = assignments.find((a) => a.apartment_id === aptId);
-    if (aptAssignment?.role_key) {
-      effectiveRoleKey = aptAssignment.role_key;
-      role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+  if (supabase) {
+    isSystemAdmin = await userHasSystemAdminRole(user.id);
+    if (isSystemAdmin) {
+      effectiveRoleKey = 'system_admin';
+      role = 'admin';
+    } else if (aptId && !isPlaceholderApartmentId(aptId)) {
+      const assignments = await loadUserRoleAssignments(user.id);
+      const aptAssignment = assignments.find((a) => a.apartment_id === aptId);
+      if (aptAssignment?.role_key) {
+        effectiveRoleKey = aptAssignment.role_key;
+        role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+      }
     }
   }
-  portalState.auth = { id: user.id, email: user.email || profile?.email || '', name, role, effectiveRoleKey };
+  portalState.auth = {
+    id: user.id,
+    email: user.email || profile?.email || '',
+    name,
+    role,
+    effectiveRoleKey,
+    isSystemAdmin,
+  };
 
   const initials = (name || 'U').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
   const roleLabel = formatRoleLabel(effectiveRoleKey || role);
@@ -212,19 +230,21 @@ const applyAuthToUIInner = async (session) => {
 
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
-  if (manageBtn) manageBtn.style.display = can('rbac.view') ? 'flex' : 'none';
+  if (manageBtn) manageBtn.style.display = (isApartmentAdminUser() || can('rbac.view')) ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
   refreshStaffNotifications().catch(() => {});
 
-  // Show "Make me admin" only if no admin exists yet and user isn't admin.
+  // Show "Make me admin" only if no admin exists yet and user isn't already an office bearer.
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
-  if (makeAdminBtn && supabase && role !== 'admin') {
+  if (makeAdminBtn && supabase && !isApartmentAdminUser()) {
     try {
       const { data } = await supabase.rpc('no_admin_exists');
       makeAdminBtn.style.display = data ? 'flex' : 'none';
     } catch {
       makeAdminBtn.style.display = 'none';
     }
+  } else if (makeAdminBtn) {
+    makeAdminBtn.style.display = 'none';
   }
   console.groupEnd();
 };
@@ -762,6 +782,11 @@ const syncAccessFromSupabase = async () => {
   }
 
   await refreshAuthPermissions(activeId);
+  try {
+    const { loadUserPageAccess } = await import('./pageAccess.js');
+    const roleKey = portalState.auth?.effectiveRoleKey || v1RoleToV2Key(portalState.auth?.role);
+    await loadUserPageAccess(activeId, uid, roleKey);
+  } catch { /* tables may not exist yet */ }
   applyPermissionsToNav(portalState.authPermissions);
 
   const { data: selfMappings } = await withTimeout(
@@ -1978,12 +2003,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { data: s } = await supabase.auth.getSession();
     const uid = s?.session?.user?.id;
     if (!uid) return showAuth('Please sign in again.');
+    const aptId = portalState.access?.activeApartmentId;
     const { error } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
     if (error) return alert(error.message);
-    // Force refresh of UI gating after role change.
+    if (aptId && !isPlaceholderApartmentId(aptId)) {
+      await supabase.from('user_role_assignments').delete()
+        .eq('user_id', uid).eq('scope', 'apartment').eq('apartment_id', aptId);
+      const { error: roleErr } = await supabase.from('user_role_assignments').insert({
+        user_id: uid,
+        role_key: 'apartment_admin',
+        scope: 'apartment',
+        apartment_id: aptId,
+      });
+      if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
+        console.warn('[auth] role assignment insert failed:', roleErr.message);
+      }
+    }
     const refreshed = await supabase.auth.getSession();
     await applyAuthToUI(refreshed.data.session);
-    alert('You are now admin. Setup/User management is enabled.');
+    alert('You are now Association Office Bearer (admin). Open Administration in the sidebar.');
   };
 
   const activeUserSelect = document.getElementById('access-active-user');

@@ -5,6 +5,7 @@ import { portalState } from './store.js';
 
 const ROLE_V1_TO_V2 = {
     admin: 'apartment_admin',
+    apartment_admin: 'apartment_admin',
     property_manager: 'property_manager',
     accounts_manager: 'accounts_manager',
     security: 'security',
@@ -27,6 +28,10 @@ export function resolvePageAccess(route) {
     const userMap = portalState.pageAccess?.user || {};
     if (userMap[route] === 'deny') return false;
     if (userMap[route] === 'grant') return true;
+
+    if (portalState.auth?.isSystemAdmin || portalState.auth?.effectiveRoleKey === 'system_admin') {
+        return null;
+    }
 
     if (!isApartmentAdminUser()) {
         const roleKey = activeRoleKey();

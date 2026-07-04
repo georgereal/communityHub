@@ -9549,6 +9549,20 @@ header {
   pointer-events: none;
 }
 
+.bank-recon-work-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.bank-recon-row-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 .bank-recon-status {
   display: inline-block;
   font-size: 0.65rem;

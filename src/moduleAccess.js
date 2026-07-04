@@ -20,6 +20,7 @@ export const LOCKED_MODULE_KEYS = new Set(['admin']);
 
 /** Only apartment admins bypass module toggles (not property managers with setup.view). */
 export function moduleBypassGating() {
+    if (portalState.auth?.isSystemAdmin || portalState.auth?.effectiveRoleKey === 'system_admin') return true;
     const perms = portalState.authPermissions || [];
     if (perms.includes('rbac.edit')) return true;
     if (portalState.auth?.effectiveRoleKey === 'apartment_admin') return true;

@@ -4,6 +4,8 @@
 import ExcelJS from 'exceljs';
 import { portalState, supabase, pullState } from './store.js';
 import { logActivity } from './activityAudit.js';
+import { matchFlatFromText, parseNoBrokerCollectionLines } from './bulkCollectionImport.js';
+import { recordMaintenanceCollectionPayment } from './maintenanceBilling.js';
 import { withButtonBusy } from './buttonBusy.js';
 import {
     validatePassbookFiles,
@@ -14,6 +16,14 @@ import {
 import { isPassbookOcrConfigured } from './externalConnections.js';
 
 const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
+const SUB_CAT_SUGGESTIONS = {
+    Maintenance: ['Lift / Elevator', 'Generator', 'Housekeeping', 'Painting', 'Landscaping', 'Pest control'],
+    Security: ['Guard salary', 'Uniforms', 'CCTV'],
+    Plumbing: ['Motor repair', 'Tank cleaning', 'Pipeline'],
+    Electrical: ['Diesel', 'Common area lighting', 'Lift backup'],
+    Stationery: ['Printing', 'Office supplies'],
+    Other: ['Miscellaneous'],
+};
 const INCOME_CATS = [
     'Maintenance Collection',
     'Marketing',
@@ -339,7 +349,377 @@ export const getUnmatchedLedgerTxns = (typeFilter = null) => {
     );
 };
 
-export const suggestMatches = (line, txns = null) => {
+let nobrokerDumpLines = [];
+let nobrokerFileName = '';
+
+export const getNoBrokerDump = () => ({ lines: nobrokerDumpLines, fileName: nobrokerFileName });
+
+export const setNoBrokerDump = (lines, fileName = '') => {
+    nobrokerDumpLines = lines || [];
+    nobrokerFileName = fileName || '';
+};
+
+export const clearNoBrokerDump = () => {
+    nobrokerDumpLines = [];
+    nobrokerFileName = '';
+};
+
+export const getDateTolerance = () => {
+    const raw = document.getElementById('bank-recon-date-tolerance')?.value
+        ?? document.getElementById('fa-date-tolerance')?.value
+        ?? '3';
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : 3;
+};
+
+const lineAmount = (line) => {
+    const credit = parseFloat(line?.credit || 0);
+    const debit = parseFloat(line?.debit || 0);
+    if (credit > 0.001) return { amount: credit, type: 'IN' };
+    if (debit > 0.001) return { amount: debit, type: 'OUT' };
+    return null;
+};
+
+const txnDateStr = (txn) => new Date(txn.date).toISOString().slice(0, 10);
+
+const daysDiff = (dateA, dateB) => {
+    const a = new Date(`${dateA}T12:00:00`);
+    const b = new Date(`${dateB}T12:00:00`);
+    return Math.abs((a - b) / 86400000);
+};
+
+const inferExpenseCategory = (desc) => {
+    const u = String(desc || '').toUpperCase();
+    if (/SECURITY|GUARD/.test(u)) return 'Security';
+    if (/PLUMB|WATER|MOTOR|TANK/.test(u)) return 'Plumbing';
+    if (/ELECT|DIESEL|\bDG\b/.test(u)) return 'Electrical';
+    if (/STATIONERY|PRINT|OFFICE/.test(u)) return 'Stationery';
+    if (/MAINT|LIFT|GEN|HOUSE|CLEAN/.test(u)) return 'Maintenance';
+    return 'Other';
+};
+
+const inferIncomeCategory = (desc) => {
+    const u = String(desc || '').toUpperCase();
+    if (/INTEREST|\bINT\b/.test(u)) return 'Interest';
+    if (/NOBROKER|MAINT|RENT|COLLECT|FLAT/.test(u)) return 'Maintenance Collection';
+    return 'Other Income';
+};
+
+const inferBankPaymentType = (desc) => {
+    const u = String(desc || '').toUpperCase();
+    if (/UPI|GPAY|PHONEPE|PAYTM/.test(u)) return 'UPI';
+    if (/NEFT|IMPS|RTGS/.test(u)) return 'NEFT';
+    if (/CHQ|CHEQUE/.test(u)) return 'CHEQUE';
+    return 'NEFT';
+};
+
+const statementReference = (lineId) => `STMT-${String(lineId || '').slice(0, 8)}`;
+
+const referenceExists = (ref) => {
+    const key = String(ref || '').trim().toLowerCase();
+    if (!key) return false;
+    return (portalState.finances.txns || []).some(
+        (t) => (t.bank_reference || '').trim().toLowerCase() === key,
+    );
+};
+
+export const findNoBrokerForLine = (line, nobrokerLines = nobrokerDumpLines, maxDays = getDateTolerance()) => {
+    const la = lineAmount(line);
+    if (!la || la.type !== 'IN') return null;
+    let best = null;
+    let bestDiff = Infinity;
+    nobrokerLines.forEach((nb) => {
+        if (Math.abs(parseFloat(nb.amount) - la.amount) > 0.01) return;
+        const diff = daysDiff(line.line_date, nb.date);
+        if (diff > maxDays || diff >= bestDiff) return;
+        bestDiff = diff;
+        best = nb;
+    });
+    return best;
+};
+
+export const findLedgerMatch = (line, txns, maxDays = getDateTolerance()) => {
+    const la = lineAmount(line);
+    if (!la) return null;
+    let best = null;
+    let bestScore = Infinity;
+    txns.forEach((t) => {
+        if (t.type !== la.type) return;
+        if ((t.wallet || '').toUpperCase() !== 'BANK') return;
+        const amt = parseFloat(t.amount || 0);
+        if (Math.abs(amt - la.amount) > 0.01) return;
+        const diff = daysDiff(line.line_date, txnDateStr(t));
+        if (diff > maxDays) return;
+        const score = diff * 1000 + Math.abs(amt - la.amount);
+        if (score < bestScore) {
+            bestScore = score;
+            best = t;
+        }
+    });
+    return best;
+};
+
+async function insertGenericBankTransaction({
+    type,
+    amount,
+    date,
+    cat,
+    description,
+    bankReference,
+    bankPaymentType,
+    vendorName = null,
+}) {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+
+    const txnId = crypto.randomUUID();
+    const dateIso = new Date(`${date}T12:00:00`).toISOString();
+    const core = {
+        id: txnId,
+        apartment_id,
+        amount: parseFloat(amount),
+        cat,
+        description: description || null,
+        wallet: 'BANK',
+        type,
+        date: dateIso,
+    };
+    const extended = {
+        ...core,
+        bank_payment_type: bankPaymentType || inferBankPaymentType(description),
+        bank_reference: bankReference,
+        vendor_name: vendorName,
+    };
+
+    let { error } = await supabase.from('transactions').insert(extended);
+    if (error && /bank_payment_type|bank_reference|vendor_name/i.test(error.message)) {
+        ({ error } = await supabase.from('transactions').insert(core));
+    }
+    if (error) throw new Error(error.message);
+
+    await logActivity({
+        entityType: 'TRANSACTION',
+        entityId: txnId,
+        action: 'CREATE',
+        summary: `Auto-created from bank statement — ${type} ${formatMoney(amount)}`,
+        newData: { txnId, cat, bankReference },
+    });
+
+    return txnId;
+}
+
+export async function createLedgerFromBankLine(lineId, { nobrokerRow = null, skipMatch = false } = {}) {
+    const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
+    if (!line || line.match_status !== 'UNMATCHED') throw new Error('Statement line is not available for import.');
+
+    const la = lineAmount(line);
+    if (!la) throw new Error('Statement line has no debit or credit amount.');
+
+    const nb = nobrokerRow || findNoBrokerForLine(line);
+    const desc = line.description || nb?.description || '';
+    let txnId;
+
+    if (la.type === 'IN') {
+        const flat = nb?.flatHint || matchFlatFromText(desc) || matchFlatFromText(nb?.description);
+        const incomeCat = inferIncomeCategory(desc);
+        const bankRef = nb?.reference || statementReference(lineId);
+
+        if (flat && (nb || incomeCat === 'Maintenance Collection')) {
+            if (referenceExists(bankRef)) {
+                throw new Error(`Reference ${bankRef} is already recorded in the ledger.`);
+            }
+            const result = await recordMaintenanceCollectionPayment({
+                unitNumber: flat,
+                amount: la.amount,
+                date: line.line_date,
+                description: desc || `Bank collection — ${flat}`,
+                wallet: 'BANK',
+                bankReference: bankRef,
+                bankPaymentType: nb ? 'UPI' : inferBankPaymentType(desc),
+            });
+            txnId = result.txnId;
+        } else {
+            if (referenceExists(bankRef)) {
+                throw new Error(`Reference ${bankRef} is already recorded in the ledger.`);
+            }
+            txnId = await insertGenericBankTransaction({
+                type: 'IN',
+                amount: la.amount,
+                date: line.line_date,
+                cat: incomeCat,
+                description: desc || `Bank credit — ${incomeCat}`,
+                bankReference: bankRef,
+                bankPaymentType: inferBankPaymentType(desc),
+            });
+        }
+    } else {
+        const bankRef = statementReference(lineId);
+        if (referenceExists(bankRef)) {
+            throw new Error(`This statement line was already imported (${bankRef}).`);
+        }
+        const cat = inferExpenseCategory(desc);
+        txnId = await insertGenericBankTransaction({
+            type: 'OUT',
+            amount: la.amount,
+            date: line.line_date,
+            cat,
+            description: desc || `Bank debit — ${cat}`,
+            bankReference: bankRef,
+            bankPaymentType: inferBankPaymentType(desc),
+            vendorName: desc.slice(0, 120) || null,
+        });
+    }
+
+    if (!skipMatch) {
+        await matchBankLine(lineId, txnId);
+    }
+    return txnId;
+}
+
+export async function autoMatchByDateAndAmount({ maxDaysDiff = getDateTolerance() } = {}) {
+    const lines = [...getUnmatchedBankLines()].sort((a, b) =>
+        (a.line_date || '').localeCompare(b.line_date || ''),
+    );
+    let txns = getUnmatchedLedgerTxns();
+    const matched = [];
+    const errors = [];
+
+    for (const line of lines) {
+        const txn = findLedgerMatch(line, txns, maxDaysDiff);
+        if (!txn) continue;
+        try {
+            await matchBankLine(line.id, txn.id);
+            matched.push({ lineId: line.id, txnId: txn.id, date: line.line_date });
+            txns = txns.filter((t) => t.id !== txn.id);
+        } catch (err) {
+            errors.push(`${line.line_date}: ${err?.message || 'Match failed'}`);
+        }
+    }
+
+    await pullState();
+    return { matched, errors };
+}
+
+export async function autoCreateFromUnmatchedLines({
+    maxDaysDiff = getDateTolerance(),
+    includeDebits = true,
+} = {}) {
+    const lines = [...getUnmatchedBankLines()].sort((a, b) =>
+        (a.line_date || '').localeCompare(b.line_date || ''),
+    );
+    let created = 0;
+    let matchedExisting = 0;
+    const skipped = [];
+    const errors = [];
+
+    for (const line of lines) {
+        const la = lineAmount(line);
+        if (!la) {
+            skipped.push(`${line.line_date}: zero amount`);
+            continue;
+        }
+        if (la.type === 'OUT' && !includeDebits) {
+            skipped.push(`${line.line_date}: debit skipped`);
+            continue;
+        }
+
+        const existing = findLedgerMatch(line, getUnmatchedLedgerTxns(), maxDaysDiff);
+        if (existing) {
+            try {
+                await matchBankLine(line.id, existing.id);
+                matchedExisting += 1;
+            } catch (err) {
+                errors.push(`${line.line_date}: ${err?.message || 'Match failed'}`);
+            }
+            continue;
+        }
+
+        try {
+            const nb = findNoBrokerForLine(line, nobrokerDumpLines, maxDaysDiff);
+            await createLedgerFromBankLine(line.id, { nobrokerRow: nb });
+            created += 1;
+        } catch (err) {
+            skipped.push(`${line.line_date}: ${err?.message || 'Skipped'}`);
+        }
+    }
+
+    await pullState();
+    return { created, matchedExisting, skipped, errors };
+}
+
+export async function reconcileBankWithNoBroker({
+    maxDaysDiff = getDateTolerance(),
+    createMissing = true,
+} = {}) {
+    if (!nobrokerDumpLines.length) throw new Error('Upload a NoBroker payment dump first.');
+
+    const lines = getUnmatchedBankLines().filter((l) => parseFloat(l.credit || 0) > 0.001);
+    let txns = getUnmatchedLedgerTxns();
+    let matchedLedger = 0;
+    let created = 0;
+    const unmatched = [];
+    const errors = [];
+
+    for (const line of lines) {
+        const nb = findNoBrokerForLine(line, nobrokerDumpLines, maxDaysDiff);
+        if (!nb) {
+            unmatched.push(`${line.line_date} · ${formatMoney(line.credit)} — no NoBroker row`);
+            continue;
+        }
+
+        const flat = nb.flatHint || matchFlatFromText(nb.description);
+        if (!flat) {
+            errors.push(`${line.line_date}: NoBroker row matched amount/date but flat could not be resolved`);
+            continue;
+        }
+
+        const ledgerMatch = txns.find((t) =>
+            t.type === 'IN'
+            && t.cat === 'Maintenance Collection'
+            && Math.abs(parseFloat(t.amount) - parseFloat(nb.amount)) < 0.01
+            && daysDiff(line.line_date, txnDateStr(t)) <= maxDaysDiff
+            && (
+                (t.description || '').toUpperCase().includes(flat.toUpperCase())
+                || daysDiff(nb.date, txnDateStr(t)) <= maxDaysDiff
+            ),
+        );
+
+        if (ledgerMatch) {
+            try {
+                await matchBankLine(line.id, ledgerMatch.id);
+                txns = txns.filter((t) => t.id !== ledgerMatch.id);
+                matchedLedger += 1;
+            } catch (err) {
+                errors.push(`${line.line_date}: ${err?.message || 'Match failed'}`);
+            }
+            continue;
+        }
+
+        if (!createMissing) {
+            unmatched.push(`${line.line_date} · ${flat} · ${formatMoney(nb.amount)} — ledger entry missing`);
+            continue;
+        }
+
+        try {
+            await createLedgerFromBankLine(line.id, { nobrokerRow: nb });
+            created += 1;
+        } catch (err) {
+            errors.push(`${line.line_date} · ${flat}: ${err?.message || 'Create failed'}`);
+        }
+    }
+
+    await pullState();
+    return { matchedLedger, created, unmatched, errors };
+}
+
+export async function loadNoBrokerDumpFile(file) {
+    const lines = await parseNoBrokerCollectionLines(file);
+    setNoBrokerDump(lines, file?.name || 'NoBroker export');
+    return lines.length;
+};
+
+export const suggestMatches = (line, txns = null, maxDays = getDateTolerance()) => {
     const lineType = bankLineType(line);
     const pool = txns ?? getUnmatchedLedgerTxns(lineType);
     const lineAmt = bankLineAmount(line);
@@ -352,7 +732,7 @@ export const suggestMatches = (line, txns = null) => {
         if (Math.abs(amt - lineAmt) > 0.01) return false;
         const txnDate = new Date(`${t.date}T12:00:00`);
         const diffDays = Math.abs((lineDate - txnDate) / 86400000);
-        return diffDays <= 3;
+        return diffDays <= maxDays;
     }).slice(0, 5);
 };
 
@@ -494,6 +874,7 @@ export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_
     const amount = bankLineAmount(line);
     if (amount <= 0.001) throw new Error('Enter a debit or credit amount.');
     if (!cat) throw new Error('Select a category.');
+    if (!isIncome && !sub_category) throw new Error('Enter sub-category for expenses.');
     if (!isIncome && !vendor_name) throw new Error('Enter vendor name for expenses.');
 
     const apartment_id = portalState.access?.activeApartmentId;
@@ -562,6 +943,36 @@ const importResultMessage = ({ count, skipped, skippedExisting, skippedBatch }) 
 const renderCatOptions = (isIncome) => {
     const cats = isIncome ? INCOME_CATS : EXPENSE_CATS;
     return cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+};
+
+const subCatOptionsForCategory = (catKey) => {
+    if (!catKey) return [];
+    const defaults = SUB_CAT_SUGGESTIONS[catKey] || SUB_CAT_SUGGESTIONS.Other;
+    const saved = (portalState.finances.subCategories || [])
+        .filter((row) => row.category === catKey)
+        .map((row) => row.name);
+    return [...new Set([...defaults, ...saved])].sort((a, b) => a.localeCompare(b));
+};
+
+const updateRowSubCatDatalist = (row, catKey) => {
+    const lineId = row?.dataset.lineId;
+    if (!lineId) return;
+    const list = row.querySelector(`#bank-recon-subcats-${lineId}`);
+    if (!list) return;
+    list.innerHTML = subCatOptionsForCategory(catKey)
+        .map((s) => `<option value="${esc(s)}">`)
+        .join('');
+};
+
+const rowClassifyReady = (row) => {
+    if (!row) return false;
+    const isIncome = row.dataset.lineType === 'IN';
+    const cat = row.querySelector('.bank-recon-cat-select')?.value;
+    if (!cat) return false;
+    if (isIncome) return true;
+    const sub_category = row.querySelector('.bank-recon-subcat-input')?.value?.trim();
+    const vendor_name = row.querySelector('.bank-recon-vendor-input')?.value?.trim();
+    return Boolean(sub_category && vendor_name);
 };
 
 const renderBalanceCells = (line, showBalances) => {
@@ -638,7 +1049,7 @@ const renderStatementTable = (unmatched, showBalances = false) => {
             `<option value="${t.id}">${new Date(t.date).toLocaleDateString('en-GB')} · ${esc(t.cat || t.type)} · ${formatMoney(t.amount)} · ${esc((t.description || '').slice(0, 30))}</option>`,
         ).join('');
         const subCats = !isIncome
-            ? (portalState.finances.subCategories || []).map((s) => `<option value="${esc(s.name)}">`).join('')
+            ? subCatOptionsForCategory(null).map((s) => `<option value="${esc(s)}">`).join('')
             : '';
 
         return `<tr class="bank-recon-table__row${line.passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-line-id="${line.id}" data-line-type="${lineType}">
@@ -666,7 +1077,7 @@ const renderStatementTable = (unmatched, showBalances = false) => {
               <option value="">Category…</option>
               ${renderCatOptions(isIncome)}
             </select>
-            ${isIncome ? '' : `<input type="text" class="bank-recon-cell-input bank-recon-subcat-input" data-line="${line.id}" list="bank-recon-subcats-${line.id}" placeholder="Sub-category" />
+            ${isIncome ? '' : `<input type="text" class="bank-recon-cell-input bank-recon-subcat-input" data-line="${line.id}" list="bank-recon-subcats-${line.id}" placeholder="Sub-category *" />
             <datalist id="bank-recon-subcats-${line.id}">${subCats}</datalist>
             <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" data-line="${line.id}" list="bank-recon-vendors" placeholder="Vendor *" value="${esc((line.description || '').slice(0, 48))}" />`}
           </td>
@@ -679,6 +1090,7 @@ const renderStatementTable = (unmatched, showBalances = false) => {
           </td>
           <td class="bank-recon-table__cell bank-recon-table__cell--actions">
             <div class="bank-recon-row-actions">
+              <span class="bank-recon-row-status" hidden aria-live="polite"></span>
               <button type="button" class="btn btn-outline btn--small btn--icon bank-ignore-btn" data-line="${line.id}" title="Ignore line" aria-label="Ignore"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></button>
               <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-line="${line.id}" title="Delete line" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
             </div>
@@ -691,6 +1103,7 @@ const renderStatementTable = (unmatched, showBalances = false) => {
 
     return `
       <datalist id="bank-recon-vendors">${vendorDatalist}</datalist>
+      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — saves when all three are set. For <strong>income</strong>, category alone is enough. Or pick a <strong>match</strong> to link an existing ledger entry.</p>
       <div class="bank-recon-bulk-bar">
         <label class="bank-recon-bulk-select-all">
           <input type="checkbox" id="bank-recon-select-all" aria-label="Select all rows" />
@@ -713,7 +1126,7 @@ const renderStatementTable = (unmatched, showBalances = false) => {
               ${showBalances ? '<th class="bank-recon-table__th--num">Calculated</th><th class="bank-recon-table__th--num">Passbook</th>' : ''}
               <th>Type</th>
               <th>Category / vendor</th>
-              <th class="bank-recon-table__th--match">Match</th>
+              <th class="bank-recon-table__th--match">Match ledger</th>
               <th class="bank-recon-table__th--actions"></th>
             </tr>
           </thead>
@@ -852,29 +1265,64 @@ const syncBulkSelectionUi = (root) => {
     }
 };
 
-const setRowBusy = (row, busy) => {
+const setRowBusy = (row, busy, label = '') => {
     if (!row) return;
     row.classList.toggle('bank-recon-table__row--busy', busy);
     row.querySelectorAll('select, input, button').forEach((el) => { el.disabled = busy; });
+    const statusEl = row.querySelector('.bank-recon-row-status');
+    if (statusEl) {
+        statusEl.textContent = busy ? label : '';
+        statusEl.hidden = !busy;
+    }
+};
+
+const clearRowClassify = (row) => {
+    row?.querySelector('.bank-recon-cat-select') && (row.querySelector('.bank-recon-cat-select').value = '');
+    row?.querySelector('.bank-recon-subcat-input') && (row.querySelector('.bank-recon-subcat-input').value = '');
+    row?.querySelector('.bank-recon-vendor-input') && (row.querySelector('.bank-recon-vendor-input').value = '');
+};
+
+const clearRowMatch = (row) => {
+    const matchSel = row?.querySelector('.bank-match-select');
+    if (matchSel) matchSel.value = '';
 };
 
 const tryAutoPostFromRow = async (row, lineId) => {
     if (!row || row.classList.contains('bank-recon-table__row--busy')) return;
-    const isIncome = row.dataset.lineType === 'IN';
+    const matchSel = row.querySelector('.bank-match-select');
+    if (matchSel?.value) return;
+
     const cat = row.querySelector('.bank-recon-cat-select')?.value;
     if (!cat) return;
     const sub_category = row.querySelector('.bank-recon-subcat-input')?.value?.trim() || null;
     const vendor_name = row.querySelector('.bank-recon-vendor-input')?.value?.trim() || null;
-    if (!isIncome && !vendor_name) return;
+    if (!rowClassifyReady(row)) return;
 
-    setRowBusy(row, true);
+    setRowBusy(row, true, 'Posting…');
     try {
         await createTxnFromBankLine(lineId, { cat, sub_category, vendor_name });
         renderBankReconciliation();
         window.renderCashLedger?.();
+        window.processFinances?.();
     } catch (err) {
         setRowBusy(row, false);
         alert(err?.message || 'Could not post transaction.');
+    }
+};
+
+const tryAutoMatchFromRow = async (row, lineId, txnId) => {
+    if (!row || row.classList.contains('bank-recon-table__row--busy')) return;
+    clearRowClassify(row);
+    setRowBusy(row, true, 'Matching…');
+    try {
+        await matchBankLine(lineId, txnId);
+        renderBankReconciliation();
+        window.renderCashLedger?.();
+    } catch (err) {
+        setRowBusy(row, false);
+        const matchSel = row.querySelector('.bank-match-select');
+        if (matchSel) matchSel.value = '';
+        alert(err?.message || 'Match failed.');
     }
 };
 
@@ -945,37 +1393,37 @@ const wireStatementTable = (linesEl) => {
         sel.addEventListener('change', async () => {
             const txnId = sel.value;
             if (!txnId) return;
-            const lineId = sel.dataset.line;
-            const row = sel.closest('tr');
-            setRowBusy(row, true);
-            try {
-                await matchBankLine(lineId, txnId);
-                renderBankReconciliation();
-                window.renderCashLedger?.();
-            } catch (err) {
-                setRowBusy(row, false);
-                sel.value = '';
-                alert(err?.message || 'Match failed.');
-            }
+            await tryAutoMatchFromRow(sel.closest('tr'), sel.dataset.line, txnId);
         });
     });
 
     linesEl.querySelectorAll('.bank-recon-cat-select').forEach((sel) => {
         sel.addEventListener('change', () => {
-            tryAutoPostFromRow(sel.closest('tr'), sel.dataset.line);
+            const row = sel.closest('tr');
+            clearRowMatch(row);
+            const isIncome = row?.dataset.lineType === 'IN';
+            if (!isIncome) {
+                row?.querySelector('.bank-recon-subcat-input') && (row.querySelector('.bank-recon-subcat-input').value = '');
+                updateRowSubCatDatalist(row, sel.value);
+                return;
+            }
+            tryAutoPostFromRow(row, sel.dataset.line);
         });
     });
 
+    const onExpenseFieldReady = (input) => {
+        const row = input.closest('tr');
+        if (rowClassifyReady(row)) tryAutoPostFromRow(row, input.dataset.line);
+    };
+
     linesEl.querySelectorAll('.bank-recon-vendor-input').forEach((input) => {
-        input.addEventListener('change', () => {
-            tryAutoPostFromRow(input.closest('tr'), input.dataset.line);
-        });
+        input.addEventListener('change', () => onExpenseFieldReady(input));
+        input.addEventListener('blur', () => onExpenseFieldReady(input));
     });
 
     linesEl.querySelectorAll('.bank-recon-subcat-input').forEach((input) => {
-        input.addEventListener('change', () => {
-            tryAutoPostFromRow(input.closest('tr'), input.dataset.line);
-        });
+        input.addEventListener('change', () => onExpenseFieldReady(input));
+        input.addEventListener('blur', () => onExpenseFieldReady(input));
     });
 
     linesEl.querySelectorAll('.bank-delete-btn').forEach((btn) => {

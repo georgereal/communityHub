@@ -7,6 +7,7 @@ import { isModuleEnabled } from './moduleAccess.js';
 import { logActivity } from './activityAudit.js';
 
 export const ROLE_OPTIONS = [
+    { key: 'system_admin', v1Key: 'admin', label: 'System Administrator' },
     { key: 'apartment_admin', v1Key: 'admin', label: 'Association Office Bearer' },
     { key: 'property_manager', v1Key: 'property_manager', label: 'Office Manager' },
     { key: 'accounts_manager', v1Key: 'accounts_manager', label: 'Accounts Manager' },
@@ -39,8 +40,29 @@ export const v1RoleToV2Key = (role) =>
 export const v2KeyToLabel = (key) =>
     ROLE_OPTIONS.find((r) => r.key === key)?.label || key;
 
-export const permissionsFromV1Role = (role) =>
-    V1_PERMISSION_MATRIX[role] || V1_PERMISSION_MATRIX.resident_viewer;
+export const permissionsFromV1Role = (role) => {
+    const v1 = ROLE_OPTIONS.find((r) => r.key === role || r.v1Key === role)?.v1Key || role;
+    return V1_PERMISSION_MATRIX[v1] || V1_PERMISSION_MATRIX.resident_viewer;
+};
+
+export function isSystemAdminUser(auth = portalState.auth) {
+    return auth?.isSystemAdmin === true || auth?.effectiveRoleKey === 'system_admin';
+}
+
+export function isApartmentAdminUser(auth = portalState.auth) {
+    return isSystemAdminUser(auth)
+        || auth?.effectiveRoleKey === 'apartment_admin'
+        || auth?.role === 'admin';
+}
+
+export function rolePermissionFloor(roleKey = portalState.auth?.effectiveRoleKey) {
+    if (roleKey === 'system_admin' || portalState.auth?.isSystemAdmin) {
+        return permissionsFromV1Role('admin');
+    }
+    const key = roleKey || v1RoleToV2Key(portalState.auth?.role || 'resident_viewer');
+    const v1 = ROLE_OPTIONS.find((r) => r.key === key)?.v1Key || portalState.auth?.role || 'resident_viewer';
+    return permissionsFromV1Role(v1);
+}
 
 export async function fetchEffectivePermissions(apartmentId) {
     if (!supabase || !apartmentId) return null;
@@ -100,15 +122,15 @@ export function routeIsAllowed(route, offline = !supabase) {
 }
 
 export async function refreshAuthPermissions(apartmentId) {
-    const v1Fallback = permissionsFromV1Role(portalState.auth?.role || 'resident_viewer');
+    const floor = rolePermissionFloor();
     try {
-        const perms = await fetchEffectivePermissions(apartmentId);
-        if (perms?.length) {
-            portalState.authPermissions = perms;
+        const dbPerms = await fetchEffectivePermissions(apartmentId);
+        if (dbPerms?.length) {
+            portalState.authPermissions = [...new Set([...floor, ...dbPerms])];
             return portalState.authPermissions;
         }
     } catch { /* ignore */ }
-    portalState.authPermissions = v1Fallback;
+    portalState.authPermissions = floor;
     return portalState.authPermissions;
 }
 
@@ -120,6 +142,20 @@ export async function loadUserRoleAssignments(userId) {
         .eq('user_id', userId)
         .eq('scope', 'apartment');
     return data || [];
+}
+
+export async function loadAllUserRoleAssignments(userId) {
+    if (!supabase || !userId) return [];
+    const { data } = await supabase
+        .from('user_role_assignments')
+        .select('role_key, apartment_id, scope')
+        .eq('user_id', userId);
+    return data || [];
+}
+
+export async function userHasSystemAdminRole(userId) {
+    const rows = await loadAllUserRoleAssignments(userId);
+    return rows.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
 }
 
 export function primaryRoleFromAssignments(assignments = []) {
