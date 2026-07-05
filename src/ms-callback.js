@@ -1,5 +1,5 @@
 import { PublicClientApplication } from '@azure/msal-browser';
-import { supabase, pullState } from './store.js';
+import { pullState } from './store.js';
 import { getMicrosoftRedirectUri } from './ledgerOAuth.js';
 import { readApiJson } from './apiJson.js';
 
@@ -27,16 +27,10 @@ async function completeMicrosoftWebOAuth(code) {
     const pending = JSON.parse(pendingRaw);
     const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-        throw new Error('Sign in to CommunityHub before connecting Microsoft.');
-    }
-
     const res = await fetch('/api/oauth-microsoft', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
             code,

@@ -165,6 +165,30 @@ const applyPermissionsToNav = (perms) => {
     applyNavPermissions(new Set(perms || resolveEffectivePermissions()), !supabase);
 };
 
+const syncBackendSession = async (session) => {
+  const accessToken = session?.access_token;
+  if (!accessToken) return false;
+  try {
+    const res = await fetch('/api/auth-session', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
+const clearBackendSession = async () => {
+  try {
+    await fetch('/api/auth-session', { method: 'DELETE' });
+  } catch {
+    // ignore
+  }
+};
+
 const applyAuthToUIInner = async (session) => {
   const user = session?.user;
   if (!user) return;
@@ -260,6 +284,7 @@ const applyAuthToUI = (session) => {
 const isSignedIn = () => Boolean(portalState.auth?.id);
 
 const signOut = async (message = 'Signed out.') => {
+  await clearBackendSession();
   if (supabase) await supabase.auth.signOut();
   localStorage.removeItem('sentry_portal_v5_platinum');
   showAuth(message);
@@ -850,6 +875,7 @@ const boot = async () => {
       bootSession = data.session;
       bootAuthHandled = true;
       repairLocalCache();
+      await syncBackendSession(bootSession);
       setBootLoaderMessage('Loading profile…');
       await applyAuthToUI(bootSession);
       setBootLoaderMessage('Loading society data…');
@@ -1505,6 +1531,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!email || !password) return showAuth('Email and password required.');
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return showAuth(error.message);
+    await syncBackendSession(data.session);
     await applyAuthToUI(data.session);
     hideAuth();
     hideWorkspaceGate();
@@ -1528,6 +1555,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return showAuth(error.message);
     if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
+    await syncBackendSession(data.session);
     await applyAuthToUI(data.session);
     hideAuth();
     hideWorkspaceGate();
@@ -1552,6 +1580,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'INITIAL_SESSION' && !bootAuthHandled) return;
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        await syncBackendSession(session);
         await applyAuthToUI(session);
         if (event === 'SIGNED_IN') {
           hideAuth();
@@ -1565,7 +1594,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         }
       }
-      if (event === 'SIGNED_OUT') showAuth();
+      if (event === 'SIGNED_OUT') {
+        await clearBackendSession();
+        showAuth();
+      }
     });
   }
 

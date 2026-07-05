@@ -2,7 +2,7 @@
  * Financial Reports — balance reconciliation, NoBroker alignment,
  * expense-sheet pivot, and income/expense trend projections.
  */
-import { portalState } from './store.js';
+import { applyLedgerPivotFilter } from './finances.js';
 import {
     getMatchedTransactionIds,
     getUnmatchedBankLines,
@@ -14,6 +14,7 @@ import {
     autoCreateFromUnmatchedLines,
     reconcileBankWithNoBroker,
     getDateTolerance,
+    isTransactionReconciled,
 } from './bankReconciliation.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -39,6 +40,13 @@ const labelForCat = (cat) => CAT_LABELS[cat] || cat || 'Uncategorised';
 /** Expenses synced from the expense spreadsheet (ledger sync). */
 export const isExpenseFromSheet = (txn) =>
     txn?.type === 'OUT' && Boolean(txn.external_sync_key || txn.sync_hash);
+
+/** OUT transactions linked to a matched bank statement line (same as ledger “Reconciled” badge). */
+export const isExpenseFromBankRecon = (txn) =>
+    txn?.type === 'OUT' && isTransactionReconciled(txn.id);
+
+export const isStructuredExpense = (txn) =>
+    isExpenseFromSheet(txn) || isExpenseFromBankRecon(txn);
 
 const monthLabel = (y, m) =>
     new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
@@ -97,13 +105,19 @@ const sumUnreconciledLedgerNet = () => {
     return net;
 };
 
-const filterExpenses = (sheetOnly) => {
+export const isReportableTxn = (txn) => !txn?.exclude_from_reports;
+
+const filterExpenses = (structuredOnly) => {
     const txns = portalState.finances.txns || [];
-    return txns.filter((t) => t.type === 'OUT' && (!sheetOnly || isExpenseFromSheet(t)));
+    return txns.filter((t) =>
+        t.type === 'OUT'
+        && isReportableTxn(t)
+        && (!structuredOnly || isStructuredExpense(t)),
+    );
 };
 
 const filterIncome = () =>
-    (portalState.finances.txns || []).filter((t) => t.type === 'IN');
+    (portalState.finances.txns || []).filter((t) => t.type === 'IN' && isReportableTxn(t));
 
 const monthlyTotals = (txns, months) =>
     months.map(({ y, m }) =>
@@ -121,13 +135,13 @@ const pivotKey = (txn, dimension) => {
     return txn.cat || 'Other';
 };
 
-const buildExpensePivot = (expenses, months, dimension) => {
-    const rowKeys = [...new Set(expenses.map((t) => pivotKey(t, dimension)))].sort((a, b) =>
+const buildCategoryPivot = (txns, months, dimension) => {
+    const rowKeys = [...new Set(txns.map((t) => pivotKey(t, dimension)))].sort((a, b) =>
         a.localeCompare(b),
     );
     const rows = rowKeys.map((key) => {
         const cells = months.map(({ y, m }) =>
-            expenses
+            txns
                 .filter((t) => pivotKey(t, dimension) === key)
                 .filter((t) => {
                     const d = new Date(t.date);
@@ -136,12 +150,38 @@ const buildExpensePivot = (expenses, months, dimension) => {
                 .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0),
         );
         const total = cells.reduce((a, b) => a + b, 0);
-        return { key, label: dimension === 'cat' || dimension === 'category' ? labelForCat(key) : key, cells, total };
+        return {
+            key,
+            label: dimension === 'cat' || dimension === 'category' ? labelForCat(key) : key,
+            cells,
+            total,
+        };
     });
     const colTotals = months.map((_, i) => rows.reduce((s, r) => s + r.cells[i], 0));
     const grandTotal = colTotals.reduce((a, b) => a + b, 0);
     return { rows: rows.filter((r) => r.total > 0.001), colTotals, grandTotal };
 };
+
+const buildIncomePivot = (months, dimension = 'cat') =>
+    buildCategoryPivot(filterIncome(), months, dimension);
+
+const buildExpensePivot = (expenses, months, dimension) =>
+    buildCategoryPivot(expenses, months, dimension);
+
+/** Keep top N categories by total; roll the rest into "Other". */
+const topCategoryRows = (rows, limit = 8) => {
+    if (rows.length <= limit) return rows;
+    const sorted = [...rows].sort((a, b) => b.total - a.total);
+    const top = sorted.slice(0, limit);
+    const rest = sorted.slice(limit);
+    const otherCells = monthsCellsFromRows(rest, top[0]?.cells.length || 0);
+    const otherTotal = otherCells.reduce((a, b) => a + b, 0);
+    if (otherTotal <= 0.001) return top;
+    return [...top, { key: '__other__', label: 'Other', cells: otherCells, total: otherTotal }];
+};
+
+const monthsCellsFromRows = (rows, len) =>
+    Array.from({ length: len }, (_, i) => rows.reduce((s, r) => s + (r.cells[i] || 0), 0));
 
 const linearProject = (values, futureCount) => {
     const n = values.length;
@@ -165,7 +205,163 @@ const linearProject = (values, futureCount) => {
     );
 };
 
-let trendChartInstance = null;
+let combinedChartInstance = null;
+
+const INCOME_COLOR_OVERRIDES = {
+    'Maintenance Collection': '#16a34a',
+    'Other Income': '#22c55e',
+    Interest: '#4ade80',
+    'Petty Inflow': '#86efac',
+    Reconcile: '#94a3b8',
+};
+
+const CATEGORY_COLORS = {
+    Security: '#6366f1',
+    Maintenance: '#8b5cf6',
+    Plumbing: '#06b6d4',
+    Electrical: '#3b82f6',
+    Stationery: '#a855f7',
+    Marketing: '#ec4899',
+    Promotion: '#f472b6',
+    Other: '#64748b',
+    Audit: '#7c3aed',
+    'Bank Charges': '#ef4444',
+    __other__: '#cbd5e1',
+};
+
+const STACK_PALETTE = [
+    '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#ef4444',
+    '#f97316', '#eab308', '#14b8a6', '#06b6d4', '#3b82f6',
+];
+
+const colorForKey = (key, side = 'expense') => {
+    if (side === 'income' && INCOME_COLOR_OVERRIDES[key]) return INCOME_COLOR_OVERRIDES[key];
+    if (CATEGORY_COLORS[key]) return CATEGORY_COLORS[key];
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) hash = ((hash << 5) - hash) + key.charCodeAt(i);
+    return STACK_PALETTE[Math.abs(hash) % STACK_PALETTE.length];
+};
+
+const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
+    const canvas = document.getElementById('fa-combined-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (combinedChartInstance) {
+        combinedChartInstance.destroy();
+        combinedChartInstance = null;
+    }
+
+    const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat').rows, 6);
+    const expenseRows = topCategoryRows(
+        buildExpensePivot(filterExpenses(sheetOnly), months, pivotDimension).rows,
+        6,
+    );
+
+    const labels = months.map((m) => m.label);
+    const datasets = [
+        ...incomeRows.map((row) => ({
+            label: `In: ${row.label}`,
+            data: row.cells,
+            stack: 'income',
+            backgroundColor: colorForKey(row.key, 'income'),
+            borderWidth: 0,
+            borderRadius: 2,
+        })),
+        ...expenseRows.map((row) => ({
+            label: `Out: ${row.label}`,
+            data: row.cells,
+            stack: 'expense',
+            backgroundColor: colorForKey(row.key, 'expense'),
+            borderWidth: 0,
+            borderRadius: 2,
+        })),
+    ];
+
+    combinedChartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 10, font: { size: 10 }, padding: 6 },
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const v = ctx.parsed.y;
+                            return v > 0 ? `${ctx.dataset.label}: ${formatMoney(v)}` : '';
+                        },
+                        footer: (items) => {
+                            const incomeTotal = items
+                                .filter((i) => i.dataset.stack === 'income')
+                                .reduce((s, i) => s + (i.parsed.y || 0), 0);
+                            const expenseTotal = items
+                                .filter((i) => i.dataset.stack === 'expense')
+                                .reduce((s, i) => s + (i.parsed.y || 0), 0);
+                            const parts = [];
+                            if (incomeTotal > 0) parts.push(`Income: ${formatMoney(incomeTotal)}`);
+                            if (expenseTotal > 0) parts.push(`Expenses: ${formatMoney(expenseTotal)}`);
+                            return parts.join(' · ');
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: {
+                    stacked: true,
+                    ticks: {
+                        callback: (v) => `₹${Number(v).toLocaleString('en-IN')}`,
+                    },
+                },
+            },
+        },
+    });
+};
+
+const renderProjectionSummary = (months, sheetOnly, projectCount) => {
+    const summaryEl = document.getElementById('fa-projection-summary');
+    if (!summaryEl) return;
+
+    const expenses = filterExpenses(sheetOnly);
+    const income = filterIncome();
+    const expenseTotals = monthlyTotals(expenses, months);
+    const incomeTotals = monthlyTotals(income, months);
+
+    const projIncome = linearProject(incomeTotals, projectCount);
+    const projExpense = linearProject(expenseTotals, projectCount);
+    const projNet = projIncome.map((v, i) => v - projExpense[i]);
+
+    const projLabels = Array.from({ length: projectCount }, (_, i) => {
+        const d = new Date();
+        d.setMonth(d.getMonth() + i + 1);
+        return monthLabel(d.getFullYear(), d.getMonth());
+    });
+
+    const avgIncome = incomeTotals.reduce((a, b) => a + b, 0) / Math.max(1, incomeTotals.length);
+    const avgExpense = expenseTotals.reduce((a, b) => a + b, 0) / Math.max(1, expenseTotals.length);
+    const nextNet = projNet.reduce((a, b) => a + b, 0);
+
+    summaryEl.innerHTML = `
+      <h3 class="fa-panel__title">Trend projection</h3>
+      <p class="fa-projection-note">Linear trend forecast for the next ${projectCount} month(s) from recent aggregate totals.</p>
+      <dl class="fa-projection-stats">
+        <div><dt>Avg monthly income</dt><dd>${formatMoney(avgIncome)}</dd></div>
+        <div><dt>Avg monthly expenses</dt><dd>${formatMoney(avgExpense)}</dd></div>
+        <div><dt>Projected net (${projectCount} mo)</dt><dd class="${nextNet >= 0 ? 'fa-positive' : 'fa-negative'}">${formatMoney(nextNet)}</dd></div>
+      </dl>
+      <ul class="fa-projection-list">
+        ${projLabels.map((lbl, i) =>
+            `<li><span>${lbl}</span><span>In ${formatMoney(projIncome[i])} · Out ${formatMoney(projExpense[i])} · Net ${formatMoney(projNet[i])}</span></li>`,
+        ).join('')}
+      </ul>`;
+};
 
 const getNobrokerState = () => getNoBrokerDump();
 
@@ -317,141 +513,6 @@ const renderNoBrokerPanel = (months) => {
       </div>`;
 };
 
-const renderTrendChart = (months, sheetOnly, projectCount) => {
-    const canvas = document.getElementById('fa-trend-chart');
-    const summaryEl = document.getElementById('fa-projection-summary');
-    if (!canvas || typeof Chart === 'undefined') return;
-
-    const expenses = filterExpenses(sheetOnly);
-    const income = filterIncome();
-    const expenseTotals = monthlyTotals(expenses, months);
-    const incomeTotals = monthlyTotals(income, months);
-    const netTotals = incomeTotals.map((v, i) => v - expenseTotals[i]);
-
-    const projIncome = linearProject(incomeTotals, projectCount);
-    const projExpense = linearProject(expenseTotals, projectCount);
-    const projNet = projIncome.map((v, i) => v - projExpense[i]);
-
-    const histLabels = months.map((m) => m.label);
-    const projLabels = Array.from({ length: projectCount }, (_, i) => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + i + 1);
-        return monthLabel(d.getFullYear(), d.getMonth());
-    });
-    const labels = [...histLabels, ...projLabels];
-    const histLen = months.length;
-
-    const actualIncome = [...incomeTotals, ...Array(projectCount).fill(null)];
-    const actualExpense = [...expenseTotals, ...Array(projectCount).fill(null)];
-    const actualNet = [...netTotals, ...Array(projectCount).fill(null)];
-
-    const projectedIncome = Array(histLen).fill(null).concat(projIncome);
-    const projectedExpense = Array(histLen).fill(null).concat(projExpense);
-    if (histLen > 0) {
-        projectedIncome[histLen - 1] = incomeTotals[histLen - 1];
-        projectedExpense[histLen - 1] = expenseTotals[histLen - 1];
-    }
-
-    if (trendChartInstance) {
-        trendChartInstance.destroy();
-        trendChartInstance = null;
-    }
-
-    trendChartInstance = new Chart(canvas, {
-        type: 'line',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: 'Income (actual)',
-                    data: actualIncome,
-                    borderColor: '#16a34a',
-                    backgroundColor: 'rgba(22, 163, 74, 0.08)',
-                    tension: 0.25,
-                    fill: false,
-                    spanGaps: false,
-                },
-                {
-                    label: 'Expenses (sheet)',
-                    data: actualExpense,
-                    borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                    tension: 0.25,
-                    fill: false,
-                },
-                {
-                    label: 'Net (actual)',
-                    data: actualNet,
-                    borderColor: '#6366f1',
-                    borderDash: [4, 4],
-                    tension: 0.25,
-                    fill: false,
-                },
-                {
-                    label: 'Income (projected)',
-                    data: projectedIncome,
-                    borderColor: '#86efac',
-                    borderDash: [6, 4],
-                    tension: 0.25,
-                    pointRadius: 3,
-                    fill: false,
-                },
-                {
-                    label: 'Expenses (projected)',
-                    data: projectedExpense,
-                    borderColor: '#fca5a5',
-                    borderDash: [6, 4],
-                    tension: 0.25,
-                    pointRadius: 3,
-                    fill: false,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const v = ctx.parsed.y;
-                            return v == null ? '' : `${ctx.dataset.label}: ${formatMoney(v)}`;
-                        },
-                    },
-                },
-            },
-            scales: {
-                y: {
-                    ticks: {
-                        callback: (v) => `₹${Number(v).toLocaleString('en-IN')}`,
-                    },
-                },
-            },
-        },
-    });
-
-    if (summaryEl) {
-        const avgIncome = incomeTotals.reduce((a, b) => a + b, 0) / Math.max(1, incomeTotals.length);
-        const avgExpense = expenseTotals.reduce((a, b) => a + b, 0) / Math.max(1, expenseTotals.length);
-        const nextNet = projNet.reduce((a, b) => a + b, 0);
-        summaryEl.innerHTML = `
-          <h3 class="fa-panel__title">Trend projection</h3>
-          <p class="fa-projection-note">Dashed lines forecast the next ${projectCount} month(s) from recent history (linear trend).</p>
-          <dl class="fa-projection-stats">
-            <div><dt>Avg monthly income</dt><dd>${formatMoney(avgIncome)}</dd></div>
-            <div><dt>Avg monthly expenses</dt><dd>${formatMoney(avgExpense)}</dd></div>
-            <div><dt>Projected net (${projectCount} mo)</dt><dd class="${nextNet >= 0 ? 'fa-positive' : 'fa-negative'}">${formatMoney(nextNet)}</dd></div>
-          </dl>
-          <ul class="fa-projection-list">
-            ${projLabels.map((lbl, i) =>
-                `<li><span>${lbl}</span><span>In ${formatMoney(projIncome[i])} · Out ${formatMoney(projExpense[i])} · Net ${formatMoney(projNet[i])}</span></li>`,
-            ).join('')}
-          </ul>`;
-    }
-};
-
 const renderExpensePivot = (months, dimension, sheetOnly) => {
     const el = document.getElementById('fa-expense-pivot');
     const metaEl = document.getElementById('fa-expense-pivot-meta');
@@ -460,19 +521,21 @@ const renderExpensePivot = (months, dimension, sheetOnly) => {
     const allOut = (portalState.finances.txns || []).filter((t) => t.type === 'OUT');
     const expenses = filterExpenses(sheetOnly);
     const sheetCount = allOut.filter(isExpenseFromSheet).length;
-    const manualCount = allOut.length - sheetCount;
+    const bankCount = allOut.filter(isExpenseFromBankRecon).length;
+    const excludedCount = allOut.length - expenses.length;
 
     if (metaEl) {
         metaEl.innerHTML = sheetOnly
-            ? `<span class="fa-meta-chip fa-meta-chip--sheet">${expenses.length} expenses from expense sheets</span>
-               <span class="fa-meta-chip">${manualCount} manual entries excluded</span>`
-            : `<span class="fa-meta-chip">${expenses.length} total expenses (${sheetCount} from sheets)</span>`;
+            ? `<span class="fa-meta-chip fa-meta-chip--sheet">${sheetCount} from expense sheets</span>
+               <span class="fa-meta-chip">${bankCount} from bank reconciliation</span>
+               <span class="fa-meta-chip">${excludedCount} manual entries excluded</span>`
+            : `<span class="fa-meta-chip">${expenses.length} total expenses (${sheetCount} sheets, ${bankCount} bank)</span>`;
     }
 
     const { rows, colTotals, grandTotal } = buildExpensePivot(expenses, months, dimension);
 
     if (!rows.length) {
-        el.innerHTML = `<p class="maintenance-dues-empty">No expenses in this range${sheetOnly ? ' from synced expense sheets' : ''}. Sync your expense spreadsheet from Income & Expenses or Admin → Spreadsheet Sync.</p>`;
+        el.innerHTML = `<p class="maintenance-dues-empty">No expenses in this range${sheetOnly ? ' from expense sheets or bank reconciliation' : ''}. Post debits from Bank reconciliation or sync your expense spreadsheet from Admin → Spreadsheet Sync.</p>`;
         return;
     }
 
@@ -513,7 +576,8 @@ export const renderFinanceAnalytics = () => {
     renderBalanceMetrics();
     renderNoBrokerPanel(months);
     wireNoBrokerActions();
-    renderTrendChart(months, settings.sheetOnly, settings.projectMonths);
+    renderCategoryCharts(months, settings.sheetOnly, settings.pivotDimension);
+    renderProjectionSummary(months, settings.sheetOnly, settings.projectMonths);
     renderExpensePivot(months, settings.pivotDimension, settings.sheetOnly);
 };
 

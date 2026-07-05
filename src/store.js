@@ -21,7 +21,7 @@ export const withTimeout = (promise, ms, label = 'Request') => Promise.race([
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], bankClassificationRules: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -114,7 +114,8 @@ export const pullState = async () => {
             supabase.from('maintenance_billing_batch_skips').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('maintenance_reminder_log').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('bank_statement_imports').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('bank_statement_lines').select('*').eq('apartment_id', activeApartmentId).order('line_date', { ascending: false }),
+            supabase.from('bank_statement_lines').select('*').eq('apartment_id', activeApartmentId).order('line_date', { ascending: true }).order('line_order', { ascending: true }).order('source_row_index', { ascending: true }),
+            supabase.from('bank_classification_rules').select('*').eq('apartment_id', activeApartmentId).order('priority', { ascending: false }).order('created_at', { ascending: true }),
             supabase.from('resident_user_links').select('*').eq('apartment_id', activeApartmentId),
             supabase.from('payment_intents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
             supabase.from('apartment_payment_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
@@ -151,7 +152,7 @@ export const pullState = async () => {
         const results = await withTimeout(queriesPromise, 90000, 'Society data load');
 
         const [
-            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl,
+            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr,
             rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
             vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc, ssa, aec,
         ] = results;
@@ -203,6 +204,10 @@ export const pullState = async () => {
         portalState.finances.maintenanceReminderLog = mrl.error ? [] : (mrl.data || []);
         portalState.finances.bankStatementImports = bsi.error ? [] : (bsi.data || []);
         portalState.finances.bankStatementLines = bsl.error ? [] : (bsl.data || []);
+        if (bcr.error) {
+            console.warn('[pullState] bank_classification_rules query failed:', bcr.error.message);
+        }
+        portalState.finances.bankClassificationRules = bcr.error ? [] : (bcr.data || []);
         portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
         portalState.admin.staff = staff.error ? [] : (staff.data || []);
         portalState.admin.externalConnections = aec.error ? [] : (aec.data || []);

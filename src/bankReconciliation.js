@@ -2,28 +2,50 @@
  * Phase 2.2 — Bank statement import and reconciliation
  */
 import ExcelJS from 'exceljs';
-import { portalState, supabase, pullState } from './store.js';
-import { logActivity } from './activityAudit.js';
+import { portalState, pullState, supabase } from './store.js';
 import { matchFlatFromText, parseNoBrokerCollectionLines } from './bulkCollectionImport.js';
-import { recordMaintenanceCollectionPayment } from './maintenanceBilling.js';
-import { withButtonBusy } from './buttonBusy.js';
+import { withButtonBusy, setButtonBusy, clearButtonBusy } from './buttonBusy.js';
+import { postFinanceMutation } from './financeApi.js';
 import {
     validatePassbookFiles,
     parsePassbookFiles,
-    passbookImportLabel,
-    PASSBOOK_ACCEPT,
+    fetchPassbookJobs,
+    markPassbookJobImported,
+    passbookJobImportLabel,
 } from './passbookEvolyx.js';
-import { isPassbookOcrConfigured } from './externalConnections.js';
+import {
+    ensureExternalConnectionsLoaded,
+    getPassbookWebhookBaseUrl,
+    isPassbookOcrConfigured,
+    savePassbookWebhookBaseUrl,
+} from './externalConnections.js';
+import {
+    buildDayOrderHints,
+    compareLineOrder,
+    prepareImportedStatementLines,
+} from './bankStatementOrdering.js';
+import { bankLineAmount, bankLineFingerprint, bankLineType, formatOcrRowDisplay } from './bankStatementLineUtils.js';
+import {
+    analyzePassbookJobLines,
+    IMPORT_LINE_STATUS,
+    IMPORT_LINE_STATUS_LABEL,
+} from './passbookJobImportAnalysis.js';
 
-const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
-const SUB_CAT_SUGGESTIONS = {
-    Maintenance: ['Lift / Elevator', 'Generator', 'Housekeeping', 'Painting', 'Landscaping', 'Pest control'],
-    Security: ['Guard salary', 'Uniforms', 'CCTV'],
-    Plumbing: ['Motor repair', 'Tank cleaning', 'Pipeline'],
-    Electrical: ['Diesel', 'Common area lighting', 'Lift backup'],
-    Stationery: ['Printing', 'Office supplies'],
-    Other: ['Miscellaneous'],
-};
+import {
+    EXPENSE_CATS,
+    SUB_CAT_SUGGESTIONS,
+} from './expenseCategories.js';
+import {
+    isExactListMatch,
+    isKnownClassifyInput,
+    wireClassifyCombobox,
+    setClassifyInputState,
+} from './classifyCombobox.js';
+import {
+    findMatchingRule,
+    sortClassificationRules,
+    suggestRuleMatchText,
+} from './bankClassificationRules.js';
 const INCOME_CATS = [
     'Maintenance Collection',
     'Marketing',
@@ -41,6 +63,48 @@ const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const formatAmountInput = (n) => {
     const v = parseFloat(n || 0);
     return v > 0.001 ? String(v) : '';
+};
+
+const MONTHS_SHORT = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+const formatDisplayDate = (isoDate) => {
+    if (!isoDate) return '';
+    const match = String(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return String(isoDate || '');
+    const [, year, month, day] = match;
+    return `${day}-${month}-${year.slice(-2)}`;
+};
+
+const normalizeDateParts = (year, monthIndex, day) => {
+    const y = parseInt(year, 10);
+    const m = parseInt(monthIndex, 10);
+    const d = parseInt(day, 10);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+    const dt = new Date(Date.UTC(y, m, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m || dt.getUTCDate() !== d) return null;
+    return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+};
+
+const parseEditableDate = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+    let match = raw.match(/^(\d{1,2})[-/\s]([A-Za-z]{3})[-/\s](\d{2}|\d{4})$/);
+    if (match) {
+        const [, day, mon, year] = match;
+        const monthIndex = MONTHS_SHORT.indexOf(mon.toLowerCase());
+        if (monthIndex < 0) return null;
+        return normalizeDateParts(year.length === 2 ? `20${year}` : year, monthIndex, day);
+    }
+
+    match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+    if (match) {
+        const [, day, month, year] = match;
+        return normalizeDateParts(year.length === 2 ? `20${year}` : year, parseInt(month, 10) - 1, day);
+    }
+
+    return null;
 };
 
 const parseDate = (val) => {
@@ -67,16 +131,7 @@ const parseAmount = (val) => {
 
 const normalizeDesc = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-export const bankLineAmount = (line) => (
-    parseFloat(line.credit || 0) > 0.001 ? parseFloat(line.credit) : parseFloat(line.debit || 0)
-);
-
-export const bankLineType = (line) => (parseFloat(line.credit || 0) > 0.001 ? 'IN' : 'OUT');
-
-export const bankLineFingerprint = (line) => {
-    const amt = bankLineAmount(line);
-    return `${line.line_date}|${normalizeDesc(line.description)}|${amt.toFixed(2)}`;
-};
+export { bankLineAmount, bankLineFingerprint, bankLineType } from './bankStatementLineUtils.js';
 
 export function dedupeBankImportLines(lines) {
     const existing = new Set((portalState.finances.bankStatementLines || []).map(bankLineFingerprint));
@@ -117,94 +172,187 @@ export const getMatchedTransactionIds = () => {
 
 export const isTransactionReconciled = (txnId) => getMatchedTransactionIds().has(txnId);
 
-export async function parseBankStatementFile(file) {
-    const wb = new ExcelJS.Workbook();
-    const buf = await file.arrayBuffer();
-    await wb.xlsx.load(buf);
-    const ws = wb.worksheets[0];
-    if (!ws) throw new Error('No worksheet found in file.');
+const PASSBOOK_IMPORT_PREFIX = 'evolyx-passbook:';
 
-    const headerRow = ws.getRow(1);
-    const headers = [];
-    headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
-        headers[col] = String(cell.value || '').trim().toLowerCase();
-    });
+const bankStatementImportById = () => new Map(
+    (portalState.finances.bankStatementImports || []).map((row) => [row.id, row]),
+);
 
+const passbookRowBalance = (line) => {
+    const importRow = bankStatementImportById().get(line?.import_id);
+    const fileName = String(importRow?.file_name || '');
+    if (!fileName.startsWith(PASSBOOK_IMPORT_PREFIX)) return null;
+    if (line?.balance == null || line.balance === '') return null;
+    const value = parseFloat(line.balance);
+    return Number.isFinite(value) ? value : null;
+};
+
+const detectStatementColumns = (headers) => {
+    const normalized = headers.map((h) => String(h || '').trim().toLowerCase());
     const col = (names) => {
-        const idx = headers.findIndex((h) => names.some((n) => h.includes(n)));
-        return idx >= 0 ? idx + 1 : null;
+        const idx = normalized.findIndex((h) => names.some((n) => h.includes(n)));
+        return idx >= 0 ? idx : -1;
     };
+    return {
+        dateCol: col(['date']),
+        descCol: col(['description', 'narration', 'particular']),
+        debitCol: col(['debit', 'withdraw']),
+        creditCol: col(['credit', 'deposit']),
+        balanceCol: col(['balance']),
+    };
+};
 
-    const dateCol = col(['date']);
-    const descCol = col(['description', 'narration', 'particular']);
-    const debitCol = col(['debit', 'withdraw']);
-    const creditCol = col(['credit', 'deposit']);
-    const balanceCol = col(['balance']);
-
-    if (!dateCol) throw new Error('Could not find Date column. Use template headers: Date, Description, Debit, Credit, Balance.');
+const buildStatementLinesFromRows = (headers, rows) => {
+    const { dateCol, descCol, debitCol, creditCol, balanceCol } = detectStatementColumns(headers);
+    if (dateCol < 0) {
+        throw new Error('Could not find Date column. Use template headers: Date, Description, Debit, Credit, Balance.');
+    }
 
     const lines = [];
-    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const lineDate = parseDate(row.getCell(dateCol).value);
+    rows.forEach((row, index) => {
+        const lineDate = parseDate(row[dateCol]);
         if (!lineDate) return;
         lines.push({
             line_date: lineDate,
-            description: descCol ? String(row.getCell(descCol).value || '').trim() : '',
-            debit: debitCol ? parseAmount(row.getCell(debitCol).value) : 0,
-            credit: creditCol ? parseAmount(row.getCell(creditCol).value) : 0,
-            balance: balanceCol ? parseAmount(row.getCell(balanceCol).value) : null,
+            description: descCol >= 0 ? String(row[descCol] || '').trim() : '',
+            debit: debitCol >= 0 ? parseAmount(row[debitCol]) : 0,
+            credit: creditCol >= 0 ? parseAmount(row[creditCol]) : 0,
+            balance: balanceCol >= 0 ? parseAmount(row[balanceCol]) : null,
+            source_row_index: index,
         });
     });
 
     if (!lines.length) throw new Error('No data rows found.');
     return lines;
+};
+
+const parseCsvRows = (text) => {
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') {
+                    cell += '"';
+                    i += 1;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                cell += ch;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inQuotes = true;
+        } else if (ch === ',') {
+            row.push(cell);
+            cell = '';
+        } else if (ch === '\n') {
+            row.push(cell);
+            rows.push(row);
+            row = [];
+            cell = '';
+        } else if (ch !== '\r') {
+            cell += ch;
+        }
+    }
+
+    if (cell !== '' || row.length) {
+        row.push(cell);
+        rows.push(row);
+    }
+    return rows;
+};
+
+export async function parseBankStatementFile(file) {
+    const name = String(file?.name || '').toLowerCase();
+    if (name.endsWith('.csv')) {
+        const text = await file.text();
+        const rows = parseCsvRows(text);
+        if (rows.length < 2) throw new Error('CSV file is empty or missing data rows.');
+        const [headers, ...dataRows] = rows;
+        return buildStatementLinesFromRows(headers, dataRows);
+    }
+    if (name.endsWith('.xls')) {
+        throw new Error('Legacy .xls files are not supported yet. Save the file as .xlsx or .csv and import again.');
+    }
+
+    const wb = new ExcelJS.Workbook();
+    const buf = await file.arrayBuffer();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new Error('No worksheet found in file.');
+    const headers = [];
+    ws.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+        headers[col - 1] = String(cell.value || '').trim();
+    });
+    const dataRows = [];
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1) return;
+        const cells = [];
+        row.eachCell({ includeEmpty: true }, (cell, col) => {
+            cells[col - 1] = cell.value;
+        });
+        dataRows.push(cells);
+    });
+    return buildStatementLinesFromRows(headers, dataRows);
 }
 
-export async function importBankStatement(file, lines, { fileLabel } = {}) {
-    if (!supabase) throw new Error('Supabase is not configured.');
+export async function importBankStatement(file, lines, { fileLabel, skipDedupe = false, pull = true } = {}) {
     const apartment_id = portalState.access?.activeApartmentId;
     if (!apartment_id) throw new Error('No active apartment selected.');
 
-    const { unique, skipped, skippedExisting, skippedBatch } = dedupeBankImportLines(lines);
+    const { unique, skipped, skippedExisting, skippedBatch } = skipDedupe
+        ? { unique: lines, skipped: 0, skippedExisting: 0, skippedBatch: 0 }
+        : dedupeBankImportLines(lines);
     if (!unique.length) {
         return { importId: null, count: 0, skipped, skippedExisting, skippedBatch };
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
     const bank_account_id = portalState.admin?.bankAccount?.id || null;
-    const dates = unique.map((l) => l.line_date).sort();
-    const importId = crypto.randomUUID();
-    const file_name = fileLabel || file?.name || 'import.xlsx';
-
-    const { error: impErr } = await supabase.from('bank_statement_imports').insert({
-        id: importId,
+    const opening = getBankOpeningConfig();
+    const orderedLines = prepareImportedStatementLines(unique, opening);
+    const result = await postFinanceMutation('importBankStatement', {
         apartment_id,
         bank_account_id,
-        file_name,
-        period_start: dates[0] || null,
-        period_end: dates[dates.length - 1] || null,
-        imported_by: user?.id || null,
+        file_name: fileLabel || file?.name || 'import.xlsx',
+        lines: orderedLines,
     });
-    if (impErr) throw new Error(impErr.message);
+    if (pull) await pullState();
+    return { importId: result.importId, count: result.count, skipped, skippedExisting, skippedBatch };
+}
 
-    const payload = unique.map((l) => ({
-        id: crypto.randomUUID(),
-        import_id: importId,
-        apartment_id,
-        line_date: l.line_date,
-        description: l.description || null,
-        debit: l.debit || 0,
-        credit: l.credit || 0,
-        balance: l.balance,
-        match_status: 'UNMATCHED',
-    }));
+const showRecalcStatus = (message = 'Recalculating calculated balances… please wait.') => {
+    const el = document.getElementById('bank-recon-recalc-status');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = message;
+};
 
-    const { error: lineErr } = await supabase.from('bank_statement_lines').insert(payload);
-    if (lineErr) throw new Error(lineErr.message);
+const hideRecalcStatus = () => {
+    const el = document.getElementById('bank-recon-recalc-status');
+    if (el) el.hidden = true;
+};
 
-    await pullState();
-    return { importId, count: payload.length, skipped, skippedExisting, skippedBatch };
+/** Save mutation first, then refresh state with visible recalc feedback. */
+async function saveThenRecalculate(btn, savingLabel, onSave) {
+    const snapshot = setButtonBusy(btn, savingLabel);
+    try {
+        const result = await onSave();
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Recalculating…';
+        showRecalcStatus();
+        await pullState();
+        return result;
+    } finally {
+        hideRecalcStatus();
+        clearButtonBusy(btn, snapshot);
+    }
 }
 
 export const getUnmatchedBankLines = () =>
@@ -226,31 +374,42 @@ export const getBankOpeningConfig = () => {
 };
 
 export const getStatementLinesChronological = () =>
-    [...(portalState.finances.bankStatementLines || [])].sort((a, b) => {
-        const byDate = a.line_date.localeCompare(b.line_date);
-        if (byDate !== 0) return byDate;
-        return String(a.id).localeCompare(String(b.id));
-    });
+    [...(portalState.finances.bankStatementLines || [])].sort((a, b) =>
+        compareLineOrder(a, b, bankStatementImportById()),
+    );
 
-/** Running balance per line: opening + credits − debits; flags passbook mismatches. */
+/** Running balance per line — uses persisted computed_balance when set (survives table resort). */
 export const annotateStatementLineBalances = () => {
     const opening = getBankOpeningConfig();
     const hasOpening = opening.amount != null;
-    let running = hasOpening ? opening.amount : 0;
+    const chronological = getStatementLinesChronological();
 
-    return getStatementLinesChronological().map((line) => {
+    let running = hasOpening ? opening.amount : 0;
+    const liveById = new Map();
+    if (hasOpening) {
+        for (const line of chronological) {
+            const onOrAfterOpening = !opening.date || line.line_date >= opening.date;
+            if (onOrAfterOpening) {
+                running += parseFloat(line.credit || 0) - parseFloat(line.debit || 0);
+                liveById.set(line.id, running);
+            }
+        }
+    }
+
+    return chronological.map((line) => {
         const onOrAfterOpening = !opening.date || line.line_date >= opening.date;
         let computedBalance = null;
         let passbookMismatch = false;
 
         if (hasOpening && onOrAfterOpening) {
-            running += parseFloat(line.credit || 0) - parseFloat(line.debit || 0);
-            computedBalance = running;
-            if (line.balance != null && line.balance !== '') {
-                const passbookBal = parseFloat(line.balance);
-                if (!Number.isNaN(passbookBal) && Math.abs(computedBalance - passbookBal) > BALANCE_TOLERANCE) {
-                    passbookMismatch = true;
-                }
+            if (line.computed_balance != null && line.computed_balance !== '') {
+                computedBalance = parseFloat(line.computed_balance);
+            } else {
+                computedBalance = liveById.get(line.id) ?? null;
+            }
+            const passbookBal = passbookRowBalance(line);
+            if (computedBalance != null && passbookBal != null && Math.abs(computedBalance - passbookBal) > BALANCE_TOLERANCE) {
+                passbookMismatch = true;
             }
         }
 
@@ -269,6 +428,16 @@ export const getCalculatedBankBalance = () => {
         return { balance: null, asOf: opening.date, lineCount: lines.length, needsOpening: true };
     }
 
+    const last = lines[lines.length - 1];
+    if (last?.computed_balance != null && last.computed_balance !== '') {
+        return {
+            balance: parseFloat(last.computed_balance),
+            asOf: last.line_date,
+            lineCount: lines.length,
+            needsOpening: false,
+        };
+    }
+
     let balance = opening.amount;
     let asOf = opening.date;
     for (const line of lines) {
@@ -278,23 +447,25 @@ export const getCalculatedBankBalance = () => {
     return { balance, asOf, lineCount: lines.length, needsOpening: false };
 };
 
-/** Passbook closing balance from the latest imported row that includes a balance column. */
+/** Passbook closing balance from the last chronologically ordered row with a passbook balance. */
 export const getPassbookClosingBalance = () => {
-    const lines = (portalState.finances.bankStatementLines || [])
-        .filter((l) => l.balance != null && l.balance !== '' && !Number.isNaN(parseFloat(l.balance)));
-    if (!lines.length) return null;
+    const opening = getBankOpeningConfig();
+    const chronological = getStatementLinesChronological().filter((l) =>
+        !opening.date || l.line_date >= opening.date,
+    );
 
-    const sorted = [...lines].sort((a, b) => {
-        const byDate = b.line_date.localeCompare(a.line_date);
-        if (byDate !== 0) return byDate;
-        return String(b.id).localeCompare(String(a.id));
-    });
-    const latest = sorted[0];
-    return {
-        balance: parseFloat(latest.balance),
-        asOf: latest.line_date,
-        lineId: latest.id,
-    };
+    for (let i = chronological.length - 1; i >= 0; i -= 1) {
+        const line = chronological[i];
+        const passbookBalance = passbookRowBalance(line);
+        if (passbookBalance != null) {
+            return {
+                balance: passbookBalance,
+                asOf: line.line_date,
+                lineId: line.id,
+            };
+        }
+    }
+    return null;
 };
 
 /** @deprecated Use getPassbookClosingBalance */
@@ -312,33 +483,54 @@ export const getBankBalanceReconciliation = () => {
     return { opening, calculated, passbook, diff, hasDiscrepancy, mismatchCount };
 };
 
-export async function saveBankOpeningBalance(date, amount) {
-    if (!supabase) throw new Error('Supabase required.');
+export async function saveBankOpeningBalance(date, amount, { pull = true } = {}) {
     const apt = portalState.access?.activeApartmentId;
     if (!apt) throw new Error('Select an apartment first.');
     if (!date) throw new Error('Enter the opening balance date.');
     if (amount == null || Number.isNaN(amount)) throw new Error('Enter the opening balance amount.');
 
-    const bank = portalState.admin?.bankAccount;
-    const payload = {
-        id: bank?.id || crypto.randomUUID(),
+    const bank = portalState.admin?.bankAccount || {};
+    await postFinanceMutation('saveBankOpeningBalance', {
         apartment_id: apt,
-        bank_name: bank?.bank_name || 'Bank account',
-        opening_balance_date: date,
-        opening_balance: amount,
-        updated_at: new Date().toISOString(),
-    };
-    if (bank?.branch) payload.branch = bank.branch;
-    if (bank?.account_holder) payload.account_holder = bank.account_holder;
-    if (bank?.account_number) payload.account_number = bank.account_number;
-    if (bank?.ifsc) payload.ifsc = bank.ifsc;
-    if (bank?.upi_id) payload.upi_id = bank.upi_id;
-    if (bank?.notes) payload.notes = bank.notes;
-
-    const { error } = await supabase.from('apartment_bank_accounts').upsert(payload, { onConflict: 'apartment_id' });
-    if (error) throw new Error(error.message);
-    await pullState();
+        date,
+        amount,
+        bank,
+    });
+    if (pull) await pullState();
 }
+
+export async function reorderBankStatementLines(updates = [], { recalculate = false } = {}) {
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+    if (!updates.length) throw new Error('No rows to reorder.');
+    await postFinanceMutation('reorderBankStatementLines', {
+        apartment_id,
+        updates,
+        recalculate_balances: recalculate,
+    });
+    if (recalculate) {
+        showRecalcStatus();
+        await pullState();
+        hideRecalcStatus();
+    } else {
+        patchLocalLineOrder(updates);
+    }
+}
+
+export async function recalculateBankStatementBalances() {
+    const apartment_id = portalState.access?.activeApartmentId;
+    if (!apartment_id) throw new Error('No active apartment selected.');
+    await postFinanceMutation('recalculateBankStatementBalances', { apartment_id });
+}
+
+const patchLocalLineOrder = (updates = []) => {
+    const byId = new Map(updates.map((u) => [u.id, u.line_order]));
+    for (const line of portalState.finances.bankStatementLines || []) {
+        if (!byId.has(line.id)) continue;
+        line.line_order = byId.get(line.id);
+        line.order_source = 'manual';
+    }
+};
 
 export const getUnmatchedLedgerTxns = (typeFilter = null) => {
     const matched = getMatchedTransactionIds();
@@ -351,6 +543,75 @@ export const getUnmatchedLedgerTxns = (typeFilter = null) => {
 
 let nobrokerDumpLines = [];
 let nobrokerFileName = '';
+let bankReconSortState = { key: 'line_date', dir: 'asc' };
+let bankReconVisibleColumns = {
+    passbookBalance: false,
+    calculatedBalance: true,
+    ocrRow: false,
+    rowOrder: false,
+};
+const BANK_RECON_TABLE_HEIGHT_KEY = 'bankReconTableHeightPx_v4';
+/** Original scroll area was capped at 640px; minimum default is +250px. */
+const BANK_RECON_TABLE_MIN_HEIGHT = 890;
+const BANK_RECON_TABLE_HEIGHT_PRESETS = {
+    compact: 650,
+    medium: 890,
+    tall: 1150,
+};
+let bankReconTableHeightControlsReady = false;
+
+const initBankReconTableHeightControls = (linesEl) => {
+    if (!linesEl || bankReconTableHeightControlsReady) return;
+    bankReconTableHeightControlsReady = true;
+
+    linesEl.addEventListener('click', (e) => {
+        const preset = e.target.closest('.bank-recon-height-preset');
+        if (!preset) return;
+        setBankReconTableHeightPreset(preset.dataset.heightPreset);
+        preset.closest('details')?.removeAttribute('open');
+    });
+};
+
+let passbookJobsModalTimer = null;
+
+const getDefaultBankReconTableHeight = () => BANK_RECON_TABLE_MIN_HEIGHT;
+
+const getFullBankReconTableHeight = () => Math.max(BANK_RECON_TABLE_MIN_HEIGHT, window.innerHeight - 100);
+
+const getBankReconTableShell = () => document.getElementById('bank-recon-table-shell');
+
+const applyBankReconTableHeight = (px, { persist = true } = {}) => {
+    const shell = getBankReconTableShell();
+    if (!shell || !Number.isFinite(px)) return;
+    const height = Math.max(BANK_RECON_TABLE_MIN_HEIGHT, Math.min(getFullBankReconTableHeight(), Math.round(px)));
+    shell.style.setProperty('height', `${height}px`, 'important');
+    if (persist) localStorage.setItem(BANK_RECON_TABLE_HEIGHT_KEY, String(height));
+};
+
+const restoreBankReconTableHeight = () => {
+    const shell = getBankReconTableShell();
+    if (!shell) return;
+    const saved = parseInt(localStorage.getItem(BANK_RECON_TABLE_HEIGHT_KEY), 10);
+    if (Number.isFinite(saved) && saved >= BANK_RECON_TABLE_MIN_HEIGHT) {
+        applyBankReconTableHeight(saved, { persist: false });
+        return;
+    }
+    shell.style.removeProperty('height');
+};
+
+const setBankReconTableHeightPreset = (preset) => {
+    const height = preset === 'full'
+        ? getFullBankReconTableHeight()
+        : BANK_RECON_TABLE_HEIGHT_PRESETS[preset] || getDefaultBankReconTableHeight();
+    applyBankReconTableHeight(height);
+};
+
+const wireBankReconTableResize = () => {
+    restoreBankReconTableHeight();
+};
+
+let latestPassbookJobs = [];
+let passbookJobDetailState = { job: null, analysis: null, filter: 'all' };
 
 export const getNoBrokerDump = () => ({ lines: nobrokerDumpLines, fileName: nobrokerFileName });
 
@@ -363,6 +624,184 @@ export const clearNoBrokerDump = () => {
     nobrokerDumpLines = [];
     nobrokerFileName = '';
 };
+
+const formatJobTimestamp = (value) => {
+    if (!value) return '—';
+    const dt = new Date(value);
+    return Number.isNaN(dt.getTime())
+        ? String(value)
+        : dt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+};
+
+const passbookJobStatusLabel = (status) => {
+    const raw = String(status || 'INITIALIZED').toUpperCase();
+    if (raw === 'SUBMITTED') return 'Queued';
+    if (raw === 'PROCESSING') return 'Processing';
+    if (raw === 'COMPLETED') return 'Completed';
+    if (raw === 'FAILED') return 'Failed';
+    if (raw === 'IMPORTED') return 'Imported';
+    return 'Initialized';
+};
+
+const passbookJobStatusClass = (status) => `passbook-job-status--${String(status || 'INITIALIZED').toLowerCase()}`;
+
+const passbookJobFileNames = (job) => (
+    Array.isArray(job.file_names) && job.file_names.length ? job.file_names.join(', ') : 'Passbook files'
+);
+
+const renderPassbookJobsTable = (jobs) => {
+    if (!Array.isArray(jobs) || !jobs.length) return '';
+    const body = jobs.map((job) => {
+        const fileNames = passbookJobFileNames(job);
+        const canImport = (job.status === 'COMPLETED' || job.status === 'IMPORTED') && job.mapped_line_count > 0;
+        const canDetail = job.mapped_line_count > 0 && (job.status === 'COMPLETED' || job.status === 'IMPORTED');
+        const importCount = job.import_count || 0;
+        const importedAt = job.imported_at ? formatJobTimestamp(job.imported_at) : '—';
+        const completedAt = job.completed_at ? formatJobTimestamp(job.completed_at) : '—';
+        const importDisabled = job.status === 'IMPORTED' && importCount >= (job.mapped_line_count || 0);
+        return `
+          <tr class="passbook-jobs-table__row" data-job-id="${esc(job.id)}">
+            <td class="passbook-jobs-table__cell passbook-jobs-table__cell--file">
+              <div class="passbook-jobs-table__file">${esc(fileNames)}</div>
+              <div class="passbook-jobs-table__meta">Created ${formatJobTimestamp(job.created_at)}${job.execution_id ? ` · ${esc(job.execution_id)}` : ''}</div>
+            </td>
+            <td class="passbook-jobs-table__cell">
+              <span class="passbook-job-status ${passbookJobStatusClass(job.status)}">${passbookJobStatusLabel(job.status)}</span>
+            </td>
+            <td class="passbook-jobs-table__cell passbook-jobs-table__cell--num">${job.mapped_line_count || 0}</td>
+            <td class="passbook-jobs-table__cell passbook-jobs-table__cell--num">${importCount || '—'}</td>
+            <td class="passbook-jobs-table__cell">${esc(completedAt)}</td>
+            <td class="passbook-jobs-table__cell">${esc(importedAt)}</td>
+            <td class="passbook-jobs-table__cell passbook-jobs-table__cell--actions">
+              <div class="passbook-jobs-table__actions">
+                ${canDetail ? `<button type="button" class="btn btn-outline btn--small btn--icon passbook-job-detail-btn" data-job="${esc(job.id)}" title="View mapped vs imported rows" aria-label="View row details"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>` : ''}
+                ${canImport ? `<button type="button" class="btn btn-primary btn--small btn--icon bank-recon-import-passbook-job" data-job="${esc(job.id)}" title="${importDisabled ? 'All mapped rows imported' : 'Import into bank reconciliation'}" aria-label="Import rows"${importDisabled ? ' disabled' : ''}><i class="fa-solid fa-file-import" aria-hidden="true"></i></button>` : ''}
+              </div>
+            </td>
+          </tr>
+          ${job.last_error ? `<tr class="passbook-jobs-table__row passbook-jobs-table__row--error"><td colspan="7" class="passbook-jobs-table__error">${esc(job.last_error)}</td></tr>` : ''}`;
+    }).join('');
+
+    return `
+      <div class="passbook-jobs-table-wrap">
+        <table class="passbook-jobs-table">
+          <thead>
+            <tr>
+              <th>Files</th>
+              <th>Status</th>
+              <th class="passbook-jobs-table__th--num">Mapped</th>
+              <th class="passbook-jobs-table__th--num">Imported</th>
+              <th>Completed</th>
+              <th>Imported at</th>
+              <th class="passbook-jobs-table__th--actions"></th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
+};
+
+const passbookJobDetailStatusClass = (status) => `passbook-job-detail-status--${status}`;
+
+const renderPassbookJobDetailModal = (job, analysis, filter = 'all') => {
+    const fileNames = passbookJobFileNames(job);
+    const { rows, summary } = analysis;
+    const filteredRows = filter === 'duplicates'
+        ? rows.filter((row) =>
+            row.status === IMPORT_LINE_STATUS.SKIPPED_EXISTING
+            || row.status === IMPORT_LINE_STATUS.SKIPPED_BATCH,
+        )
+        : filter === 'imported'
+            ? rows.filter((row) => row.status === IMPORT_LINE_STATUS.IMPORTED)
+            : filter === 'ready'
+                ? rows.filter((row) => row.status === IMPORT_LINE_STATUS.READY)
+                : rows;
+
+    const tableRows = filteredRows.map((row) => {
+        const line = row.line;
+        const isDup = row.status === IMPORT_LINE_STATUS.SKIPPED_EXISTING
+            || row.status === IMPORT_LINE_STATUS.SKIPPED_BATCH;
+        const canForce = isDup || row.status === IMPORT_LINE_STATUS.READY;
+        const amt = bankLineAmount(line);
+        const type = bankLineType(line);
+        const amtLabel = type === 'IN' ? `+${formatMoney(amt)}` : `-${formatMoney(amt)}`;
+        return `
+          <tr class="passbook-job-detail-table__row passbook-job-detail-table__row--${row.status}" data-row-index="${row.index}">
+            <td class="passbook-job-detail-table__cell passbook-job-detail-table__cell--check">
+              ${canForce ? `<input type="checkbox" class="passbook-job-detail-check" data-row-index="${row.index}" aria-label="Select row" />` : ''}
+            </td>
+            <td class="passbook-job-detail-table__cell passbook-job-detail-table__cell--num">${formatOcrRowDisplay(line) ?? (row.index + 1)}</td>
+            <td class="passbook-job-detail-table__cell">${esc(formatDisplayDate(line.line_date))}</td>
+            <td class="passbook-job-detail-table__cell passbook-job-detail-table__cell--desc">${esc(line.description || '—')}</td>
+            <td class="passbook-job-detail-table__cell passbook-job-detail-table__cell--num ${type === 'IN' ? 'bank-recon-amt--in' : 'bank-recon-amt--out'}">${amtLabel}</td>
+            <td class="passbook-job-detail-table__cell passbook-job-detail-table__cell--num">${line.balance != null ? formatMoney(line.balance) : '—'}</td>
+            <td class="passbook-job-detail-table__cell">
+              <span class="passbook-job-detail-status ${passbookJobDetailStatusClass(row.status)}" title="${esc(row.reason)}">${IMPORT_LINE_STATUS_LABEL[row.status]}</span>
+            </td>
+          </tr>`;
+    }).join('');
+
+    return `
+      <div class="passbook-job-detail__summary">
+        <div class="passbook-job-detail__metric"><span class="label">Mapped</span><span class="value">${summary.mapped}</span></div>
+        <div class="passbook-job-detail__metric"><span class="label">Imported rows</span><span class="value">${summary.imported}</span></div>
+        <div class="passbook-job-detail__metric"><span class="label">Duplicates</span><span class="value">${summary.duplicates}</span></div>
+        <div class="passbook-job-detail__metric"><span class="label">Ready</span><span class="value">${summary.ready}</span></div>
+      </div>
+      ${summary.importCountRecorded && summary.importCountRecorded !== summary.imported
+        ? `<p class="passbook-job-detail__note">Bank import recorded <strong>${summary.importCountRecorded}</strong> row(s) on import — per-row replay shows <strong>${summary.imported}</strong> unique imported line(s).</p>`
+        : ''}
+      <div class="passbook-job-detail__toolbar">
+        <div class="passbook-job-detail__filters" role="tablist" aria-label="Row filter">
+          <button type="button" class="passbook-job-detail-filter${filter === 'all' ? ' passbook-job-detail-filter--active' : ''}" data-filter="all">All (${summary.mapped})</button>
+          <button type="button" class="passbook-job-detail-filter${filter === 'duplicates' ? ' passbook-job-detail-filter--active' : ''}" data-filter="duplicates">Duplicates (${summary.duplicates})</button>
+          <button type="button" class="passbook-job-detail-filter${filter === 'imported' ? ' passbook-job-detail-filter--active' : ''}" data-filter="imported">Imported (${summary.imported})</button>
+          <button type="button" class="passbook-job-detail-filter${filter === 'ready' ? ' passbook-job-detail-filter--active' : ''}" data-filter="ready">Ready (${summary.ready})</button>
+        </div>
+        <div class="passbook-job-detail__bulk">
+          <button type="button" class="btn btn-outline btn--small" id="passbook-job-detail-select-dupes">Select duplicates</button>
+          <button type="button" class="btn btn-primary btn--small" id="passbook-job-detail-force-import" disabled>
+            <i class="fa-solid fa-file-import" aria-hidden="true"></i> Import selected
+          </button>
+        </div>
+      </div>
+      <p class="passbook-job-detail__hint">Compare OCR mapped rows with what reached bank reconciliation. Select duplicate rows that were skipped incorrectly, then import them.</p>
+      <div class="passbook-job-detail-table-wrap">
+        <table class="passbook-job-detail-table">
+          <thead>
+            <tr>
+              <th class="passbook-job-detail-table__th--check">
+                <input type="checkbox" id="passbook-job-detail-select-all" aria-label="Select all visible rows" />
+              </th>
+              <th class="passbook-job-detail-table__th--num">OCR #</th>
+              <th>Date</th>
+              <th>Description</th>
+              <th class="passbook-job-detail-table__th--num">Amount</th>
+              <th class="passbook-job-detail-table__th--num">Balance</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows || `<tr><td colspan="7" class="passbook-job-detail-table__empty">No rows in this filter.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <input type="hidden" id="passbook-job-detail-job-id" value="${esc(job.id)}" />
+      <input type="hidden" id="passbook-job-detail-file-label" value="${esc(passbookJobImportLabel(job))}" />`;
+};
+
+const updatePassbookJobsBadge = (jobs) => {
+    const badge = document.getElementById('bank-recon-passbook-jobs-badge');
+    if (!badge) return;
+    const pending = (jobs || []).filter((job) => ['INITIALIZED', 'SUBMITTED', 'PROCESSING'].includes(String(job.status || '').toUpperCase())).length;
+    badge.hidden = pending <= 0;
+    badge.textContent = String(pending);
+};
+
+const getVisibleBalanceColumns = () => ({
+    passbookBalance: !!bankReconVisibleColumns.passbookBalance,
+    calculatedBalance: !!bankReconVisibleColumns.calculatedBalance,
+    ocrRow: !!bankReconVisibleColumns.ocrRow,
+    rowOrder: !!bankReconVisibleColumns.rowOrder,
+});
 
 export const getDateTolerance = () => {
     const raw = document.getElementById('bank-recon-date-tolerance')?.value
@@ -386,16 +825,6 @@ const daysDiff = (dateA, dateB) => {
     const a = new Date(`${dateA}T12:00:00`);
     const b = new Date(`${dateB}T12:00:00`);
     return Math.abs((a - b) / 86400000);
-};
-
-const inferExpenseCategory = (desc) => {
-    const u = String(desc || '').toUpperCase();
-    if (/SECURITY|GUARD/.test(u)) return 'Security';
-    if (/PLUMB|WATER|MOTOR|TANK/.test(u)) return 'Plumbing';
-    if (/ELECT|DIESEL|\bDG\b/.test(u)) return 'Electrical';
-    if (/STATIONERY|PRINT|OFFICE/.test(u)) return 'Stationery';
-    if (/MAINT|LIFT|GEN|HOUSE|CLEAN/.test(u)) return 'Maintenance';
-    return 'Other';
 };
 
 const inferIncomeCategory = (desc) => {
@@ -459,56 +888,6 @@ export const findLedgerMatch = (line, txns, maxDays = getDateTolerance()) => {
     return best;
 };
 
-async function insertGenericBankTransaction({
-    type,
-    amount,
-    date,
-    cat,
-    description,
-    bankReference,
-    bankPaymentType,
-    vendorName = null,
-}) {
-    if (!supabase) throw new Error('Supabase is not configured.');
-    const apartment_id = portalState.access?.activeApartmentId;
-    if (!apartment_id) throw new Error('No active apartment selected.');
-
-    const txnId = crypto.randomUUID();
-    const dateIso = new Date(`${date}T12:00:00`).toISOString();
-    const core = {
-        id: txnId,
-        apartment_id,
-        amount: parseFloat(amount),
-        cat,
-        description: description || null,
-        wallet: 'BANK',
-        type,
-        date: dateIso,
-    };
-    const extended = {
-        ...core,
-        bank_payment_type: bankPaymentType || inferBankPaymentType(description),
-        bank_reference: bankReference,
-        vendor_name: vendorName,
-    };
-
-    let { error } = await supabase.from('transactions').insert(extended);
-    if (error && /bank_payment_type|bank_reference|vendor_name/i.test(error.message)) {
-        ({ error } = await supabase.from('transactions').insert(core));
-    }
-    if (error) throw new Error(error.message);
-
-    await logActivity({
-        entityType: 'TRANSACTION',
-        entityId: txnId,
-        action: 'CREATE',
-        summary: `Auto-created from bank statement — ${type} ${formatMoney(amount)}`,
-        newData: { txnId, cat, bankReference },
-    });
-
-    return txnId;
-}
-
 export async function createLedgerFromBankLine(lineId, { nobrokerRow = null, skipMatch = false } = {}) {
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (!line || line.match_status !== 'UNMATCHED') throw new Error('Statement line is not available for import.');
@@ -516,65 +895,14 @@ export async function createLedgerFromBankLine(lineId, { nobrokerRow = null, ski
     const la = lineAmount(line);
     if (!la) throw new Error('Statement line has no debit or credit amount.');
 
-    const nb = nobrokerRow || findNoBrokerForLine(line);
-    const desc = line.description || nb?.description || '';
-    let txnId;
-
-    if (la.type === 'IN') {
-        const flat = nb?.flatHint || matchFlatFromText(desc) || matchFlatFromText(nb?.description);
-        const incomeCat = inferIncomeCategory(desc);
-        const bankRef = nb?.reference || statementReference(lineId);
-
-        if (flat && (nb || incomeCat === 'Maintenance Collection')) {
-            if (referenceExists(bankRef)) {
-                throw new Error(`Reference ${bankRef} is already recorded in the ledger.`);
-            }
-            const result = await recordMaintenanceCollectionPayment({
-                unitNumber: flat,
-                amount: la.amount,
-                date: line.line_date,
-                description: desc || `Bank collection — ${flat}`,
-                wallet: 'BANK',
-                bankReference: bankRef,
-                bankPaymentType: nb ? 'UPI' : inferBankPaymentType(desc),
-            });
-            txnId = result.txnId;
-        } else {
-            if (referenceExists(bankRef)) {
-                throw new Error(`Reference ${bankRef} is already recorded in the ledger.`);
-            }
-            txnId = await insertGenericBankTransaction({
-                type: 'IN',
-                amount: la.amount,
-                date: line.line_date,
-                cat: incomeCat,
-                description: desc || `Bank credit — ${incomeCat}`,
-                bankReference: bankRef,
-                bankPaymentType: inferBankPaymentType(desc),
-            });
-        }
-    } else {
-        const bankRef = statementReference(lineId);
-        if (referenceExists(bankRef)) {
-            throw new Error(`This statement line was already imported (${bankRef}).`);
-        }
-        const cat = inferExpenseCategory(desc);
-        txnId = await insertGenericBankTransaction({
-            type: 'OUT',
-            amount: la.amount,
-            date: line.line_date,
-            cat,
-            description: desc || `Bank debit — ${cat}`,
-            bankReference: bankRef,
-            bankPaymentType: inferBankPaymentType(desc),
-            vendorName: desc.slice(0, 120) || null,
-        });
-    }
-
-    if (!skipMatch) {
-        await matchBankLine(lineId, txnId);
-    }
-    return txnId;
+    const result = await postFinanceMutation('createLedgerFromBankLineAuto', {
+        apartment_id: portalState.access?.activeApartmentId,
+        line_id: lineId,
+        nobroker_row: nobrokerRow || findNoBrokerForLine(line) || null,
+        skip_match: !!skipMatch,
+    });
+    await pullState();
+    return result.txnId;
 }
 
 export async function autoMatchByDateAndAmount({ maxDaysDiff = getDateTolerance() } = {}) {
@@ -736,75 +1064,180 @@ export const suggestMatches = (line, txns = null, maxDays = getDateTolerance()) 
     }).slice(0, 5);
 };
 
-export async function matchBankLine(lineId, transactionId) {
-    if (!supabase) return;
-    const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
-    if (!line) return;
+const bankReconSortValue = (line, key) => {
+    switch (key) {
+    case 'line_date':
+        return String(line?.line_date || '');
+    case 'description':
+        return String(line?.description || '').toLowerCase();
+    case 'debit':
+        return parseFloat(line?.debit || 0);
+    case 'credit':
+        return parseFloat(line?.credit || 0);
+    case 'computedBalance':
+        if (line?.computed_balance != null && line.computed_balance !== '') {
+            return parseFloat(line.computed_balance);
+        }
+        return line?.computedBalance == null ? Number.NEGATIVE_INFINITY : parseFloat(line.computedBalance || 0);
+    case 'balance':
+        return passbookRowBalance(line) == null ? Number.NEGATIVE_INFINITY : passbookRowBalance(line);
+    case 'source_row_index':
+        return line?.source_row_index == null ? Number.MAX_SAFE_INTEGER : parseInt(line.source_row_index, 10);
+    case 'type':
+        return bankLineType(line);
+    default:
+        return '';
+    }
+};
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from('bank_statement_lines').update({
-        match_status: 'MATCHED',
-        transaction_id: transactionId,
-        matched_at: new Date().toISOString(),
-        matched_by: user?.id || null,
-    }).eq('id', lineId);
-    if (error) throw new Error(error.message);
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: lineId,
-        action: 'MATCH',
-        summary: `Matched statement line to ledger txn ${transactionId.slice(0, 8)}…`,
-        newData: { line_id: lineId, transaction_id: transactionId },
+const sortBankReconLines = (lines) => {
+    const { key, dir } = bankReconSortState;
+    const factor = dir === 'desc' ? -1 : 1;
+    return [...lines].sort((a, b) => {
+        const av = bankReconSortValue(a, key);
+        const bv = bankReconSortValue(b, key);
+        let cmp = 0;
+        if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+        else cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
+        if (cmp) return cmp * factor;
+        return compareLineOrder(a, b, bankStatementImportById()) * factor;
     });
+};
 
+const buildSameDayOrderIndex = (lines) => {
+    const imports = bankStatementImportById();
+    const sorted = [...lines].sort((a, b) => compareLineOrder(a, b, imports));
+    const byDate = new Map();
+    for (const line of sorted) {
+        const key = line.line_date || '';
+        if (!byDate.has(key)) byDate.set(key, []);
+        byDate.get(key).push(line.id);
+    }
+    const meta = new Map();
+    for (const ids of byDate.values()) {
+        ids.forEach((id, index) => {
+            meta.set(id, { index, count: ids.length });
+        });
+    }
+    return meta;
+};
+
+const renderOrderButtons = (lineId, orderMeta) => {
+    const o = orderMeta.get(lineId) || { index: 0, count: 1 };
+    if (o.count <= 1) {
+        return '<td class="bank-recon-table__cell bank-recon-table__cell--order"></td>';
+    }
+    const upDisabled = o.index === 0 ? ' disabled' : '';
+    const downDisabled = o.index === o.count - 1 ? ' disabled' : '';
+    return `<td class="bank-recon-table__cell bank-recon-table__cell--order">
+      <div class="bank-recon-order-btns">
+        <button type="button" class="btn btn-outline btn--small btn--icon bank-recon-move-up" data-line="${lineId}" title="Move up (same day)" aria-label="Move up"${upDisabled}><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
+        <input type="number" class="bank-recon-move-step expense-combobox" min="1" max="${o.count - 1}" value="1" title="Number of positions to move" aria-label="Rows to move" />
+        <button type="button" class="btn btn-outline btn--small btn--icon bank-recon-move-down" data-line="${lineId}" title="Move down (same day)" aria-label="Move down"${downDisabled}><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+      </div>
+    </td>`;
+};
+
+async function moveStatementLineInDay(lineId, direction, { recalculate = false, steps = 1 } = {}) {
+    const imports = bankStatementImportById();
+    const lines = portalState.finances.bankStatementLines || [];
+    const line = lines.find((l) => l.id === lineId);
+    if (!line) return null;
+
+    const dayLines = lines.filter((l) => l.line_date === line.line_date);
+    if (dayLines.length <= 1) return null;
+
+    const sorted = [...dayLines].sort((a, b) => compareLineOrder(a, b, imports));
+    const idx = sorted.findIndex((l) => l.id === lineId);
+    if (idx < 0) return null;
+
+    const stepCount = Math.max(1, parseInt(steps, 10) || 1);
+    const targetIdx = Math.max(0, Math.min(sorted.length - 1, idx + direction * stepCount));
+    if (targetIdx === idx) return null;
+
+    const ids = sorted.map((l) => l.id);
+    const [moved] = ids.splice(idx, 1);
+    ids.splice(targetIdx, 0, moved);
+    const updates = ids.map((id, index) => ({ id, line_order: index }));
+    await reorderBankStatementLines(updates, { recalculate });
+    return { lineId, dayLineIds: ids, orderMeta: buildSameDayOrderIndex(lines) };
+}
+
+const refreshStatementTableRowOrder = (linesEl) => {
+    const tbody = linesEl?.querySelector('.bank-recon-table tbody');
+    if (!tbody) return;
+
+    const unmatched = annotateStatementLineBalances().filter((l) => l.match_status === 'UNMATCHED');
+    const sorted = sortBankReconLines(unmatched);
+    const orderMeta = buildSameDayOrderIndex(unmatched);
+
+    for (const line of sorted) {
+        const row = tbody.querySelector(`[data-line-id="${line.id}"]`);
+        if (row) tbody.appendChild(row);
+    }
+
+    tbody.querySelectorAll('.bank-recon-table__row[data-line-id]').forEach((row) => {
+        const lineId = row.dataset.lineId;
+        const o = orderMeta.get(lineId);
+        const up = row.querySelector('.bank-recon-move-up');
+        const down = row.querySelector('.bank-recon-move-down');
+        const stepInput = row.querySelector('.bank-recon-move-step');
+        if (!o || o.count <= 1) return;
+        if (up) up.disabled = o.index === 0;
+        if (down) down.disabled = o.index === o.count - 1;
+        if (stepInput) {
+            stepInput.max = String(Math.max(1, o.count - 1));
+            const current = parseInt(stepInput.value, 10) || 1;
+            if (current > o.count - 1) stepInput.value = String(Math.max(1, o.count - 1));
+        }
+    });
+};
+
+let pendingRowMoveChoice = null;
+
+const promptRowMoveRecalc = () => new Promise((resolve) => {
+    const modal = document.getElementById('bank-recon-move-confirm-modal');
+    if (!modal) {
+        resolve('just');
+        return;
+    }
+    pendingRowMoveChoice = resolve;
+    modal.classList.add('active');
+});
+
+const closeRowMoveConfirmModal = (choice) => {
+    document.getElementById('bank-recon-move-confirm-modal')?.classList.remove('active');
+    const resolve = pendingRowMoveChoice;
+    pendingRowMoveChoice = null;
+    resolve?.(choice);
+};
+
+const renderSortHeader = (label, key, extraClass = '') => {
+    const active = bankReconSortState.key === key;
+    const dir = active ? bankReconSortState.dir : '';
+    const arrow = active ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
+    const classes = ['bank-recon-sort-btn', active ? 'bank-recon-sort-btn--active' : '', extraClass]
+        .filter(Boolean)
+        .join(' ');
+    return `<button type="button" class="${classes}" data-sort-key="${key}" aria-label="Sort by ${esc(label)}${active ? ` ${dir}` : ''}">${esc(label)}${arrow}</button>`;
+};
+
+export async function matchBankLine(lineId, transactionId) {
+    await postFinanceMutation('matchBankLine', { line_id: lineId, transaction_id: transactionId });
     await pullState();
 }
 
 export async function unmatchBankLine(lineId) {
-    if (!supabase) return;
-    const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
-    if (!line) return;
-
-    const { error } = await supabase.from('bank_statement_lines').update({
-        match_status: 'UNMATCHED',
-        transaction_id: null,
-        matched_at: null,
-        matched_by: null,
-    }).eq('id', lineId);
-    if (error) throw new Error(error.message);
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: lineId,
-        action: 'UNMATCH',
-        summary: 'Unmatched bank statement line',
-        oldData: { transaction_id: line.transaction_id },
-    });
-
+    await postFinanceMutation('unmatchBankLine', { line_id: lineId });
     await pullState();
 }
 
 export async function ignoreBankLine(lineId) {
-    if (!supabase) return;
-    const { error } = await supabase.from('bank_statement_lines').update({
-        match_status: 'IGNORED',
-        transaction_id: null,
-    }).eq('id', lineId);
-    if (error) throw new Error(error.message);
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: lineId,
-        action: 'IGNORE',
-        summary: 'Marked bank line as ignored',
-    });
-
+    await postFinanceMutation('ignoreBankLine', { line_id: lineId });
     await pullState();
 }
 
 export async function updateBankStatementLine(lineId, patch) {
-    if (!supabase) throw new Error('Supabase is not configured.');
     const allowed = ['line_date', 'description', 'debit', 'credit', 'balance'];
     const payload = {};
     for (const key of allowed) {
@@ -812,9 +1245,7 @@ export async function updateBankStatementLine(lineId, patch) {
     }
     if (!Object.keys(payload).length) return;
 
-    const { error } = await supabase.from('bank_statement_lines').update(payload).eq('id', lineId);
-    if (error) throw new Error(error.message);
-
+    await postFinanceMutation('updateBankStatementLine', { line_id: lineId, patch: payload });
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (line) Object.assign(line, payload);
 }
@@ -824,49 +1255,26 @@ export async function deleteBankStatementLine(lineId) {
 }
 
 export async function deleteBankStatementLines(lineIds) {
-    if (!supabase) throw new Error('Supabase is not configured.');
     const ids = [...new Set(lineIds)].filter(Boolean);
     if (!ids.length) return;
-
-    const { error } = await supabase.from('bank_statement_lines').delete().in('id', ids);
-    if (error) throw new Error(error.message);
-
+    await postFinanceMutation('deleteBankStatementLines', { line_ids: ids });
     await pullState();
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: ids[0],
-        action: 'DELETE',
-        summary: ids.length === 1 ? 'Deleted bank statement line' : `Deleted ${ids.length} bank statement lines`,
-        newData: { line_ids: ids },
-    });
 }
 
 export async function clearAllBankStatementData() {
-    if (!supabase) throw new Error('Supabase is not configured.');
     const apartment_id = portalState.access?.activeApartmentId;
     if (!apartment_id) throw new Error('No active apartment selected.');
 
     const lines = portalState.finances.bankStatementLines || [];
     if (!lines.length) return { deleted: 0 };
 
-    const { error } = await supabase.from('bank_statement_imports').delete().eq('apartment_id', apartment_id);
-    if (error) throw new Error(error.message);
-
+    await postFinanceMutation('clearBankStatementData', { apartment_id });
     await pullState();
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: apartment_id,
-        action: 'CLEAR_ALL',
-        summary: `Cleared all bank statement imports (${lines.length} line(s))`,
-    });
 
     return { deleted: lines.length };
 }
 
 export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_name }) {
-    if (!supabase) throw new Error('Supabase is not configured.');
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (!line) throw new Error('Statement line not found.');
 
@@ -877,53 +1285,13 @@ export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_
     if (!isIncome && !sub_category) throw new Error('Enter sub-category for expenses.');
     if (!isIncome && !vendor_name) throw new Error('Enter vendor name for expenses.');
 
-    const apartment_id = portalState.access?.activeApartmentId;
-    if (!apartment_id) throw new Error('No active apartment selected.');
-
-    const txnId = crypto.randomUUID();
-    const payload = {
-        id: txnId,
-        apartment_id,
-        amount,
+    await postFinanceMutation('createTxnFromBankLine', {
+        line_id: lineId,
         cat,
-        sub_category: isIncome ? null : (sub_category || null),
-        vendor_name: isIncome ? null : vendor_name,
-        vendor_invoice: null,
-        bank_payment_type: null,
-        bank_reference: (line.description || '').slice(0, 120) || null,
-        bank_proof_urls: [],
-        description: line.description || null,
-        wallet: 'BANK',
-        type: isIncome ? 'IN' : 'OUT',
-        date: new Date(`${line.line_date}T12:00:00`).toISOString(),
-        receipt_url: null,
-        receipt_urls: [],
-    };
-
-    let { error } = await supabase.from('transactions').insert(payload);
-    if (error && /sub_category|vendor_name|bank_reference|bank_proof_urls/i.test(error.message)) {
-        const core = { ...payload };
-        delete core.sub_category;
-        delete core.vendor_name;
-        delete core.vendor_invoice;
-        delete core.bank_payment_type;
-        delete core.bank_reference;
-        delete core.bank_proof_urls;
-        delete core.receipt_url;
-        delete core.receipt_urls;
-        ({ error } = await supabase.from('transactions').insert(core));
-    }
-    if (error) throw new Error(error.message);
-
-    await matchBankLine(lineId, txnId);
-
-    await logActivity({
-        entityType: 'BANK_MATCH',
-        entityId: lineId,
-        action: 'POST',
-        summary: `Posted ${isIncome ? 'income' : 'expense'} (${cat}) from bank line`,
-        newData: { line_id: lineId, transaction_id: txnId, cat },
+        sub_category,
+        vendor_name,
     });
+    await pullState();
 }
 
 const importResultMessage = ({ count, skipped, skippedExisting, skippedBatch }) => {
@@ -940,71 +1308,162 @@ const importResultMessage = ({ count, skipped, skippedExisting, skippedBatch }) 
     return msg;
 };
 
-const renderCatOptions = (isIncome) => {
-    const cats = isIncome ? INCOME_CATS : EXPENSE_CATS;
-    return cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+const categoryOptionsForRow = (row) => {
+    const isIncome = row?.dataset.lineType === 'IN';
+    return isIncome ? INCOME_CATS : EXPENSE_CATS;
 };
 
 const subCatOptionsForCategory = (catKey) => {
     if (!catKey) return [];
-    const defaults = SUB_CAT_SUGGESTIONS[catKey] || SUB_CAT_SUGGESTIONS.Other;
+    const defaults = SUB_CAT_SUGGESTIONS[catKey] || SUB_CAT_SUGGESTIONS.Other || [];
     const saved = (portalState.finances.subCategories || [])
         .filter((row) => row.category === catKey)
         .map((row) => row.name);
     return [...new Set([...defaults, ...saved])].sort((a, b) => a.localeCompare(b));
 };
 
-const updateRowSubCatDatalist = (row, catKey) => {
-    const lineId = row?.dataset.lineId;
-    if (!lineId) return;
-    const list = row.querySelector(`#bank-recon-subcats-${lineId}`);
-    if (!list) return;
-    list.innerHTML = subCatOptionsForCategory(catKey)
-        .map((s) => `<option value="${esc(s)}">`)
-        .join('');
+const resolvedCategoryForRow = (row) => {
+    const input = row?.querySelector('.bank-recon-cat-input');
+    const raw = input?.value?.trim() || '';
+    if (!raw) return '';
+    if (isKnownClassifyInput(input)) return raw;
+    const options = categoryOptionsForRow(row);
+    return isExactListMatch(raw, options) || raw;
 };
 
-const rowClassifyReady = (row) => {
+const rowClassifyReady = (row, { allowCustom = false } = {}) => {
     if (!row) return false;
     const isIncome = row.dataset.lineType === 'IN';
-    const cat = row.querySelector('.bank-recon-cat-select')?.value;
+    const catInput = row.querySelector('.bank-recon-cat-input');
+    const cat = catInput?.value?.trim();
     if (!cat) return false;
+    if (!allowCustom && !isKnownClassifyInput(catInput)) return false;
+    if (allowCustom && !catInput?.dataset.classifyState) return false;
     if (isIncome) return true;
-    const sub_category = row.querySelector('.bank-recon-subcat-input')?.value?.trim();
+
+    const subInput = row.querySelector('.bank-recon-subcat-input');
+    const sub_category = subInput?.value?.trim();
     const vendor_name = row.querySelector('.bank-recon-vendor-input')?.value?.trim();
-    return Boolean(sub_category && vendor_name);
+    if (!sub_category || !vendor_name) return false;
+    if (!allowCustom && !isKnownClassifyInput(subInput)) return false;
+    if (allowCustom && !subInput?.dataset.classifyState) return false;
+    return true;
 };
 
-const renderBalanceCells = (line, showBalances) => {
-    if (!showBalances) return '';
+const normalizeClassifyStatesForPost = (row) => {
+    const catInput = row.querySelector('.bank-recon-cat-input');
+    const subInput = row.querySelector('.bank-recon-subcat-input');
+    if (catInput?.value?.trim() && !catInput.dataset.classifyState) {
+        const exact = isExactListMatch(catInput.value, categoryOptionsForRow(row));
+        setClassifyInputState(catInput, exact ? 'known' : 'custom');
+    }
+    if (subInput?.value?.trim() && !subInput.dataset.classifyState) {
+        const exact = isExactListMatch(subInput.value, subCatOptionsForCategory(resolvedCategoryForRow(row)));
+        setClassifyInputState(subInput, exact ? 'known' : 'custom');
+    }
+};
+
+const fieldNeedsManualPost = (input, options = []) => {
+    const raw = input?.value?.trim();
+    if (!raw) return false;
+    if (input?.dataset.classifyState === 'custom') return true;
+    if (input?.dataset.classifyState === 'known') return false;
+    return !isExactListMatch(raw, options);
+};
+
+const syncRowPostButton = (row) => {
+    const btn = row?.querySelector('.bank-recon-post-classify');
+    if (!btn) return;
+    const catInput = row.querySelector('.bank-recon-cat-input');
+    const subInput = row.querySelector('.bank-recon-subcat-input');
+    const needsManual = fieldNeedsManualPost(catInput, categoryOptionsForRow(row))
+        || fieldNeedsManualPost(subInput, subCatOptionsForCategory(resolvedCategoryForRow(row)));
+    const isIncome = row.dataset.lineType === 'IN';
+    const vendor = row.querySelector('.bank-recon-vendor-input')?.value?.trim();
+    const ready = isIncome
+        ? Boolean(catInput?.value?.trim())
+        : Boolean(catInput?.value?.trim() && subInput?.value?.trim() && vendor);
+    btn.hidden = !(needsManual && ready);
+    syncSaveRuleButton(row);
+    syncBulkPostUi();
+};
+
+const syncSaveRuleButton = (row) => {
+    const btn = row?.querySelector('.bank-recon-save-rule-btn');
+    if (!btn) return;
+    const cat = row.querySelector('.bank-recon-cat-input')?.value?.trim();
+    btn.hidden = !cat;
+};
+
+const maybeAutoPostRow = (row) => {
+    const lineId = row?.dataset.lineId;
+    if (!lineId || !rowClassifyReady(row)) return;
+    tryAutoPostFromRow(row, lineId);
+};
+
+const renderClassifyCell = (line, isIncome) => {
+    const postBtn = `<button type="button" class="btn btn-outline btn--small bank-recon-post-classify" data-line="${line.id}" hidden title="Post with new category values">Post</button>`;
+    const saveRuleBtn = `<button type="button" class="btn btn-outline btn--small btn--icon bank-recon-save-rule-btn" data-line="${line.id}" hidden title="Save current values as a classification rule"><i class="fa-solid fa-bookmark" aria-hidden="true"></i></button>`;
+    const catCombobox = `
+      <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat">
+        <input type="text" class="bank-recon-cell-input bank-recon-cat-input" data-line="${line.id}" placeholder="Category…" autocomplete="off" />
+        <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+      </div>`;
+    if (isIncome) {
+        return `<div class="bank-recon-classify-actions">${catCombobox}${saveRuleBtn}${postBtn}</div>`;
+    }
+    return `
+      <div class="bank-recon-classify-actions">
+      ${catCombobox}
+      <div class="bank-recon-classify-combobox bank-recon-classify-combobox--sub">
+        <input type="text" class="bank-recon-cell-input bank-recon-subcat-input" data-line="${line.id}" placeholder="Sub-category *" autocomplete="off" />
+        <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+      </div>
+      <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" data-line="${line.id}" list="bank-recon-vendors" placeholder="Vendor *" value="${esc((line.description || '').slice(0, 48))}" />
+      ${saveRuleBtn}${postBtn}
+      </div>`;
+};
+
+const renderBalanceCells = (line, visibleColumns) => {
+    const showCalculated = !!visibleColumns?.calculatedBalance;
+    const showPassbook = !!visibleColumns?.passbookBalance;
+    if (!showCalculated && !showPassbook) return '';
+    const opening = getBankOpeningConfig();
+    const needsOpening = showCalculated && opening.amount == null;
     const computed = line.computedBalance != null ? formatMoney(line.computedBalance) : '—';
-    const passbook = line.balance != null && line.balance !== '' ? formatMoney(line.balance) : '—';
+    const passbookValue = passbookRowBalance(line);
+    const passbook = passbookValue != null ? formatMoney(passbookValue) : '—';
     const mismatchTitle = line.passbookMismatch && line.computedBalance != null
-        ? ` title="Calculated ${formatMoney(line.computedBalance)} ≠ passbook ${formatMoney(line.balance)}"`
+        ? ` title="Calculated ${formatMoney(line.computedBalance)} ≠ passbook ${formatMoney(passbookValue)}"`
         : '';
+    const openingHint = needsOpening ? ' title="Set opening balance above to calculate"' : '';
     const mismatchClass = line.passbookMismatch ? ' bank-recon-balance--mismatch' : '';
     const icon = line.passbookMismatch
         ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>'
         : '';
     return `
-      <td class="bank-recon-table__cell bank-recon-table__cell--num${mismatchClass}"${mismatchTitle}>${computed}</td>
-      <td class="bank-recon-table__cell bank-recon-table__cell--num${mismatchClass}"${mismatchTitle}>${passbook}${icon}</td>`;
+      ${showCalculated ? `<td class="bank-recon-table__cell bank-recon-table__cell--num${mismatchClass}"${mismatchTitle || openingHint}>${computed}${!showPassbook ? icon : ''}</td>` : ''}
+      ${showPassbook ? `<td class="bank-recon-table__cell bank-recon-table__cell--num${mismatchClass}"${mismatchTitle}>${passbook}${icon}</td>` : ''}`;
 };
 
 const renderOpeningBalancePanel = () => {
     const opening = getBankOpeningConfig();
     const recon = getBankBalanceReconciliation();
     const hasOpening = opening.amount != null && opening.date;
+    const showCalculatedHint = bankReconVisibleColumns.calculatedBalance && !hasOpening;
 
     let statusHtml = '';
     if (!hasOpening) {
         statusHtml = '<p class="bank-recon-balance-panel__hint">Set your passbook opening balance and date below. Each import adds movements; we calculate running balance and compare it to the passbook balance on each row.</p>';
+        if (showCalculatedHint) {
+            statusHtml += '<p class="bank-recon-balance-panel__hint bank-recon-balance-panel__hint--emphasis">The <strong>Calculated</strong> column stays blank until you save an opening balance here.</p>';
+        }
     } else if (recon.passbook && recon.hasDiscrepancy) {
         statusHtml = `<p class="bank-recon-balance-panel__alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Overall discrepancy of <strong>${formatMoney(Math.abs(recon.diff))}</strong> — calculated ${formatMoney(recon.calculated.balance)} vs passbook ${formatMoney(recon.passbook.balance)}. Review highlighted rows below.</p>`;
     } else if (recon.passbook && !recon.hasDiscrepancy) {
         statusHtml = '<p class="bank-recon-balance-panel__ok"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Calculated balance matches the latest passbook closing balance.</p>';
     } else if (recon.calculated.balance != null) {
-        statusHtml = `<p class="bank-recon-balance-panel__hint">Calculated balance is ${formatMoney(recon.calculated.balance)}${recon.calculated.asOf ? ` as of ${recon.calculated.asOf}` : ''}. Import statements with a balance column to compare against passbook.</p>`;
+        statusHtml = `<p class="bank-recon-balance-panel__hint">Calculated balance is ${formatMoney(recon.calculated.balance)}${recon.calculated.asOf ? ` as of ${formatDisplayDate(recon.calculated.asOf)}` : ''}. Import statements with a balance column to compare against passbook.</p>`;
     }
 
     const mismatchNote = recon.mismatchCount > 0
@@ -1032,12 +1491,21 @@ const renderOpeningBalancePanel = () => {
       </div>`;
 };
 
-const renderStatementTable = (unmatched, showBalances = false) => {
+const renderStatementTable = (unmatched, visibleColumns = {}) => {
     if (!unmatched.length) {
         return '<p class="maintenance-dues-empty">No unmatched statement lines. Import a bank statement to begin.</p>';
     }
 
-    const rows = unmatched.map((line) => {
+    const dayHints = buildDayOrderHints(unmatched);
+    const seenDates = new Set();
+    const opening = getBankOpeningConfig();
+    const calculatedHeaderHint = visibleColumns.calculatedBalance && opening.amount == null
+        ? ' title="Set opening balance above to calculate"'
+        : '';
+
+    const orderMeta = buildSameDayOrderIndex(unmatched);
+
+    const rows = sortBankReconLines(unmatched).map((line) => {
         const lineType = bankLineType(line);
         const isIncome = lineType === 'IN';
         const ledgerTxns = getUnmatchedLedgerTxns(lineType);
@@ -1048,19 +1516,24 @@ const renderStatementTable = (unmatched, showBalances = false) => {
         const allOptions = ledgerTxns.map((t) =>
             `<option value="${t.id}">${new Date(t.date).toLocaleDateString('en-GB')} · ${esc(t.cat || t.type)} · ${formatMoney(t.amount)} · ${esc((t.description || '').slice(0, 30))}</option>`,
         ).join('');
-        const subCats = !isIncome
-            ? subCatOptionsForCategory(null).map((s) => `<option value="${esc(s)}">`).join('')
+        const showOrderHint = !seenDates.has(line.line_date) && dayHints.has(line.line_date);
+        seenDates.add(line.line_date);
+        const orderHint = showOrderHint
+            ? `<span class="bank-recon-order-hint">${esc(dayHints.get(line.line_date))}</span>`
             : '';
 
-        return `<tr class="bank-recon-table__row${line.passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-line-id="${line.id}" data-line-type="${lineType}">
+        return `<tr class="bank-recon-table__row${line.passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-line-id="${line.id}" data-line-type="${lineType}" data-line-date="${esc(line.line_date)}">
+          ${visibleColumns.rowOrder ? renderOrderButtons(line.id, orderMeta) : ''}
           <td class="bank-recon-table__cell bank-recon-table__cell--check">
             <input type="checkbox" class="bank-recon-row-check" data-line="${line.id}" aria-label="Select row" />
           </td>
+          ${visibleColumns.ocrRow ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr" title="AI extract row sequence">${formatOcrRowDisplay(line) ?? '—'}</td>` : ''}
           <td class="bank-recon-table__cell bank-recon-table__cell--date">
-            <input type="date" class="bank-recon-cell-input" data-line="${line.id}" data-field="line_date" value="${esc(line.line_date)}" />
+            ${orderHint}
+            <input type="text" class="bank-recon-cell-input bank-recon-cell-input--date" data-line="${line.id}" data-field="line_date" value="${esc(formatDisplayDate(line.line_date))}" placeholder="DD-MM-YY" />
           </td>
           <td class="bank-recon-table__cell bank-recon-table__cell--desc">
-            <input type="text" class="bank-recon-cell-input bank-recon-cell-input--desc" data-line="${line.id}" data-field="description" value="${esc(line.description || '')}" placeholder="Description" />
+            <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-line="${line.id}" data-field="description" rows="2" placeholder="Description">${esc(line.description || '')}</textarea>
           </td>
           <td class="bank-recon-table__cell bank-recon-table__cell--num">
             <input type="number" min="0" step="0.01" class="bank-recon-cell-input bank-recon-cell-input--num" data-line="${line.id}" data-field="debit" value="${formatAmountInput(line.debit)}" placeholder="0" ${isIncome ? 'disabled' : ''} />
@@ -1068,18 +1541,12 @@ const renderStatementTable = (unmatched, showBalances = false) => {
           <td class="bank-recon-table__cell bank-recon-table__cell--num">
             <input type="number" min="0" step="0.01" class="bank-recon-cell-input bank-recon-cell-input--num" data-line="${line.id}" data-field="credit" value="${formatAmountInput(line.credit)}" placeholder="0" ${!isIncome ? 'disabled' : ''} />
           </td>
-          ${renderBalanceCells(line, showBalances)}
+          ${renderBalanceCells(line, visibleColumns)}
           <td class="bank-recon-table__cell bank-recon-table__cell--type">
             <span class="bank-recon-type-badge bank-recon-type-badge--${lineType.toLowerCase()}">${lineType === 'IN' ? 'Income' : 'Expense'}</span>
           </td>
           <td class="bank-recon-table__cell bank-recon-table__cell--classify">
-            <select class="bank-recon-cell-select bank-recon-cat-select" data-line="${line.id}" title="Category">
-              <option value="">Category…</option>
-              ${renderCatOptions(isIncome)}
-            </select>
-            ${isIncome ? '' : `<input type="text" class="bank-recon-cell-input bank-recon-subcat-input" data-line="${line.id}" list="bank-recon-subcats-${line.id}" placeholder="Sub-category *" />
-            <datalist id="bank-recon-subcats-${line.id}">${subCats}</datalist>
-            <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" data-line="${line.id}" list="bank-recon-vendors" placeholder="Vendor *" value="${esc((line.description || '').slice(0, 48))}" />`}
+            ${renderClassifyCell(line, isIncome)}
           </td>
           <td class="bank-recon-table__cell bank-recon-table__cell--match">
             <select class="bank-recon-cell-select bank-match-select" data-line="${line.id}">
@@ -1103,28 +1570,68 @@ const renderStatementTable = (unmatched, showBalances = false) => {
 
     return `
       <datalist id="bank-recon-vendors">${vendorDatalist}</datalist>
-      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — saves when all three are set. For <strong>income</strong>, category alone is enough. Or pick a <strong>match</strong> to link an existing ledger entry.</p>
+      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. After <strong>Rules</strong>, use <strong>Post all ready</strong>. Drag the <strong>bottom-right corner</strong> of the table frame to resize it, or use <strong>Height</strong>.</p>
       <div class="bank-recon-bulk-bar">
         <label class="bank-recon-bulk-select-all">
           <input type="checkbox" id="bank-recon-select-all" aria-label="Select all rows" />
           <span>Select all</span>
         </label>
+        <button type="button" class="btn btn-primary btn--small" id="bank-recon-post-all-ready" disabled title="Create ledger entries for every row with category filled">
+          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Post all ready
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-post" disabled title="Post selected rows that have category filled">
+          <i class="fa-solid fa-check-double" aria-hidden="true"></i> Post selected
+        </button>
         <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-delete" disabled>
           <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
         </button>
+        <details class="bank-recon-height-picker">
+          <summary class="btn btn-outline btn--small" title="Table height"><i class="fa-solid fa-up-down" aria-hidden="true"></i> Height</summary>
+          <div class="bank-recon-height-picker__menu">
+            <button type="button" class="bank-recon-height-preset" data-height-preset="compact">Compact</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="medium">Medium</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="tall">Tall</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="full">Full screen</button>
+          </div>
+        </details>
+        <details class="bank-recon-columns-picker">
+          <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
+          <div class="bank-recon-columns-picker__menu">
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
+              <span>Calculated balance</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
+              <span>Passbook balance</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
+              <span>OCR row #</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
+              <span>Row order (↑ ↓)</span>
+            </label>
+          </div>
+        </details>
         <span id="bank-recon-bulk-count" class="bank-recon-bulk-count"></span>
       </div>
-      <div class="bank-recon-table-wrap">
+      <div class="bank-recon-table-shell" id="bank-recon-table-shell">
+        <div class="bank-recon-table-wrap" id="bank-recon-table-wrap">
         <table class="bank-recon-table">
           <thead>
             <tr>
+              ${visibleColumns.rowOrder ? '<th class="bank-recon-table__th--order"><span class="sr-only">Order</span></th>' : ''}
               <th class="bank-recon-table__th--check"><span class="sr-only">Select</span></th>
-              <th>Date</th>
-              <th>Description</th>
-              <th class="bank-recon-table__th--num">Debit</th>
-              <th class="bank-recon-table__th--num">Credit</th>
-              ${showBalances ? '<th class="bank-recon-table__th--num">Calculated</th><th class="bank-recon-table__th--num">Passbook</th>' : ''}
-              <th>Type</th>
+              ${visibleColumns.ocrRow ? `<th class="bank-recon-table__th--num bank-recon-table__th--ocr">${renderSortHeader('OCR #', 'source_row_index', 'bank-recon-sort-btn--num')}</th>` : ''}
+              <th>${renderSortHeader('Date', 'line_date')}</th>
+              <th>${renderSortHeader('Description', 'description')}</th>
+              <th class="bank-recon-table__th--num">${renderSortHeader('Debit', 'debit', 'bank-recon-sort-btn--num')}</th>
+              <th class="bank-recon-table__th--num">${renderSortHeader('Credit', 'credit', 'bank-recon-sort-btn--num')}</th>
+              ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint}>${renderSortHeader('Calculated', 'computedBalance', 'bank-recon-sort-btn--num')}</th>` : ''}
+              ${visibleColumns.passbookBalance ? `<th class="bank-recon-table__th--num">${renderSortHeader('Passbook', 'balance', 'bank-recon-sort-btn--num')}</th>` : ''}
+              <th>${renderSortHeader('Type', 'type')}</th>
               <th>Category / vendor</th>
               <th class="bank-recon-table__th--match">Match ledger</th>
               <th class="bank-recon-table__th--actions"></th>
@@ -1132,10 +1639,11 @@ const renderStatementTable = (unmatched, showBalances = false) => {
           </thead>
           <tbody>${rows}</tbody>
         </table>
+        </div>
       </div>`;
 };
 
-const renderProcessedLinesSection = (matched, ignored, showBalances = false) => {
+const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
     const rows = [...matched, ...ignored];
     if (!rows.length) return '';
 
@@ -1153,10 +1661,11 @@ const renderProcessedLinesSection = (matched, ignored, showBalances = false) => 
             : '';
 
         return `<tr class="bank-recon-table__row bank-recon-table__row--processed bank-recon-table__row--readonly${line.passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-line-id="${line.id}">
-          <td class="bank-recon-table__cell">${esc(line.line_date)}</td>
+          ${visibleColumns.ocrRow ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr">${formatOcrRowDisplay(line) ?? '—'}</td>` : ''}
+          <td class="bank-recon-table__cell">${esc(formatDisplayDate(line.line_date))}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--desc">${esc(line.description || '—')}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--num ${isIncome ? 'bank-recon-amt--in' : 'bank-recon-amt--out'}">${amtLabel}</td>
-          ${renderBalanceCells(line, showBalances)}
+          ${renderBalanceCells(line, visibleColumns)}
           <td class="bank-recon-table__cell"><span class="bank-recon-status ${statusClass}">${status}</span>${txnLabel ? `<span class="bank-recon-processed-txn">${esc(txnLabel)}</span>` : ''}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--actions">
             <div class="bank-recon-row-actions">
@@ -1175,10 +1684,12 @@ const renderProcessedLinesSection = (matched, ignored, showBalances = false) => 
           <table class="bank-recon-table bank-recon-table--processed">
             <thead>
               <tr>
+                ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num bank-recon-table__th--ocr">OCR #</th>' : ''}
                 <th>Date</th>
                 <th>Description</th>
                 <th class="bank-recon-table__th--num">Amount</th>
-                ${showBalances ? '<th class="bank-recon-table__th--num">Calculated</th><th class="bank-recon-table__th--num">Passbook</th>' : ''}
+                ${visibleColumns.calculatedBalance ? '<th class="bank-recon-table__th--num">Calculated</th>' : ''}
+                ${visibleColumns.passbookBalance ? '<th class="bank-recon-table__th--num">Passbook</th>' : ''}
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -1249,15 +1760,35 @@ const renderLedgerTable = (ledgerTxns) => {
 const syncBulkSelectionUi = (root) => {
     const checks = [...root.querySelectorAll('.bank-recon-row-check')];
     const selected = checks.filter((c) => c.checked);
-    const bulkBtn = root.querySelector('#bank-recon-bulk-delete');
+    const bulkDeleteBtn = root.querySelector('#bank-recon-bulk-delete');
+    const bulkPostBtn = root.querySelector('#bank-recon-bulk-post');
+    const postAllBtn = root.querySelector('#bank-recon-post-all-ready');
     const countEl = root.querySelector('#bank-recon-bulk-count');
     const selectAll = root.querySelector('#bank-recon-select-all');
 
-    if (bulkBtn) bulkBtn.disabled = selected.length === 0;
+    let postableAll = 0;
+    let postableSelected = 0;
+    root.querySelectorAll('.bank-recon-table__row[data-line-id]').forEach((row) => {
+        normalizeClassifyStatesForPost(row);
+        if (!rowClassifyReady(row, { allowCustom: true })) return;
+        postableAll += 1;
+        const cb = row.querySelector('.bank-recon-row-check');
+        if (cb?.checked) postableSelected += 1;
+    });
+
+    if (bulkDeleteBtn) bulkDeleteBtn.disabled = selected.length === 0;
+    if (bulkPostBtn) bulkPostBtn.disabled = postableSelected === 0;
+    if (postAllBtn) {
+        postAllBtn.disabled = postableAll === 0;
+        postAllBtn.title = postableAll
+            ? `Create ledger entries for ${postableAll} row(s) with category filled`
+            : 'No rows ready to post — fill category (and sub-category/vendor for expenses) first';
+    }
     if (countEl) {
-        countEl.textContent = selected.length
-            ? `${selected.length} selected`
-            : '';
+        const parts = [];
+        if (selected.length) parts.push(`${selected.length} selected`);
+        if (postableAll) parts.push(`${postableAll} ready to post`);
+        countEl.textContent = parts.join(' · ');
     }
     if (selectAll) {
         selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
@@ -1265,10 +1796,54 @@ const syncBulkSelectionUi = (root) => {
     }
 };
 
+const syncBulkPostUi = () => {
+    const root = document.getElementById('bank-recon-lines');
+    if (root) syncBulkSelectionUi(root);
+};
+
+const collectPostableRows = (root, { selectedOnly = false } = {}) => {
+    const rows = [...root.querySelectorAll('.bank-recon-table__row[data-line-id]')];
+    const selectedIds = selectedOnly
+        ? new Set([...root.querySelectorAll('.bank-recon-row-check:checked')].map((c) => c.dataset.line))
+        : null;
+    const postable = [];
+    for (const row of rows) {
+        if (selectedOnly && !selectedIds.has(row.dataset.lineId)) continue;
+        normalizeClassifyStatesForPost(row);
+        if (rowClassifyReady(row, { allowCustom: true })) postable.push(row);
+    }
+    return postable;
+};
+
+const bulkPostClassifiedRows = async ({ root, selectedOnly = false } = {}) => {
+    const postable = collectPostableRows(root, { selectedOnly });
+    if (!postable.length) return { posted: 0, failed: 0 };
+
+    let posted = 0;
+    let failed = 0;
+    for (const row of postable) {
+        const lineId = row.dataset.lineId;
+        try {
+            await tryAutoPostFromRow(row, lineId, { allowCustom: true, skipRender: true });
+            posted += 1;
+        } catch {
+            failed += 1;
+        }
+    }
+    if (posted) {
+        renderBankReconciliation();
+        window.renderCashLedger?.();
+        window.processFinances?.();
+    } else {
+        syncBulkPostUi();
+    }
+    return { posted, failed };
+};
+
 const setRowBusy = (row, busy, label = '') => {
     if (!row) return;
     row.classList.toggle('bank-recon-table__row--busy', busy);
-    row.querySelectorAll('select, input, button').forEach((el) => { el.disabled = busy; });
+    row.querySelectorAll('select, input, textarea, button').forEach((el) => { el.disabled = busy; });
     const statusEl = row.querySelector('.bank-recon-row-status');
     if (statusEl) {
         statusEl.textContent = busy ? label : '';
@@ -1277,9 +1852,19 @@ const setRowBusy = (row, busy, label = '') => {
 };
 
 const clearRowClassify = (row) => {
-    row?.querySelector('.bank-recon-cat-select') && (row.querySelector('.bank-recon-cat-select').value = '');
-    row?.querySelector('.bank-recon-subcat-input') && (row.querySelector('.bank-recon-subcat-input').value = '');
-    row?.querySelector('.bank-recon-vendor-input') && (row.querySelector('.bank-recon-vendor-input').value = '');
+    const cat = row?.querySelector('.bank-recon-cat-input');
+    const sub = row?.querySelector('.bank-recon-subcat-input');
+    const vendor = row?.querySelector('.bank-recon-vendor-input');
+    if (cat) {
+        cat.value = '';
+        setClassifyInputState(cat, '');
+    }
+    if (sub) {
+        sub.value = '';
+        setClassifyInputState(sub, '');
+    }
+    if (vendor) vendor.value = '';
+    syncRowPostButton(row);
 };
 
 const clearRowMatch = (row) => {
@@ -1287,26 +1872,316 @@ const clearRowMatch = (row) => {
     if (matchSel) matchSel.value = '';
 };
 
-const tryAutoPostFromRow = async (row, lineId) => {
+const getClassificationRules = () => portalState.finances.bankClassificationRules || [];
+
+const ensureClassificationRulesLoaded = async ({ force = false } = {}) => {
+    if (!force && getClassificationRules().length) return getClassificationRules();
+
+    try {
+        const { rules } = await postFinanceMutation('listBankClassificationRules', {});
+        portalState.finances.bankClassificationRules = sortClassificationRules(rules || []);
+        return portalState.finances.bankClassificationRules;
+    } catch (err) {
+        console.warn('[bankRecon] listBankClassificationRules failed:', err?.message || err);
+    }
+
+    if (!supabase) return [];
+    const apartmentId = portalState.access?.activeApartmentId;
+    if (!apartmentId) return [];
+    const { data, error } = await supabase
+        .from('bank_classification_rules')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: true });
+    if (error) {
+        console.warn('[bankRecon] Could not load classification rules:', error.message);
+        return [];
+    }
+    portalState.finances.bankClassificationRules = sortClassificationRules(data || []);
+    return portalState.finances.bankClassificationRules;
+};
+
+const upsertLocalClassificationRule = (rule) => {
+    const rules = [...getClassificationRules()];
+    const idx = rules.findIndex((r) => r.id === rule.id);
+    if (idx >= 0) rules[idx] = rule;
+    else rules.push(rule);
+    portalState.finances.bankClassificationRules = sortClassificationRules(rules);
+};
+
+const saveBankClassificationRule = async (payload) => {
+    const { rule } = await postFinanceMutation('saveBankClassificationRule', payload);
+    upsertLocalClassificationRule(rule);
+    return rule;
+};
+
+const deleteBankClassificationRule = async (id) => {
+    await postFinanceMutation('deleteBankClassificationRule', { id });
+    portalState.finances.bankClassificationRules = getClassificationRules().filter((r) => r.id !== id);
+};
+
+const applyRuleToClassifyRow = (row, rule, { skipIfFilled = true } = {}) => {
+    if (!row || !rule) return false;
+    const catInput = row.querySelector('.bank-recon-cat-input');
+    if (!catInput) return false;
+    if (skipIfFilled && catInput.value?.trim()) return false;
+
+    if (rule.category) {
+        catInput.value = rule.category;
+        setClassifyInputState(
+            catInput,
+            isExactListMatch(rule.category, categoryOptionsForRow(row)) ? 'known' : 'custom',
+        );
+    }
+
+    const subInput = row.querySelector('.bank-recon-subcat-input');
+    if (rule.sub_category && subInput) {
+        subInput.value = rule.sub_category;
+        setClassifyInputState(
+            subInput,
+            isExactListMatch(rule.sub_category, subCatOptionsForCategory(resolvedCategoryForRow(row))) ? 'known' : 'custom',
+        );
+    }
+
+    const vendorInput = row.querySelector('.bank-recon-vendor-input');
+    if (rule.vendor_name && vendorInput) vendorInput.value = rule.vendor_name;
+
+    syncRowPostButton(row);
+    return Boolean(rule.category && catInput.value?.trim());
+};
+
+const runClassificationRulesOnUnmatched = async ({ autoPost = false, onlyEmpty = true } = {}) => {
+    await ensureClassificationRulesLoaded({ force: true });
+    const rules = getClassificationRules();
+    const linesEl = document.getElementById('bank-recon-lines');
+    if (!linesEl || !rules.length) {
+        return { applied: 0, posted: 0, examined: 0, noRule: 0, skippedFilled: 0, ruleCount: rules.length };
+    }
+
+    let preview = null;
+    try {
+        preview = await postFinanceMutation('previewBankClassificationRules', {});
+    } catch (err) {
+        console.warn('[bankRecon] previewBankClassificationRules failed:', err?.message || err);
+    }
+
+    let applied = 0;
+    let posted = 0;
+    let skippedFilled = 0;
+    const examined = preview?.examined ?? 0;
+    const noRule = preview?.noRule ?? 0;
+    const ruleCount = preview?.ruleCount ?? rules.length;
+    const matchList = preview?.matches?.length
+        ? preview.matches
+        : null;
+
+    const applyMatch = async (lineId, rulePayload) => {
+        const row = linesEl.querySelector(`tr[data-line-id="${lineId}"]`);
+        if (!row || row.classList.contains('bank-recon-table__row--processed')) return;
+        const rule = rulePayload.rule_id
+            ? (rules.find((r) => r.id === rulePayload.rule_id) || rulePayload)
+            : rulePayload;
+        if (!applyRuleToClassifyRow(row, rule, { skipIfFilled: onlyEmpty })) {
+            skippedFilled += 1;
+            return;
+        }
+        applied += 1;
+        if (autoPost) {
+            normalizeClassifyStatesForPost(row);
+            if (rowClassifyReady(row, { allowCustom: false })) {
+                await tryAutoPostFromRow(row, lineId, { skipRender: true });
+                posted += 1;
+            }
+        }
+    };
+
+    if (matchList) {
+        for (const match of matchList) {
+            await applyMatch(match.line_id, match);
+        }
+    } else {
+        let clientExamined = 0;
+        let clientNoRule = 0;
+        for (const row of linesEl.querySelectorAll('.bank-recon-table__row[data-line-id]')) {
+            if (row.classList.contains('bank-recon-table__row--processed')) continue;
+            const lineId = row.dataset.lineId;
+            const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
+            if (!line || line.match_status !== 'UNMATCHED') continue;
+            clientExamined += 1;
+            const rule = findMatchingRule(line, rules, row);
+            if (!rule) {
+                clientNoRule += 1;
+                continue;
+            }
+            await applyMatch(lineId, rule);
+        }
+        if (!preview) {
+            return {
+                applied,
+                posted,
+                examined: clientExamined,
+                noRule: clientNoRule,
+                skippedFilled,
+                ruleCount: rules.length,
+            };
+        }
+    }
+
+    if (posted) {
+        renderBankReconciliation();
+        window.renderCashLedger?.();
+        window.processFinances?.();
+    } else if (applied) {
+        syncBulkPostUi();
+    }
+
+    return {
+        applied,
+        posted,
+        examined,
+        noRule,
+        skippedFilled,
+        ruleCount,
+        sampleLineDescription: preview?.sampleLineDescription || null,
+        sampleRuleMatch: preview?.sampleRuleMatch || null,
+    };
+};
+
+const ruleTypeLabel = (type) => (type === 'IN' ? 'Income' : 'Expense');
+
+const renderClassificationRulesList = () => {
+    const listEl = document.getElementById('bank-recon-rules-list');
+    const emptyEl = document.getElementById('bank-recon-rules-empty');
+    if (!listEl) return;
+
+    const rules = getClassificationRules();
+    if (emptyEl) emptyEl.hidden = rules.length > 0;
+    if (!rules.length) {
+        listEl.innerHTML = '';
+        return;
+    }
+
+    listEl.innerHTML = `
+      <table class="bank-recon-rules-table">
+        <thead>
+          <tr>
+            <th>Match</th>
+            <th>Type</th>
+            <th>Category</th>
+            <th>Sub / vendor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rules.map((rule) => {
+        const extras = [
+            rule.sub_category ? esc(rule.sub_category) : '',
+            rule.vendor_name ? esc(rule.vendor_name) : '',
+        ].filter(Boolean).join(' · ');
+        return `<tr data-rule-id="${rule.id}">
+              <td class="bank-recon-rules-table__match" title="${esc(rule.description_match)}">${esc(rule.description_match)}</td>
+              <td>${ruleTypeLabel(rule.line_type)}</td>
+              <td>${esc(rule.category)}</td>
+              <td class="bank-recon-rules-table__extras">${extras || '—'}</td>
+              <td class="bank-recon-rules-table__actions">
+                <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-recon-rule-delete" data-rule-id="${rule.id}" title="Delete rule" aria-label="Delete rule"><i class="fa-solid fa-trash-can"></i></button>
+              </td>
+            </tr>`;
+    }).join('')}
+        </tbody>
+      </table>`;
+};
+
+const refreshRuleFormCategoryList = () => {
+    const datalist = document.getElementById('bank-recon-rule-categories');
+    const typeSel = document.getElementById('bank-recon-rule-type');
+    if (!datalist || !typeSel) return;
+    const cats = typeSel.value === 'IN' ? INCOME_CATS : EXPENSE_CATS;
+    datalist.innerHTML = cats.map((c) => `<option value="${esc(c)}"></option>`).join('');
+};
+
+const syncRuleFormExpenseFields = () => {
+    const typeSel = document.getElementById('bank-recon-rule-type');
+    const isExpense = typeSel?.value === 'OUT';
+    document.getElementById('bank-recon-rule-sub-wrap')?.classList.toggle('bank-recon-rules-field--hidden', !isExpense);
+    document.getElementById('bank-recon-rule-vendor-wrap')?.classList.toggle('bank-recon-rules-field--hidden', !isExpense);
+    refreshRuleFormCategoryList();
+};
+
+const prefillClassificationRuleForm = (prefill = {}) => {
+    const matchInput = document.getElementById('bank-recon-rule-match');
+    const typeSel = document.getElementById('bank-recon-rule-type');
+    const catInput = document.getElementById('bank-recon-rule-category');
+    const subInput = document.getElementById('bank-recon-rule-sub');
+    const vendorInput = document.getElementById('bank-recon-rule-vendor');
+    const priorityInput = document.getElementById('bank-recon-rule-priority');
+    if (matchInput) matchInput.value = prefill.description_match || '';
+    if (typeSel) typeSel.value = prefill.line_type === 'OUT' ? 'OUT' : 'IN';
+    syncRuleFormExpenseFields();
+    if (catInput) catInput.value = prefill.category || '';
+    if (subInput) subInput.value = prefill.sub_category || '';
+    if (vendorInput) vendorInput.value = prefill.vendor_name || '';
+    if (priorityInput) priorityInput.value = String(prefill.priority ?? 0);
+};
+
+const openClassificationRulesModal = async (prefill = null) => {
+    const modal = document.getElementById('bank-recon-rules-modal');
+    if (!modal) return;
+    await ensureClassificationRulesLoaded({ force: true });
+    renderClassificationRulesList();
+    prefillClassificationRuleForm(prefill || {});
+    modal.classList.add('active');
+    if (prefill) document.getElementById('bank-recon-rule-match')?.focus();
+};
+
+const closeClassificationRulesModal = () => {
+    document.getElementById('bank-recon-rules-modal')?.classList.remove('active');
+};
+
+const openSaveRuleFromRow = (row) => {
+    const lineId = row?.dataset.lineId;
+    const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
+    if (!line) return;
+    const category = row.querySelector('.bank-recon-cat-input')?.value?.trim();
+    if (!category) {
+        alert('Pick a category first, then save as a rule.');
+        return;
+    }
+    openClassificationRulesModal({
+        description_match: suggestRuleMatchText(line.description),
+        line_type: bankLineType(line),
+        category,
+        sub_category: row.querySelector('.bank-recon-subcat-input')?.value?.trim() || '',
+        vendor_name: row.querySelector('.bank-recon-vendor-input')?.value?.trim() || '',
+    });
+};
+
+const tryAutoPostFromRow = async (row, lineId, { allowCustom = false, skipRender = false } = {}) => {
     if (!row || row.classList.contains('bank-recon-table__row--busy')) return;
     const matchSel = row.querySelector('.bank-match-select');
     if (matchSel?.value) return;
 
-    const cat = row.querySelector('.bank-recon-cat-select')?.value;
+    const cat = row.querySelector('.bank-recon-cat-input')?.value?.trim();
     if (!cat) return;
     const sub_category = row.querySelector('.bank-recon-subcat-input')?.value?.trim() || null;
     const vendor_name = row.querySelector('.bank-recon-vendor-input')?.value?.trim() || null;
-    if (!rowClassifyReady(row)) return;
+    if (!rowClassifyReady(row, { allowCustom })) return;
 
     setRowBusy(row, true, 'Posting…');
     try {
         await createTxnFromBankLine(lineId, { cat, sub_category, vendor_name });
-        renderBankReconciliation();
-        window.renderCashLedger?.();
-        window.processFinances?.();
+        if (!skipRender) {
+            renderBankReconciliation();
+            window.renderCashLedger?.();
+            window.processFinances?.();
+        } else {
+            setRowBusy(row, false);
+        }
     } catch (err) {
         setRowBusy(row, false);
         alert(err?.message || 'Could not post transaction.');
+        throw err;
     }
 };
 
@@ -1324,6 +2199,39 @@ const tryAutoMatchFromRow = async (row, lineId, txnId) => {
         if (matchSel) matchSel.value = '';
         alert(err?.message || 'Match failed.');
     }
+};
+
+const wireRowOrderButtons = (linesEl) => {
+    const onMove = async (btn, direction) => {
+        if (!btn || btn.disabled || btn.dataset.busy === '1') return;
+        const stepInput = btn.closest('.bank-recon-order-btns')?.querySelector('.bank-recon-move-step');
+        const steps = Math.max(1, parseInt(stepInput?.value, 10) || 1);
+        const choice = await promptRowMoveRecalc();
+        if (choice === 'cancel') return;
+        const recalculate = choice === 'recalc';
+        try {
+            await withButtonBusy(btn, 'Moving…', () => moveStatementLineInDay(btn.dataset.line, direction, { recalculate, steps }));
+            if (recalculate) {
+                renderBankReconciliation();
+            } else {
+                refreshStatementTableRowOrder(linesEl);
+            }
+        } catch (err) {
+            alert(err?.message || 'Could not reorder row.');
+        }
+    };
+
+    linesEl.querySelectorAll('.bank-recon-move-step').forEach((input) => {
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('keydown', (e) => e.stopPropagation());
+    });
+
+    linesEl.querySelectorAll('.bank-recon-move-up').forEach((btn) => {
+        btn.addEventListener('click', () => onMove(btn, -1));
+    });
+    linesEl.querySelectorAll('.bank-recon-move-down').forEach((btn) => {
+        btn.addEventListener('click', () => onMove(btn, 1));
+    });
 };
 
 const wireStatementTable = (linesEl) => {
@@ -1353,17 +2261,77 @@ const wireStatementTable = (linesEl) => {
         }
     });
 
+    const confirmBulkPost = (count, selectedOnly) => {
+        const scope = selectedOnly ? 'selected' : 'ready';
+        return confirm(`Post ${count} ${scope} row(s) to the ledger? This creates transactions and marks lines as matched.`);
+    };
+
+    linesEl.querySelector('#bank-recon-bulk-post')?.addEventListener('click', async () => {
+        const postable = collectPostableRows(linesEl, { selectedOnly: true });
+        if (!postable.length) return;
+        if (!confirmBulkPost(postable.length, true)) return;
+        const btn = linesEl.querySelector('#bank-recon-bulk-post');
+        try {
+            const { posted, failed } = await withButtonBusy(btn, 'Posting…', () => bulkPostClassifiedRows({ root: linesEl, selectedOnly: true }));
+            const failNote = failed ? ` ${failed} failed.` : '';
+            alert(posted ? `Posted ${posted} row(s).${failNote}` : 'Could not post selected rows.');
+        } catch (err) {
+            alert(err?.message || 'Bulk post failed.');
+        }
+    });
+
+    linesEl.querySelector('#bank-recon-post-all-ready')?.addEventListener('click', async () => {
+        const postable = collectPostableRows(linesEl, { selectedOnly: false });
+        if (!postable.length) return;
+        if (!confirmBulkPost(postable.length, false)) return;
+        const btn = linesEl.querySelector('#bank-recon-post-all-ready');
+        try {
+            const { posted, failed } = await withButtonBusy(btn, 'Posting…', () => bulkPostClassifiedRows({ root: linesEl, selectedOnly: false }));
+            const failNote = failed ? ` ${failed} failed.` : '';
+            alert(posted ? `Posted ${posted} row(s).${failNote}` : 'Could not post ready rows.');
+        } catch (err) {
+            alert(err?.message || 'Bulk post failed.');
+        }
+    });
+
     syncBulkSelectionUi(linesEl);
+    wireBankReconTableResize();
+    linesEl.querySelectorAll('[data-sort-key]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.sortKey;
+            if (!key) return;
+            bankReconSortState = bankReconSortState.key === key
+                ? { key, dir: bankReconSortState.dir === 'asc' ? 'desc' : 'asc' }
+                : { key, dir: 'asc' };
+            renderBankReconciliation();
+        });
+    });
+    linesEl.querySelectorAll('[data-column-toggle]').forEach((input) => {
+        input.addEventListener('change', () => {
+            const key = input.dataset.columnToggle;
+            if (!key) return;
+            bankReconVisibleColumns = {
+                ...bankReconVisibleColumns,
+                [key]: !!input.checked,
+            };
+            renderBankReconciliation();
+        });
+    });
     linesEl.querySelectorAll('.bank-recon-cell-input').forEach((input) => {
         input.addEventListener('change', async () => {
             const lineId = input.dataset.line;
             const field = input.dataset.field;
-            let value = input.value;
-            if (field === 'debit' || field === 'credit' || field === 'balance') {
-                value = value === '' ? 0 : parseFloat(value);
-                if (!Number.isFinite(value)) return;
-            }
             try {
+                let value = input.value;
+                if (field === 'line_date') {
+                    value = parseEditableDate(value);
+                    if (!value) throw new Error('Enter date as DD-MM-YY.');
+                    input.value = formatDisplayDate(value);
+                }
+                if (field === 'debit' || field === 'credit' || field === 'balance') {
+                    value = value === '' ? 0 : parseFloat(value);
+                    if (!Number.isFinite(value)) return;
+                }
                 await updateBankStatementLine(lineId, { [field]: value });
                 if (field === 'debit' && value > 0) {
                     const creditInput = linesEl.querySelector(`input[data-line="${lineId}"][data-field="credit"]`);
@@ -1397,33 +2365,81 @@ const wireStatementTable = (linesEl) => {
         });
     });
 
-    linesEl.querySelectorAll('.bank-recon-cat-select').forEach((sel) => {
-        sel.addEventListener('change', () => {
-            const row = sel.closest('tr');
-            clearRowMatch(row);
-            const isIncome = row?.dataset.lineType === 'IN';
-            if (!isIncome) {
-                row?.querySelector('.bank-recon-subcat-input') && (row.querySelector('.bank-recon-subcat-input').value = '');
-                updateRowSubCatDatalist(row, sel.value);
-                return;
-            }
-            tryAutoPostFromRow(row, sel.dataset.line);
+    linesEl.querySelectorAll('.bank-recon-table__row[data-line-id]').forEach((row) => {
+        const onClassifyStateChange = () => syncRowPostButton(row);
+
+        const catWrap = row.querySelector('.bank-recon-classify-combobox--cat');
+        if (catWrap) {
+            wireClassifyCombobox(catWrap, {
+                getOptions: () => categoryOptionsForRow(row),
+                onKnownSelect: () => {
+                    clearRowMatch(row);
+                    const isIncome = row.dataset.lineType === 'IN';
+                    const subInput = row.querySelector('.bank-recon-subcat-input');
+                    if (subInput) {
+                        subInput.value = '';
+                        setClassifyInputState(subInput, '');
+                    }
+                    syncRowPostButton(row);
+                    if (isIncome) maybeAutoPostRow(row);
+                },
+                onStateChange: onClassifyStateChange,
+            });
+        }
+
+        const subWrap = row.querySelector('.bank-recon-classify-combobox--sub');
+        if (subWrap) {
+            wireClassifyCombobox(subWrap, {
+                getOptions: () => subCatOptionsForCategory(resolvedCategoryForRow(row)),
+                onKnownSelect: () => {
+                    syncRowPostButton(row);
+                    maybeAutoPostRow(row);
+                },
+                onStateChange: onClassifyStateChange,
+            });
+        }
+    });
+
+    linesEl.querySelectorAll('.bank-recon-vendor-input').forEach((input) => {
+        input.addEventListener('change', () => {
+            const row = input.closest('tr');
+            syncRowPostButton(row);
+            maybeAutoPostRow(row);
         });
     });
 
-    const onExpenseFieldReady = (input) => {
-        const row = input.closest('tr');
-        if (rowClassifyReady(row)) tryAutoPostFromRow(row, input.dataset.line);
-    };
-
-    linesEl.querySelectorAll('.bank-recon-vendor-input').forEach((input) => {
-        input.addEventListener('change', () => onExpenseFieldReady(input));
-        input.addEventListener('blur', () => onExpenseFieldReady(input));
+    linesEl.querySelectorAll('.bank-recon-post-classify').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const row = btn.closest('tr');
+            if (!row || btn.disabled || btn.dataset.busy === '1') return;
+            if (!rowClassifyReady(row, { allowCustom: true })) {
+                normalizeClassifyStatesForPost(row);
+            }
+            if (!rowClassifyReady(row, { allowCustom: true })) {
+                alert('Pick category and sub-category from the list, or use + Add for new values, then fill vendor.');
+                return;
+            }
+            const lineId = btn.dataset.line || row.dataset.lineId;
+            try {
+                await withButtonBusy(btn, 'Posting…', () => tryAutoPostFromRow(row, lineId, { allowCustom: true }));
+            } catch (err) {
+                alert(err?.message || 'Could not post transaction.');
+            }
+        });
     });
 
-    linesEl.querySelectorAll('.bank-recon-subcat-input').forEach((input) => {
-        input.addEventListener('change', () => onExpenseFieldReady(input));
-        input.addEventListener('blur', () => onExpenseFieldReady(input));
+    linesEl.querySelectorAll('.bank-recon-save-rule-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            openSaveRuleFromRow(btn.closest('tr'));
+        });
+    });
+
+    linesEl.querySelectorAll('.bank-recon-table__row[data-line-id]').forEach((row) => {
+        if (row.classList.contains('bank-recon-table__row--processed')) return;
+        const line = portalState.finances.bankStatementLines?.find((l) => l.id === row.dataset.lineId);
+        if (!line || line.match_status !== 'UNMATCHED') return;
+        const rule = findMatchingRule(line, getClassificationRules(), row);
+        if (rule) applyRuleToClassifyRow(row, rule, { skipIfFilled: true });
     });
 
     linesEl.querySelectorAll('.bank-delete-btn').forEach((btn) => {
@@ -1449,6 +2465,8 @@ const wireStatementTable = (linesEl) => {
             }
         });
     });
+
+    wireRowOrderButtons(linesEl);
 };
 
 export const renderBankReconciliation = () => {
@@ -1457,6 +2475,7 @@ export const renderBankReconciliation = () => {
     const statsEl = document.getElementById('bank-recon-stats');
     const balancePanelEl = document.getElementById('bank-recon-balance-panel');
     const passbookBtn = document.getElementById('bank-recon-passbook-btn');
+    const passbookSettingsBtn = document.getElementById('bank-recon-passbook-settings-btn');
     const passbookHint = document.getElementById('bank-recon-passbook-hint');
     if (!linesEl || !txnsEl) return;
 
@@ -1467,12 +2486,21 @@ export const renderBankReconciliation = () => {
             ? 'Scan passbook photos or PDF with Evolyx OCR'
             : 'Configure Evolyx under Administration → External Connections';
     }
+    if (passbookSettingsBtn) {
+        passbookSettingsBtn.disabled = !passbookReady;
+        passbookSettingsBtn.title = passbookReady
+            ? (getPassbookWebhookBaseUrl()
+                ? `Passbook webhook target: ${getPassbookWebhookBaseUrl()}`
+                : 'Passbook webhook settings (currently auto-detecting from app URL)')
+            : 'Configure Evolyx under Administration → External Connections first';
+    }
     if (passbookHint) {
         passbookHint.hidden = passbookReady;
         passbookHint.innerHTML = passbookReady
             ? ''
             : 'Passbook OCR is not configured. <a href="#admin-connections">Set up Evolyx</a> under Administration → External Connections.';
     }
+    updatePassbookJobsBadge(latestPassbookJobs);
 
     const annotated = annotateStatementLineBalances();
     const lines = portalState.finances.bankStatementLines || [];
@@ -1480,7 +2508,7 @@ export const renderBankReconciliation = () => {
     const matched = annotated.filter((l) => l.match_status === 'MATCHED');
     const ignored = annotated.filter((l) => l.match_status === 'IGNORED');
     const recon = getBankBalanceReconciliation();
-    const showBalances = recon.opening.amount != null;
+    const visibleColumns = getVisibleBalanceColumns();
 
     if (balancePanelEl) {
         balancePanelEl.innerHTML = renderOpeningBalancePanel();
@@ -1490,7 +2518,7 @@ export const renderBankReconciliation = () => {
             const amount = raw === '' ? null : parseFloat(raw);
             const btn = document.getElementById('bank-recon-opening-save');
             try {
-                await withButtonBusy(btn, 'Saving…', () => saveBankOpeningBalance(date, amount));
+                await saveThenRecalculate(btn, 'Saving…', () => saveBankOpeningBalance(date, amount, { pull: false }));
                 renderBankReconciliation();
             } catch (err) {
                 alert(err?.message || 'Could not save opening balance.');
@@ -1500,10 +2528,10 @@ export const renderBankReconciliation = () => {
 
     if (statsEl) {
         const calcCard = recon.calculated.balance != null
-            ? `<div class="metric-card metric-card--highlight"><span class="label">Calculated balance</span><span class="value">${formatMoney(recon.calculated.balance)}</span><span class="metric-card__sub">opening + ${recon.calculated.lineCount} line(s)${recon.calculated.asOf ? ` · as of ${recon.calculated.asOf}` : ''}</span></div>`
+            ? `<div class="metric-card metric-card--highlight"><span class="label">Calculated balance</span><span class="value">${formatMoney(recon.calculated.balance)}</span><span class="metric-card__sub">opening + ${recon.calculated.lineCount} line(s)${recon.calculated.asOf ? ` · as of ${formatDisplayDate(recon.calculated.asOf)}` : ''}</span></div>`
             : `<div class="metric-card metric-card--warn"><span class="label">Calculated balance</span><span class="value">—</span><span class="metric-card__sub">set opening balance above</span></div>`;
         const passbookCard = recon.passbook
-            ? `<div class="metric-card${recon.hasDiscrepancy ? ' metric-card--danger' : ''}"><span class="label">Passbook balance</span><span class="value">${formatMoney(recon.passbook.balance)}</span><span class="metric-card__sub">last row with balance · ${recon.passbook.asOf}</span></div>`
+            ? `<div class="metric-card${recon.hasDiscrepancy ? ' metric-card--danger' : ''}"><span class="label">Passbook balance</span><span class="value">${formatMoney(recon.passbook.balance)}</span><span class="metric-card__sub">last in statement order · ${formatDisplayDate(recon.passbook.asOf)}</span></div>`
             : '';
         const varianceCard = recon.diff != null
             ? `<div class="metric-card${recon.hasDiscrepancy ? ' metric-card--danger' : ' metric-card--ok'}"><span class="label">Variance</span><span class="value">${recon.diff >= 0 ? '+' : ''}${formatMoney(recon.diff)}</span><span class="metric-card__sub">${recon.hasDiscrepancy ? 'needs review' : 'in balance'}</span></div>`
@@ -1520,11 +2548,21 @@ export const renderBankReconciliation = () => {
 
     const ledgerTxns = getUnmatchedLedgerTxns();
 
-    linesEl.innerHTML = renderStatementTable(unmatched, showBalances) + renderProcessedLinesSection(matched, ignored, showBalances);
+    linesEl.innerHTML = renderStatementTable(unmatched, visibleColumns) + renderProcessedLinesSection(matched, ignored, visibleColumns);
     txnsEl.innerHTML = renderLedgerTable(ledgerTxns);
 
     wireStatementTable(linesEl);
     wireProcessedLines(linesEl);
+    ensureClassificationRulesLoaded({ force: true }).then(() => {
+        linesEl.querySelectorAll('.bank-recon-table__row[data-line-id]').forEach((row) => {
+            if (row.classList.contains('bank-recon-table__row--processed')) return;
+            const line = portalState.finances.bankStatementLines?.find((l) => l.id === row.dataset.lineId);
+            if (!line || line.match_status !== 'UNMATCHED') return;
+            const rule = findMatchingRule(line, getClassificationRules(), row);
+            if (rule) applyRuleToClassifyRow(row, rule, { skipIfFilled: true });
+        });
+        syncBulkPostUi();
+    }).catch(() => {});
 };
 
 export async function downloadBankStatementTemplate() {
@@ -1545,6 +2583,7 @@ export async function downloadBankStatementTemplate() {
 }
 
 export const initBankReconciliationUi = () => {
+    initBankReconTableHeightControls(document.getElementById('bank-recon-lines'));
     const setPassbookStatus = (msg, isError = false) => {
         const el = document.getElementById('bank-recon-passbook-status');
         if (!el) return;
@@ -1552,9 +2591,377 @@ export const initBankReconciliationUi = () => {
         el.textContent = msg;
         el.classList.toggle('bank-recon-passbook-status--error', isError);
     };
+    const getActiveApartmentId = () => portalState.access?.activeApartmentId;
+    const passbookJobsModal = document.getElementById('passbook-jobs-modal');
+    const passbookSettingsModal = document.getElementById('passbook-settings-modal');
+    const passbookJobsListEl = document.getElementById('passbook-jobs-list');
+    const passbookJobsEmptyEl = document.getElementById('passbook-jobs-empty');
+    const passbookJobDetailModal = document.getElementById('passbook-job-detail-modal');
+    const passbookJobDetailBody = document.getElementById('passbook-job-detail-body');
+    const passbookJobDetailTitle = document.getElementById('passbook-job-detail-title');
+    const passbookWebhookBaseUrlInput = document.getElementById('passbook-settings-webhook-base-url');
+
+    const importPassbookJobRows = async (btn, job, lines, { skipDedupe = false, confirmMessage } = {}) => {
+        const apartmentId = getActiveApartmentId();
+        if (!apartmentId) throw new Error('Select an apartment first.');
+        if (!lines.length) throw new Error('No rows to import.');
+
+        const { unique, skipped } = skipDedupe
+            ? { unique: lines, skipped: 0 }
+            : dedupeBankImportLines(lines);
+        if (!unique.length) {
+            alert(skipDedupe
+                ? 'No rows selected to import.'
+                : `All ${lines.length} row(s) are already present in bank reconciliation.`);
+            return null;
+        }
+
+        const dupNote = skipped ? `\n\n${skipped} duplicate(s) will be skipped.` : '';
+        const message = confirmMessage || `Import ${unique.length} statement row(s) from this passbook scan?`;
+        if (!confirm(`${message}${dupNote}`)) return null;
+
+        const result = await withButtonBusy(btn, 'Importing…', () => importBankStatement(null, unique, {
+            fileLabel: passbookJobImportLabel(job),
+            skipDedupe: true,
+        }));
+
+        const nextImportCount = (job.import_count || 0) + result.count;
+        await markPassbookJobImported(apartmentId, job.id, {
+            importId: result.importId,
+            importCount: nextImportCount,
+        });
+        setPassbookStatus(`Imported ${result.count} line(s) from passbook scan.`);
+        renderBankReconciliation();
+        await loadPassbookJobs();
+        return result;
+    };
+
+    const syncPassbookJobDetailImportBtn = (root) => {
+        const btn = root?.querySelector('#passbook-job-detail-force-import');
+        const selected = root?.querySelectorAll('.passbook-job-detail-check:checked').length || 0;
+        if (btn) btn.disabled = selected === 0;
+    };
+
+    const renderPassbookJobDetail = (filter = passbookJobDetailState.filter) => {
+        if (!passbookJobDetailBody || !passbookJobDetailState.job || !passbookJobDetailState.analysis) return;
+        passbookJobDetailState.filter = filter;
+        passbookJobDetailBody.innerHTML = renderPassbookJobDetailModal(
+            passbookJobDetailState.job,
+            passbookJobDetailState.analysis,
+            filter,
+        );
+        wirePassbookJobDetail(passbookJobDetailBody);
+    };
+
+    const openPassbookJobDetail = async (jobId) => {
+        const apartmentId = getActiveApartmentId();
+        if (!apartmentId || !passbookJobDetailModal) return;
+        try {
+            const job = await fetchPassbookJobs(apartmentId, jobId);
+            if (!job) throw new Error('Passbook job not found.');
+            const analysis = analyzePassbookJobLines(
+                job,
+                portalState.finances.bankStatementLines || [],
+                portalState.finances.bankStatementImports || [],
+            );
+            passbookJobDetailState = { job, analysis, filter: 'all' };
+            if (passbookJobDetailTitle) {
+                passbookJobDetailTitle.textContent = passbookJobFileNames(job);
+            }
+            const defaultFilter = analysis.summary.duplicates > 0 ? 'duplicates' : 'all';
+            renderPassbookJobDetail(defaultFilter);
+            passbookJobDetailModal.classList.add('active');
+        } catch (err) {
+            alert(err?.message || 'Could not load passbook job details.');
+        }
+    };
+
+    const closePassbookJobDetail = () => {
+        passbookJobDetailModal?.classList.remove('active');
+        passbookJobDetailState = { job: null, analysis: null, filter: 'all' };
+        if (passbookJobDetailBody) passbookJobDetailBody.innerHTML = '';
+    };
+
+    const wirePassbookJobDetail = (root) => {
+        root.querySelectorAll('.passbook-job-detail-filter').forEach((btn) => {
+            btn.addEventListener('click', () => renderPassbookJobDetail(btn.dataset.filter || 'all'));
+        });
+
+        root.querySelectorAll('.passbook-job-detail-check').forEach((cb) => {
+            cb.addEventListener('change', () => syncPassbookJobDetailImportBtn(root));
+        });
+
+        root.querySelector('#passbook-job-detail-select-all')?.addEventListener('change', (e) => {
+            const on = e.target.checked;
+            root.querySelectorAll('.passbook-job-detail-check').forEach((cb) => { cb.checked = on; });
+            syncPassbookJobDetailImportBtn(root);
+        });
+
+        root.querySelector('#passbook-job-detail-select-dupes')?.addEventListener('click', () => {
+            root.querySelectorAll('.passbook-job-detail-check').forEach((cb) => {
+                const row = cb.closest('tr');
+                const isDup = row?.classList.contains('passbook-job-detail-table__row--skipped_existing')
+                    || row?.classList.contains('passbook-job-detail-table__row--skipped_batch');
+                cb.checked = !!isDup;
+            });
+            syncPassbookJobDetailImportBtn(root);
+        });
+
+        root.querySelector('#passbook-job-detail-force-import')?.addEventListener('click', async () => {
+            const { job, analysis } = passbookJobDetailState;
+            if (!job || !analysis) return;
+            const selectedIndexes = new Set(
+                [...root.querySelectorAll('.passbook-job-detail-check:checked')].map((cb) => parseInt(cb.dataset.rowIndex, 10)),
+            );
+            const lines = analysis.rows
+                .filter((row) => selectedIndexes.has(row.index))
+                .map((row) => row.line);
+            const btn = root.querySelector('#passbook-job-detail-force-import');
+            try {
+                const result = await importPassbookJobRows(btn, job, lines, {
+                    skipDedupe: true,
+                    confirmMessage: `Force-import ${lines.length} selected row(s) into bank reconciliation?`,
+                });
+                if (result) {
+                    alert(importResultMessage(result));
+                    const refreshedJob = await fetchPassbookJobs(getActiveApartmentId(), job.id);
+                    passbookJobDetailState.job = refreshedJob;
+                    passbookJobDetailState.analysis = analyzePassbookJobLines(
+                        refreshedJob,
+                        portalState.finances.bankStatementLines || [],
+                        portalState.finances.bankStatementImports || [],
+                    );
+                    renderPassbookJobDetail(passbookJobDetailState.filter);
+                }
+            } catch (err) {
+                alert(err?.message || 'Could not import selected rows.');
+            }
+        });
+
+        syncPassbookJobDetailImportBtn(root);
+    };
+
+    const stopPassbookJobsPolling = () => {
+        if (passbookJobsModalTimer) {
+            clearInterval(passbookJobsModalTimer);
+            passbookJobsModalTimer = null;
+        }
+    };
+    const renderPassbookJobsModal = () => {
+        if (!passbookJobsListEl || !passbookJobsEmptyEl) return;
+        passbookJobsListEl.innerHTML = renderPassbookJobsTable(latestPassbookJobs);
+        passbookJobsEmptyEl.hidden = latestPassbookJobs.length > 0;
+
+        passbookJobsListEl.querySelectorAll('.bank-recon-import-passbook-job').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const apartmentId = getActiveApartmentId();
+                if (!apartmentId) return alert('Select an apartment first.');
+                const jobId = btn.dataset.job;
+                try {
+                    const job = await fetchPassbookJobs(apartmentId, jobId);
+                    const lines = Array.isArray(job?.mapped_lines) ? job.mapped_lines : [];
+                    if (!lines.length) {
+                        alert('This scan completed, but no transaction rows were mapped from the OCR response.');
+                        return;
+                    }
+                    const result = await importPassbookJobRows(btn, job, lines);
+                    if (result) alert(importResultMessage(result));
+                } catch (err) {
+                    alert(err?.message || 'Could not import passbook job.');
+                }
+            });
+        });
+
+        passbookJobsListEl.querySelectorAll('.passbook-job-detail-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                openPassbookJobDetail(btn.dataset.job).catch((err) => {
+                    alert(err?.message || 'Could not open job details.');
+                });
+            });
+        });
+    };
+    const loadPassbookJobs = async () => {
+        const apartmentId = getActiveApartmentId();
+        if (!apartmentId) {
+            latestPassbookJobs = [];
+            updatePassbookJobsBadge([]);
+            renderPassbookJobsModal();
+            return [];
+        }
+        latestPassbookJobs = await fetchPassbookJobs(apartmentId);
+        updatePassbookJobsBadge(latestPassbookJobs);
+        renderPassbookJobsModal();
+        return latestPassbookJobs;
+    };
+    const openPassbookJobsModal = async () => {
+        if (!passbookJobsModal) return;
+        passbookJobsModal.classList.add('active');
+        try {
+            await loadPassbookJobs();
+        } catch (err) {
+            setPassbookStatus(err?.message || 'Could not load passbook jobs.', true);
+        }
+        stopPassbookJobsPolling();
+        passbookJobsModalTimer = window.setInterval(() => {
+            loadPassbookJobs().catch(() => {});
+        }, 8000);
+    };
+    const closePassbookJobsModal = () => {
+        passbookJobsModal?.classList.remove('active');
+        stopPassbookJobsPolling();
+    };
+    const openPassbookSettingsModal = async () => {
+        if (!passbookSettingsModal) return;
+        try {
+            await ensureExternalConnectionsLoaded();
+        } catch (err) {
+            alert(err?.message || 'Could not load passbook settings.');
+            return;
+        }
+        if (passbookWebhookBaseUrlInput) {
+            passbookWebhookBaseUrlInput.value = getPassbookWebhookBaseUrl();
+        }
+        passbookSettingsModal.classList.add('active');
+        passbookWebhookBaseUrlInput?.focus();
+    };
+    const closePassbookSettingsModal = () => {
+        passbookSettingsModal?.classList.remove('active');
+    };
+
+    const manualWrap = document.getElementById('bank-recon-manual-entry');
+    const manualRowsEl = document.getElementById('bank-recon-manual-rows');
+    let manualEntryRowSeq = 0;
+
+    const escapeManualAttr = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+
+    const defaultManualDate = () => new Date().toISOString().slice(0, 10);
+
+    const clearManualRowFields = (row) => {
+        const dateInput = row.querySelector('.manual-row-date');
+        const descInput = row.querySelector('.manual-row-desc');
+        const debitInput = row.querySelector('.manual-row-debit');
+        const creditInput = row.querySelector('.manual-row-credit');
+        const balanceInput = row.querySelector('.manual-row-balance');
+        if (dateInput) dateInput.value = defaultManualDate();
+        if (descInput) descInput.value = '';
+        if (debitInput) debitInput.value = '';
+        if (creditInput) creditInput.value = '';
+        if (balanceInput) balanceInput.value = '';
+    };
+
+    const addManualEntryRow = (defaults = {}) => {
+        if (!manualRowsEl) return null;
+        manualEntryRowSeq += 1;
+        const row = document.createElement('tr');
+        row.dataset.manualRow = String(manualEntryRowSeq);
+        row.innerHTML = `
+          <td><input type="date" class="expense-combobox manual-row-date" value="${escapeManualAttr(defaults.date ?? defaultManualDate())}" /></td>
+          <td><input type="text" class="expense-combobox manual-row-desc" placeholder="Narration or particulars" value="${escapeManualAttr(defaults.description || '')}" /></td>
+          <td class="bank-recon-manual-entry__cell--num"><input type="number" class="expense-combobox manual-row-debit" min="0" step="0.01" placeholder="0.00" value="${escapeManualAttr(defaults.debit ?? '')}" /></td>
+          <td class="bank-recon-manual-entry__cell--num"><input type="number" class="expense-combobox manual-row-credit" min="0" step="0.01" placeholder="0.00" value="${escapeManualAttr(defaults.credit ?? '')}" /></td>
+          <td class="bank-recon-manual-entry__cell--num"><input type="number" class="expense-combobox manual-row-balance" step="0.01" placeholder="Optional" value="${escapeManualAttr(defaults.balance ?? '')}" /></td>
+          <td class="bank-recon-manual-entry__cell--actions">
+            <button type="button" class="btn btn-outline btn--small btn--icon manual-row-remove" title="Remove row" aria-label="Remove row"><i class="fa-solid fa-xmark"></i></button>
+          </td>
+        `;
+        row.querySelector('.manual-row-remove')?.addEventListener('click', () => {
+            const rows = manualRowsEl.querySelectorAll('tr[data-manual-row]');
+            if (rows.length <= 1) {
+                clearManualRowFields(row);
+                return;
+            }
+            row.remove();
+        });
+        manualRowsEl.appendChild(row);
+        return row;
+    };
+
+    const collectManualEntryRows = () => {
+        const lines = [];
+        const errors = [];
+        const rows = [...(manualRowsEl?.querySelectorAll('tr[data-manual-row]') || [])];
+        rows.forEach((row, index) => {
+            const rowNum = index + 1;
+            const date = row.querySelector('.manual-row-date')?.value || '';
+            const description = row.querySelector('.manual-row-desc')?.value?.trim() || '';
+            const debitRaw = row.querySelector('.manual-row-debit')?.value?.trim() ?? '';
+            const creditRaw = row.querySelector('.manual-row-credit')?.value?.trim() ?? '';
+            const balanceRaw = row.querySelector('.manual-row-balance')?.value?.trim() ?? '';
+            const debit = debitRaw === '' ? 0 : parseFloat(debitRaw);
+            const credit = creditRaw === '' ? 0 : parseFloat(creditRaw);
+            const balance = balanceRaw === '' ? null : parseFloat(balanceRaw);
+
+            const hasContent = date || description || debitRaw || creditRaw || balanceRaw;
+            if (!hasContent) return;
+
+            if (!date) errors.push(`Row ${rowNum}: enter the statement date.`);
+            if (!description) errors.push(`Row ${rowNum}: enter the description.`);
+            if (!Number.isFinite(debit) || !Number.isFinite(credit) || (balance != null && !Number.isFinite(balance))) {
+                errors.push(`Row ${rowNum}: enter valid numeric amounts.`);
+            }
+            if (debit > 0 && credit > 0) errors.push(`Row ${rowNum}: enter either debit or credit, not both.`);
+            if (debit <= 0 && credit <= 0) errors.push(`Row ${rowNum}: enter either a debit or a credit amount.`);
+
+            if (!date || !description) return;
+            if (!Number.isFinite(debit) || !Number.isFinite(credit)) return;
+            if (debit > 0 && credit > 0) return;
+            if (debit <= 0 && credit <= 0) return;
+
+            lines.push({ line_date: date, description, debit, credit, balance });
+        });
+        return { lines, errors };
+    };
+
+    const resetManualForm = () => {
+        if (manualRowsEl) manualRowsEl.innerHTML = '';
+        addManualEntryRow();
+    };
+
+    const toggleManualForm = (open) => {
+        if (!manualWrap) return;
+        manualWrap.hidden = !open;
+        if (open) {
+            if (!manualRowsEl?.querySelector('tr[data-manual-row]')) addManualEntryRow();
+            manualRowsEl?.querySelector('.manual-row-date')?.focus();
+        }
+    };
 
     document.getElementById('bank-recon-import-btn')?.addEventListener('click', () => {
         document.getElementById('bank-recon-file')?.click();
+    });
+    document.getElementById('bank-recon-add-row-btn')?.addEventListener('click', () => {
+        toggleManualForm(manualWrap?.hidden ?? true);
+    });
+    document.getElementById('bank-recon-manual-add-row')?.addEventListener('click', () => {
+        const row = addManualEntryRow();
+        row?.querySelector('.manual-row-date')?.focus();
+    });
+    document.getElementById('bank-recon-manual-cancel')?.addEventListener('click', () => {
+        resetManualForm();
+        toggleManualForm(false);
+    });
+    document.getElementById('bank-recon-manual-save')?.addEventListener('click', async () => {
+        const { lines, errors } = collectManualEntryRows();
+        if (errors.length) return alert(errors.join('\n'));
+        if (!lines.length) return alert('Add at least one row with date, description, and an amount.');
+
+        const btn = document.getElementById('bank-recon-manual-save');
+        const fileLabel = `manual-entry:${defaultManualDate()}`;
+        try {
+            const result = await saveThenRecalculate(btn, 'Saving rows…', () => importBankStatement(null, lines, {
+                fileLabel,
+                pull: false,
+            }));
+            alert(importResultMessage(result));
+            resetManualForm();
+            toggleManualForm(false);
+            renderBankReconciliation();
+        } catch (err) {
+            alert(err?.message || 'Could not save rows.');
+        }
     });
     document.getElementById('bank-recon-passbook-btn')?.addEventListener('click', () => {
         if (!isPassbookOcrConfigured()) {
@@ -1562,6 +2969,150 @@ export const initBankReconciliationUi = () => {
             return;
         }
         document.getElementById('bank-recon-passbook-files')?.click();
+    });
+    document.getElementById('bank-recon-passbook-settings-btn')?.addEventListener('click', () => {
+        if (!isPassbookOcrConfigured()) {
+            alert('Configure Evolyx first under Administration → External Connections, then set the webhook base URL here.');
+            return;
+        }
+        openPassbookSettingsModal().catch((err) => alert(err?.message || 'Could not open passbook settings.'));
+    });
+    document.getElementById('bank-recon-passbook-jobs-btn')?.addEventListener('click', () => {
+        openPassbookJobsModal().catch((err) => alert(err?.message || 'Could not open passbook jobs.'));
+    });
+    document.getElementById('passbook-settings-close')?.addEventListener('click', closePassbookSettingsModal);
+    document.getElementById('passbook-settings-reset')?.addEventListener('click', () => {
+        if (passbookWebhookBaseUrlInput) passbookWebhookBaseUrlInput.value = '';
+    });
+    document.getElementById('passbook-settings-save')?.addEventListener('click', async () => {
+        const btn = document.getElementById('passbook-settings-save');
+        const value = passbookWebhookBaseUrlInput?.value?.trim() || '';
+        try {
+            if (value) new URL(value);
+            await withButtonBusy(btn, 'Saving…', () => savePassbookWebhookBaseUrl(value));
+            setPassbookStatus(
+                value
+                    ? `Passbook webhook base URL saved: ${value}`
+                    : 'Passbook webhook base URL cleared. New scans will use the current app host automatically.',
+            );
+            closePassbookSettingsModal();
+            renderBankReconciliation();
+        } catch (err) {
+            alert(err?.message || 'Could not save passbook settings.');
+        }
+    });
+    document.getElementById('passbook-jobs-close')?.addEventListener('click', closePassbookJobsModal);
+    document.getElementById('passbook-jobs-refresh')?.addEventListener('click', () => {
+        loadPassbookJobs().catch((err) => alert(err?.message || 'Could not refresh passbook jobs.'));
+    });
+    document.getElementById('passbook-job-detail-close')?.addEventListener('click', closePassbookJobDetail);
+    passbookJobDetailModal?.addEventListener('click', (e) => {
+        if (e.target?.id === 'passbook-job-detail-modal') closePassbookJobDetail();
+    });
+    passbookJobsModal?.addEventListener('click', (e) => {
+        if (e.target?.id === 'passbook-jobs-modal') closePassbookJobsModal();
+    });
+    passbookSettingsModal?.addEventListener('click', (e) => {
+        if (e.target?.id === 'passbook-settings-modal') closePassbookSettingsModal();
+    });
+    document.getElementById('bank-recon-move-cancel')?.addEventListener('click', () => closeRowMoveConfirmModal('cancel'));
+    document.getElementById('bank-recon-move-just')?.addEventListener('click', () => closeRowMoveConfirmModal('just'));
+    document.getElementById('bank-recon-move-recalc')?.addEventListener('click', () => closeRowMoveConfirmModal('recalc'));
+    document.getElementById('bank-recon-move-confirm-modal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'bank-recon-move-confirm-modal') closeRowMoveConfirmModal('cancel');
+    });
+
+    const classificationRulesModal = document.getElementById('bank-recon-rules-modal');
+    document.getElementById('bank-recon-rules-btn')?.addEventListener('click', () => openClassificationRulesModal());
+    document.getElementById('bank-recon-rules-close')?.addEventListener('click', closeClassificationRulesModal);
+    classificationRulesModal?.addEventListener('click', (e) => {
+        if (e.target?.id === 'bank-recon-rules-modal') closeClassificationRulesModal();
+    });
+    document.getElementById('bank-recon-rule-type')?.addEventListener('change', syncRuleFormExpenseFields);
+    document.getElementById('bank-recon-rules-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('bank-recon-rule-save');
+        const lineType = document.getElementById('bank-recon-rule-type')?.value === 'OUT' ? 'OUT' : 'IN';
+        const payload = {
+            description_match: document.getElementById('bank-recon-rule-match')?.value?.trim(),
+            line_type: lineType,
+            category: document.getElementById('bank-recon-rule-category')?.value?.trim(),
+            sub_category: lineType === 'OUT' ? document.getElementById('bank-recon-rule-sub')?.value?.trim() : null,
+            vendor_name: lineType === 'OUT' ? document.getElementById('bank-recon-rule-vendor')?.value?.trim() : null,
+            priority: parseInt(document.getElementById('bank-recon-rule-priority')?.value, 10) || 0,
+        };
+        try {
+            await withButtonBusy(btn, 'Saving…', () => saveBankClassificationRule(payload));
+            renderClassificationRulesList();
+            prefillClassificationRuleForm({ line_type: lineType });
+            document.getElementById('bank-recon-rule-match')?.focus();
+        } catch (err) {
+            alert(err?.message || 'Could not save rule.');
+        }
+    });
+    document.getElementById('bank-recon-rules-list')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.bank-recon-rule-delete');
+        if (!btn || btn.dataset.busy === '1') return;
+        const id = btn.dataset.ruleId;
+        if (!id || !confirm('Delete this classification rule?')) return;
+        try {
+            await withButtonBusy(btn, '…', () => deleteBankClassificationRule(id));
+            renderClassificationRulesList();
+        } catch (err) {
+            alert(err?.message || 'Could not delete rule.');
+        }
+    });
+    document.getElementById('bank-recon-rules-run')?.addEventListener('click', async () => {
+        const btn = document.getElementById('bank-recon-rules-run');
+        const autoPost = document.getElementById('bank-recon-rules-auto-post')?.checked;
+        const onlyEmpty = document.getElementById('bank-recon-rules-only-empty')?.checked !== false;
+        await ensureClassificationRulesLoaded({ force: true });
+        if (!getClassificationRules().length) {
+            alert('No classification rules found. Save a rule first, or run docs/scripts/sql/supabase_bank_classification_rules.sql in Supabase.');
+            return;
+        }
+        try {
+            const result = await withButtonBusy(btn, 'Running…', () => runClassificationRulesOnUnmatched({ autoPost, onlyEmpty }));
+            const { applied, posted, examined, noRule, skippedFilled, ruleCount } = result;
+            const postNote = autoPost && posted ? ` ${posted} posted automatically.` : '';
+            const bulkHint = applied && !posted
+                ? ' Use Post all ready above the table to save them in bulk.'
+                : '';
+            if (applied) {
+                alert(`Applied rules to ${applied} row(s).${postNote}${bulkHint}`);
+                return;
+            }
+            const parts = [`Checked ${examined} unmatched row(s) against ${ruleCount} rule(s) (stored line descriptions from database).`];
+            if (noRule) {
+                parts.push(`${noRule} had no match.`);
+                parts.push('Rules use case-insensitive contains (not exact). Try a shorter phrase like "NEFT:Nobroker", or regex like /nobroker/i.');
+            }
+            if (skippedFilled) parts.push(`${skippedFilled} skipped because category was already set.`);
+            if (result.sampleLineDescription) {
+                parts.push(`Example line: "${result.sampleLineDescription}"`);
+            }
+            if (result.sampleRuleMatch) {
+                parts.push(`Example rule: "${result.sampleRuleMatch}"`);
+            }
+            alert(parts.join('\n\n'));
+        } catch (err) {
+            alert(err?.message || 'Could not run rules.');
+        }
+    });
+
+    document.getElementById('bank-recon-recalc-btn')?.addEventListener('click', async () => {
+        const opening = getBankOpeningConfig();
+        if (opening.amount == null) {
+            alert('Set the opening balance first — calculated balances need a starting point.');
+            return;
+        }
+        const btn = document.getElementById('bank-recon-recalc-btn');
+        try {
+            await saveThenRecalculate(btn, 'Recalculating…', () => recalculateBankStatementBalances());
+            renderBankReconciliation();
+        } catch (err) {
+            alert(err?.message || 'Could not recalculate balances.');
+        }
     });
     document.getElementById('bank-recon-template-btn')?.addEventListener('click', () => {
         downloadBankStatementTemplate().catch((err) => alert(err?.message || 'Download failed.'));
@@ -1609,30 +3160,15 @@ export const initBankReconciliationUi = () => {
         setPassbookStatus('');
         try {
             const files = validatePassbookFiles(fileList);
-            if (!confirm(`Scan ${files.length} passbook file(s) with Evolyx OCR? This may take a few minutes.`)) return;
+            if (!confirm(`Queue OCR for ${files.length} passbook file(s)? You can keep working while the scan runs in the background.`)) return;
 
-            setPassbookStatus('Scanning passbook… this may take up to 5 minutes. Please wait.');
-            const { lines, meta } = await withButtonBusy(btn, 'Scanning…', () => parsePassbookFiles(files));
-
-            const preview = lines.slice(0, 3).map((l) => {
-                const amt = l.credit > 0 ? `+₹${l.credit}` : `-₹${l.debit}`;
-                return `${l.line_date} ${amt} ${(l.description || '').slice(0, 40)}`;
-            }).join('\n');
-            const more = lines.length > 3 ? `\n… and ${lines.length - 3} more` : '';
-            const { unique, skipped } = dedupeBankImportLines(lines);
-            const dupNote = skipped ? `\n\n${skipped} duplicate(s) will be skipped.` : '';
-            if (!unique.length) {
-                alert(`All ${lines.length} line(s) are duplicates. Nothing to import.`);
-                return;
+            setPassbookStatus('Passbook scan queued. Track progress in Jobs and import rows once the run completes.');
+            const { job } = await withButtonBusy(btn, 'Queueing…', () => parsePassbookFiles(files));
+            await loadPassbookJobs();
+            await openPassbookJobsModal();
+            if (job?.id) {
+                setPassbookStatus(`Passbook scan queued successfully. Job ${job.id.slice(0, 8)} is now running in the background.`);
             }
-            if (!confirm(`Found ${lines.length} transaction(s).\n\n${preview}${more}\n\nImport ${unique.length} new line(s)?${dupNote}`)) return;
-
-            const result = await importBankStatement(null, lines, {
-                fileLabel: passbookImportLabel(files, meta),
-            });
-            setPassbookStatus(`Imported ${result.count} line(s) from passbook scan.`);
-            alert(importResultMessage(result));
-            renderBankReconciliation();
         } catch (err) {
             const msg = err?.message || 'Passbook scan failed.';
             setPassbookStatus(msg, true);
@@ -1641,6 +3177,8 @@ export const initBankReconciliationUi = () => {
             input.value = '';
         }
     });
+    ensureExternalConnectionsLoaded().then(() => renderBankReconciliation()).catch(() => {});
+    loadPassbookJobs().catch(() => {});
 };
 
 window.renderBankReconciliation = renderBankReconciliation;

@@ -1,24 +1,33 @@
-import { restMaybeSingle } from './supabaseRest.js';
+import { createServiceClient, createUserClient } from './serverSupabase.js';
 
 export const EVOLYX_PROVIDER = 'EVOLYX';
 export const EVOLYX_PASSBOOK_KEY = 'passbook_reader';
 
-/**
- * Load Evolyx passbook OCR settings for this society from the DB.
- */
-export async function resolveEvolyxPassbookConfig(authHeader, apartmentId) {
-    const { data, error } = await restMaybeSingle(
-        authHeader,
-        'apartment_external_connections',
-        {
-            apartment_id: apartmentId,
-            provider: EVOLYX_PROVIDER,
-            connection_key: EVOLYX_PASSBOOK_KEY,
-        },
-        'base_url, client_id, api_key, workflow_id, enabled, api_key_set',
-    );
+function connectionClient(authHeader = '') {
+    try {
+        return createServiceClient();
+    } catch (err) {
+        if (authHeader && /SUPABASE_SERVICE_ROLE_KEY/i.test(err?.message || '')) {
+            return createUserClient(authHeader);
+        }
+        throw err;
+    }
+}
 
-    if (error) throw Object.assign(new Error(error), { status: 500 });
+/**
+ * Load Evolyx passbook OCR settings for this society from the DB using server-side service credentials.
+ */
+export async function resolveEvolyxPassbookConfig(apartmentId, { authHeader = '' } = {}) {
+    const service = connectionClient(authHeader);
+    const { data, error } = await service
+        .from('apartment_external_connections')
+        .select('base_url, client_id, api_key, workflow_id, enabled, config')
+        .eq('apartment_id', apartmentId)
+        .eq('provider', EVOLYX_PROVIDER)
+        .eq('connection_key', EVOLYX_PASSBOOK_KEY)
+        .maybeSingle();
+
+    if (error) throw Object.assign(new Error(error.message || String(error)), { status: 500 });
 
     if (data?.enabled !== false && data?.api_key) {
         const baseUrl = String(data.base_url || '').replace(/\/$/, '');
@@ -30,6 +39,7 @@ export async function resolveEvolyxPassbookConfig(authHeader, apartmentId) {
             apiKey: data.api_key,
             workflowId: data.workflow_id || '6a44f36f5ddde12aabd18023',
             clientId: data.client_id || 'communityhub',
+            webhookBaseUrl: String(data.config?.webhook_base_url || '').trim(),
             source: 'database',
         };
     }

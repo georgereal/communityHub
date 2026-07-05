@@ -8,7 +8,7 @@ import { renderExternalConnectionsAdmin } from './externalConnections.js';
 import { closeSyncLogDrawer, teardownSyncLogDrawer } from './ledgerSyncLog.js';
 import { withButtonBusy, bindBusyClick } from './buttonBusy.js';
 
-const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
+import { EXPENSE_CATS } from './expenseCategories.js';
 const STAFF_ROLES = ['Manager', 'Security Guard', 'Housekeeping', 'Maintenance', 'Accounts', 'Other'];
 
 const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff', 'connections', 'sync'];

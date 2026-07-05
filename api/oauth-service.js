@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { createServiceClient } from './serverSupabase.js';
+import { requireApartmentPermission } from './serverAuth.js';
 
 async function userCanAccountsEdit(supabase, userId, apartmentId) {
     try {
@@ -80,28 +81,6 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-        return res.status(500).json({ error: 'Missing Supabase environment variables.' });
-    }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Sign in required.' });
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-        return res.status(401).json({ error: 'Invalid session.' });
-    }
-
-    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
     const body = req.body || {};
     const { action, apartment_id, provider } = body;
 
@@ -109,11 +88,13 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'apartment_id is required.' });
     }
 
+    let auth;
     try {
-        await assertAccountsAccess(serviceClient, user.id, apartment_id);
+        auth = await requireApartmentPermission(req, apartment_id, 'accounts.edit');
     } catch (err) {
         return res.status(err.status || 500).json({ error: err.message });
     }
+    const { user, service: serviceClient } = auth;
 
     if (action === 'disconnect') {
         if (!provider || !['GOOGLE', 'MICROSOFT'].includes(provider)) {

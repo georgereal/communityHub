@@ -1008,9 +1008,6 @@ export function renderAdminSyncPanel() {
         await withButtonBusy(btn, 'Running…', async () => {
             const apartment_id = portalState.access?.activeApartmentId;
             if (!apartment_id || apartment_id === 'apt-default') throw new Error('Select a society first.');
-            const { data: sess } = await supabase.auth.getSession();
-            const token = sess?.session?.access_token;
-            if (!token) throw new Error('Sign in again to run the server sync.');
 
             clearSyncLog();
             syncLog('info', 'Manual server sync requested', { apartment_id });
@@ -1019,7 +1016,6 @@ export function renderAdminSyncPanel() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ apartment_id }),
             });

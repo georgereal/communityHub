@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireApartmentPermission } from './serverAuth.js';
 
 /**
  * Exchange Microsoft authorization code for tokens (server-side only — uses client secret).
@@ -9,45 +9,13 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-        return res.status(500).json({ error: 'Missing Supabase environment variables.' });
-    }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Sign in required.' });
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-        return res.status(401).json({ error: 'Invalid session.' });
-    }
-
     const { code, apartment_id, redirect_uri, code_verifier } = req.body || {};
     if (!code || !apartment_id || !redirect_uri) {
         return res.status(400).json({ error: 'code, apartment_id, and redirect_uri are required.' });
     }
 
     try {
-    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
-
-    const { data: mapping } = await serviceClient
-        .from('user_apartments')
-        .select('apartment_id')
-        .eq('user_id', user.id)
-        .eq('apartment_id', apartment_id)
-        .maybeSingle();
-
-    if (!mapping) {
-        return res.status(403).json({ error: 'No access to this society.' });
-    }
+    const { user, service: serviceClient } = await requireApartmentPermission(req, apartment_id, 'accounts.edit');
 
     const { data: app, error: appError } = await serviceClient
         .from('ledger_sync_oauth_apps')

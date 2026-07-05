@@ -9441,10 +9441,350 @@ header {
 
 .bank-recon-toolbar {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
   margin-bottom: 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.bank-recon-toolbar__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bank-recon-toolbar__group--end {
+  margin-left: auto;
+}
+
+.bank-recon-toolbar__label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 0.15rem;
+}
+
+.btn--danger-outline {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.bank-recon-recalc-status {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: #1e40af;
+  background: color-mix(in srgb, var(--accent) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.bank-recon-move-confirm-modal {
+  max-width: 28rem;
+}
+
+.bank-recon-move-confirm-modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.bank-recon-move-confirm-modal p {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.bank-recon-move-confirm-modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.bank-recon-classify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bank-recon-classify-actions .bank-recon-classify-combobox {
+  flex: 1 1 8rem;
+  min-width: 7rem;
+}
+
+.bank-recon-classify-actions .bank-recon-vendor-input {
+  flex: 1 1 8rem;
+  min-width: 7rem;
+}
+
+#bank-recon-rules-modal.modal-backdrop {
+  z-index: 1200;
+}
+
+#bank-recon-rules-modal .modal-content.bank-recon-rules-modal {
+  max-width: 44rem;
+  width: min(96vw, 44rem);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.bank-recon-rules-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.bank-recon-rules-modal__head h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.bank-recon-rules-modal__head p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.bank-recon-rules-modal__run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, white);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+}
+
+.bank-recon-rules-modal__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.bank-recon-rules-list {
+  margin-bottom: 0.85rem;
+}
+
+.bank-recon-rules-empty {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.bank-recon-rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.bank-recon-rules-table th,
+.bank-recon-rules-table td {
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.bank-recon-rules-table__match {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-recon-rules-table__extras {
+  color: var(--text-dim);
+  max-width: 10rem;
+}
+
+.bank-recon-rules-table__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bank-recon-rules-form {
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+
+.bank-recon-rules-form__title {
+  margin: 0 0 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.bank-recon-rules-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 0.65rem;
+}
+
+.bank-recon-rules-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.bank-recon-rules-field input,
+.bank-recon-rules-field select {
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.bank-recon-rules-field--wide {
+  grid-column: 1 / -1;
+}
+
+.bank-recon-rules-field--narrow {
+  max-width: 6rem;
+}
+
+.bank-recon-rules-field--hidden {
+  display: none;
+}
+
+.bank-recon-rules-form__actions {
+  margin-top: 0.65rem;
+}
+
+.bank-recon-manual-entry {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.85rem 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.bank-recon-manual-entry__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.bank-recon-manual-entry__title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.bank-recon-manual-entry__table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.bank-recon-manual-entry__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.bank-recon-manual-entry__table th,
+.bank-recon-manual-entry__table td {
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.bank-recon-manual-entry__table thead th {
+  background: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.bank-recon-manual-entry__th--num,
+.bank-recon-manual-entry__cell--num {
+  text-align: right;
+  width: 7rem;
+}
+
+.bank-recon-manual-entry__th--actions,
+.bank-recon-manual-entry__cell--actions {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.bank-recon-manual-entry__table .expense-combobox {
+  width: 100%;
+  min-width: 0;
+}
+
+.bank-recon-manual-entry__grid {
+  display: grid;
+  grid-template-columns: 140px minmax(220px, 2fr) repeat(3, minmax(120px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.bank-recon-manual-entry__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.bank-recon-manual-entry__desc {
+  min-width: 0;
+}
+
+.bank-recon-manual-entry__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.bank-recon-manual-entry__hint {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  max-width: 48rem;
+}
+
+.bank-recon-manual-entry__buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+  .bank-recon-manual-entry__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bank-recon-manual-entry__desc {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Activity audit review queue (office manager → office bearer) */
@@ -9599,6 +9939,30 @@ header {
   color: var(--danger);
 }
 
+.bank-recon-passbook-jobs-btn {
+  position: relative;
+}
+
+.bank-recon-passbook-settings-btn {
+  min-width: 2.4rem;
+  padding-inline: 0.7rem;
+}
+
+.bank-recon-passbook-jobs-badge {
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .bank-recon-passbook-hint {
   margin: -0.35rem 0 0.85rem;
   font-size: 0.8rem;
@@ -9608,6 +9972,433 @@ header {
 
 .bank-recon-passbook-hint a {
   color: var(--accent);
+}
+
+#passbook-jobs-modal.modal-backdrop {
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  z-index: 2100;
+}
+
+#passbook-jobs-modal .modal-content.passbook-jobs-modal {
+  width: min(900px, 95vw);
+  height: auto;
+  max-height: 88vh;
+  border-radius: 16px;
+  transform: translateY(14px) scale(0.98);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+#passbook-jobs-modal.modal-backdrop.active .modal-content.passbook-jobs-modal {
+  transform: translateY(0) scale(1);
+}
+
+.passbook-jobs-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.15rem 1.2rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.passbook-jobs-modal__head h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.passbook-jobs-modal__head p {
+  margin-top: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.passbook-jobs-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.8rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+#passbook-settings-modal.modal-backdrop {
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  z-index: 2100;
+}
+
+#passbook-settings-modal .modal-content.passbook-settings-modal {
+  width: min(640px, 94vw);
+  height: auto;
+  max-height: 88vh;
+  border-radius: 16px;
+  transform: translateY(14px) scale(0.98);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+#passbook-settings-modal.modal-backdrop.active .modal-content.passbook-settings-modal {
+  transform: translateY(0) scale(1);
+}
+
+.passbook-settings-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.15rem 1.2rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.passbook-settings-modal__head h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.passbook-settings-modal__head p {
+  margin-top: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.passbook-settings-modal__body {
+  padding: 1rem 1.2rem;
+}
+
+.passbook-settings-modal__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0 1.2rem 1.2rem;
+}
+
+.passbook-jobs-list {
+  padding: 0 1.2rem 1.2rem;
+  overflow: auto;
+}
+
+.passbook-jobs-empty {
+  padding: 0 1.2rem 1.2rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.passbook-jobs-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.passbook-jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.passbook-jobs-table th,
+.passbook-jobs-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  text-align: left;
+}
+
+.passbook-jobs-table thead th {
+  background: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.passbook-jobs-table__th--num,
+.passbook-jobs-table__cell--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.passbook-jobs-table__th--actions,
+.passbook-jobs-table__cell--actions {
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+.passbook-jobs-table__file {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.passbook-jobs-table__meta {
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.passbook-jobs-table__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.passbook-jobs-table__row--error .passbook-jobs-table__error {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, white);
+}
+
+.passbook-job-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.passbook-job-status--initialized,
+.passbook-job-status--submitted,
+.passbook-job-status--processing {
+  background: color-mix(in srgb, var(--warning) 16%, white);
+  color: #b45309;
+}
+
+.passbook-job-status--completed,
+.passbook-job-status--imported {
+  background: color-mix(in srgb, var(--success) 14%, white);
+  color: var(--success);
+}
+
+.passbook-job-status--failed {
+  background: color-mix(in srgb, var(--danger) 14%, white);
+  color: var(--danger);
+}
+
+#passbook-job-detail-modal.modal-backdrop {
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  z-index: 2200;
+}
+
+#passbook-job-detail-modal .modal-content.passbook-job-detail-modal {
+  width: min(1100px, 96vw);
+  height: auto;
+  max-height: 90vh;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.passbook-job-detail-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.15rem 1.2rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.passbook-job-detail-modal__head h2 {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.passbook-job-detail-modal__head p {
+  margin-top: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.passbook-job-detail-modal__body {
+  padding: 1rem 1.2rem 1.2rem;
+  overflow: auto;
+}
+
+.passbook-job-detail__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+
+.passbook-job-detail__metric {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: #f8fafc;
+}
+
+.passbook-job-detail__metric .label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.passbook-job-detail__metric .value {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.passbook-job-detail__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.passbook-job-detail__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.passbook-job-detail-filter {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.passbook-job-detail-filter--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, white);
+}
+
+.passbook-job-detail__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.passbook-job-detail__hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.passbook-job-detail__note {
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  background: #f8fafc;
+  border: 1px solid var(--border);
+}
+
+.passbook-job-detail-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 52vh;
+}
+
+.passbook-job-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.passbook-job-detail-table th,
+.passbook-job-detail-table td {
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.passbook-job-detail-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  z-index: 1;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.passbook-job-detail-table__th--num,
+.passbook-job-detail-table__cell--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.passbook-job-detail-table__th--check,
+.passbook-job-detail-table__cell--check {
+  width: 2rem;
+  text-align: center;
+}
+
+.passbook-job-detail-table__cell--desc {
+  min-width: 12rem;
+  max-width: 24rem;
+  white-space: normal;
+}
+
+.passbook-job-detail-table__row--skipped_existing,
+.passbook-job-detail-table__row--skipped_batch {
+  background: color-mix(in srgb, var(--warning) 8%, white);
+}
+
+.passbook-job-detail-table__row--imported {
+  background: color-mix(in srgb, var(--success) 6%, white);
+}
+
+.passbook-job-detail-table__empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 1rem;
+}
+
+.passbook-job-detail-status {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.passbook-job-detail-status--imported {
+  background: color-mix(in srgb, var(--success) 14%, white);
+  color: var(--success);
+}
+
+.passbook-job-detail-status--skipped_existing,
+.passbook-job-detail-status--skipped_batch {
+  background: color-mix(in srgb, var(--warning) 16%, white);
+  color: #b45309;
+}
+
+.passbook-job-detail-status--ready {
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .passbook-job-detail__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .ext-conn-list {
@@ -9771,6 +10562,11 @@ header {
   line-height: 1.45;
 }
 
+.bank-recon-balance-panel__hint--emphasis {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .bank-recon-balance-panel__ok {
   color: var(--success);
 }
@@ -9860,9 +10656,77 @@ header {
 
 .bank-recon-table-wrap {
   overflow: auto;
-  max-height: min(70vh, 640px);
+  border: none;
+  border-radius: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#bank-recon-table-shell {
+  display: flex;
+  flex-direction: column;
+  resize: vertical;
+  overflow: hidden;
+  min-height: 890px;
+  height: 890px;
+  max-height: calc(100vh - 100px);
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: #fff;
+}
+
+#bank-recon-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.bank-recon-table-resizing {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+.bank-recon-height-picker {
+  position: relative;
+}
+
+.bank-recon-height-picker summary {
+  list-style: none;
+}
+
+.bank-recon-height-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.bank-recon-height-picker__menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 9rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.bank-recon-height-preset {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.bank-recon-height-preset:hover {
+  background: color-mix(in srgb, var(--accent) 8%, #fff);
 }
 
 .bank-recon-table-wrap--compact {
@@ -9892,6 +10756,43 @@ header {
   color: var(--text-dim);
 }
 
+.bank-recon-columns-picker {
+  position: relative;
+}
+
+.bank-recon-columns-picker summary {
+  list-style: none;
+}
+
+.bank-recon-columns-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.bank-recon-columns-picker__menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 13rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  z-index: 4;
+}
+
+.bank-recon-columns-picker__option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-main);
+}
+
+.bank-recon-columns-picker__option + .bank-recon-columns-picker__option {
+  margin-top: 0.45rem;
+}
+
 .bank-recon-table {
   width: 100%;
   border-collapse: collapse;
@@ -9919,6 +10820,34 @@ header {
   white-space: nowrap;
 }
 
+.bank-recon-sort-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bank-recon-sort-btn:hover,
+.bank-recon-sort-btn:focus {
+  color: var(--text-main);
+  outline: none;
+}
+
+.bank-recon-sort-btn--active {
+  color: var(--text-main);
+}
+
+.bank-recon-sort-btn--num {
+  width: 100%;
+  text-align: right;
+}
+
 .bank-recon-table__th--num,
 .bank-recon-table__cell--num {
   text-align: right;
@@ -9937,6 +10866,54 @@ header {
   text-align: center;
   padding-left: 0.5rem;
   padding-right: 0.25rem;
+}
+
+.bank-recon-table__th--order,
+.bank-recon-table__cell--order {
+  width: 3.25rem;
+  text-align: center;
+  padding-left: 0.25rem;
+  padding-right: 0.15rem;
+  vertical-align: middle;
+}
+
+.bank-recon-order-btns {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.bank-recon-order-btns .btn--icon {
+  width: 1.35rem;
+  height: 1.35rem;
+  min-width: 0;
+  padding: 0;
+  font-size: 0.62rem;
+}
+
+.bank-recon-move-step {
+  width: 2.25rem;
+  min-width: 0;
+  padding: 0.1rem 0.15rem;
+  font-size: 0.72rem;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.bank-recon-move-step::-webkit-outer-spin-button,
+.bank-recon-move-step::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.bank-recon-order-hint {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-dim);
 }
 
 .bank-recon-table__th--match,
@@ -9973,7 +10950,7 @@ header {
 .bank-recon-table__cell {
   padding: 0.2rem 0.35rem;
   border-bottom: 1px solid var(--border);
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .bank-recon-table__cell--num {
@@ -9983,11 +10960,21 @@ header {
 }
 
 .bank-recon-table__cell--desc {
-  min-width: 12rem;
+  min-width: 14rem;
+  white-space: normal;
 }
 
 .bank-recon-table__cell--date {
   width: 8.5rem;
+}
+
+.bank-recon-table__th--ocr,
+.bank-recon-table__cell--ocr {
+  width: 3.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: 0.78rem;
 }
 
 .bank-recon-cell-input {
@@ -9999,6 +10986,14 @@ header {
   background: transparent;
   color: inherit;
   box-sizing: border-box;
+}
+
+textarea.bank-recon-cell-input {
+  resize: vertical;
+  min-height: 3.2rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .bank-recon-cell-input:hover,
@@ -10017,7 +11012,15 @@ header {
 }
 
 .bank-recon-cell-input--desc {
-  min-width: 10rem;
+  min-width: 12rem;
+  max-height: 4.5rem;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bank-recon-cell-input--date {
+  min-width: 6.75rem;
 }
 
 .bank-recon-cell-select {
@@ -10049,9 +11052,64 @@ header {
   min-width: 11rem;
 }
 
+.bank-recon-classify-combobox {
+  position: relative;
+  margin-bottom: 0.25rem;
+}
+
+.bank-recon-classify-combobox__menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  margin: 0;
+  padding: 0.2rem 0;
+  list-style: none;
+  max-height: 11rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.bank-recon-classify-combobox__option {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.bank-recon-classify-combobox__option:hover,
+.bank-recon-classify-combobox__option:focus {
+  background: color-mix(in srgb, var(--accent) 10%, white);
+  outline: none;
+}
+
+.bank-recon-classify-combobox__option--add {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.bank-recon-post-classify {
+  margin-top: 0.2rem;
+  width: 100%;
+}
+
 .bank-recon-table__cell--classify .bank-recon-cell-select,
 .bank-recon-table__cell--classify .bank-recon-cell-input {
   margin-bottom: 0.25rem;
+}
+
+.bank-recon-table__row--readonly .bank-recon-table__cell--desc {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .bank-recon-table__cell--type {
@@ -11735,6 +12793,10 @@ header {
   margin-bottom: 1rem;
 }
 
+.fa-charts-grid--triple {
+  grid-template-columns: 1fr 1fr minmax(240px, 0.85fr);
+}
+
 .fa-chart-card,
 .fa-projection-card {
   padding: 1rem;
@@ -11749,7 +12811,7 @@ header {
 .fa-chart-wrap {
   flex: 1;
   position: relative;
-  min-height: 260px;
+  min-height: 280px;
 }
 
 .fa-projection-note {
@@ -11886,9 +12948,24 @@ header {
   color: #4338ca;
 }
 
+@media (max-width: 1100px) {
+  .fa-charts-grid--triple {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .fa-charts-grid--triple .fa-projection-card {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 900px) {
-  .fa-charts-grid {
+  .fa-charts-grid,
+  .fa-charts-grid--triple {
     grid-template-columns: 1fr;
+  }
+
+  .fa-charts-grid--triple .fa-projection-card {
+    grid-column: auto;
   }
 
   .fa-chart-card,

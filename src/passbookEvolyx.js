@@ -1,8 +1,10 @@
 /**
  * Evolyx passbook OCR — client calls /api/passbook-parse, maps to bank statement lines.
  */
-import { portalState, supabase, isPlaceholderApartmentId } from './store.js';
+import { portalState, isPlaceholderApartmentId } from './store.js';
 import { readApiJson } from './apiJson.js';
+import { prepareImportedStatementLines } from './bankStatementOrdering.js';
+import { extractOcrRowIndexFromTxn } from './bankStatementLineUtils.js';
 
 export const PASSBOOK_ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp';
 export const PASSBOOK_MAX_FILES = 20;
@@ -82,8 +84,9 @@ async function filesToPayload(files) {
 
 function collectRawTransactions(data) {
     if (!data || typeof data !== 'object') return [];
+    if (Array.isArray(data.account_statement?.transactions)) return data.account_statement.transactions;
+    if (Array.isArray(data.transactions) && data.transactions.length) return data.transactions;
     const out = [];
-    if (Array.isArray(data.transactions)) out.push(...data.transactions);
     if (Array.isArray(data.accounts)) {
         for (const acct of data.accounts) {
             if (Array.isArray(acct?.transactions)) out.push(...acct.transactions);
@@ -92,11 +95,12 @@ function collectRawTransactions(data) {
     return out;
 }
 
-export function mapEvolyxTransactionsToStatementLines(data) {
+export function mapEvolyxTransactionsToStatementLines(data, openingConfig = {}) {
     const raw = collectRawTransactions(data);
     const lines = [];
 
-    for (const txn of raw) {
+    for (let sourceIndex = 0; sourceIndex < raw.length; sourceIndex += 1) {
+        const txn = raw[sourceIndex];
         if (!txn || typeof txn !== 'object') continue;
         const lineDate = parseDate(
             txn.line_date
@@ -142,11 +146,11 @@ export function mapEvolyxTransactionsToStatementLines(data) {
             debit,
             credit,
             balance: txn.balance != null ? parseAmount(txn.balance) : null,
+            source_row_index: extractOcrRowIndexFromTxn(txn, sourceIndex),
         });
     }
 
-    lines.sort((a, b) => a.line_date.localeCompare(b.line_date) || (a.description || '').localeCompare(b.description || ''));
-    return lines;
+    return prepareImportedStatementLines(lines, openingConfig);
 }
 
 export async function parsePassbookFiles(files, { requestId } = {}) {
@@ -155,14 +159,10 @@ export async function parsePassbookFiles(files, { requestId } = {}) {
         throw new Error('No society selected. Choose your society from the header and try again.');
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('Sign in required.');
-
     const filePayload = await filesToPayload(files);
     const res = await fetch('/api/passbook-parse', {
         method: 'POST',
         headers: {
-            Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -179,34 +179,55 @@ export async function parsePassbookFiles(files, { requestId } = {}) {
                 'Passbook API route not found. Deploy the latest CommunityHub build to Vercel, then restart `npm run dev` if testing locally.',
             );
         }
-        throw new Error(json.error || error || `Passbook parse failed (${res.status}).`);
-    }
-
-    const lines = mapEvolyxTransactionsToStatementLines(json.data);
-    if (!lines.length) {
-        const total = json.data?.summary?.totalTransactions;
-        throw new Error(
-            total
-                ? `Evolyx reported ${total} transaction(s) but none could be mapped. Check date/amount fields.`
-                : 'No transactions found in passbook. Try clearer photos or a PDF export.',
-        );
+        const detail = json.detail ? `\n\nDetail: ${json.detail}` : '';
+        const targetUrl = json.targetUrl ? `\nTarget: ${json.targetUrl}` : '';
+        throw new Error((json.error || error || `Passbook parse failed (${res.status}).`) + detail + targetUrl);
     }
 
     return {
-        lines,
-        meta: {
-            executionId: json.executionId,
-            requestId: json.requestId,
-            durationMs: json.durationMs,
-            filesProcessed: json.filesProcessed,
-            summary: json.data?.summary,
-            accounts: json.data?.accounts,
-        },
+        job: json.job || null,
+        executionId: json.executionId || null,
+        requestId: json.requestId || null,
+        status: json.status || null,
     };
 }
 
 export function passbookImportLabel(files, meta) {
     const names = files.map((f) => f.name).join(', ');
     const exec = meta?.executionId ? ` · ${meta.executionId}` : '';
+    return `evolyx-passbook:${names}${exec}`;
+}
+
+export async function fetchPassbookJobs(apartmentId, jobId = null) {
+    const params = new URLSearchParams({ apartment_id: apartmentId });
+    if (jobId) params.set('job_id', jobId);
+    const res = await fetch(`/api/passbook-jobs?${params.toString()}`);
+    const { ok, json, error } = await readApiJson(res);
+    if (!ok) throw new Error(json.error || error || `Could not load passbook jobs (${res.status}).`);
+    return jobId ? json.job || null : (json.jobs || []);
+}
+
+export async function markPassbookJobImported(apartmentId, jobId, importInfo = {}) {
+    const res = await fetch('/api/passbook-jobs', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            apartment_id: apartmentId,
+            action: 'mark_imported',
+            job_id: jobId,
+            import_count: importInfo.importCount || 0,
+            imported_statement_import_id: importInfo.importId || null,
+        }),
+    });
+    const { ok, json, error } = await readApiJson(res);
+    if (!ok) throw new Error(json.error || error || `Could not update passbook job (${res.status}).`);
+    return json.job || null;
+}
+
+export function passbookJobImportLabel(job) {
+    const names = Array.isArray(job?.file_names) ? job.file_names.join(', ') : 'passbook';
+    const exec = job?.execution_id ? ` · ${job.execution_id}` : '';
     return `evolyx-passbook:${names}${exec}`;
 }

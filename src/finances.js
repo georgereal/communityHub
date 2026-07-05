@@ -5,12 +5,14 @@ import { portalState, persist, supabase, pullState } from './store.js';
 import { isTransactionReconciled } from './bankReconciliation.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
 import {
+    collectAllocationDraft,
     formatAllocationSummary,
-    saveMaintenanceAllocations,
     syncMaintenanceIncomeSection,
     validateMaintenanceAllocations,
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
+import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
+import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS } from './expenseCategories.js';
 
 const CAT_LABELS = {
     Security: 'Security / Guards',
@@ -28,7 +30,6 @@ const CAT_LABELS = {
     Other: 'Miscellaneous',
 };
 
-const EXPENSE_CATS = ['Maintenance', 'Security', 'Plumbing', 'Electrical', 'Stationery', 'Other'];
 const INCOME_CATS = [
     'Maintenance Collection',
     'Marketing',
@@ -78,15 +79,6 @@ const INCOME_EXTRA_BY_CAT = {
             placeholder: 'e.g. Q1 2026 savings account',
         },
     },
-};
-
-const SUB_CAT_SUGGESTIONS = {
-    Maintenance: ['Lift / Elevator', 'Generator', 'Housekeeping', 'Painting', 'Landscaping', 'Pest control'],
-    Security: ['Guard salary', 'Uniforms', 'CCTV'],
-    Plumbing: ['Motor repair', 'Tank cleaning', 'Pipeline'],
-    Electrical: ['Diesel', 'Common area lighting', 'Lift backup'],
-    Stationery: ['Printing', 'Office supplies'],
-    Other: ['Miscellaneous'],
 };
 
 const RECEIPT_BUCKET = 'transaction-receipts';
@@ -834,7 +826,6 @@ const showReceiptAtIndex = async (index) => {
 };
 
 export const saveCashData = async () => {
-    if (!supabase) return;
     const isIncome = portalState.cashModalMode === 'income';
     const amtEl = document.getElementById(isIncome ? 'income-amt' : 'cash-amt');
     const descEl = document.getElementById(isIncome ? 'income-desc' : 'cash-desc');
@@ -905,37 +896,14 @@ export const saveCashData = async () => {
     if (!apartment_id) return alert('No active apartment selected.');
 
     const txnId = portalState.editingTxnId || crypto.randomUUID();
-    let receipt_urls = [...(portalState.pendingReceiptPaths || [])];
-    let bank_proof_urls = wallet === 'BANK' ? [...(portalState.pendingBankProofPaths || [])] : [];
+    const receipt_urls = [...(portalState.pendingReceiptPaths || [])];
+    const bank_proof_urls = wallet === 'BANK' ? [...(portalState.pendingBankProofPaths || [])] : [];
     const removedPaths = (portalState.originalReceiptPaths || []).filter((p) => !receipt_urls.includes(p));
     const removedBankPaths = wallet === 'BANK'
         ? (portalState.originalBankProofPaths || []).filter((p) => !bank_proof_urls.includes(p))
         : (portalState.originalBankProofPaths || []);
 
     try {
-        if (!isIncome && portalState.pendingReceiptFiles?.length) {
-            const uploaded = await uploadReceiptFiles(
-                apartment_id,
-                txnId,
-                portalState.pendingReceiptFiles,
-                receipt_urls.length,
-            );
-            receipt_urls = [...receipt_urls, ...uploaded];
-        }
-
-        if (wallet === 'BANK' && portalState.pendingBankProofFiles?.length) {
-            const uploadedBank = await uploadReceiptFiles(
-                apartment_id,
-                txnId,
-                portalState.pendingBankProofFiles,
-                bank_proof_urls.length,
-                'bank',
-            );
-            bank_proof_urls = [...bank_proof_urls, ...uploadedBank];
-        }
-
-        const receipt_url = receipt_urls[0] || null;
-
         const payload = {
             id: txnId,
             apartment_id,
@@ -951,44 +919,27 @@ export const saveCashData = async () => {
             wallet,
             type,
             date,
-            receipt_url,
-            receipt_urls,
         };
-
-        let { error } = await supabase.from('transactions').upsert(payload);
-        if (error && /sub_category|receipt_url|receipt_urls|vendor_name|vendor_invoice|bank_payment_type|bank_reference|bank_proof_urls/i.test(error.message)) {
-            const core = { ...payload };
-            delete core.sub_category;
-            delete core.receipt_url;
-            delete core.receipt_urls;
-            delete core.vendor_name;
-            delete core.vendor_invoice;
-            delete core.bank_payment_type;
-            delete core.bank_reference;
-            delete core.bank_proof_urls;
-            ({ error } = await supabase.from('transactions').upsert(core));
-            if (!error && (sub_category || receipt_urls.length || vendor_name || vendor_invoice || bank_reference || bank_proof_urls.length)) {
-                alert('Saved without extended fields — run supabase_transactions_extras.sql in Supabase, then edit to add them.');
-            }
-        }
-        if (error) return alert(`Could not save: ${error.message}`);
+        const allocations = isIncome && cat === 'Maintenance Collection'
+            ? collectAllocationDraft().rows
+            : [];
+        await postFinanceMutation('saveTransaction', {
+            apartment_id,
+            transaction: payload,
+            allocations,
+            keepReceiptPaths: receipt_urls,
+            keepBankProofPaths: bank_proof_urls,
+            removeReceiptPaths: removedPaths,
+            removeBankProofPaths: removedBankPaths,
+            newReceiptFiles: !isIncome ? await filesToBase64Payload(portalState.pendingReceiptFiles || []) : [],
+            newBankProofFiles: wallet === 'BANK' ? await filesToBase64Payload(portalState.pendingBankProofFiles || []) : [],
+        });
 
         if (isIncome && cat === 'Maintenance Collection') {
-            const allocResult = await saveMaintenanceAllocations(apartment_id, txnId, cat);
-            if (!allocResult.ok) return alert(`Saved payment but allocations failed: ${allocResult.error}`);
-            if (allocResult.skipped) {
-                alert('Saved without invoice allocation — run supabase_maintenance_billing.sql in Supabase, then edit to apply to dues.');
-            }
             document.dispatchEvent(new CustomEvent('maintenance-payment-saved', {
                 detail: { unitNumber: document.getElementById('maintenance-unit-input')?.value?.trim() || '' },
             }));
         }
-
-        if (removedPaths.length) await deleteReceiptPaths(removedPaths);
-        if (removedBankPaths.length) await deleteReceiptPaths(removedBankPaths);
-
-        if (!isIncome && vendor_name) await rememberVendor(apartment_id, vendor_name);
-        if (!isIncome && sub_category) await rememberSubCategory(apartment_id, cat, sub_category);
 
         await pullState();
         populateVendorDatalist();
@@ -1149,9 +1100,14 @@ window.openCash = (direction = 'OUT', wallet = 'CASH') => {
 };
 
 export const delTxn = async (id) => {
-    if (confirm('Delete Record?') && supabase) {
-        const { error } = await supabase.from('transactions').delete().eq('id', id);
-        if (!error) { await pullState(); processFinances(); renderCashLedger(); }
+    if (confirm('Delete Record?')) {
+        await postFinanceMutation('deleteTransaction', {
+            apartment_id: portalState.access?.activeApartmentId,
+            transaction_id: id,
+        });
+        await pullState();
+        processFinances();
+        renderCashLedger();
     }
 };
 window.delTxn = delTxn;

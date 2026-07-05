@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { createServiceClient } from './serverSupabase.js';
+import { requireApartmentPermission } from './serverAuth.js';
 import {
     parseLedgerSheet,
     computeSyncHash,
@@ -27,15 +28,7 @@ export default async function handler(req, res) {
     }
 
     const authHeader = req.headers.authorization || '';
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-        return res.status(500).json({ error: 'Missing Supabase environment variables.' });
-    }
-
-    const service = createClient(supabaseUrl, supabaseServiceKey);
+    const service = createServiceClient();
 
     // Mode A: Cron secret — sync all due societies.
     const isCron = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
@@ -81,28 +74,15 @@ export default async function handler(req, res) {
     }
 
     // Mode B: Admin test button — uses Supabase session JWT.
-    if (!authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const token = authHeader.slice('Bearer '.length);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-        return res.status(401).json({ error: 'Invalid session.' });
-    }
-
     const apartment_id = req.body?.apartment_id;
     if (!apartment_id) {
         return res.status(400).json({ error: 'apartment_id is required.' });
     }
 
-    const allowed = await userCanAccountsEdit(service, user.id, apartment_id);
-    if (!allowed) {
-        return res.status(403).json({ error: 'Not permitted.' });
+    try {
+        await requireApartmentPermission(req, apartment_id, 'accounts.edit');
+    } catch (err) {
+        return res.status(err.status || 500).json({ error: err.message });
     }
 
     try {

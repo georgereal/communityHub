@@ -496,15 +496,11 @@ export async function disconnectServiceAccount(provider) {
         throw new Error('Only accounts managers can disconnect the service account.');
     }
     const apartment_id = portalState.access?.activeApartmentId;
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('Sign in again to disconnect the service account.');
 
     const res = await fetch('/api/oauth-service', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ action: 'disconnect', apartment_id, provider }),
     });
@@ -519,16 +515,10 @@ async function completeServiceAccountGoogleCallback(code) {
     const pending = JSON.parse(pendingRaw);
     const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-        throw new Error('Sign in to CommunityHub before connecting the service account.');
-    }
-
     const res = await fetch('/api/oauth-service', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
             action: 'google_exchange',

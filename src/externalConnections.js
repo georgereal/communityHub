@@ -1,8 +1,9 @@
 /**
  * External API connections — per-society credentials (Evolyx passbook OCR, etc.)
  */
-import { portalState, supabase, pullState } from './store.js';
+import { portalState } from './store.js';
 import { withButtonBusy } from './buttonBusy.js';
+import { readApiJson } from './apiJson.js';
 
 export const EVOLYX_PROVIDER = 'EVOLYX';
 export const EVOLYX_PASSBOOK_KEY = 'passbook_reader';
@@ -14,9 +15,10 @@ export const CONNECTION_CATALOG = [
         label: 'Evolyx — Passbook Reader',
         description: 'Scan passbook photos or PDFs into bank statement lines for reconciliation.',
         defaults: {
-            base_url: 'http://localhost:3000',
+            base_url: 'https://communityhub.evolyx.in',
             client_id: 'communityhub',
             workflow_id: '6a44f36f5ddde12aabd18023',
+            webhook_base_url: '',
         },
     },
 ];
@@ -33,14 +35,89 @@ export const isPassbookOcrConfigured = () => {
     return Boolean(row?.enabled !== false && row?.api_key_set);
 };
 
+export const getPassbookWebhookBaseUrl = () => {
+    const row = getConnectionRow(EVOLYX_PROVIDER, EVOLYX_PASSBOOK_KEY);
+    return String(row?.webhook_base_url || '').trim();
+};
+
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 const fieldId = (provider, connectionKey, field) =>
     `ext-conn-${provider}-${connectionKey}-${field}`.toLowerCase();
 
+let loadingConnections = null;
+let loadedApartmentId = null;
+let attemptedApartmentId = null;
+let loadErrorMessage = '';
+
+async function loadExternalConnections() {
+    const apt = apartmentId();
+    if (!apt) return [];
+    attemptedApartmentId = apt;
+    const res = await fetch(`/api/external-connections?apartment_id=${encodeURIComponent(apt)}`);
+    const { ok, json, error } = await readApiJson(res);
+    if (!ok) throw new Error(json.error || error || 'Could not load external connections.');
+    portalState.admin = portalState.admin || {};
+    portalState.admin.externalConnections = json.rows || [];
+    loadedApartmentId = apt;
+    loadErrorMessage = '';
+    return portalState.admin.externalConnections;
+}
+
+export async function ensureExternalConnectionsLoaded({ force = false } = {}) {
+    const apt = apartmentId();
+    if (!apt) return [];
+    if (!force && loadedApartmentId === apt && Array.isArray(portalState.admin?.externalConnections)) {
+        return portalState.admin.externalConnections;
+    }
+    if (!loadingConnections) {
+        loadingConnections = loadExternalConnections().finally(() => {
+            loadingConnections = null;
+        });
+    }
+    return loadingConnections;
+}
+
+async function upsertExternalConnectionRow(row) {
+    const res = await fetch('/api/external-connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(row),
+    });
+    const { ok, json, error } = await readApiJson(res);
+    if (!ok) throw new Error(json.error || error || 'Save failed.');
+
+    portalState.admin = portalState.admin || {};
+    portalState.admin.externalConnections = [
+        ...getExternalConnections().filter((item) => !(item.provider === row.provider && item.connection_key === row.connection_key)),
+        json.row,
+    ];
+    loadedApartmentId = row.apartment_id;
+    attemptedApartmentId = row.apartment_id;
+    loadErrorMessage = '';
+    renderExternalConnectionsAdmin();
+    return json.row;
+}
+
 export const renderExternalConnectionsAdmin = () => {
     const root = document.getElementById('admin-connections-root');
     if (!root) return;
+
+    if (!loadingConnections && apartmentId() && loadedApartmentId !== apartmentId() && attemptedApartmentId !== apartmentId()) {
+        loadingConnections = loadExternalConnections()
+            .catch((err) => {
+                loadErrorMessage = err?.message || 'Could not load external connections.';
+            })
+            .finally(() => {
+                loadingConnections = null;
+                if (loadedApartmentId === apartmentId()) renderExternalConnectionsAdmin();
+            });
+    }
+
+    if (loadErrorMessage && attemptedApartmentId === apartmentId() && loadedApartmentId !== apartmentId()) {
+        root.innerHTML = `<div class="empty-state"><h3>External Connections</h3><p>${esc(loadErrorMessage)}</p></div>`;
+        return;
+    }
 
     root.innerHTML = CONNECTION_CATALOG.map((def) => {
         const row = getConnectionRow(def.provider, def.connectionKey);
@@ -71,6 +148,11 @@ export const renderExternalConnectionsAdmin = () => {
               value="${esc(row?.client_id || def.defaults.client_id)}" autocomplete="off" />
           </label>
           <label class="ext-conn-field">
+            <span class="ext-conn-label">Webhook app base URL</span>
+            <input type="url" class="expense-combobox" id="${fieldId(def.provider, def.connectionKey, 'webhook_base_url')}"
+              value="${esc(row?.webhook_base_url || def.defaults.webhook_base_url || '')}" placeholder="https://your-public-app-url.example" autocomplete="off" />
+          </label>
+          <label class="ext-conn-field">
             <span class="ext-conn-label">Workflow ID</span>
             <input type="text" class="expense-combobox" id="${fieldId(def.provider, def.connectionKey, 'workflow_id')}"
               value="${esc(row?.workflow_id || def.defaults.workflow_id)}" autocomplete="off" />
@@ -86,7 +168,7 @@ export const renderExternalConnectionsAdmin = () => {
           </label>
         </div>
         <footer class="ext-conn-card__foot">
-          <p class="ext-conn-hint">Keys are stored per society in the database. They are never shown again after save — only used server-side for passbook scans.</p>
+          <p class="ext-conn-hint">Keys are stored per society in the database. They are never shown again after save. Set Webhook app base URL when callbacks should go to a public URL like ngrok instead of the current app host.</p>
           <button type="button" class="btn btn-primary btn--small ext-conn-save"
             data-provider="${def.provider}" data-connection-key="${def.connectionKey}">
             Save connection
@@ -109,7 +191,6 @@ export const renderExternalConnectionsAdmin = () => {
 };
 
 export async function saveExternalConnection(provider, connectionKey) {
-    if (!supabase) throw new Error('Supabase is required.');
     const apt = apartmentId();
     if (!apt) throw new Error('Select a society first.');
 
@@ -118,6 +199,7 @@ export async function saveExternalConnection(provider, connectionKey) {
 
     const base_url = document.getElementById(fieldId(provider, connectionKey, 'base_url'))?.value?.trim();
     const client_id = document.getElementById(fieldId(provider, connectionKey, 'client_id'))?.value?.trim() || null;
+    const webhook_base_url = document.getElementById(fieldId(provider, connectionKey, 'webhook_base_url'))?.value?.trim() || null;
     const workflow_id = document.getElementById(fieldId(provider, connectionKey, 'workflow_id'))?.value?.trim() || null;
     const api_key_input = document.getElementById(fieldId(provider, connectionKey, 'api_key'))?.value?.trim();
     const enabled = document.getElementById(fieldId(provider, connectionKey, 'enabled'))?.checked !== false;
@@ -125,34 +207,43 @@ export async function saveExternalConnection(provider, connectionKey) {
     if (!base_url) throw new Error('API base URL is required.');
 
     const existing = getConnectionRow(provider, connectionKey);
-    const { data: { user } } = await supabase.auth.getUser();
-
     const row = {
-        id: existing?.id || crypto.randomUUID(),
         apartment_id: apt,
         provider,
         connection_key: connectionKey,
         display_name: def.label,
         base_url,
         client_id,
+        webhook_base_url,
         workflow_id,
         enabled,
-        configured_by: user?.id || null,
-        updated_at: new Date().toISOString(),
+        api_key: api_key_input || '',
     };
+    if (!api_key_input && !existing?.api_key_set) throw new Error('API key is required for a new connection.');
 
-    if (api_key_input) {
-        row.api_key = api_key_input;
-        row.api_key_set = true;
-    } else if (!existing?.api_key_set) {
-        throw new Error('API key is required for a new connection.');
+    await upsertExternalConnectionRow(row);
+}
+
+export async function savePassbookWebhookBaseUrl(webhookBaseUrl) {
+    const apt = apartmentId();
+    if (!apt) throw new Error('Select a society first.');
+    await ensureExternalConnectionsLoaded();
+    const def = CONNECTION_CATALOG.find((d) => d.provider === EVOLYX_PROVIDER && d.connectionKey === EVOLYX_PASSBOOK_KEY);
+    const existing = getConnectionRow(EVOLYX_PROVIDER, EVOLYX_PASSBOOK_KEY);
+    if (!def) throw new Error('Passbook connection definition is missing.');
+    if (!existing?.api_key_set) {
+        throw new Error('Configure Evolyx API access first under Administration → External Connections.');
     }
-
-    const { error } = await supabase
-        .from('apartment_external_connections')
-        .upsert(row, { onConflict: 'apartment_id,provider,connection_key' });
-    if (error) throw new Error(error.message);
-
-    await pullState();
-    renderExternalConnectionsAdmin();
+    await upsertExternalConnectionRow({
+        apartment_id: apt,
+        provider: EVOLYX_PROVIDER,
+        connection_key: EVOLYX_PASSBOOK_KEY,
+        display_name: def.label,
+        base_url: existing?.base_url || def.defaults.base_url,
+        client_id: existing?.client_id || def.defaults.client_id,
+        workflow_id: existing?.workflow_id || def.defaults.workflow_id,
+        webhook_base_url: webhookBaseUrl?.trim() || null,
+        enabled: existing?.enabled !== false,
+        api_key: '',
+    });
 }
