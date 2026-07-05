@@ -2,7 +2,8 @@
  * Financial Reports — balance reconciliation, NoBroker alignment,
  * expense-sheet pivot, and income/expense trend projections.
  */
-import { applyLedgerPivotFilter } from './finances.js';
+import { portalState } from './store.js';
+import { navigateToLedgerFromPivot } from './ledgerFilter.js';
 import {
     getMatchedTransactionIds,
     getUnmatchedBankLines,
@@ -30,6 +31,7 @@ const CAT_LABELS = {
     Promotion: 'Promotion / Sponsorship',
     Interest: 'Bank Interest',
     'Petty Inflow': 'Petty Cash Top-up',
+    'Bank Reject': 'Bank Reject',
     Reconcile: 'Bank Reconciliation',
     'Other Income': 'Other Income',
     Other: 'Miscellaneous',
@@ -513,10 +515,107 @@ const renderNoBrokerPanel = (months) => {
       </div>`;
 };
 
+const renderPivotTable = ({
+    el,
+    metaEl,
+    rows,
+    months,
+    dimension,
+    type,
+    emptyMessage,
+    clickable = false,
+}) => {
+    if (!el) return;
+
+    const dimLabel =
+        dimension === 'sub_category' ? 'Sub-category' : dimension === 'vendor' ? 'Vendor' : 'Category';
+    const amountClass = type === 'IN' ? 'fa-income' : 'fa-expense';
+
+    if (!rows.length) {
+        if (metaEl) metaEl.innerHTML = '';
+        el.innerHTML = `<p class="maintenance-dues-empty">${emptyMessage}</p>`;
+        return;
+    }
+
+    const colTotals = months.map((_, i) => rows.reduce((s, r) => s + r.cells[i], 0));
+    const grandTotal = colTotals.reduce((a, b) => a + b, 0);
+
+    const pivotCell = (value, row, monthIndex) => {
+        if (value <= 0.001) return '<td class="fa-num">—</td>';
+        const month = monthIndex != null ? months[monthIndex] : null;
+        if (!clickable || row.key === '__other__') {
+            return `<td class="fa-num ${amountClass}">${formatMoney(value)}</td>`;
+        }
+        const attrs = [
+            `class="fa-num fa-pivot-cell fa-pivot-cell--clickable ${amountClass}"`,
+            'role="button" tabindex="0"',
+            `data-pivot-type="${type}"`,
+            `data-pivot-dimension="${dimension}"`,
+            `data-pivot-key="${escAttr(row.key)}"`,
+            `data-pivot-label="${escAttr(row.label)}"`,
+            month ? `data-pivot-year="${month.y}" data-pivot-month="${month.m}"` : '',
+            `title="View matching ledger entries"`,
+        ].filter(Boolean).join(' ');
+        return `<td ${attrs}>${formatMoney(value)}</td>`;
+    };
+
+    el.innerHTML = `
+      <table class="fa-pivot-table">
+        <thead>
+          <tr>
+            <th>${dimLabel}</th>
+            ${months.map((m) => `<th class="fa-num">${m.label}</th>`).join('')}
+            <th class="fa-num fa-col-total">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td>${r.label}</td>
+              ${r.cells.map((v, i) => pivotCell(v, r, i)).join('')}
+              <td class="fa-num fa-col-total"><strong>${formatMoney(r.total)}</strong></td>
+            </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Monthly total</strong></td>
+            ${colTotals.map((v) => `<td class="fa-num"><strong>${formatMoney(v)}</strong></td>`).join('')}
+            <td class="fa-num fa-col-total"><strong>${formatMoney(grandTotal)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>`;
+};
+
+const renderIncomePivot = (months) => {
+    const el = document.getElementById('fa-income-pivot');
+    const metaEl = document.getElementById('fa-income-pivot-meta');
+    const income = filterIncome();
+    const excludedCount = (portalState.finances.txns || []).filter(
+        (t) => t.type === 'IN' && t.exclude_from_reports,
+    ).length;
+
+    if (metaEl) {
+        metaEl.innerHTML = excludedCount
+            ? `<span class="fa-meta-chip">${income.length} in reports</span>
+               <span class="fa-meta-chip">${excludedCount} excluded from reports</span>`
+            : `<span class="fa-meta-chip">${income.length} income entries</span>`;
+    }
+
+    const { rows } = buildIncomePivot(months, 'cat');
+    renderPivotTable({
+        el,
+        metaEl,
+        rows,
+        months,
+        dimension: 'cat',
+        type: 'IN',
+        emptyMessage: 'No income in this range.',
+    });
+};
+
 const renderExpensePivot = (months, dimension, sheetOnly) => {
     const el = document.getElementById('fa-expense-pivot');
     const metaEl = document.getElementById('fa-expense-pivot-meta');
-    if (!el) return;
 
     const allOut = (portalState.finances.txns || []).filter((t) => t.type === 'OUT');
     const expenses = filterExpenses(sheetOnly);
@@ -532,41 +631,47 @@ const renderExpensePivot = (months, dimension, sheetOnly) => {
             : `<span class="fa-meta-chip">${expenses.length} total expenses (${sheetCount} sheets, ${bankCount} bank)</span>`;
     }
 
-    const { rows, colTotals, grandTotal } = buildExpensePivot(expenses, months, dimension);
+    const { rows } = buildExpensePivot(expenses, months, dimension);
+    renderPivotTable({
+        el,
+        metaEl,
+        rows,
+        months,
+        dimension,
+        type: 'OUT',
+        clickable: true,
+        emptyMessage: `No expenses in this range${sheetOnly ? ' from expense sheets or bank reconciliation' : ''}. Post debits from Bank reconciliation or sync your expense spreadsheet from Admin → Spreadsheet Sync.`,
+    });
+};
 
-    if (!rows.length) {
-        el.innerHTML = `<p class="maintenance-dues-empty">No expenses in this range${sheetOnly ? ' from expense sheets or bank reconciliation' : ''}. Post debits from Bank reconciliation or sync your expense spreadsheet from Admin → Spreadsheet Sync.</p>`;
-        return;
-    }
+const wirePivotDrilldown = () => {
+    const el = document.getElementById('fa-expense-pivot');
+    if (!el || el.dataset.pivotWired) return;
+    el.dataset.pivotWired = '1';
 
-    const dimLabel =
-        dimension === 'sub_category' ? 'Sub-category' : dimension === 'vendor' ? 'Vendor' : 'Category';
+    const openFromCell = (cell) => {
+        if (!cell?.classList.contains('fa-pivot-cell--clickable')) return;
+        navigateToLedgerFromPivot({
+            type: cell.dataset.pivotType || 'OUT',
+            dimension: cell.dataset.pivotDimension || 'cat',
+            key: cell.dataset.pivotKey,
+            label: cell.dataset.pivotLabel,
+            year: cell.dataset.pivotYear ? parseInt(cell.dataset.pivotYear, 10) : null,
+            month: cell.dataset.pivotMonth ? parseInt(cell.dataset.pivotMonth, 10) : null,
+        });
+    };
 
-    el.innerHTML = `
-      <table class="fa-pivot-table">
-        <thead>
-          <tr>
-            <th>${dimLabel}</th>
-            ${months.map((m) => `<th class="fa-num">${m.label}</th>`).join('')}
-            <th class="fa-num fa-col-total">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((r) => `
-            <tr>
-              <td>${r.label}</td>
-              ${r.cells.map((v) => `<td class="fa-num ${v > 0 ? 'fa-expense' : ''}">${v > 0 ? formatMoney(v) : '—'}</td>`).join('')}
-              <td class="fa-num fa-col-total"><strong>${formatMoney(r.total)}</strong></td>
-            </tr>`).join('')}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td><strong>Monthly total</strong></td>
-            ${colTotals.map((v) => `<td class="fa-num"><strong>${formatMoney(v)}</strong></td>`).join('')}
-            <td class="fa-num fa-col-total"><strong>${formatMoney(grandTotal)}</strong></td>
-          </tr>
-        </tfoot>
-      </table>`;
+    el.addEventListener('click', (e) => {
+        const cell = e.target.closest('.fa-pivot-cell--clickable');
+        if (cell) openFromCell(cell);
+    });
+    el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const cell = e.target.closest('.fa-pivot-cell--clickable');
+        if (!cell) return;
+        e.preventDefault();
+        openFromCell(cell);
+    });
 };
 
 export const renderFinanceAnalytics = () => {
@@ -576,9 +681,11 @@ export const renderFinanceAnalytics = () => {
     renderBalanceMetrics();
     renderNoBrokerPanel(months);
     wireNoBrokerActions();
-    renderCategoryCharts(months, settings.sheetOnly, settings.pivotDimension);
+    renderCombinedCategoryChart(months, settings.sheetOnly, settings.pivotDimension);
     renderProjectionSummary(months, settings.sheetOnly, settings.projectMonths);
+    renderIncomePivot(months);
     renderExpensePivot(months, settings.pivotDimension, settings.sheetOnly);
+    wirePivotDrilldown();
 };
 
 const handleNoBrokerUpload = async (file) => {

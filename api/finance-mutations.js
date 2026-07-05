@@ -1,6 +1,6 @@
 import { requireApartmentPermission } from './serverAuth.js';
 import { prepareImportedStatementLines, computeRunningBalances } from '../src/bankStatementOrdering.js';
-import { inferExpenseCategory } from '../src/expenseCategories.js';
+import { inferExpenseCategory, BANK_REJECT_CAT } from '../src/expenseCategories.js';
 import { findMatchingRule } from '../src/bankClassificationRules.js';
 
 const RECEIPT_BUCKET = 'transaction-receipts';
@@ -10,6 +10,7 @@ const bankLineAmount = (line) => Math.max(parseFloat(line?.credit || 0), parseFl
 const bankLineType = (line) => parseFloat(line?.credit || 0) > 0.001 ? 'IN' : 'OUT';
 const inferIncomeCategory = (desc) => {
     const u = String(desc || '').toUpperCase();
+    if (/REJECT|RETURNED|BOUNCE|DISHONOU?R|CHQ\s*RET|CHEQUE\s*RET|INWARD\s*RET/.test(u)) return BANK_REJECT_CAT;
     if (/INTEREST|\bINT\b/.test(u)) return 'Interest';
     if (/NOBROKER|MAINT|RENT|COLLECT|FLAT/.test(u)) return 'Maintenance Collection';
     return 'Other Income';
@@ -113,7 +114,7 @@ async function saveTransactionMutation(service, apartmentId, body) {
     };
 
     let { error } = await service.from('transactions').upsert(payload);
-    if (error && /sub_category|receipt_url|receipt_urls|vendor_name|vendor_invoice|bank_payment_type|bank_reference|bank_proof_urls/i.test(error.message)) {
+    if (error && /sub_category|receipt_url|receipt_urls|vendor_name|vendor_invoice|bank_payment_type|bank_reference|bank_proof_urls|exclude_from_reports/i.test(error.message)) {
         const core = { ...payload };
         delete core.sub_category;
         delete core.receipt_url;
@@ -123,6 +124,7 @@ async function saveTransactionMutation(service, apartmentId, body) {
         delete core.bank_payment_type;
         delete core.bank_reference;
         delete core.bank_proof_urls;
+        delete core.exclude_from_reports;
         ({ error } = await service.from('transactions').upsert(core));
     }
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
@@ -431,10 +433,11 @@ async function createTxnFromBankLineMutation(service, apartmentId, body) {
         date: new Date(`${line.line_date}T12:00:00`).toISOString(),
         receipt_url: null,
         receipt_urls: [],
+        exclude_from_reports: Boolean(body.exclude_from_reports) || body.cat === BANK_REJECT_CAT,
     };
 
     let { error } = await service.from('transactions').insert(payload);
-    if (error && /sub_category|vendor_name|bank_reference|bank_proof_urls/i.test(error.message)) {
+    if (error && /sub_category|vendor_name|bank_reference|bank_proof_urls|exclude_from_reports/i.test(error.message)) {
         const core = { ...payload };
         delete core.sub_category;
         delete core.vendor_name;
@@ -444,6 +447,7 @@ async function createTxnFromBankLineMutation(service, apartmentId, body) {
         delete core.bank_proof_urls;
         delete core.receipt_url;
         delete core.receipt_urls;
+        delete core.exclude_from_reports;
         ({ error } = await service.from('transactions').insert(core));
     }
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
@@ -667,6 +671,7 @@ async function previewBankClassificationRulesMutation(service, apartmentId) {
             category: rule.category,
             sub_category: rule.sub_category,
             vendor_name: rule.vendor_name,
+            exclude_from_reports: !!rule.exclude_from_reports,
         });
     }
 
@@ -708,9 +713,14 @@ async function saveBankClassificationRuleMutation(service, apartmentId, body) {
         vendor_name: body.vendor_name?.trim() || null,
         priority: Number.isFinite(body.priority) ? body.priority : 0,
         enabled: body.enabled !== false,
+        exclude_from_reports: Boolean(body.exclude_from_reports),
         updated_at: new Date().toISOString(),
     };
-    const { data, error } = await service.from('bank_classification_rules').upsert(payload).select('*').single();
+    let { data, error } = await service.from('bank_classification_rules').upsert(payload).select('*').single();
+    if (error && /exclude_from_reports/i.test(error.message)) {
+        delete payload.exclude_from_reports;
+        ({ data, error } = await service.from('bank_classification_rules').upsert(payload).select('*').single());
+    }
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
     return { ok: true, rule: data };
 }
@@ -724,6 +734,52 @@ async function deleteBankClassificationRuleMutation(service, apartmentId, body) 
         .eq('id', id);
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
     return { ok: true };
+}
+
+async function bulkUpdateTransactionsMutation(service, apartmentId, body) {
+    const updates = Array.isArray(body.updates) ? body.updates : [];
+    if (!updates.length) return { ok: true, updated: 0 };
+
+    const allowed = new Set(['cat', 'sub_category', 'description', 'exclude_from_reports', 'vendor_name']);
+    let updated = 0;
+
+    for (const item of updates) {
+        const id = item?.id;
+        const fields = item?.fields || {};
+        if (!id || !Object.keys(fields).length) continue;
+
+        const { data: existing, error: fetchErr } = await service
+            .from('transactions')
+            .select('*')
+            .eq('apartment_id', apartmentId)
+            .eq('id', id)
+            .maybeSingle();
+        if (fetchErr) throw Object.assign(new Error(fetchErr.message), { status: 500 });
+        if (!existing) continue;
+
+        const patch = {};
+        for (const [key, value] of Object.entries(fields)) {
+            if (allowed.has(key)) patch[key] = value;
+        }
+        if (patch.cat === BANK_REJECT_CAT && patch.exclude_from_reports === undefined) {
+            patch.exclude_from_reports = true;
+        }
+        if (!Object.keys(patch).length) continue;
+
+        const payload = { ...existing, ...patch, apartment_id: apartmentId, id };
+        let { error } = await service.from('transactions').upsert(payload);
+        if (error && /sub_category|vendor_name|exclude_from_reports/i.test(error.message)) {
+            const core = { ...payload };
+            delete core.sub_category;
+            delete core.vendor_name;
+            delete core.exclude_from_reports;
+            ({ error } = await service.from('transactions').upsert(core));
+        }
+        if (error) throw Object.assign(new Error(error.message), { status: 500 });
+        updated += 1;
+    }
+
+    return { ok: true, updated };
 }
 
 export default async function handler(req, res) {
@@ -792,6 +848,9 @@ export default async function handler(req, res) {
                 break;
             case 'previewBankClassificationRules':
                 result = await previewBankClassificationRulesMutation(service, apartmentId);
+                break;
+            case 'bulkUpdateTransactions':
+                result = await bulkUpdateTransactionsMutation(service, apartmentId, body);
                 break;
             default:
                 return res.status(400).json({ error: 'Unknown finance action.' });

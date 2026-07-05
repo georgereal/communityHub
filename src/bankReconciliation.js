@@ -34,6 +34,9 @@ import {
 import {
     EXPENSE_CATS,
     SUB_CAT_SUGGESTIONS,
+    INCOME_CATS,
+    BANK_REJECT_CAT,
+    defaultExcludeFromReports,
 } from './expenseCategories.js';
 import {
     isExactListMatch,
@@ -46,15 +49,6 @@ import {
     sortClassificationRules,
     suggestRuleMatchText,
 } from './bankClassificationRules.js';
-const INCOME_CATS = [
-    'Maintenance Collection',
-    'Marketing',
-    'Promotion',
-    'Interest',
-    'Petty Inflow',
-    'Reconcile',
-    'Other Income',
-];
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
@@ -1274,7 +1268,7 @@ export async function clearAllBankStatementData() {
     return { deleted: lines.length };
 }
 
-export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_name }) {
+export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_name, exclude_from_reports = false }) {
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (!line) throw new Error('Statement line not found.');
 
@@ -1290,6 +1284,7 @@ export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_
         cat,
         sub_category,
         vendor_name,
+        exclude_from_reports,
     });
     await pullState();
 }
@@ -1371,6 +1366,12 @@ const fieldNeedsManualPost = (input, options = []) => {
     return !isExactListMatch(raw, options);
 };
 
+const syncRowExcludeForCategory = (row) => {
+    const cat = row?.querySelector('.bank-recon-cat-input')?.value?.trim();
+    const excludeInput = row?.querySelector('.bank-recon-exclude-reports-input');
+    if (excludeInput && cat === BANK_REJECT_CAT) excludeInput.checked = true;
+};
+
 const syncRowPostButton = (row) => {
     const btn = row?.querySelector('.bank-recon-post-classify');
     if (!btn) return;
@@ -1384,6 +1385,7 @@ const syncRowPostButton = (row) => {
         ? Boolean(catInput?.value?.trim())
         : Boolean(catInput?.value?.trim() && subInput?.value?.trim() && vendor);
     btn.hidden = !(needsManual && ready);
+    syncRowExcludeForCategory(row);
     syncSaveRuleButton(row);
     syncBulkPostUi();
 };
@@ -1404,13 +1406,18 @@ const maybeAutoPostRow = (row) => {
 const renderClassifyCell = (line, isIncome) => {
     const postBtn = `<button type="button" class="btn btn-outline btn--small bank-recon-post-classify" data-line="${line.id}" hidden title="Post with new category values">Post</button>`;
     const saveRuleBtn = `<button type="button" class="btn btn-outline btn--small btn--icon bank-recon-save-rule-btn" data-line="${line.id}" hidden title="Save current values as a classification rule"><i class="fa-solid fa-bookmark" aria-hidden="true"></i></button>`;
+    const excludeCheck = `
+      <label class="bank-recon-exclude-reports" title="Omit from income/expense reports (e.g. bank rejects with matching debit/credit)">
+        <input type="checkbox" class="bank-recon-exclude-reports-input" data-line="${line.id}" />
+        <span>No reports</span>
+      </label>`;
     const catCombobox = `
       <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat">
         <input type="text" class="bank-recon-cell-input bank-recon-cat-input" data-line="${line.id}" placeholder="Category…" autocomplete="off" />
         <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
       </div>`;
     if (isIncome) {
-        return `<div class="bank-recon-classify-actions">${catCombobox}${saveRuleBtn}${postBtn}</div>`;
+        return `<div class="bank-recon-classify-actions">${catCombobox}${excludeCheck}${saveRuleBtn}${postBtn}</div>`;
     }
     return `
       <div class="bank-recon-classify-actions">
@@ -1420,7 +1427,7 @@ const renderClassifyCell = (line, isIncome) => {
         <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
       </div>
       <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" data-line="${line.id}" list="bank-recon-vendors" placeholder="Vendor *" value="${esc((line.description || '').slice(0, 48))}" />
-      ${saveRuleBtn}${postBtn}
+      ${excludeCheck}${saveRuleBtn}${postBtn}
       </div>`;
 };
 
@@ -1864,6 +1871,8 @@ const clearRowClassify = (row) => {
         setClassifyInputState(sub, '');
     }
     if (vendor) vendor.value = '';
+    const exclude = row?.querySelector('.bank-recon-exclude-reports-input');
+    if (exclude) exclude.checked = false;
     syncRowPostButton(row);
 };
 
@@ -1946,6 +1955,9 @@ const applyRuleToClassifyRow = (row, rule, { skipIfFilled = true } = {}) => {
 
     const vendorInput = row.querySelector('.bank-recon-vendor-input');
     if (rule.vendor_name && vendorInput) vendorInput.value = rule.vendor_name;
+
+    const excludeInput = row.querySelector('.bank-recon-exclude-reports-input');
+    if (excludeInput && rule.exclude_from_reports) excludeInput.checked = true;
 
     syncRowPostButton(row);
     return Boolean(rule.category && catInput.value?.trim());
@@ -2070,6 +2082,7 @@ const renderClassificationRulesList = () => {
             <th>Type</th>
             <th>Category</th>
             <th>Sub / vendor</th>
+            <th>Reports</th>
             <th></th>
           </tr>
         </thead>
@@ -2084,6 +2097,7 @@ const renderClassificationRulesList = () => {
               <td>${ruleTypeLabel(rule.line_type)}</td>
               <td>${esc(rule.category)}</td>
               <td class="bank-recon-rules-table__extras">${extras || '—'}</td>
+              <td>${rule.exclude_from_reports ? 'Exclude' : 'Include'}</td>
               <td class="bank-recon-rules-table__actions">
                 <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-recon-rule-delete" data-rule-id="${rule.id}" title="Delete rule" aria-label="Delete rule"><i class="fa-solid fa-trash-can"></i></button>
               </td>
@@ -2123,6 +2137,8 @@ const prefillClassificationRuleForm = (prefill = {}) => {
     if (subInput) subInput.value = prefill.sub_category || '';
     if (vendorInput) vendorInput.value = prefill.vendor_name || '';
     if (priorityInput) priorityInput.value = String(prefill.priority ?? 0);
+    const excludeInput = document.getElementById('bank-recon-rule-exclude-reports');
+    if (excludeInput) excludeInput.checked = !!prefill.exclude_from_reports;
 };
 
 const openClassificationRulesModal = async (prefill = null) => {
@@ -2154,6 +2170,7 @@ const openSaveRuleFromRow = (row) => {
         category,
         sub_category: row.querySelector('.bank-recon-subcat-input')?.value?.trim() || '',
         vendor_name: row.querySelector('.bank-recon-vendor-input')?.value?.trim() || '',
+        exclude_from_reports: row.querySelector('.bank-recon-exclude-reports-input')?.checked === true,
     });
 };
 
@@ -2166,11 +2183,12 @@ const tryAutoPostFromRow = async (row, lineId, { allowCustom = false, skipRender
     if (!cat) return;
     const sub_category = row.querySelector('.bank-recon-subcat-input')?.value?.trim() || null;
     const vendor_name = row.querySelector('.bank-recon-vendor-input')?.value?.trim() || null;
+    const exclude_from_reports = row.querySelector('.bank-recon-exclude-reports-input')?.checked === true;
     if (!rowClassifyReady(row, { allowCustom })) return;
 
     setRowBusy(row, true, 'Posting…');
     try {
-        await createTxnFromBankLine(lineId, { cat, sub_category, vendor_name });
+        await createTxnFromBankLine(lineId, { cat, sub_category, vendor_name, exclude_from_reports });
         if (!skipRender) {
             renderBankReconciliation();
             window.renderCashLedger?.();
@@ -3040,6 +3058,7 @@ export const initBankReconciliationUi = () => {
             sub_category: lineType === 'OUT' ? document.getElementById('bank-recon-rule-sub')?.value?.trim() : null,
             vendor_name: lineType === 'OUT' ? document.getElementById('bank-recon-rule-vendor')?.value?.trim() : null,
             priority: parseInt(document.getElementById('bank-recon-rule-priority')?.value, 10) || 0,
+            exclude_from_reports: document.getElementById('bank-recon-rule-exclude-reports')?.checked === true,
         };
         try {
             await withButtonBusy(btn, 'Saving…', () => saveBankClassificationRule(payload));

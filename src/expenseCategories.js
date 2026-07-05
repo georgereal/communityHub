@@ -1,5 +1,18 @@
 /** Society expense categories for bank recon, ledger, and admin. */
 
+export const BANK_REJECT_CAT = 'Bank Reject';
+
+export const INCOME_CATS = [
+    'Maintenance Collection',
+    'Marketing',
+    'Promotion',
+    'Interest',
+    'Petty Inflow',
+    'Reconcile',
+    BANK_REJECT_CAT,
+    'Other Income',
+];
+
 export const EXPENSE_CATS = [
     'Security',
     'Housekeeping',
@@ -19,10 +32,18 @@ export const EXPENSE_CATS = [
     'Water softener Salt',
     'Water Softener Expenses',
     'Bank Charges',
+    BANK_REJECT_CAT,
     'Water tank cleaning',
     'JMC (ABC Share)',
     'Other',
 ];
+
+export const categoryOptionsForType = (type) => (type === 'IN' ? INCOME_CATS : EXPENSE_CATS);
+
+export const isBankRejectCategory = (cat) => cat === BANK_REJECT_CAT;
+
+/** Bank rejects are non-P&L by default. */
+export const defaultExcludeFromReports = (cat) => isBankRejectCategory(cat);
 
 export const SUB_CAT_SUGGESTIONS = {
     'Bank Charges': [
@@ -39,6 +60,7 @@ export const SUB_CAT_SUGGESTIONS = {
 
 export function inferExpenseCategory(desc) {
     const u = String(desc || '').toUpperCase();
+    if (/REJECT|RETURNED|BOUNCE|DISHONOU?R|CHQ\s*RET|CHEQUE\s*RET|INWARD\s*RET/.test(u)) return BANK_REJECT_CAT;
     if (/LIFT\s*AMC|LIFT\s*MAINT/.test(u)) return 'Lift AMC';
     if (/\bLIFT\b|ELEVATOR/.test(u)) return 'Lift';
     if (/GENERATOR\s*AMC|\bDG\s*AMC|GEN\s*AMC/.test(u)) return 'Generator AMC';

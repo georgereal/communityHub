@@ -376,10 +376,56 @@
                 />
               </form>
             </div>
+            <div id="ledger-context-bar" class="ledger-context-bar"></div>
+            <div id="ledger-bulk-bar" class="ledger-bulk-bar">
+              <label class="ledger-bulk-bar__select-all">
+                <input type="checkbox" id="ledger-select-all" aria-label="Select all rows" />
+                <span>Select all</span>
+              </label>
+              <span id="ledger-bulk-count" class="ledger-bulk-bar__count">0 selected · 0 unsaved</span>
+              <label class="ledger-bulk-bar__field">
+                <span>Category</span>
+                <select id="ledger-bulk-cat" class="expense-combobox">
+                  <option value="">— no change —</option>
+                  <optgroup label="Income">
+                    <option value="Maintenance Collection">Maintenance Collection</option>
+                    <option value="Bank Reject">Bank Reject</option>
+                    <option value="Other Income">Other Income</option>
+                    <option value="Interest">Bank Interest</option>
+                    <option value="Reconcile">Bank Reconciliation</option>
+                  </optgroup>
+                  <optgroup label="Expenses">
+                    <option value="Bank Reject">Bank Reject</option>
+                    <option value="Bank Charges">Bank Charges</option>
+                    <option value="Audit">Audit</option>
+                    <option value="Security">Security</option>
+                    <option value="Other">Miscellaneous</option>
+                  </optgroup>
+                </select>
+              </label>
+              <label class="ledger-bulk-bar__field">
+                <span>Reports</span>
+                <select id="ledger-bulk-exclude" class="expense-combobox">
+                  <option value="nochange">No change</option>
+                  <option value="exclude">Exclude from reports</option>
+                  <option value="include">Include in reports</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
+              <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
+            </div>
+            <datalist id="ledger-subcat-datalist"></datalist>
             <div class="registry-list ledger-registry-list">
               <div class="registry-header ledger-txn-header">
-                <span>Date</span><span>Ledger</span><span>Category</span><span>Description</span><span
-                  class="ledger-txn-header__num">Dr (₹)</span><span class="ledger-txn-header__num">Cr (₹)</span><span class="ledger-txn-header__action">Action</span>
+                <label class="ledger-txn-header__check"><input type="checkbox" id="ledger-header-select-all" aria-label="Select all" /></label>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--active" data-sort="date" aria-sort="descending">Date <span class="ledger-sort-indicator">↓</span></button>
+                <button type="button" class="ledger-sort-btn" data-sort="wallet" aria-sort="none">Ledger <span class="ledger-sort-indicator"></span></button>
+                <button type="button" class="ledger-sort-btn" data-sort="cat" aria-sort="none">Category <span class="ledger-sort-indicator"></span></button>
+                <span class="ledger-txn-header__static">Exclude</span>
+                <span class="ledger-txn-header__static">Description</span>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="dr" aria-sort="none">Dr (₹) <span class="ledger-sort-indicator"></span></button>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="cr" aria-sort="none">Cr (₹) <span class="ledger-sort-indicator"></span></button>
+                <span class="ledger-txn-header__action">Action</span>
               </div>
               <div id="cash-ledger-items"></div>
             </div>
@@ -565,16 +611,11 @@
 
           <section class="fa-panel" id="fa-nobroker-panel"></section>
 
-          <div class="fa-charts-grid fa-charts-grid--triple">
-            <div class="metric-card fa-chart-card">
-              <h3 class="fa-panel__title">Income by category</h3>
-              <p class="fa-panel__hint">Stacked monthly totals from ledger income entries.</p>
-              <div class="fa-chart-wrap"><canvas id="fa-income-chart"></canvas></div>
-            </div>
-            <div class="metric-card fa-chart-card">
-              <h3 class="fa-panel__title">Expenses by category</h3>
-              <p class="fa-panel__hint">Uses the <strong>Pivot by</strong> filter above. With structured expenses on, includes sheets and bank reconciliation.</p>
-              <div class="fa-chart-wrap"><canvas id="fa-expense-chart"></canvas></div>
+          <div class="fa-charts-grid fa-charts-grid--dual">
+            <div class="metric-card fa-chart-card fa-chart-card--wide">
+              <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
+              <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+              <div class="fa-chart-wrap"><canvas id="fa-combined-chart"></canvas></div>
             </div>
             <div class="metric-card fa-projection-card" id="fa-projection-summary"></div>
           </div>
@@ -582,8 +623,19 @@
           <section class="fa-panel fa-pivot-panel">
             <div class="fa-panel__head fa-panel__head--row">
               <div>
+                <h3 class="fa-panel__title">Income pivot</h3>
+                <p class="fa-panel__hint">Monthly income by category. Rows excluded from reports are omitted.</p>
+              </div>
+              <div id="fa-income-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-income-pivot"></div>
+          </section>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
                 <h3 class="fa-panel__title">Expense pivot</h3>
-                <p class="fa-panel__hint">Detail table — same data as the expense chart above.</p>
+                <p class="fa-panel__hint">Click a cell to open matching ledger entries.</p>
               </div>
               <div id="fa-expense-pivot-meta" class="fa-pivot-meta"></div>
             </div>
@@ -1955,6 +2007,7 @@
         <option value="Interest">Bank Interest</option>
         <option value="Petty Inflow">Petty Cash Top-up</option>
         <option value="Reconcile">Direct Synchronization</option>
+        <option value="Bank Reject">Bank Reject</option>
         <option value="Other Income">Other Income</option>
         <option value="Other">Miscellaneous</option>
       </select>
@@ -1964,9 +2017,16 @@
       </select>
 
       <div class="expense-modal__footer">
+        <label class="expense-form__exclude-reports">
+          <input type="checkbox" id="txn-exclude-reports" />
+          <span>Exclude from income/expense reports</span>
+          <span class="expense-form__exclude-hint">Ledger &amp; bank balance unchanged — use for bank rejects and internal transfers</span>
+        </label>
+        <div class="expense-modal__footer-actions">
         <button class="btn btn-outline" type="button"
           onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button>
         <button class="btn btn-primary" type="button" id="save-cash-btn">Save Expense</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2867,6 +2927,10 @@
           <label class="bank-recon-rules-field bank-recon-rules-field--narrow">
             <span>Priority</span>
             <input type="number" id="bank-recon-rule-priority" value="0" step="1" title="Higher priority rules win when several match" />
+          </label>
+          <label class="bank-recon-rules-field bank-recon-rules-field--wide bank-recon-rules-modal__checkbox">
+            <input type="checkbox" id="bank-recon-rule-exclude-reports" />
+            <span>Exclude matching rows from income/expense reports</span>
           </label>
         </div>
         <div class="bank-recon-rules-form__actions">

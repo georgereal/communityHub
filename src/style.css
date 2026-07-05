@@ -12793,8 +12793,12 @@ textarea.bank-recon-cell-input {
   margin-bottom: 1rem;
 }
 
-.fa-charts-grid--triple {
-  grid-template-columns: 1fr 1fr minmax(240px, 0.85fr);
+.fa-charts-grid--dual {
+  grid-template-columns: 1.65fr 1fr;
+}
+
+.fa-chart-card--wide {
+  min-height: 400px;
 }
 
 .fa-chart-card,
@@ -12811,7 +12815,90 @@ textarea.bank-recon-cell-input {
 .fa-chart-wrap {
   flex: 1;
   position: relative;
-  min-height: 280px;
+  min-height: 300px;
+}
+
+.fa-pivot-cell--clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.fa-pivot-cell--clickable:hover,
+.fa-pivot-cell--clickable:focus {
+  background: rgba(99, 102, 241, 0.08);
+  outline: none;
+}
+
+.ledger-pivot-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 100%;
+  order: 3;
+  padding: 0.45rem 0.65rem;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.ledger-pivot-filter__label {
+  flex: 1;
+  font-weight: 600;
+  color: #4338ca;
+}
+
+.ledger-recon-badge--report-excluded {
+  background: rgba(100, 116, 139, 0.15);
+  color: #475569;
+}
+
+.bank-recon-exclude-reports {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bank-recon-exclude-reports input {
+  margin: 0;
+}
+
+.expense-form__exclude-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.expense-form__exclude-reports input {
+  margin-right: 0.35rem;
+}
+
+.expense-form__exclude-hint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.expense-modal__footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.expense-modal__footer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .fa-projection-note {
@@ -12948,24 +13035,10 @@ textarea.bank-recon-cell-input {
   color: #4338ca;
 }
 
-@media (max-width: 1100px) {
-  .fa-charts-grid--triple {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .fa-charts-grid--triple .fa-projection-card {
-    grid-column: 1 / -1;
-  }
-}
-
 @media (max-width: 900px) {
   .fa-charts-grid,
-  .fa-charts-grid--triple {
+  .fa-charts-grid--dual {
     grid-template-columns: 1fr;
-  }
-
-  .fa-charts-grid--triple .fa-projection-card {
-    grid-column: auto;
   }
 
   .fa-chart-card,

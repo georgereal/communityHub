@@ -2,8 +2,9 @@
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist, supabase, pullState } from './store.js';
-import { isTransactionReconciled } from './bankReconciliation.js';
+import { renderEditableLedgerRows, initLedgerBulkBar } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
+import { txnMatchesLedgerPivotFilter, renderLedgerContextBar, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators } from './ledgerFilter.js';
 import {
     collectAllocationDraft,
     formatAllocationSummary,
@@ -12,7 +13,7 @@ import {
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
-import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS } from './expenseCategories.js';
+import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports } from './expenseCategories.js';
 
 const CAT_LABELS = {
     Security: 'Security / Guards',
@@ -25,22 +26,12 @@ const CAT_LABELS = {
     Promotion: 'Promotion / Sponsorship',
     Interest: 'Bank Interest',
     'Petty Inflow': 'Petty Cash Top-up',
+    'Bank Reject': 'Bank Reject',
     Reconcile: 'Bank Reconciliation',
     'Other Income': 'Other Income',
     Other: 'Miscellaneous',
 };
 
-const INCOME_CATS = [
-    'Maintenance Collection',
-    'Marketing',
-    'Promotion',
-    'Interest',
-    'Petty Inflow',
-    'Reconcile',
-    'Other Income',
-];
-
-/** Extra fields shown on Record Income for specific income types (stored as vendor_name / vendor_invoice). */
 const INCOME_EXTRA_BY_CAT = {
     Promotion: {
         hint: 'Who sponsored or paid for this promotion?',
@@ -670,11 +661,12 @@ export const processFinances = () => {
 };
 
 export const renderCashLedger = () => {
-    const list = document.getElementById('cash-ledger-items'); if (!list) return; list.innerHTML = '';
+    const list = document.getElementById('cash-ledger-items'); if (!list) return;
+    renderLedgerContextBar();
     const q = (document.getElementById('cash-search')?.value || '').toLowerCase();
-    let sorted = [...portalState.finances.txns].sort((a, b) => new Date(b.date) - new Date(a.date));
+    let filtered = [...portalState.finances.txns].filter((t) => txnMatchesLedgerPivotFilter(t));
     if (q) {
-        sorted = sorted.filter((t) =>
+        filtered = filtered.filter((t) =>
             (t.description || '').toLowerCase().includes(q) ||
             (t.vendor_name || '').toLowerCase().includes(q) ||
             (t.vendor_invoice || '').toLowerCase().includes(q) ||
@@ -684,35 +676,19 @@ export const renderCashLedger = () => {
             (t.wallet || '').toLowerCase().includes(q),
         );
     }
-    sorted.forEach(t => {
-        const detail = formatTxnDetail(t);
-        const attachmentPaths = getAllAttachmentPaths(t);
-        const receiptBtn = attachmentPaths.length
-            ? `<button class="btn btn-outline" style="padding:0.2rem 0.4rem; position:relative;" title="View attachment${attachmentPaths.length > 1 ? 's' : ''}" onclick="window.viewReceipts('${t.id}')"><i class="fa-solid fa-paperclip"></i>${attachmentPaths.length > 1 ? `<span style="font-size:0.55rem; margin-left:0.15rem;">${attachmentPaths.length}</span>` : ''}</button>`
-            : '';
-        const reconciled = isTransactionReconciled(t.id);
-        const reconBadge = reconciled
-            ? '<span class="ledger-recon-badge" title="Reconciled to bank statement">Reconciled</span>'
-            : ((t.wallet || '').toUpperCase() === 'BANK' ? '<span class="ledger-recon-badge ledger-recon-badge--open">Unreconciled</span>' : '');
-        const amt = parseFloat(t.amount).toLocaleString('en-IN');
-        const dr = t.type === 'OUT' ? `₹${amt}` : '';
-        const cr = t.type === 'IN' ? `₹${amt}` : '';
-        const amountClass = t.type === 'IN' ? 'ledger-txn-row__amount--in' : 'ledger-txn-row__amount--out';
-        const amountText = t.type === 'IN' ? cr : dr;
-        const row = document.createElement('div');
-        row.className = 'apt-row ledger-txn-row';
-        row.innerHTML = `<div class="ledger-txn-row__date">${new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
-           <div class="ledger-txn-row__meta">
-             <div class="ledger-txn-row__wallet"><span class="ledger-txn-chip ledger-txn-chip--wallet">${t.wallet}</span> ${reconBadge}</div>
-             <div class="ledger-txn-row__cat"><span class="ledger-txn-chip ledger-txn-chip--cat">${getLabel(t.cat)}</span></div>
-           </div>
-           <div class="ledger-txn-row__desc">${detail || '<span class="ledger-txn-row__desc-empty">—</span>'}</div>
-           <div class="ledger-txn-row__dr">${dr}</div>
-           <div class="ledger-txn-row__cr">${cr}</div>
-           <div class="ledger-txn-row__amount ${amountClass}">${amountText}</div>
-           <div class="ledger-txn-row__actions">${receiptBtn}<button class="btn btn-outline ledger-txn-row__action-btn" type="button" onclick="window.editTxn('${t.id}')"><i class="fa-solid fa-pen" aria-hidden="true"></i></button><button class="btn btn-outline ledger-txn-row__action-btn ledger-txn-row__action-btn--danger" type="button" onclick="window.delTxn('${t.id}')"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button></div>`;
-        list.appendChild(row);
-    });
+    const sorted = sortLedgerTxns(filtered);
+    updateLedgerSortIndicators();
+
+    const countEl = document.getElementById('cash-txn-count');
+    if (countEl) {
+        const total = portalState.finances.txns.length;
+        const showing = sorted.length;
+        countEl.textContent = showing === total
+            ? (total ? `· ${total} ${total === 1 ? 'entry' : 'entries'}` : '')
+            : `· ${showing} of ${total} entries`;
+    }
+
+    renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
 };
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
@@ -903,6 +879,9 @@ export const saveCashData = async () => {
         ? (portalState.originalBankProofPaths || []).filter((p) => !bank_proof_urls.includes(p))
         : (portalState.originalBankProofPaths || []);
 
+    const excludeFromReports = document.getElementById('txn-exclude-reports')?.checked === true
+        || cat === BANK_REJECT_CAT;
+
     try {
         const payload = {
             id: txnId,
@@ -919,6 +898,7 @@ export const saveCashData = async () => {
             wallet,
             type,
             date,
+            exclude_from_reports: excludeFromReports,
         };
         const allocations = isIncome && cat === 'Maintenance Collection'
             ? collectAllocationDraft().rows
@@ -1026,6 +1006,8 @@ const openExpenseFormDefaults = (wallet = 'CASH') => {
     document.getElementById('cash-cat-select').value = 'Maintenance';
     document.getElementById('cash-wallet-select').value = wallet;
     resetReceiptUI([]);
+    const excludeEl = document.getElementById('txn-exclude-reports');
+    if (excludeEl) excludeEl.checked = false;
 };
 
 window.openExpense = (wallet = 'CASH') => {
@@ -1063,6 +1045,8 @@ const openIncomeFormDefaults = (wallet = 'CASH', catKey = 'Maintenance Collectio
     resetReceiptUI([]);
     syncMaintenanceIncomeSection(catKey);
     syncIncomeExtraSection(catKey);
+    const excludeEl = document.getElementById('txn-exclude-reports');
+    if (excludeEl) excludeEl.checked = false;
 };
 
 window.openIncome = (wallet = 'CASH') => {
@@ -1132,6 +1116,7 @@ window.editTxn = (id) => {
         syncWalletPills('income-wallet-pills', t.wallet || 'CASH');
         syncBankTypePills(t.bank_payment_type || 'CHEQUE');
         document.getElementById('income-bank-ref').value = t.bank_reference || '';
+        document.getElementById('txn-exclude-reports').checked = !!t.exclude_from_reports;
         resetBankProofUI(getBankProofPaths(t));
         syncBankWalletUI();
         resetReceiptUI([]);
@@ -1153,6 +1138,7 @@ window.editTxn = (id) => {
         syncWalletPills('expense-wallet-pills', t.wallet || 'CASH');
         syncBankTypePills(t.bank_payment_type || 'CHEQUE');
         document.getElementById('expense-bank-ref').value = t.bank_reference || '';
+        document.getElementById('txn-exclude-reports').checked = !!t.exclude_from_reports;
         resetBankProofUI(getBankProofPaths(t));
         syncExpenseWalletUI();
         resetReceiptUI(getReceiptPaths(t));
@@ -1181,6 +1167,19 @@ export const initAccountsSubViewTabs = () => {
         btn.addEventListener('click', () => {
             const route = ACCOUNTS_SUBVIEW_ROUTES[btn.dataset.accountsSubview];
             if (route && typeof window.switchView === 'function') window.switchView(route);
+        });
+    });
+    initLedgerTableControls();
+    initLedgerBulkBar();
+};
+
+const initLedgerTableControls = () => {
+    document.querySelectorAll('.ledger-sort-btn').forEach((btn) => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+            toggleLedgerSort(btn.dataset.sort);
+            renderCashLedger();
         });
     });
 };
