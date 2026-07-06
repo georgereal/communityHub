@@ -2,16 +2,82 @@
  * Drill-down filter from Financial Reports pivot → Financial Ledger.
  * Sort state and context bar for the Financial Ledger table.
  */
+import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
+
 const pivotKeyOnTxn = (txn, dimension) => {
     if (dimension === 'sub_category') return txn.sub_category?.trim() || '(none)';
     if (dimension === 'vendor') return txn.vendor_name?.trim() || '(none)';
-    return txn.cat || 'Other';
+    return normalizeCategoryKey(txn.cat || 'Other');
 };
 
 let ledgerPivotFilter = null;
+let ledgerCategoryFilter = null;
 let ledgerSort = { field: 'date', dir: 'desc' };
+let activityTimer = null;
 
 export const getLedgerPivotFilter = () => ledgerPivotFilter;
+
+export const getLedgerCategoryFilter = () => ledgerCategoryFilter;
+
+export const setLedgerCategoryFilter = (cat) => {
+    ledgerCategoryFilter = cat ? normalizeCategoryKey(cat) : null;
+    const sel = document.getElementById('ledger-cat-filter');
+    if (sel && sel.value !== (ledgerCategoryFilter || '')) sel.value = ledgerCategoryFilter || '';
+    renderLedgerContextBar();
+};
+
+export const clearAllLedgerFilters = () => {
+    ledgerPivotFilter = null;
+    ledgerCategoryFilter = null;
+    const searchEl = document.getElementById('cash-search');
+    if (searchEl) searchEl.value = '';
+    const catSel = document.getElementById('ledger-cat-filter');
+    if (catSel) catSel.value = '';
+    renderLedgerContextBar();
+};
+
+export const setLedgerSearchBusy = (busy) => {
+    const wrap = document.getElementById('cash-search')?.closest('.ledger-ledger-toolbar__search');
+    wrap?.classList.toggle('ledger-search--busy', busy);
+    const icon = wrap?.querySelector('.ledger-search-icon');
+    const spinner = wrap?.querySelector('.ledger-search-spinner');
+    if (icon) icon.hidden = busy;
+    if (spinner) spinner.hidden = !busy;
+};
+
+export const setLedgerActivity = (message, { busy = false, flashMs = 0 } = {}) => {
+    const el = document.getElementById('ledger-activity');
+    if (!el) return;
+    clearTimeout(activityTimer);
+    if (!message) {
+        el.hidden = true;
+        el.innerHTML = '';
+        el.classList.remove('ledger-activity--busy');
+        return;
+    }
+    el.hidden = false;
+    el.classList.toggle('ledger-activity--busy', busy);
+    el.innerHTML = busy
+        ? `<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i><span>${message}</span>`
+        : `<span>${message}</span>`;
+    if (flashMs > 0) {
+        activityTimer = setTimeout(() => setLedgerActivity(null), flashMs);
+    }
+};
+
+export const applyLedgerTableFilters = (txns) => {
+    const q = (document.getElementById('cash-search')?.value || '').trim();
+    return txns.filter((t) =>
+        txnMatchesLedgerPivotFilter(t)
+        && txnMatchesLedgerSearch(t, q)
+        && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
+    );
+};
+
+export const ledgerHasActiveFilters = () => {
+    const q = (document.getElementById('cash-search')?.value || '').trim();
+    return Boolean(q || ledgerCategoryFilter || ledgerPivotFilter);
+};
 
 export const getLedgerSort = () => ({ ...ledgerSort });
 
@@ -54,6 +120,10 @@ export const clearLedgerPivotFilter = () => {
     renderLedgerContextBar();
 };
 
+export const clearLedgerFilters = () => {
+    clearAllLedgerFilters();
+};
+
 export const applyLedgerPivotFilter = (filter) => {
     ledgerPivotFilter = filter ? { ...filter } : null;
     renderLedgerContextBar();
@@ -62,6 +132,43 @@ export const applyLedgerPivotFilter = (filter) => {
 export const navigateToLedgerFromPivot = (filter) => {
     applyLedgerPivotFilter(filter);
     window.switchView?.('finance-ledger');
+};
+
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Match query as its own token (not a substring inside another word). */
+const hasWordMatch = (haystack, needle) => {
+    if (!needle) return false;
+    const h = String(haystack || '');
+    if (!h) return false;
+    return new RegExp(`(?:^|[^a-z0-9])${escapeRe(needle)}(?:[^a-z0-9]|$)`, 'i').test(h);
+};
+
+const textIncludes = (haystack, needle) =>
+    String(haystack || '').toLowerCase().includes(needle);
+
+/** Free-text ledger search — description/vendor use substring; category uses word boundaries for short queries. */
+export const txnMatchesLedgerSearch = (txn, rawQuery) => {
+    const q = String(rawQuery || '').trim().toLowerCase();
+    if (!q || !txn) return true;
+
+    if (
+        textIncludes(txn.description, q)
+        || textIncludes(txn.vendor_name, q)
+        || textIncludes(txn.vendor_invoice, q)
+        || textIncludes(txn.bank_reference, q)
+        || textIncludes(txn.sub_category, q)
+    ) return true;
+
+    const wallet = (txn.wallet || '').toLowerCase();
+    if (wallet.includes(q)) return true;
+
+    const label = categoryDisplayLabel(txn.cat);
+    const catKey = normalizeCategoryKey(txn.cat || '');
+    if (q.length < 4) {
+        return hasWordMatch(label, q) || hasWordMatch(catKey, q);
+    }
+    return textIncludes(label, q) || textIncludes(catKey, q);
 };
 
 export const txnMatchesLedgerPivotFilter = (txn) => {
@@ -91,7 +198,7 @@ const describeLedgerPivotFilter = (f) => {
     if (f.key && f.key !== '__other__') {
         const dim =
             f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
-        parts.push(`${dim}: ${f.label || f.key}`);
+        parts.push(`${dim}: ${categoryDisplayLabel(f.key)}`);
     } else if (f.scope === 'col-total' || f.scope === 'grand-total') {
         parts.push('all categories');
     }
@@ -147,21 +254,22 @@ export const renderLedgerContextBar = () => {
     if (ledgerPivotFilter) {
         chips.push(`<span class="ledger-context-chip ledger-context-chip--filter"><i class="fa-solid fa-filter" aria-hidden="true"></i> ${describeLedgerPivotFilter(ledgerPivotFilter)}</span>`);
     }
+    if (ledgerCategoryFilter) {
+        chips.push(`<span class="ledger-context-chip ledger-context-chip--filter"><i class="fa-solid fa-tag" aria-hidden="true"></i> Category: ${categoryDisplayLabel(ledgerCategoryFilter)}</span>`);
+    }
     if (search) {
         chips.push(`<span class="ledger-context-chip ledger-context-chip--search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> “${search.replace(/</g, '&lt;')}”</span>`);
     }
     chips.push(`<span class="ledger-context-chip ledger-context-chip--sort"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i> ${describeLedgerSort()}</span>`);
 
-    const hasClearable = ledgerPivotFilter || search;
+    const hasClearable = ledgerPivotFilter || search || ledgerCategoryFilter;
     el.hidden = false;
     el.innerHTML = `
       <div class="ledger-context-bar__chips">${chips.join('')}</div>
       ${hasClearable ? '<button type="button" class="btn btn-outline btn--small" id="ledger-context-clear">Clear filters</button>' : ''}`;
 
     el.querySelector('#ledger-context-clear')?.addEventListener('click', () => {
-        clearLedgerPivotFilter();
-        const searchEl = document.getElementById('cash-search');
-        if (searchEl) searchEl.value = '';
+        clearAllLedgerFilters();
         window.renderCashLedger?.();
     }, { once: true });
 

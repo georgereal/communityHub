@@ -358,24 +358,33 @@
               <h3 class="ledger-ledger-toolbar__title">
                 Financial Ledger <span id="cash-txn-count" class="ledger-ledger-toolbar__count"></span>
               </h3>
-              <form class="search-container ledger-ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
-                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                <input
-                  type="search"
-                  id="cash-search"
-                  name="ledger-txn-filter"
-                  autocomplete="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                  inputmode="search"
-                  data-lpignore="true"
-                  data-1p-ignore
-                  data-form-type="other"
-                  placeholder="Search transactions..."
-                  oninput="window.renderCashLedger()"
-                />
-              </form>
+              <div class="ledger-ledger-toolbar__filters">
+                <label class="ledger-filter-field">
+                  <span class="ledger-filter-field__label">Category</span>
+                  <select id="ledger-cat-filter" class="expense-combobox" aria-label="Filter by category">
+                    <option value="">All categories</option>
+                  </select>
+                </label>
+                <form class="search-container ledger-ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
+                  <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+                  <i class="fa-solid fa-circle-notch fa-spin ledger-search-spinner" aria-hidden="true" hidden></i>
+                  <input
+                    type="search"
+                    id="cash-search"
+                    name="ledger-txn-filter"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    inputmode="search"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
+                    placeholder="Search description, vendor…"
+                  />
+                </form>
+              </div>
             </div>
+            <div id="ledger-activity" class="ledger-activity" hidden aria-live="polite"></div>
             <div id="ledger-context-bar" class="ledger-context-bar"></div>
             <div id="ledger-bulk-bar" class="ledger-bulk-bar">
               <label class="ledger-bulk-bar__select-all">
@@ -384,8 +393,8 @@
               </label>
               <span id="ledger-bulk-count" class="ledger-bulk-bar__count">0 selected · 0 unsaved</span>
               <label class="ledger-bulk-bar__field">
-                <span>Category</span>
-                <select id="ledger-bulk-cat" class="expense-combobox">
+                <span>Bulk set category</span>
+                <select id="ledger-bulk-cat" class="expense-combobox" title="Select rows, then apply — does not filter the table">
                   <option value="">— no change —</option>
                   <optgroup label="Income">
                     <option value="Maintenance Collection">Maintenance Collection</option>
@@ -411,6 +420,7 @@
                   <option value="include">Include in reports</option>
                 </select>
               </label>
+              <p class="ledger-bulk-bar__hint">Select rows → set values → Apply → Save. Use the <strong>Category</strong> filter above the table to narrow the list.</p>
               <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
               <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
             </div>

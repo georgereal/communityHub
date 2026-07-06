@@ -4,7 +4,7 @@
 import { portalState, persist, supabase, pullState } from './store.js';
 import { renderEditableLedgerRows, initLedgerBulkBar } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
-import { txnMatchesLedgerPivotFilter, renderLedgerContextBar, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators } from './ledgerFilter.js';
+import { renderLedgerContextBar, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, ledgerHasActiveFilters, setLedgerActivity, setLedgerSearchBusy, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
     collectAllocationDraft,
     formatAllocationSummary,
@@ -13,24 +13,9 @@ import {
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
-import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports } from './expenseCategories.js';
+import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from './expenseCategories.js';
 
-const CAT_LABELS = {
-    Security: 'Security / Guards',
-    Maintenance: 'General Maintenance',
-    Plumbing: 'Plumbing / Water',
-    Electrical: 'Electrical / Diesel',
-    Stationery: 'Office / Stationery',
-    'Maintenance Collection': 'Maintenance Collection',
-    Marketing: 'Marketing / Events',
-    Promotion: 'Promotion / Sponsorship',
-    Interest: 'Bank Interest',
-    'Petty Inflow': 'Petty Cash Top-up',
-    'Bank Reject': 'Bank Reject',
-    Reconcile: 'Bank Reconciliation',
-    'Other Income': 'Other Income',
-    Other: 'Miscellaneous',
-};
+const CAT_LABELS = CATEGORY_LABELS;
 
 const INCOME_EXTRA_BY_CAT = {
     Promotion: {
@@ -74,11 +59,11 @@ const INCOME_EXTRA_BY_CAT = {
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 
-const getLabel = (cat) => CAT_LABELS[cat] || cat;
+const getLabel = (cat) => categoryDisplayLabel(cat);
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const labelForCat = (cat) => CAT_LABELS[cat] || cat;
+const labelForCat = (cat) => categoryDisplayLabel(cat);
 
 export const getReceiptPaths = (txn) => {
     if (!txn) return [];
@@ -661,34 +646,40 @@ export const processFinances = () => {
 };
 
 export const renderCashLedger = () => {
-    const list = document.getElementById('cash-ledger-items'); if (!list) return;
-    renderLedgerContextBar();
-    const q = (document.getElementById('cash-search')?.value || '').toLowerCase();
-    let filtered = [...portalState.finances.txns].filter((t) => txnMatchesLedgerPivotFilter(t));
-    if (q) {
-        filtered = filtered.filter((t) =>
-            (t.description || '').toLowerCase().includes(q) ||
-            (t.vendor_name || '').toLowerCase().includes(q) ||
-            (t.vendor_invoice || '').toLowerCase().includes(q) ||
-            (t.bank_reference || '').toLowerCase().includes(q) ||
-            (t.sub_category || '').toLowerCase().includes(q) ||
-            getLabel(t.cat).toLowerCase().includes(q) ||
-            (t.wallet || '').toLowerCase().includes(q),
-        );
+    const list = document.getElementById('cash-ledger-items');
+    if (!list) return;
+
+    const hasFilters = ledgerHasActiveFilters();
+    if (hasFilters) {
+        setLedgerActivity('Filtering…', { busy: true });
+        setLedgerSearchBusy(true);
     }
+
+    renderLedgerContextBar();
+    const filtered = applyLedgerTableFilters([...portalState.finances.txns]);
     const sorted = sortLedgerTxns(filtered);
     updateLedgerSortIndicators();
 
+    const total = portalState.finances.txns.length;
+    const showing = sorted.length;
+
     const countEl = document.getElementById('cash-txn-count');
     if (countEl) {
-        const total = portalState.finances.txns.length;
-        const showing = sorted.length;
         countEl.textContent = showing === total
             ? (total ? `· ${total} ${total === 1 ? 'entry' : 'entries'}` : '')
             : `· ${showing} of ${total} entries`;
     }
 
     renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
+
+    setLedgerSearchBusy(false);
+    if (hasFilters) {
+        const parts = [`Showing ${showing} of ${total}`];
+        if (!showing) parts.push('— no matches');
+        setLedgerActivity(parts.join(' '), { busy: false });
+    } else {
+        setLedgerActivity(null);
+    }
 };
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
@@ -1173,11 +1164,49 @@ export const initAccountsSubViewTabs = () => {
     initLedgerBulkBar();
 };
 
+const populateLedgerCategoryFilter = () => {
+    const sel = document.getElementById('ledger-cat-filter');
+    if (!sel || sel.dataset.populated) return;
+    sel.dataset.populated = '1';
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    sel.innerHTML = [
+        '<option value="">All categories</option>',
+        `<optgroup label="Income">${INCOME_CATS.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+        `<optgroup label="Expenses">${EXPENSE_CATS.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+    ].join('');
+};
+
+const initLedgerSearch = () => {
+    const input = document.getElementById('cash-search');
+    if (!input || input.dataset.wired) return;
+    input.dataset.wired = '1';
+    let debounce = null;
+    input.addEventListener('input', () => {
+        setLedgerSearchBusy(true);
+        clearTimeout(debounce);
+        debounce = setTimeout(() => window.renderCashLedger?.(), 120);
+    });
+};
+
+const initLedgerCategoryFilter = () => {
+    populateLedgerCategoryFilter();
+    const sel = document.getElementById('ledger-cat-filter');
+    if (!sel || sel.dataset.wired) return;
+    sel.dataset.wired = '1';
+    sel.addEventListener('change', () => {
+        setLedgerCategoryFilter(sel.value || null);
+        window.renderCashLedger?.();
+    });
+};
+
 const initLedgerTableControls = () => {
+    initLedgerSearch();
+    initLedgerCategoryFilter();
     document.querySelectorAll('.ledger-sort-btn').forEach((btn) => {
         if (btn.dataset.wired) return;
         btn.dataset.wired = '1';
         btn.addEventListener('click', () => {
+            setLedgerActivity('Sorting…', { busy: true });
             toggleLedgerSort(btn.dataset.sort);
             renderCashLedger();
         });

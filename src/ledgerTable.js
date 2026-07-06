@@ -9,9 +9,12 @@ import {
     EXPENSE_CATS,
     BANK_REJECT_CAT,
     defaultExcludeFromReports,
+    normalizeCategoryKey,
+    categoryDisplayLabel,
 } from './expenseCategories.js';
 import { isTransactionReconciled } from './bankReconciliation.js';
 import { withButtonBusy } from './buttonBusy.js';
+import { setLedgerActivity } from './ledgerFilter.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
@@ -38,10 +41,17 @@ const markDirty = (txnId, patch) => {
 
 const catOptionsHtml = (txn) => {
     const cats = categoryOptionsForType(txn.type);
-    const current = mergedTxn(txn).cat || '';
-    return cats.map((c) =>
-        `<option value="${esc(c)}" ${c === current ? 'selected' : ''}>${esc(c)}</option>`,
-    ).join('');
+    const raw = mergedTxn(txn).cat || '';
+    const options = [...cats];
+    if (raw && !options.some((c) => normalizeCategoryKey(c) === normalizeCategoryKey(raw))) {
+        options.unshift(raw);
+    }
+    return options.map((c) => {
+        const key = normalizeCategoryKey(c) || c;
+        const label = categoryDisplayLabel(c);
+        const selected = normalizeCategoryKey(c) === normalizeCategoryKey(raw);
+        return `<option value="${esc(key)}" ${selected ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
 };
 
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
@@ -218,10 +228,19 @@ export const saveLedgerPendingEdits = async (txnIds = null) => {
 
 const applyBulkToSelected = () => {
     const ids = selectedTxnIds();
-    if (!ids.length) return;
+    if (!ids.length) {
+        setLedgerActivity('Select rows first, then click Apply to selected', { flashMs: 3500 });
+        return;
+    }
 
     const cat = document.getElementById('ledger-bulk-cat')?.value?.trim();
     const excludeMode = document.getElementById('ledger-bulk-exclude')?.value || 'nochange';
+    if (!cat && excludeMode === 'nochange') {
+        setLedgerActivity('Choose a bulk category or reports option first', { flashMs: 3500 });
+        return;
+    }
+
+    setLedgerActivity(`Staging changes for ${ids.length} row${ids.length === 1 ? '' : 's'}…`, { busy: true });
 
     ids.forEach((id) => {
         const row = document.querySelector(`.ledger-txn-row[data-txn-id="${id}"]`);
@@ -245,6 +264,10 @@ const applyBulkToSelected = () => {
         }
     });
     syncLedgerBulkBar();
+    setLedgerActivity(
+        `Staged ${ids.length} row${ids.length === 1 ? '' : 's'} — click Save changes to persist`,
+        { flashMs: 4000 },
+    );
 };
 
 let ledgerTableWired = false;
@@ -321,7 +344,11 @@ export const initLedgerBulkBar = () => {
     document.getElementById('ledger-select-all')?.addEventListener('change', (e) => setAllSelected(e.target.checked));
     document.getElementById('ledger-header-select-all')?.addEventListener('change', (e) => setAllSelected(e.target.checked));
 
-    document.getElementById('ledger-bulk-apply')?.addEventListener('click', () => applyBulkToSelected());
+    document.getElementById('ledger-bulk-apply')?.addEventListener('click', () => {
+        withButtonBusy(document.getElementById('ledger-bulk-apply'), 'Applying…', async () => {
+            applyBulkToSelected();
+        });
+    });
 
     document.getElementById('ledger-bulk-save')?.addEventListener('click', async () => {
         const btn = document.getElementById('ledger-bulk-save');

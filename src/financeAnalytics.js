@@ -17,27 +17,11 @@ import {
     getDateTolerance,
     isTransactionReconciled,
 } from './bankReconciliation.js';
+import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
-const CAT_LABELS = {
-    Security: 'Security / Guards',
-    Maintenance: 'General Maintenance',
-    Plumbing: 'Plumbing / Water',
-    Electrical: 'Electrical / Diesel',
-    Stationery: 'Office / Stationery',
-    'Maintenance Collection': 'Maintenance Collection',
-    Marketing: 'Marketing / Events',
-    Promotion: 'Promotion / Sponsorship',
-    Interest: 'Bank Interest',
-    'Petty Inflow': 'Petty Cash Top-up',
-    'Bank Reject': 'Bank Reject',
-    Reconcile: 'Bank Reconciliation',
-    'Other Income': 'Other Income',
-    Other: 'Miscellaneous',
-};
-
-const labelForCat = (cat) => CAT_LABELS[cat] || cat || 'Uncategorised';
+const labelForCat = (cat) => categoryDisplayLabel(cat);
 
 /** Expenses synced from the expense spreadsheet (ledger sync). */
 export const isExpenseFromSheet = (txn) =>
@@ -134,7 +118,7 @@ const monthlyTotals = (txns, months) =>
 const pivotKey = (txn, dimension) => {
     if (dimension === 'sub_category') return txn.sub_category?.trim() || '(none)';
     if (dimension === 'vendor') return txn.vendor_name?.trim() || '(none)';
-    return txn.cat || 'Other';
+    return normalizeCategoryKey(txn.cat || 'Other');
 };
 
 const buildCategoryPivot = (txns, months, dimension) => {

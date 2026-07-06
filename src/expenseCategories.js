@@ -2,6 +2,34 @@
 
 export const BANK_REJECT_CAT = 'Bank Reject';
 
+/** Display labels for canonical category keys (income + expense). */
+export const CATEGORY_LABELS = {
+    Security: 'Security / Guards',
+    Maintenance: 'General Maintenance',
+    Plumbing: 'Plumbing / Water',
+    Electrical: 'Electrical / Diesel',
+    Stationery: 'Office / Stationery',
+    'Maintenance Collection': 'Maintenance Collection',
+    Marketing: 'Marketing / Events',
+    Promotion: 'Promotion / Sponsorship',
+    Interest: 'Bank Interest',
+    'Petty Inflow': 'Petty Cash Top-up',
+    'Bank Reject': 'Bank Reject',
+    Reconcile: 'Bank Reconciliation',
+    'Other Income': 'Other Income',
+    Other: 'Miscellaneous',
+};
+
+/** Legacy / alternate stored values → canonical key. */
+const CATEGORY_ALIASES = {
+    'Petty Cash': 'Petty Inflow',
+    'Petty Cash Top-up': 'Petty Inflow',
+};
+
+const LABEL_TO_KEY = Object.fromEntries(
+    Object.entries(CATEGORY_LABELS).map(([key, label]) => [label.toLowerCase(), key]),
+);
+
 export const INCOME_CATS = [
     'Maintenance Collection',
     'Marketing',
@@ -39,6 +67,23 @@ export const EXPENSE_CATS = [
 ];
 
 export const categoryOptionsForType = (type) => (type === 'IN' ? INCOME_CATS : EXPENSE_CATS);
+
+/** Map stored cat (key, label, or alias) to the canonical key used in lists & pivots. */
+export const normalizeCategoryKey = (cat) => {
+    const t = String(cat ?? '').trim();
+    if (!t) return t;
+    if (CATEGORY_ALIASES[t]) return CATEGORY_ALIASES[t];
+    const allKeys = [...INCOME_CATS, ...EXPENSE_CATS];
+    if (allKeys.includes(t)) return t;
+    const byLabel = LABEL_TO_KEY[t.toLowerCase()];
+    if (byLabel) return byLabel;
+    return t;
+};
+
+export const categoryDisplayLabel = (cat) => {
+    const key = normalizeCategoryKey(cat);
+    return CATEGORY_LABELS[key] || key || 'Uncategorised';
+};
 
 export const isBankRejectCategory = (cat) => cat === BANK_REJECT_CAT;
 
