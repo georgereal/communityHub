@@ -1,0 +1,179 @@
+<section id="view-registry" class="content-view">
+        <header class="registry-page-header">
+          <div class="header-title registry-page-header__title">
+            <h2 id="complex-title" class="page-title">Parking & Vehicles</h2>
+            <p class="registry-page-header__subtitle">Parking slots, vehicle registry, stickers & compliance</p>
+          </div>
+          <div class="registry-page-header__actions">
+            <button class="btn btn-outline btn--with-badge" type="button" id="registry-change-log">
+              <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Change Log</span>
+              <span class="btn-badge" id="audit-pending-badge" hidden>0</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-base-capacity">
+              <i class="fa-solid fa-table-cells" aria-hidden="true"></i> <span>Base Capacity</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-download-xlsx">
+              <i class="fa-solid fa-download" aria-hidden="true"></i> <span>Download</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-import-xlsx">
+              <i class="fa-solid fa-file-excel" aria-hidden="true"></i> <span>Reconcile Excel</span>
+            </button>
+            <input type="file" id="xlsx-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;" />
+            <button class="btn btn-outline" onclick="document.getElementById('csv-file').click()">
+              <i class="fa-solid fa-file-import" aria-hidden="true"></i> <span>Import CSV</span>
+            </button>
+            <input type="file" id="csv-file" accept=".csv" style="display: none;" />
+          </div>
+        </header>
+
+        <div class="page-sections">
+        <details class="page-section page-section--summaries mobile-disclosure" id="registry-summaries">
+          <summary class="page-section__header mobile-summary">
+            <span class="page-section__title">
+              <span class="page-section__icon" aria-hidden="true"><i class="fa-solid fa-chart-simple"></i></span>
+              Summary & pools
+            </span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill bad"><b id="ms-over-cars">0</b> Car+</span>
+              <span class="ms-pill bad"><b id="ms-over-bikes">0</b> Bike+</span>
+              <span class="ms-pill ms-pill--occ"><b id="ms-occ">—</b> Occ</span>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="cars" title="Show car pool (EH) only">
+                <b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> EH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="bikes" title="Show bike pool (BH) only">
+                <b id="ms-bike-pool-occ">0</b>/<b id="ms-bike-pool-total">0</b> BH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="rentals" title="Show flat-to-flat rentals only">
+                <b id="ms-flat-rent-count">0</b> rent
+              </button>
+            </span>
+          </summary>
+          <div class="page-section__body page-section__body--summaries">
+          <div class="summary-focus-bar" id="summary-focus-bar" hidden>
+            <span class="summary-focus-bar__label" id="summary-focus-label"></span>
+            <button type="button" class="btn btn-outline btn--small" id="summary-show-all">Show all</button>
+          </div>
+
+          <div class="summary-block" id="registry-overview">
+            <h3 class="summary-block__label">Overview</h3>
+            <section class="dashboard-metrics dashboard-metrics--compact">
+              <div class="metric-card"><span class="label">Overlimit Cars</span><span class="value value--danger"
+                  id="kpi-overlimit-cars">0</span></div>
+              <div class="metric-card"><span class="label">Overlimit Bikes</span><span class="value value--danger"
+                  id="kpi-overlimit-bikes">0</span></div>
+              <div class="metric-card"><span class="label">Active Cars</span><span class="value value--accent"
+                  id="kpi-cars">0</span></div>
+              <div class="metric-card"><span class="label">Active Bikes</span><span class="value value--success"
+                  id="kpi-bikes">0</span></div>
+              <div class="metric-card" title="Active vehicles vs total base slot capacity (car + bike limits)"><span class="label">Occupancy</span><span class="value value--accent"
+                  id="kpi-occupancy">—</span></div>
+            </section>
+          </div>
+
+          <div class="summary-block" id="pool-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Community Pool — Cars (EH)</h3>
+              <div class="summary-block__actions">
+                <button type="button" class="btn btn-outline btn--small" id="pool-add-car">
+                  <i class="fa-solid fa-plus"></i> Add EH slot
+                </button>
+              </div>
+            </div>
+            <div id="pool-grid" class="pool-slot-grid"></div>
+          </div>
+
+          <div class="summary-block" id="bike-pool-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Community Pool — Bikes (BH)</h3>
+              <div class="summary-block__actions">
+                <button type="button" class="btn btn-outline btn--small" id="pool-add-bike">
+                  <i class="fa-solid fa-plus"></i> Add BH slot
+                </button>
+              </div>
+            </div>
+            <div id="bike-pool-grid" class="pool-slot-grid"></div>
+            <p id="bike-pool-empty" class="pool-section-empty" hidden>No bike pool slots yet — add a BH slot to start.</p>
+          </div>
+
+          <div class="summary-block" id="flat-rental-visualiser">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Flat-to-flat rentals</h3>
+            </div>
+            <p class="pool-section-hint">One flat renting parking from another flat (e.g. D-005 slot used by D-006).</p>
+            <div id="flat-rental-grid" class="pool-slot-grid"></div>
+            <p id="flat-rental-empty" class="pool-section-empty" hidden>No flat-to-flat rentals.</p>
+          </div>
+
+          <div class="summary-block" id="visitor-passes-block">
+            <div class="summary-block__head">
+              <h3 class="summary-block__label summary-block__label--inline">Active visitor passes</h3>
+            </div>
+            <form id="visitor-pass-form" class="ops-inline-form" onsubmit="return false" style="margin-bottom:0.75rem;">
+              <select id="visitor-pass-unit" class="expense-combobox"><option value="">Flat</option></select>
+              <input type="text" id="visitor-pass-reg" class="expense-combobox" placeholder="Vehicle reg" />
+              <input type="number" id="visitor-pass-hours" class="expense-combobox" value="4" min="1" max="72" title="Valid hours" style="width:5rem;" />
+              <button type="button" class="btn btn-primary btn--small" id="visitor-pass-save">Issue pass</button>
+            </form>
+            <div id="visitor-passes-list"></div>
+          </div>
+
+          </div>
+        </details>
+
+        <details class="page-section page-section--primary mobile-disclosure" id="registry-units" open>
+          <summary class="page-section__header mobile-summary">
+            <span class="page-section__title">
+              <span class="page-section__icon" aria-hidden="true"><i class="fa-solid fa-building"></i></span>
+              Units
+            </span>
+          </summary>
+          <div class="page-section__body">
+          <section class="explorer-controls explorer-controls--inset registry-explorer">
+          <div class="registry-explorer__search-row">
+            <form class="search-container registry-explorer__search" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+              <input
+                type="search"
+                id="apt-search"
+                name="registry-unit-plate-filter"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                inputmode="search"
+                data-lpignore="true"
+                data-1p-ignore
+                data-form-type="other"
+                placeholder="Search unit or plate…"
+              />
+            </form>
+            <div class="explorer-sort registry-explorer__sort">
+              <span class="explorer-sort__label">Sort</span>
+              <label class="explorer-sort__trigger" for="registry-sort" title="Sort units" aria-label="Sort units">
+                <i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i>
+              </label>
+              <select id="registry-sort" class="explorer-sort__select" aria-label="Sort units">
+                <option value="AZ">Unit (A-Z)</option>
+                <option value="OVERLIMIT">Violation Cases</option>
+              </select>
+            </div>
+          </div>
+          <div class="filter-bar registry-explorer__filters">
+            <button class="filter-pill active" data-filter="ALL">All Units</button>
+            <button class="filter-pill" data-filter="OVERLIMIT">Overlimit</button>
+            <button class="filter-pill" data-filter="FREE_SLOTS_CARS">Free Cars</button>
+            <button class="filter-pill" data-filter="FREE_SLOTS_BIKES">Free Bikes</button>
+            <button class="filter-pill" data-filter="UNFILLED">Unfilled</button>
+          </div>
+          <div class="registry-list registry-list--inset">
+            <div class="registry-header"><span>Unit</span><span>Active Fleet</span><span>Dormant
+                Registry</span><span>Pool Allocated</span><span>Base Slots</span><span>Status</span><span
+                style="text-align: right;">Detail</span>
+            </div>
+            <div id="registry-items"></div>
+          </div>
+          </section>
+          </div>
+        </details>
+        </div>
+      </section>

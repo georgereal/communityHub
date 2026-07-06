@@ -1,0 +1,90 @@
+<section id="view-security" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Security Gate</h2>
+            <p>
+              <span>Visitor entry, parcels, and parking passes</span>
+              <span class="sec-clock" id="sec-clock" aria-live="polite"></span>
+            </p>
+          </div>
+        </header>
+
+        <div id="security-subview-gate" class="security-subview portal-subview" style="padding: 0 1.6rem 1.6rem;">
+          <div class="sec-gate-head">
+            <h3>New visitor entry</h3>
+            <button type="button" class="btn btn-outline btn--small sec-refresh-btn" id="sec-refresh">
+              <i class="fa-solid fa-rotate"></i> Refresh
+            </button>
+          </div>
+
+          <div class="dashboard-metrics visitor-metrics" id="sec-stats" aria-live="polite"></div>
+
+          <div id="sec-pending-approvals" hidden></div>
+          <div id="sec-wizard-mount"></div>
+
+          <div class="metric-card" style="padding:1rem 1.1rem;margin-bottom:1rem;">
+            <div class="sec-section__head">
+              <h4>Parcels waiting</h4>
+              <button type="button" class="btn btn-outline btn--small" id="sec-receive-toggle">Receive parcel</button>
+            </div>
+            <div id="sec-parcels-list"></div>
+            <div id="sec-parcel-receive" class="visitor-parcel-receive" hidden>
+              <p class="visitor-parcel-row__meta" style="margin:0.65rem 0;">Parcel dropped off without courier check-in.</p>
+              <form id="sec-receive-form" class="sec-entry-form" onsubmit="return false">
+                <div class="sec-entry-form__field">
+                  <label class="sec-entry-form__label" for="sec-receive-unit">Flat</label>
+                  <select id="sec-receive-unit" class="expense-combobox"><option value="">Select flat</option></select>
+                </div>
+                <div class="sec-entry-form__field">
+                  <label class="sec-entry-form__label" for="sec-receive-courier">Courier</label>
+                  <input type="text" id="sec-receive-courier" class="expense-combobox" placeholder="Optional" />
+                </div>
+                <div class="sec-entry-form__field sec-entry-form__field--full">
+                  <label class="sec-entry-form__label" for="sec-receive-company">Company</label>
+                  <input type="text" id="sec-receive-company" class="expense-combobox" />
+                  <div class="visitor-company-chips" id="sec-receive-chips"></div>
+                </div>
+                <div class="sec-entry-form__field">
+                  <label class="sec-entry-form__label" for="sec-receive-packages">Packages</label>
+                  <input type="number" id="sec-receive-packages" class="expense-combobox" min="1" value="1" />
+                </div>
+                <div class="sec-entry-form__field">
+                  <label class="sec-entry-form__label" for="sec-receive-desc">Description</label>
+                  <input type="text" id="sec-receive-desc" class="expense-combobox" />
+                </div>
+                <div class="sec-entry-form__actions">
+                  <button type="button" class="btn btn-primary btn--small" id="sec-receive-save">Save parcel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="sec-section">
+            <h4>On premises now</h4>
+            <div id="sec-active-list" class="sec-active-list registry-list"></div>
+          </div>
+        </div>
+
+        <div id="security-subview-log" class="security-subview portal-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="sec-log-panel">
+            <div class="dashboard-metrics visitor-metrics" id="sec-stats-log" aria-hidden="true"></div>
+            <nav class="ops-subview-tabs visitor-log-tabs" id="sec-log-filters" aria-label="Filter visitor log">
+              <button type="button" class="active" data-visitor-filter="today">Today</button>
+              <button type="button" data-visitor-filter="on-premises">On premises</button>
+              <button type="button" data-visitor-filter="all">All entries</button>
+            </nav>
+            <div id="sec-log-list" class="registry-list visitor-registry"></div>
+          </div>
+        </div>
+
+        <div id="security-subview-passes" class="security-subview portal-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <h3 style="margin:0 0 0.75rem;font-size:1rem;">Issue visitor parking pass</h3>
+          <form id="sec-pass-form" class="sec-passes-form" onsubmit="return false">
+            <select id="sec-pass-unit" class="expense-combobox" data-placeholder="Flat"><option value="">Flat</option></select>
+            <input type="text" id="sec-pass-reg" class="expense-combobox" placeholder="Vehicle reg." />
+            <input type="number" id="sec-pass-hours" class="expense-combobox" value="4" min="1" max="72" title="Valid hours" style="width:5rem;" />
+            <button type="button" class="btn btn-primary btn--small" id="sec-pass-save">Issue pass</button>
+          </form>
+          <div id="sec-passes-list" class="registry-list"></div>
+        </div>
+      </section>

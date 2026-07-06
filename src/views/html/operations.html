@@ -1,0 +1,348 @@
+<section id="view-operations" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Operations</h2>
+            <p>Helpdesk, move-in/out, assets, amenities, visitors, and payroll</p>
+          </div>
+        </header>
+
+        <div id="ops-subview-helpdesk" class="ops-subview" style="padding: 0 1.6rem 1.6rem;">
+          <form id="ops-helpdesk-create" class="ops-inline-form ops-inline-form--stack" style="max-width:480px;margin-bottom:1rem;" onsubmit="return false">
+            <h3>Raise ticket (staff)</h3>
+            <select id="ops-ticket-unit" class="expense-combobox"><option value="">Flat (optional)</option></select>
+            <input type="text" id="ops-ticket-category" class="expense-combobox" placeholder="Category" value="General" />
+            <input type="text" id="ops-ticket-subject" class="expense-combobox" placeholder="Subject" required />
+            <textarea id="ops-ticket-desc" class="expense-desc expense-textarea" rows="3" placeholder="Description"></textarea>
+            <button type="button" class="btn btn-primary btn--small" id="ops-ticket-save">Create ticket</button>
+          </form>
+          <div class="registry-list">
+            <div class="registry-header" style="grid-template-columns: 2fr 100px 120px 120px 100px 140px;">
+              <span>Subject</span><span>Flat</span><span>Status</span><span>Assigned</span><span>Created</span><span>Update</span>
+            </div>
+            <div id="ops-helpdesk-list"></div>
+          </div>
+        </div>
+
+        <div id="ops-subview-transitions" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="occ-toolbar">
+            <div id="ops-transition-block-filter"></div>
+            <div class="flat-picker">
+              <label class="occ-toolbar__label" for="ops-transition-unit-input">Flat</label>
+              <div class="flat-picker__wrap">
+                <input type="search" id="ops-transition-unit-input" class="flat-picker__input expense-combobox"
+                  placeholder="Type to search flat…" autocomplete="off" spellcheck="false" />
+                <input type="hidden" id="ops-transition-unit" value="" />
+                <ul id="ops-transition-unit-list" class="flat-picker__list" role="listbox" hidden></ul>
+              </div>
+            </div>
+          </div>
+          <div id="ops-transition-panel" class="occ-panel">
+            <p class="ops-empty">Choose a flat above to see who lives there and what move-in or move-out actions are available.</p>
+          </div>
+          <details class="occ-history" id="ops-transition-history-wrap">
+            <summary>Recent move-in/out activity</summary>
+            <div id="ops-transitions-list"></div>
+          </details>
+        </div>
+
+        <div id="ops-subview-notices" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div id="notice-list-view">
+            <div class="notice-page-head">
+              <div>
+                <h3>Notice board</h3>
+                <p>Publish circulars to the resident portal. Drafts stay private until you publish.</p>
+              </div>
+              <button type="button" class="btn btn-primary btn--small" id="notice-add-btn">
+                <i class="fa-solid fa-plus"></i> New notice
+              </button>
+            </div>
+
+            <div class="dashboard-metrics notice-metrics" id="notice-stats" aria-live="polite"></div>
+
+            <nav class="ops-subview-tabs notice-tabs" id="notice-filters" aria-label="Filter notices">
+              <button type="button" class="active" data-notice-filter="all">All</button>
+              <button type="button" data-notice-filter="draft">Drafts</button>
+              <button type="button" data-notice-filter="published">Published</button>
+            </nav>
+
+            <div id="ops-notices-list"></div>
+          </div>
+
+          <div id="notice-compose-view" hidden>
+            <button type="button" class="notice-back" id="notice-back-btn">
+              <i class="fa-solid fa-arrow-left"></i> Back to notice board
+            </button>
+
+            <div class="notice-compose-card">
+              <header class="notice-compose-card__header">
+                <h3>New notice</h3>
+                <p>Residents will see this on their portal after you publish.</p>
+              </header>
+
+              <form id="notice-form" class="notice-compose-form" onsubmit="return false">
+                <div class="notice-compose-form__field">
+                  <label class="notice-compose-form__label" for="notice-title">Headline</label>
+                  <input type="text" id="notice-title" class="notice-compose-form__input" maxlength="120"
+                    placeholder="e.g. Annual general meeting — 20 June, 10 AM" required />
+                </div>
+
+                <div class="notice-compose-form__field notice-compose-form__field--editor">
+                  <label class="notice-compose-form__label" for="notice-body-editor">Message</label>
+                  <div class="notice-editor">
+                    <div id="notice-body-editor" class="notice-editor__mount" aria-label="Notice message"></div>
+                  </div>
+                </div>
+
+                <fieldset class="notice-compose-form__settings">
+                  <legend>Delivery settings</legend>
+                  <div class="notice-compose-form__settings-grid">
+                    <div class="notice-compose-form__field">
+                      <span class="notice-compose-form__label">Priority</span>
+                      <div class="notice-priority-pills" id="notice-priority-pills" role="radiogroup" aria-label="Priority">
+                        <button type="button" class="notice-priority-pill" data-priority="LOW">Low</button>
+                        <button type="button" class="notice-priority-pill active" data-priority="NORMAL">Normal</button>
+                        <button type="button" class="notice-priority-pill" data-priority="HIGH">High</button>
+                        <button type="button" class="notice-priority-pill notice-priority-pill--urgent" data-priority="URGENT">Urgent</button>
+                      </div>
+                      <input type="hidden" id="notice-priority" value="NORMAL" />
+                    </div>
+
+                    <div class="notice-compose-form__field">
+                      <label class="notice-compose-form__label" for="notice-audience">Who sees this</label>
+                      <select id="notice-audience" class="notice-compose-form__input">
+                        <option value="ALL">All residents</option>
+                        <option value="BLOCKS">Specific blocks only</option>
+                      </select>
+                    </div>
+
+                    <div class="notice-compose-form__field">
+                      <label class="notice-compose-form__label" for="notice-expires">Auto-hide after <span class="notice-compose-form__optional">(optional)</span></label>
+                      <input type="date" id="notice-expires" class="notice-compose-form__input" />
+                    </div>
+                  </div>
+
+                    <div id="notice-blocks-wrap" class="notice-blocks-panel" hidden>
+                      <span class="notice-compose-form__label">Select blocks</span>
+                      <div id="notice-block-chips" class="notice-block-chips"></div>
+                      <p class="notice-compose-form__hint">Only residents in these blocks will see the notice.</p>
+                    </div>
+
+                    <div class="notice-delivery-channels">
+                      <span class="notice-compose-form__label">Notify residents via</span>
+                      <div class="notice-delivery-channels__grid">
+                        <label class="notice-delivery-option">
+                          <input type="checkbox" id="notice-ch-portal" checked />
+                          <span class="notice-delivery-option__icon"><i class="fa-solid fa-bell"></i></span>
+                          <span class="notice-delivery-option__text">
+                            <strong>Portal & app alerts</strong>
+                            <small>Show on resident portal and alert linked accounts</small>
+                          </span>
+                        </label>
+                        <label class="notice-delivery-option">
+                          <input type="checkbox" id="notice-ch-email" />
+                          <span class="notice-delivery-option__icon"><i class="fa-solid fa-envelope"></i></span>
+                          <span class="notice-delivery-option__text">
+                            <strong>Email</strong>
+                            <small>Queue email to addresses on file in Residents</small>
+                          </span>
+                        </label>
+                        <label class="notice-delivery-option">
+                          <input type="checkbox" id="notice-ch-sms" />
+                          <span class="notice-delivery-option__icon"><i class="fa-solid fa-comment-sms"></i></span>
+                          <span class="notice-delivery-option__text">
+                            <strong>SMS</strong>
+                            <small>Queue text message to mobile numbers on file</small>
+                          </span>
+                        </label>
+                      </div>
+                      <p class="notice-compose-form__hint">Email and SMS are sent when you publish. Queued emails appear in Administration → Email outbox.</p>
+                    </div>
+                  </fieldset>
+
+                <footer class="notice-compose-card__footer">
+                  <button type="button" class="btn btn-outline btn--small" id="notice-cancel-btn">Cancel</button>
+                  <button type="button" class="btn btn-primary btn--small" id="notice-save-btn">
+                    <i class="fa-solid fa-floppy-disk"></i> Save draft
+                  </button>
+                </footer>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div id="ops-subview-assets" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <form id="ops-asset-form" class="ops-inline-form" onsubmit="return false">
+            <input type="text" id="ops-asset-name" class="expense-combobox" placeholder="Asset name" />
+            <input type="text" id="ops-asset-type" class="expense-combobox" placeholder="Type" />
+            <input type="text" id="ops-asset-location" class="expense-combobox" placeholder="Location" />
+            <input type="date" id="ops-asset-amc" class="expense-combobox" title="AMC end date" />
+            <button type="button" class="btn btn-primary btn--small" id="ops-asset-save">Add asset</button>
+          </form>
+          <div id="ops-assets-list" style="margin-top:1rem;"></div>
+        </div>
+
+        <div id="ops-subview-amenities" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <h3>Amenities</h3>
+              <form class="ops-inline-form" onsubmit="return false">
+                <input type="text" id="ops-amenity-name" class="expense-combobox" placeholder="Amenity name" />
+                <button type="button" class="btn btn-primary btn--small" id="ops-amenity-save">Add</button>
+              </form>
+              <div id="ops-amenities-list" style="margin-top:0.75rem;"></div>
+            </div>
+            <div>
+              <h3>Book amenity</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <select id="ops-booking-amenity" class="expense-combobox"></select>
+                <select id="ops-booking-unit" class="expense-combobox"><option value="">Flat</option></select>
+                <input type="date" id="ops-booking-date" class="expense-combobox" />
+                <input type="time" id="ops-booking-time" class="expense-combobox" value="10:00" />
+                <button type="button" class="btn btn-primary btn--small" id="ops-booking-save">Book</button>
+              </form>
+              <h3 style="margin-top:1.5rem;">Upcoming bookings</h3>
+              <div id="ops-bookings-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="ops-subview-visitors" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="visitor-page-head">
+            <div>
+              <h3>Gate &amp; visitors</h3>
+              <p>Log guest and service entries, track couriers, and manage parcels held at security.</p>
+            </div>
+          </div>
+
+          <div class="dashboard-metrics visitor-metrics" id="visitor-stats" aria-live="polite"></div>
+
+          <div class="visitor-layout">
+            <section class="visitor-log-panel metric-card">
+              <h4>Log entry</h4>
+              <nav class="ops-subview-tabs visitor-purpose-tabs" id="visitor-purpose-tabs" aria-label="Entry type">
+                <button type="button" class="active" data-purpose="GUEST">Guest</button>
+                <button type="button" data-purpose="DELIVERY">Delivery</button>
+                <button type="button" data-purpose="SERVICE">Service</button>
+              </nav>
+              <form id="visitor-entry-form" class="visitor-entry-form" onsubmit="return false">
+                <div class="visitor-entry-form__field visitor-entry-form__field--full">
+                  <label class="visitor-entry-form__label" for="visitor-entry-name">Name</label>
+                  <input type="text" id="visitor-entry-name" class="expense-combobox" placeholder="Visitor or courier name" required />
+                </div>
+                <div class="visitor-entry-form__field">
+                  <label class="visitor-entry-form__label" for="visitor-entry-unit">Flat</label>
+                  <select id="visitor-entry-unit" class="expense-combobox"><option value="">Select flat</option></select>
+                </div>
+                <div class="visitor-entry-form__field">
+                  <label class="visitor-entry-form__label" for="visitor-entry-phone">Phone</label>
+                  <input type="tel" id="visitor-entry-phone" class="expense-combobox" placeholder="Optional" />
+                </div>
+                <div class="visitor-entry-form__field" data-purpose-field="GUEST,DELIVERY,SERVICE">
+                  <label class="visitor-entry-form__label" for="visitor-entry-vehicle">Vehicle</label>
+                  <input type="text" id="visitor-entry-vehicle" class="expense-combobox" placeholder="Reg. no. (optional)" />
+                </div>
+                <div class="visitor-entry-form__field visitor-entry-form__field--full" data-purpose-field="DELIVERY" hidden>
+                  <label class="visitor-entry-form__label" for="visitor-entry-company">Delivery company</label>
+                  <input type="text" id="visitor-entry-company" class="expense-combobox" placeholder="e.g. Amazon, Swiggy" list="visitor-company-list" />
+                  <datalist id="visitor-company-list">
+                    <option value="Amazon"></option><option value="Flipkart"></option><option value="Swiggy"></option>
+                    <option value="Zomato"></option><option value="Blinkit"></option><option value="Dunzo"></option>
+                  </datalist>
+                  <div class="visitor-company-chips" id="visitor-company-chips"></div>
+                </div>
+                <div class="visitor-entry-form__field" data-purpose-field="DELIVERY" hidden>
+                  <label class="visitor-entry-form__label" for="visitor-entry-packages">Packages</label>
+                  <input type="number" id="visitor-entry-packages" class="expense-combobox" min="1" value="1" />
+                </div>
+                <div class="visitor-entry-form__field visitor-entry-form__field--full" data-purpose-field="DELIVERY" hidden>
+                  <label class="visitor-entry-form__check">
+                    <input type="checkbox" id="visitor-entry-hold-parcel" checked />
+                    Hold parcel at gate for resident pickup
+                  </label>
+                </div>
+                <div class="visitor-entry-form__field visitor-entry-form__field--full">
+                  <label class="visitor-entry-form__label" for="visitor-entry-notes">Notes</label>
+                  <input type="text" id="visitor-entry-notes" class="expense-combobox" placeholder="Optional" />
+                </div>
+                <div class="visitor-entry-form__actions">
+                  <button type="button" class="btn btn-primary btn--small" id="visitor-entry-save">Log entry</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="visitor-parcels-panel metric-card">
+              <div class="visitor-parcels-panel__head">
+                <h4>Parcels at gate</h4>
+                <button type="button" class="btn btn-outline btn--small" id="visitor-receive-toggle">Receive parcel</button>
+              </div>
+              <div id="visitor-parcels-list"></div>
+              <div id="visitor-parcel-receive" class="visitor-parcel-receive" hidden>
+                <p class="visitor-parcel-row__meta" style="margin:0 0 0.65rem;">Log a parcel left at security without a courier entry.</p>
+                <form id="visitor-receive-form" class="visitor-entry-form" onsubmit="return false">
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-unit">Flat</label>
+                    <select id="visitor-receive-unit" class="expense-combobox"><option value="">Select flat</option></select>
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-courier">Courier name</label>
+                    <input type="text" id="visitor-receive-courier" class="expense-combobox" placeholder="Optional" />
+                  </div>
+                  <div class="visitor-entry-form__field visitor-entry-form__field--full">
+                    <label class="visitor-entry-form__label" for="visitor-receive-company">Company</label>
+                    <input type="text" id="visitor-receive-company" class="expense-combobox" placeholder="e.g. Amazon" />
+                    <div class="visitor-company-chips" id="visitor-receive-chips"></div>
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-packages">Packages</label>
+                    <input type="number" id="visitor-receive-packages" class="expense-combobox" min="1" value="1" />
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-desc">Description</label>
+                    <input type="text" id="visitor-receive-desc" class="expense-combobox" placeholder="Optional" />
+                  </div>
+                  <div class="visitor-entry-form__actions">
+                    <button type="button" class="btn btn-primary btn--small" id="visitor-receive-save">Save parcel</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+          </div>
+
+          <nav class="ops-subview-tabs visitor-log-tabs" id="visitor-log-filters" aria-label="Filter visitor log">
+            <button type="button" class="active" data-visitor-filter="on-premises">On premises</button>
+            <button type="button" data-visitor-filter="today">Today's log</button>
+            <button type="button" data-visitor-filter="all">All entries</button>
+          </nav>
+
+          <div id="ops-visitors-list" class="registry-list visitor-registry"></div>
+        </div>
+
+        <div id="ops-subview-payroll" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <h3>Mark attendance</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <select id="ops-att-staff" class="expense-combobox"><option value="">Staff</option></select>
+                <input type="date" id="ops-att-date" class="expense-combobox" />
+                <select id="ops-att-status" class="expense-combobox">
+                  <option value="PRESENT">Present</option>
+                  <option value="ABSENT">Absent</option>
+                  <option value="HALF_DAY">Half day</option>
+                  <option value="LEAVE">Leave</option>
+                </select>
+                <button type="button" class="btn btn-primary btn--small" id="ops-att-save">Save</button>
+              </form>
+              <div id="ops-attendance-list" style="margin-top:0.75rem;"></div>
+            </div>
+            <div>
+              <h3>Payroll run</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <input type="text" id="ops-payroll-period" class="expense-combobox" placeholder="e.g. Mar 2026" />
+                <input type="number" id="ops-payroll-total" class="expense-combobox" placeholder="Total amount" step="0.01" />
+                <button type="button" class="btn btn-primary btn--small" id="ops-payroll-save">Record run</button>
+              </form>
+              <div id="ops-payroll-list" style="margin-top:0.75rem;"></div>
+            </div>
+          </div>
+        </div>
+      </section>

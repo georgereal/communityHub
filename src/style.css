@@ -1027,6 +1027,10 @@ main {
   display: block;
 }
 
+.app-views {
+  display: contents;
+}
+
 body.route-loading {
   cursor: progress;
 }

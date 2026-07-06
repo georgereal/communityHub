@@ -1,0 +1,386 @@
+<section id="view-accounts" class="content-view">
+        <header class="ledger-page-header">
+          <div class="header-title ledger-page-header__title">
+            <h2>Income & Expenses</h2>
+            <p class="ledger-page-header__subtitle">Track income and expenses across petty cash and bank</p>
+          </div>
+          <div class="ledger-page-header__actions">
+            <button class="btn btn-primary" type="button" onclick="window.openExpense('CASH')">
+              <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add Expense</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openIncome('CASH')">
+              <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record Income</span>
+            </button>
+            <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> <span>Bank Sync</span>
+            </button>
+          </div>
+        </header>
+
+        <nav class="accounts-subview-tabs" aria-label="Income and expenses views">
+          <button type="button" class="active" data-accounts-subview="ledger">Ledger</button>
+          <button type="button" data-accounts-subview="reports">Financial Reports</button>
+          <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
+          <button type="button" data-accounts-subview="activity">Activity Log</button>
+          <button type="button" data-accounts-subview="gl">General Ledger</button>
+        </nav>
+
+        <div id="subview-ledger">
+          <div class="ledger-summary-strip" aria-label="Account balances">
+            <div class="ledger-summary-stat ledger-summary-stat--total">
+              <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Total balance</span>
+                <span class="ledger-summary-stat__value ledger-summary-stat__value--total" id="total-wealth">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-summary-stat ledger-summary-stat--cash">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Petty cash</span>
+                <span class="ledger-summary-stat__value" id="cash-balance">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-summary-stat ledger-summary-stat--bank">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Bank</span>
+                <span class="ledger-summary-stat__value" id="bank-balance">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-summary-stat ledger-summary-stat--out">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <div class="ledger-summary-stat__body">
+                <span class="ledger-summary-stat__label">Today out</span>
+                <span class="ledger-summary-stat__value ledger-summary-stat__value--out" id="cash-today-out">₹ 0</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="ledger-sync-panel"></div>
+
+          <section class="ledger-ledger-section">
+            <div class="ledger-ledger-toolbar">
+              <h3 class="ledger-ledger-toolbar__title">
+                Financial Ledger <span id="cash-txn-count" class="ledger-ledger-toolbar__count"></span>
+              </h3>
+              <div class="ledger-ledger-toolbar__filters">
+                <label class="ledger-filter-field">
+                  <span class="ledger-filter-field__label">Category</span>
+                  <select id="ledger-cat-filter" class="expense-combobox" aria-label="Filter by category">
+                    <option value="">All categories</option>
+                  </select>
+                </label>
+                <form class="search-container ledger-ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
+                  <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+                  <i class="fa-solid fa-circle-notch fa-spin ledger-search-spinner" aria-hidden="true" hidden></i>
+                  <input
+                    type="search"
+                    id="cash-search"
+                    name="ledger-txn-filter"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    inputmode="search"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    data-form-type="other"
+                    placeholder="Search description, vendor…"
+                  />
+                </form>
+              </div>
+            </div>
+            <div id="ledger-activity" class="ledger-activity" hidden aria-live="polite"></div>
+            <div id="ledger-context-bar" class="ledger-context-bar"></div>
+            <div id="ledger-bulk-bar" class="ledger-bulk-bar">
+              <label class="ledger-bulk-bar__select-all">
+                <input type="checkbox" id="ledger-select-all" aria-label="Select all rows" />
+                <span>Select all</span>
+              </label>
+              <span id="ledger-bulk-count" class="ledger-bulk-bar__count">0 selected · 0 unsaved</span>
+              <label class="ledger-bulk-bar__field">
+                <span>Bulk set category</span>
+                <select id="ledger-bulk-cat" class="expense-combobox" title="Select rows, then apply — does not filter the table">
+                  <option value="">— no change —</option>
+                  <optgroup label="Income">
+                    <option value="Maintenance Collection">Maintenance Collection</option>
+                    <option value="Bank Reject">Bank Reject</option>
+                    <option value="Other Income">Other Income</option>
+                    <option value="Interest">Bank Interest</option>
+                    <option value="Reconcile">Bank Reconciliation</option>
+                  </optgroup>
+                  <optgroup label="Expenses">
+                    <option value="Bank Reject">Bank Reject</option>
+                    <option value="Bank Charges">Bank Charges</option>
+                    <option value="Audit">Audit</option>
+                    <option value="Security">Security</option>
+                    <option value="Other">Miscellaneous</option>
+                  </optgroup>
+                </select>
+              </label>
+              <label class="ledger-bulk-bar__field">
+                <span>Reports</span>
+                <select id="ledger-bulk-exclude" class="expense-combobox">
+                  <option value="nochange">No change</option>
+                  <option value="exclude">Exclude from reports</option>
+                  <option value="include">Include in reports</option>
+                </select>
+              </label>
+              <p class="ledger-bulk-bar__hint">Select rows → set values → Apply → Save. Use the <strong>Category</strong> filter above the table to narrow the list.</p>
+              <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
+              <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
+            </div>
+            <datalist id="ledger-subcat-datalist"></datalist>
+            <div class="registry-list ledger-registry-list">
+              <div class="registry-header ledger-txn-header">
+                <label class="ledger-txn-header__check"><input type="checkbox" id="ledger-header-select-all" aria-label="Select all" /></label>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--active" data-sort="date" aria-sort="descending">Date <span class="ledger-sort-indicator">↓</span></button>
+                <button type="button" class="ledger-sort-btn" data-sort="wallet" aria-sort="none">Ledger <span class="ledger-sort-indicator"></span></button>
+                <button type="button" class="ledger-sort-btn" data-sort="cat" aria-sort="none">Category <span class="ledger-sort-indicator"></span></button>
+                <span class="ledger-txn-header__static">Exclude</span>
+                <span class="ledger-txn-header__static">Description</span>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="dr" aria-sort="none">Dr (₹) <span class="ledger-sort-indicator"></span></button>
+                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="cr" aria-sort="none">Cr (₹) <span class="ledger-sort-indicator"></span></button>
+                <span class="ledger-txn-header__action">Action</span>
+              </div>
+              <div id="cash-ledger-items"></div>
+            </div>
+          </section>
+        </div>
+
+        <div id="subview-bank-recon" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="invoice-toolbar bank-recon-toolbar">
+            <div class="bank-recon-toolbar__group">
+              <span class="bank-recon-toolbar__label">Import</span>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-template-btn"><i class="fa-solid fa-download"></i> Template</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-import-btn"><i class="fa-solid fa-file-arrow-up"></i> Excel / CSV</button>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-add-row-btn"><i class="fa-solid fa-plus"></i> Add rows</button>
+            </div>
+            <div class="bank-recon-toolbar__group">
+              <span class="bank-recon-toolbar__label">Passbook</span>
+              <button type="button" class="btn btn-primary btn--small" id="bank-recon-passbook-btn"><i class="fa-solid fa-book-open"></i> Scan</button>
+              <button type="button" class="btn btn-outline btn--small bank-recon-passbook-settings-btn" id="bank-recon-passbook-settings-btn" title="Passbook webhook settings" aria-label="Passbook webhook settings">
+                <i class="fa-solid fa-gear"></i>
+              </button>
+              <button type="button" class="btn btn-outline btn--small bank-recon-passbook-jobs-btn" id="bank-recon-passbook-jobs-btn" title="Open passbook scan jobs">
+                <i class="fa-solid fa-list-check"></i> Jobs
+                <span id="bank-recon-passbook-jobs-badge" class="bank-recon-passbook-jobs-badge" hidden>0</span>
+              </button>
+            </div>
+            <div class="bank-recon-toolbar__group">
+              <span class="bank-recon-toolbar__label">Balance</span>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-recalc-btn" title="Recalculate the Calculated balance column after reordering rows"><i class="fa-solid fa-calculator"></i> Recalculate</button>
+            </div>
+            <div class="bank-recon-toolbar__group">
+              <span class="bank-recon-toolbar__label">Classify</span>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-rules-btn" title="Manage description → category rules and run on unmatched lines"><i class="fa-solid fa-wand-magic-sparkles"></i> Rules</button>
+            </div>
+            <div class="bank-recon-toolbar__group bank-recon-toolbar__group--end">
+              <button type="button" class="btn btn-outline btn--small btn--danger-outline" id="bank-recon-clear-all-btn"><i class="fa-solid fa-trash-can"></i> Clear all</button>
+            </div>
+            <input type="file" id="bank-recon-file" accept=".xlsx,.csv" hidden />
+            <input type="file" id="bank-recon-passbook-files" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf" multiple hidden />
+          </div>
+          <section id="bank-recon-manual-entry" class="bank-recon-manual-entry" hidden>
+            <div class="bank-recon-manual-entry__head">
+              <h4 class="bank-recon-manual-entry__title">Add statement rows manually</h4>
+              <button type="button" class="btn btn-outline btn--small" id="bank-recon-manual-add-row"><i class="fa-solid fa-plus"></i> Add another row</button>
+            </div>
+            <div class="bank-recon-manual-entry__table-wrap">
+              <table class="bank-recon-manual-entry__table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th class="bank-recon-manual-entry__th--num">Debit</th>
+                    <th class="bank-recon-manual-entry__th--num">Credit</th>
+                    <th class="bank-recon-manual-entry__th--num">Balance</th>
+                    <th class="bank-recon-manual-entry__th--actions"></th>
+                  </tr>
+                </thead>
+                <tbody id="bank-recon-manual-rows"></tbody>
+              </table>
+            </div>
+            <div class="bank-recon-manual-entry__actions">
+              <p class="bank-recon-manual-entry__hint">Use when OCR misses rows or print overlaps. Add multiple rows, then save — balances are recalculated after insert.</p>
+              <div class="bank-recon-manual-entry__buttons">
+                <button type="button" class="btn btn-outline btn--small" id="bank-recon-manual-cancel">Cancel</button>
+                <button type="button" class="btn btn-primary btn--small" id="bank-recon-manual-save"><i class="fa-solid fa-floppy-disk"></i> Save rows</button>
+              </div>
+            </div>
+          </section>
+          <p id="bank-recon-recalc-status" class="bank-recon-recalc-status" hidden></p>
+          <p id="bank-recon-passbook-hint" class="bank-recon-passbook-hint" hidden></p>
+          <p id="bank-recon-passbook-status" class="bank-recon-passbook-status" hidden></p>
+          <section class="bank-recon-balance-panel" id="bank-recon-balance-panel"></section>
+          <section class="dashboard-metrics bank-recon-metrics" id="bank-recon-stats"></section>
+          <div class="bank-recon-split">
+            <div class="bank-recon-panel bank-recon-panel--statement">
+              <h3 class="bank-recon-panel__title">Statement lines — pick category/vendor or match to reconcile automatically</h3>
+              <div id="bank-recon-lines" class="bank-recon-lines"></div>
+            </div>
+            <div class="bank-recon-panel bank-recon-panel--ledger">
+              <h3 class="bank-recon-panel__title">Unmatched bank ledger</h3>
+              <div id="bank-recon-txns" class="bank-recon-txns"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="subview-activity" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div id="activity-review-queue" class="activity-review-queue" style="display:none;">
+            <div class="activity-review-queue__head">
+              <h3><i class="fa-solid fa-clipboard-check"></i> Pending review — office manager entries</h3>
+              <p class="activity-review-queue__hint">Association office bearers must approve these entries before they appear in the official activity log.</p>
+            </div>
+            <div class="registry-list">
+              <div class="registry-header activity-review-header">
+                <span>When</span><span>Type</span><span>Summary</span><span>Actions</span>
+              </div>
+              <div id="activity-review-list"></div>
+            </div>
+          </div>
+          <div class="invoice-toolbar activity-log-toolbar">
+            <label class="invoice-filter-status">
+              <span>Entity</span>
+              <select id="activity-filter-entity">
+                <option value="">All types</option>
+                <option value="INVOICE">Invoice</option>
+                <option value="RESIDENT">Resident</option>
+                <option value="ROLE">Role</option>
+                <option value="ALLOCATION">Payment allocation</option>
+                <option value="REMINDER">Reminder</option>
+                <option value="BANK_MATCH">Bank reconciliation</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status">
+              <span>From</span>
+              <input type="date" id="activity-filter-from" />
+            </label>
+            <label class="invoice-filter-status">
+              <span>To</span>
+              <input type="date" id="activity-filter-to" />
+            </label>
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false" style="max-width:200px;">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="activity-filter-actor" placeholder="Actor…" autocomplete="off" />
+            </form>
+            <button type="button" class="btn btn-primary btn--small" id="activity-filter-apply">Apply</button>
+            <button type="button" class="btn btn-outline btn--small" id="activity-filter-reset">Reset</button>
+          </div>
+          <div class="registry-list">
+            <div class="registry-header activity-log-header">
+              <span>When</span><span>Type</span><span>Summary</span>
+            </div>
+            <div id="activity-log-list"></div>
+          </div>
+        </div>
+
+        <div id="subview-reports" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="fa-toolbar invoice-toolbar">
+            <div class="fa-toolbar__filters">
+              <label class="fa-filter">
+                <span>History</span>
+                <select id="fa-month-range" class="expense-combobox">
+                  <option value="6">Last 6 months</option>
+                  <option value="12" selected>Last 12 months</option>
+                  <option value="18">Last 18 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Pivot by</span>
+                <select id="fa-pivot-dimension" class="expense-combobox">
+                  <option value="cat">Category</option>
+                  <option value="sub_category">Sub-category</option>
+                  <option value="vendor">Vendor</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Forecast</span>
+                <select id="fa-project-months" class="expense-combobox">
+                  <option value="1">1 month</option>
+                  <option value="3" selected>3 months</option>
+                  <option value="6">6 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Match dates</span>
+                <select id="fa-date-tolerance" class="expense-combobox">
+                  <option value="0">Exact date</option>
+                  <option value="3" selected>±3 days</option>
+                  <option value="7">±7 days</option>
+                </select>
+              </label>
+              <label class="fa-filter fa-filter--check">
+                <input type="checkbox" id="fa-sheet-only" checked />
+                <span>Structured expenses only (sheets + bank)</span>
+              </label>
+            </div>
+            <div class="fa-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fa-goto-bank-recon"><i class="fa-solid fa-scale-balanced"></i> Bank reconciliation</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-nobroker-upload-btn"><i class="fa-solid fa-file-arrow-up"></i> Upload NoBroker dump</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
+              <input type="file" id="fa-nobroker-file" accept=".xlsx,.xls,.csv" hidden />
+            </div>
+          </div>
+
+          <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
+
+          <section class="fa-panel" id="fa-nobroker-panel"></section>
+
+          <div class="fa-charts-grid fa-charts-grid--dual">
+            <div class="metric-card fa-chart-card fa-chart-card--wide">
+              <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
+              <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+              <div class="fa-chart-wrap"><canvas id="fa-combined-chart"></canvas></div>
+            </div>
+            <div class="metric-card fa-projection-card" id="fa-projection-summary"></div>
+          </div>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Income pivot</h3>
+                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. Rows excluded from reports are omitted.</p>
+              </div>
+              <div id="fa-income-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-income-pivot"></div>
+          </section>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Expense pivot</h3>
+                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries.</p>
+              </div>
+              <div id="fa-expense-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-expense-pivot"></div>
+          </section>
+        </div>
+
+        <div id="subview-gl" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <div class="ops-toolbar">
+                <h3>Chart of accounts</h3>
+                <button type="button" class="btn btn-outline btn--small" id="gl-seed-accounts">Seed default chart</button>
+              </div>
+              <div id="gl-accounts-list"></div>
+              <form class="ops-inline-form ops-inline-form--stack" style="margin-top:1rem;" onsubmit="return false">
+                <h3>Post journal entry</h3>
+                <input type="date" id="gl-entry-date" class="expense-combobox" />
+                <input type="text" id="gl-entry-desc" class="expense-combobox" placeholder="Description" />
+                <select id="gl-debit-account" class="expense-combobox"><option value="">Debit account</option></select>
+                <select id="gl-credit-account" class="expense-combobox"><option value="">Credit account</option></select>
+                <input type="number" id="gl-entry-amount" class="expense-combobox" placeholder="Amount" step="0.01" />
+                <button type="button" class="btn btn-primary btn--small" id="gl-post-entry">Post entry</button>
+              </form>
+            </div>
+            <div>
+              <h3>Recent journal entries</h3>
+              <div id="gl-journal-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>

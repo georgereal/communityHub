@@ -1,0 +1,31 @@
+<section id="view-units" class="content-view directory-page">
+        <header class="directory-page__header">
+          <div class="header-title">
+            <h2>Unit Directory</h2>
+            <p>Flat master data — area, slots, owners & tenants (bulk update via Excel)</p>
+          </div>
+          <div class="directory-page__actions">
+            <button class="btn btn-outline" type="button" id="unit-directory-download">
+              <i class="fa-solid fa-download"></i> <span>Download template</span>
+            </button>
+            <button class="btn btn-primary" type="button" id="unit-directory-import-btn">
+              <i class="fa-solid fa-file-excel"></i> <span>Import Excel</span>
+            </button>
+            <input type="file" id="unit-directory-xlsx" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+          </div>
+        </header>
+        <div class="invoice-toolbar directory-page__toolbar">
+          <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="search" id="unit-directory-filter" placeholder="Search flat, block, BHK…" autocomplete="off" />
+          </form>
+          <div id="unit-directory-block-filter"></div>
+        </div>
+        <div class="registry-list unit-directory-list">
+          <div class="registry-header unit-directory-header">
+            <span>Flat</span><span>Block</span><span>Unit info</span><span>Status</span>
+            <span>Owners</span><span>Tenants</span><span>Parking</span><span>Dues</span><span></span>
+          </div>
+          <div id="unit-directory-items"></div>
+        </div>
+      </section>

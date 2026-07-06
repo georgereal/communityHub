@@ -1,0 +1,252 @@
+<section id="view-setup" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Society Administration</h2>
+            <p>Society profile, bank account, expense references, and staff directory</p>
+          </div>
+        </header>
+
+
+        <div id="setup-subview-society">
+        <div class="setup-grid" style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 2rem; margin-top: 1rem;">
+          <div style="background:#fff; border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px;">
+            <h3
+              style="font-size: 0.8rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2rem;">
+              Society Configuration</h3>
+            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+              <div>
+                <label
+                  style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.5rem;">Complex
+                  Name</label>
+                <input type="text" id="setup-name"
+                  style="width:100%; padding:0.75rem; border:1px solid var(--border); border-radius:6px; font-weight:700;" />
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                  <label
+                    style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.5rem;">Default
+                    Car Slots</label>
+                  <input type="number" id="setup-car"
+                    style="width:100%; padding:0.6rem; border:1px solid var(--border); border-radius:6px;" />
+                </div>
+                <div>
+                  <label
+                    style="display:block; font-size:0.65rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.5rem;">Default
+                    Bike Slots</label>
+                  <input type="number" id="setup-bike"
+                    style="width:100%; padding:0.6rem; border:1px solid var(--border); border-radius:6px;" />
+                </div>
+              </div>
+              <button class="btn btn-primary" id="save-setup-btn" style="width: 100%; padding: 0.75rem;">Save Global
+                Policy</button>
+            </div>
+          </div>
+
+          <div style="background:#fef2f2; border: 1px solid #fee2e2; padding: 1.5rem; border-radius: 8px;">
+            <h3
+              style="font-size: 0.8rem; font-weight: 800; color: #ef4444; text-transform: uppercase; margin-bottom: 2rem;">
+              Data Cleanup & Maintenance</h3>
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <button class="btn btn-outline" style="width:100%; border-color:#ef4444; color:#ef4444; background:#fff;"
+                id="clear-all-btn">
+                <i class="fa-solid fa-trash-can"></i> <span>Purge All Database</span>
+              </button>
+              <button class="btn btn-outline"
+                style="width:100%; border-color:var(--accent); color:var(--accent); background:#fff;"
+                id="deep-repair-btn">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Deep State Repair</span>
+              </button>
+              <button class="btn btn-outline"
+                style="width:100%; border-color:var(--success); color:var(--success); background:#fff;"
+                onclick="window.initializeSeedData(); alert('Seed Data Restored!'); window.location.reload();">
+                <i class="fa-solid fa-seedling"></i> <span>Re-Initialize Seed Data</span>
+              </button>
+              <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px dashed #fee2e2;">
+                <p style="font-size:0.7rem; color: #ef4444; font-weight:700; text-align:center;">WARNING: These actions
+                  are irreversible.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="module-access-card">
+          <h3 class="module-access-card__title">Enabled modules</h3>
+          <p class="module-access-card__desc">Control which sections appear in the menu for non-admin users in this society.</p>
+          <div id="apartment-module-settings"></div>
+        </div>
+
+        <div style="margin-top: 2.5rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:900; color:var(--text-main); letter-spacing:-0.02em;">User Access Directory</h3>
+              <p style="font-size:0.8rem; color:var(--text-dim); font-weight:500;">Manage system users and their apartment-level permissions.</p>
+              <label style="display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.5rem; font-size:0.78rem; color:var(--text-dim); cursor:pointer;">
+                <input type="checkbox" id="access-users-show-unassigned" style="accent-color:var(--primary);">
+                Include users without society access
+              </label>
+            </div>
+            <button class="btn btn-primary" onclick="window.openUserModal()"><i class="fa-solid fa-user-plus"></i> <span>Assign Access</span></button>
+          </div>
+
+          <div class="user-directory-card">
+            <div class="user-table-header">
+              <span>User Identity</span>
+              <span>Primary Role</span>
+              <span>Apartment Access</span>
+              <span style="text-align:right;">Actions</span>
+            </div>
+            <div id="access-users-list-v2">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 3rem; margin-bottom: 2rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:900; color:var(--text-main); letter-spacing:-0.02em;">Portal Flat Links</h3>
+              <p style="font-size:0.8rem; color:var(--text-dim); font-weight:500;">Connect login accounts to resident records so owners see their flats in the Resident Portal.</p>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+              <button type="button" class="btn btn-outline" onclick="window.openResidentLinkModal(null, '', null, 'manual')"><i class="fa-solid fa-link"></i> <span>Manual link</span></button>
+              <button type="button" class="btn btn-primary" onclick="window.openResidentLinkModal(null, '', null, 'invite')"><i class="fa-solid fa-envelope"></i> <span>Email invitation</span></button>
+            </div>
+          </div>
+          <div id="resident-links-list" class="resident-links-panel"></div>
+        </div>
+
+        <div style="margin-top: 3rem; margin-bottom: 3rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:900; color:var(--text-main); letter-spacing:-0.02em;">Apartment Portfolio</h3>
+              <p style="font-size:0.8rem; color:var(--text-dim); font-weight:500;">List of all apartments managed under this community.</p>
+            </div>
+            <button class="btn btn-outline" onclick="window.openAptModal()"><i class="fa-solid fa-plus"></i> <span>Add Apartment</span></button>
+          </div>
+          <div id="portfolio-grid" class="portfolio-grid">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+        </div>
+
+        <div id="setup-subview-bank" class="setup-admin-panel" hidden>
+          <div class="admin-card">
+            <h3 class="admin-card__title">Society Bank Account</h3>
+            <p class="admin-card__desc">Official account used for maintenance collections and vendor payments. Shown for reference when recording bank expenses.</p>
+            <div class="admin-form-grid">
+              <div class="admin-field admin-field--span2">
+                <label class="expense-label" for="admin-bank-name">Bank name</label>
+                <input type="text" id="admin-bank-name" class="expense-combobox" placeholder="e.g. HDFC Bank" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-branch">Branch</label>
+                <input type="text" id="admin-bank-branch" class="expense-combobox" placeholder="e.g. Whitefield" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-holder">Account holder</label>
+                <input type="text" id="admin-bank-holder" class="expense-combobox" placeholder="Association name" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-number">Account number</label>
+                <input type="text" id="admin-bank-number" class="expense-combobox" autocomplete="off" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-ifsc">IFSC</label>
+                <input type="text" id="admin-bank-ifsc" class="expense-combobox" placeholder="HDFC0001234" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-upi">UPI ID <span class="expense-optional">(optional)</span></label>
+                <input type="text" id="admin-bank-upi" class="expense-combobox" placeholder="society@hdfcbank" />
+              </div>
+              <div class="admin-field admin-field--span2">
+                <label class="expense-label" for="admin-bank-notes">Notes <span class="expense-optional">(optional)</span></label>
+                <textarea id="admin-bank-notes" class="expense-textarea" rows="2" placeholder="Signatories, payment instructions, etc."></textarea>
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-opening-date">Opening balance date</label>
+                <input type="date" id="admin-bank-opening-date" class="expense-combobox" />
+              </div>
+              <div class="admin-field">
+                <label class="expense-label" for="admin-bank-opening-amount">Opening balance (₹)</label>
+                <input type="number" id="admin-bank-opening-amount" class="expense-combobox" step="0.01" placeholder="e.g. 150000" />
+              </div>
+            </div>
+            <p class="admin-card__desc" style="margin-top:0.5rem;">Set the passbook balance on the opening date. Bank reconciliation calculates running balance from this baseline and compares it to imported statement balances.</p>
+            <p id="admin-bank-hint" class="admin-hint"></p>
+            <button type="button" class="btn btn-primary" id="admin-bank-save">Save Bank Details</button>
+          </div>
+        </div>
+
+        <div id="setup-subview-vendors" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Vendor Directory</h3>
+              <p class="admin-panel-desc">Manage payees used in expense entries. Autocomplete pulls from this list.</p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="window.openVendorModal()"><i class="fa-solid fa-plus"></i> Add Vendor</button>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--vendors">
+              <span>Vendor</span><span>Phone</span><span>Email</span><span>Use count</span><span></span>
+            </div>
+            <div id="admin-vendors-list"></div>
+          </div>
+        </div>
+
+        <div id="setup-subview-subcats" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Expense Sub-categories</h3>
+              <p class="admin-panel-desc">Finer labels grouped under each expense category.</p>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <select id="admin-subcat-filter" class="expense-combobox" style="width:auto; min-width:10rem;">
+                <option value="">All categories</option>
+                <option value="Maintenance">Maintenance</option>
+                <option value="Security">Security</option>
+                <option value="Plumbing">Plumbing</option>
+                <option value="Electrical">Electrical</option>
+                <option value="Stationery">Stationery</option>
+                <option value="Other">Other</option>
+              </select>
+              <button type="button" class="btn btn-primary" onclick="window.openSubCatModal()"><i class="fa-solid fa-plus"></i> Add</button>
+            </div>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--subcats">
+              <span>Category</span><span>Sub-category</span><span>Use count</span><span></span>
+            </div>
+            <div id="admin-subcats-list"></div>
+          </div>
+        </div>
+
+        <div id="setup-subview-staff" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">Staff Directory</h3>
+              <p class="admin-panel-desc">Guards, housekeeping, managers, and other non-resident staff.</p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="window.openStaffModal()"><i class="fa-solid fa-plus"></i> Add Staff</button>
+          </div>
+          <div class="admin-table">
+            <div class="admin-table__head admin-table__head--staff">
+              <span>Name</span><span>Role</span><span>Phone</span><span>Email</span><span>Status</span><span></span>
+            </div>
+            <div id="admin-staff-list"></div>
+          </div>
+        </div>
+
+        <div id="setup-subview-connections" class="setup-admin-panel" hidden>
+          <div class="admin-panel-header">
+            <div>
+              <h3 class="admin-panel-title">External Connections</h3>
+              <p class="admin-panel-desc">API credentials for third-party services used by this society (passbook OCR, etc.). Keys are stored securely and used only server-side.</p>
+            </div>
+          </div>
+          <div id="admin-connections-root" class="ext-conn-list"></div>
+        </div>
+
+        <div id="setup-subview-sync" class="setup-admin-panel" hidden>
+          <div id="admin-sync-panel-container"></div>
+        </div>
+      </section>
