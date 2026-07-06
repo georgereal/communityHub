@@ -6,7 +6,7 @@ import { readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const apiDir = resolve(process.cwd(), 'api');
-const skip = new Set(['vercelRequest.js', 'dbAccess.js', 'serverAuth.js', 'serverSupabase.js', 'supabaseRest.js', 'accountsAuth.js', 'passbookJobsStore.js', 'evolyxConnection.js']);
+const skip = new Set(['vercelRequest.js', 'dbAccess.js', 'stateDomains.js', 'serverAuth.js', 'serverSupabase.js', 'supabaseRest.js', 'accountsAuth.js', 'passbookJobsStore.js', 'evolyxConnection.js']);
 
 const files = readdirSync(apiDir).filter((f) => f.endsWith('.js') && !skip.has(f));
 let failed = 0;

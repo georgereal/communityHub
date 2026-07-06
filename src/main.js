@@ -2,7 +2,7 @@
  * Sentry Portal Modular Entry (Vercel Edition)
  * Primary Boot Sequence & View Coordination
  */
-import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig, isPlaceholderApartmentId, withTimeout } from './store.js';
+import { portalState, persist, migrateAndRecover, supabase, pullState, upsertSocietyConfig, isPlaceholderApartmentId, withTimeout, ensureRouteState, resetLoadedDomains } from './store.js';
 import {
   processAnalytics,
   renderRegistry,
@@ -457,6 +457,7 @@ const setActiveApartment = async (apartmentId) => {
 
   portalState.access.activeApartmentId = apartmentId;
   portalState.community.name = apt.name;
+  resetLoadedDomains();
 
   const headerSelect = document.getElementById('header-apartment-switch');
   if (headerSelect) headerSelect.value = apartmentId;
@@ -470,8 +471,8 @@ const setActiveApartment = async (apartmentId) => {
     }
   }
 
-  console.log('Pulling state for apartment...');
-  const success = await pullState();
+  console.log('Pulling core state for apartment...');
+  const success = await pullState({ domain: 'core' });
   console.log('Pull State Success:', success);
   if (success) {
     await refreshAuthPermissions(apartmentId);
@@ -944,7 +945,7 @@ window.initializeSeedData = initializeSeedData;
  */
 let routingGuard = false;
 
-window.switchView = (v) => {
+window.switchView = async (v) => {
   if (routingGuard) return;
   const route = resolveRoute(v, portalState.auth?.role);
   const fallback = findFirstAllowedRoute(portalState.auth?.role);
@@ -972,6 +973,15 @@ window.switchView = (v) => {
   }
 
   const { page } = meta;
+  document.body.classList.add('route-loading');
+  try {
+    await ensureRouteState(route);
+  } catch (err) {
+    console.warn('[nav] Route state load failed:', err?.message || err);
+  } finally {
+    document.body.classList.remove('route-loading');
+  }
+
   document.querySelectorAll('.content-view').forEach((x) => x.classList.remove('active'));
   const viewNode = document.getElementById(`view-${page.view}`);
   if (!viewNode) {

@@ -18,6 +18,10 @@ export const isValidEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 };
 
+export function setResidentsFromState(rows) {
+    residentsCache = rows || [];
+}
+
 export async function fetchResidentsForApartment(apartmentId) {
     if (!apartmentId || !supabase) return [];
     const { data, error } = await supabase

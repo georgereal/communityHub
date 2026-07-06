@@ -304,8 +304,12 @@ export function createApiSupabaseClient(realClient) {
     };
 }
 
-export async function fetchApartmentState(apartmentId) {
-    const res = await fetch(`/api/state?apartment_id=${encodeURIComponent(apartmentId)}`, {
+export async function fetchApartmentState(apartmentId, domain = 'core') {
+    const params = new URLSearchParams({
+        apartment_id: apartmentId,
+        domain,
+    });
+    const res = await fetch(`/api/state?${params}`, {
         method: 'GET',
         ...API_FETCH_OPTS,
     });
