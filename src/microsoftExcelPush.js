@@ -5,25 +5,24 @@ import {
     normalizeMapping,
 } from './ledgerColumnMapping.js';
 import { colIndexToLetters, parseColumnRange } from './ledgerSheetRegion.js';
+import { proxyExternalRequest } from './dbClient.js';
 
 function colLetter(n) {
     return colIndexToLetters(n);
 }
 
 async function graphRequest(path, accessToken, init = {}) {
-    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    const proxy = await proxyExternalRequest(`https://graph.microsoft.com/v1.0${path}`, {
         ...init,
         headers: {
             Authorization: `Bearer ${accessToken}`,
             ...init.headers,
         },
     });
-    const text = await res.text();
-    let json = {};
-    if (text) {
-        try { json = JSON.parse(text); } catch { json = {}; }
-    }
-    return { res, json };
+    return {
+        res: { ok: proxy.ok, status: proxy.status },
+        json: proxy.json || {},
+    };
 }
 
 function sessionHeaders(sessionId, extra = {}) {

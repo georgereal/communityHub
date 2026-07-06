@@ -2,11 +2,13 @@
  * Sentry Cloud Store (Relational)
  */
 import { createClient } from '@supabase/supabase-js';
+import { createApiSupabaseClient, fetchApartmentState, setActiveApartmentIdForApi } from './dbClient.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const authClient = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+export const supabase = createApiSupabaseClient(authClient);
 
 let pullStateChain = Promise.resolve(true);
 
@@ -83,6 +85,7 @@ export const pullState = async () => {
     try {
         const activeApartmentId = portalState.access?.activeApartmentId;
         if (!activeApartmentId) throw new Error('No active apartment selected');
+        setActiveApartmentIdForApi(activeApartmentId);
         if (isPlaceholderApartmentId(activeApartmentId)) {
             console.warn('[pullState] Refusing to load placeholder apartment id:', activeApartmentId);
             return false;
@@ -92,171 +95,36 @@ export const pullState = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         const uid = user?.id;
 
-        console.log('Running parallel queries...');
-        const queriesPromise = Promise.all([
-            supabase.from('units').select('*').eq('apartment_id', activeApartmentId).order('number'),
-            supabase.from('vehicles').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('transactions').select('*').eq('apartment_id', activeApartmentId).order('date', { ascending: false }),
-            supabase.from('society_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('parking_slots').select('*').eq('apartment_id', activeApartmentId).order('name'),
-            supabase.from('expense_vendors').select('*').eq('apartment_id', activeApartmentId).order('last_used_at', { ascending: false }),
-            supabase.from('expense_sub_categories').select('*').eq('apartment_id', activeApartmentId).order('last_used_at', { ascending: false }),
-            supabase.from('apartment_bank_accounts').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('staff_members').select('*').eq('apartment_id', activeApartmentId).order('full_name'),
-            supabase.from('maintenance_invoices').select('*').eq('apartment_id', activeApartmentId).order('due_date'),
-            supabase.from('maintenance_payment_allocations').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('maintenance_charge_heads').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
-            supabase.from('maintenance_invoice_lines').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('maintenance_penalty_rules').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
-            supabase.from('maintenance_billing_groups').select('*').eq('apartment_id', activeApartmentId).order('sort_order'),
-            supabase.from('maintenance_billing_group_units').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('maintenance_billing_batches').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('maintenance_billing_batch_skips').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('maintenance_reminder_log').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('bank_statement_imports').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('bank_statement_lines').select('*').eq('apartment_id', activeApartmentId).order('line_date', { ascending: true }).order('line_order', { ascending: true }).order('source_row_index', { ascending: true }),
-            supabase.from('bank_classification_rules').select('*').eq('apartment_id', activeApartmentId).order('priority', { ascending: false }).order('created_at', { ascending: true }),
-            supabase.from('resident_user_links').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('payment_intents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('apartment_payment_config').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('society_notices').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            uid
-                ? supabase.from('notice_read_log').select('*').eq('user_id', uid)
-                : Promise.resolve({ data: [], error: null }),
-            supabase.from('resident_portal_invites').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('helpdesk_tickets').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('unit_transitions').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('unit_documents').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('society_assets').select('*').eq('apartment_id', activeApartmentId).order('name'),
-            supabase.from('asset_service_log').select('*').eq('apartment_id', activeApartmentId).order('service_date', { ascending: false }),
-            supabase.from('amenities').select('*').eq('apartment_id', activeApartmentId).order('name'),
-            supabase.from('amenity_bookings').select('*').eq('apartment_id', activeApartmentId).order('starts_at', { ascending: false }),
-            supabase.from('visitor_log').select('*').eq('apartment_id', activeApartmentId).order('entry_at', { ascending: false }),
-            supabase.from('staff_attendance').select('*').eq('apartment_id', activeApartmentId).order('work_date', { ascending: false }),
-            supabase.from('payroll_runs').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('visitor_parking_passes').select('*').eq('apartment_id', activeApartmentId).order('valid_until', { ascending: false }),
-            supabase.from('parking_fine_rules').select('*').eq('apartment_id', activeApartmentId).order('name'),
-            supabase.from('parking_violations').select('*').eq('apartment_id', activeApartmentId).order('violation_date', { ascending: false }),
-            supabase.from('chart_of_accounts').select('*').eq('apartment_id', activeApartmentId).order('code'),
-            supabase.from('journal_entries').select('*').eq('apartment_id', activeApartmentId).order('entry_date', { ascending: false }),
-            supabase.from('journal_lines').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('email_outbox').select('*').eq('apartment_id', activeApartmentId).order('created_at', { ascending: false }),
-            supabase.from('gate_parcels').select('*').eq('apartment_id', activeApartmentId).order('received_at', { ascending: false }),
-            supabase.from('visitor_log_units').select('*').eq('apartment_id', activeApartmentId),
-            supabase.from('ledger_sync_settings').select('*').eq('apartment_id', activeApartmentId).maybeSingle(),
-            supabase.from('ledger_sync_oauth_apps').select('id, apartment_id, provider, client_id, tenant_id, redirect_uri, enabled, client_secret_set, updated_at').eq('apartment_id', activeApartmentId),
-            supabase.from('user_oauth_connections').select('id, provider, account_email, token_expires_at, connected_at, provider_account_id, account_meta').eq('apartment_id', activeApartmentId).eq('user_id', uid || '00000000-0000-0000-0000-000000000000'),
-            supabase.rpc('get_ledger_sync_service_status', { p_apartment_id: activeApartmentId }),
-            supabase.from('apartment_external_connections').select('id, apartment_id, provider, connection_key, display_name, base_url, client_id, workflow_id, enabled, api_key_set, updated_at').eq('apartment_id', activeApartmentId),
-        ]);
-        const results = await withTimeout(queriesPromise, 90000, 'Society data load');
+        console.log('Loading state via API...');
+        const state = await withTimeout(
+            fetchApartmentState(activeApartmentId),
+            90000,
+            'Society data load',
+        );
 
-        const [
-            u, v, t, s, p, ev, esc, bank, staff, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr,
-            rul, pi, pc, sn, nrl, rpi, hd, ut, ud, sa, asl, am, ab, vl, att, pr,
-            vpp, pfr, pv, coa, je, jl, em, gp, vlu, lss, loa, uoc, ssa, aec,
-        ] = results;
+        if (state.errors?.length) console.warn('Some queries failed:', state.errors);
 
-        console.log('Queries finished.');
-        const errors = results.filter(r => r.error).map(r => r.error.message);
-        if (errors.length) console.warn('Some queries failed:', errors);
-
-        if (s.data) {
-            portalState.community = {
-                name: s.data.name,
-                defaults: { cars: s.data.car_default, bikes: s.data.bike_default },
-                configId: s.data.id,
-            };
-        } else if (portalState.community) {
-            portalState.community.configId = null;
+        if (state.community) {
+            portalState.community = state.community;
         } else {
             portalState.community = { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null };
         }
 
-        if (u.error) console.error('[pullState] units query failed:', u.error.message);
-        if (v.error) console.error('[pullState] vehicles query failed:', v.error.message);
-
-        const units = u.error ? [] : (u.data || []);
-        const vehicles = v.error ? [] : (v.data || []);
-        portalState.units = units.map((unit) => ({
-            ...unit,
-            vehicles: vehicles.filter((veh) => veh.unit_id == unit.id),
-        }));
-        portalState.lastPullMeta = {
+        portalState.units = state.units || [];
+        portalState.lastPullMeta = state.meta || {
             apartmentId: activeApartmentId,
-            unitCount: units.length,
-            vehicleCount: vehicles.length,
-            unitsError: u.error?.message || null,
+            unitCount: portalState.units.length,
+            vehicleCount: 0,
             at: new Date().toISOString(),
         };
-        portalState.finances.txns = t.data || [];
-        portalState.finances.vendors = ev.error ? [] : (ev.data || []);
-        portalState.finances.subCategories = esc.error ? [] : (esc.data || []);
-        portalState.finances.maintenanceInvoices = mi.error ? [] : (mi.data || []);
-        portalState.finances.maintenanceAllocations = ma.error ? [] : (ma.data || []);
-        portalState.finances.maintenanceChargeHeads = mch.error ? [] : (mch.data || []);
-        portalState.finances.maintenanceInvoiceLines = mil.error ? [] : (mil.data || []);
-        portalState.finances.maintenancePenaltyRules = mpr.error ? [] : (mpr.data || []);
-        portalState.finances.maintenanceBillingGroups = mbg.error ? [] : (mbg.data || []);
-        portalState.finances.maintenanceBillingGroupUnits = mbgu.error ? [] : (mbgu.data || []);
-        portalState.finances.maintenanceBillingBatches = mbb.error ? [] : (mbb.data || []);
-        portalState.finances.maintenanceBillingBatchSkips = mbbs.error ? [] : (mbbs.data || []);
-        portalState.finances.maintenanceReminderLog = mrl.error ? [] : (mrl.data || []);
-        portalState.finances.bankStatementImports = bsi.error ? [] : (bsi.data || []);
-        portalState.finances.bankStatementLines = bsl.error ? [] : (bsl.data || []);
-        if (bcr.error) {
-            console.warn('[pullState] bank_classification_rules query failed:', bcr.error.message);
-        }
-        portalState.finances.bankClassificationRules = bcr.error ? [] : (bcr.data || []);
-        portalState.admin.bankAccount = bank.error ? null : (bank.data || null);
-        portalState.admin.staff = staff.error ? [] : (staff.data || []);
-        portalState.admin.externalConnections = aec.error ? [] : (aec.data || []);
-
-        if (!portalState.portal) portalState.portal = {};
-        portalState.portal.residentLinks = rul.error ? [] : (rul.data || []);
-        portalState.portal.portalInvites = rpi.error ? [] : (rpi.data || []);
-        portalState.portal.paymentIntents = pi.error ? [] : (pi.data || []);
-        portalState.portal.paymentConfig = pc.error ? null : (pc.data || null);
-        portalState.portal.notices = sn.error ? [] : (sn.data || []);
-        portalState.portal.noticeReadLog = nrl.error ? [] : (nrl.data || []);
-
-        if (!portalState.operations) portalState.operations = {};
-        portalState.operations.helpdeskTickets = hd.error ? [] : (hd.data || []);
-        portalState.operations.unitTransitions = ut.error ? [] : (ut.data || []);
-        portalState.operations.unitDocuments = ud.error ? [] : (ud.data || []);
-        portalState.operations.societyAssets = sa.error ? [] : (sa.data || []);
-        portalState.operations.assetServiceLog = asl.error ? [] : (asl.data || []);
-        portalState.operations.amenities = am.error ? [] : (am.data || []);
-        portalState.operations.amenityBookings = ab.error ? [] : (ab.data || []);
-        portalState.operations.visitorLog = vl.error ? [] : (vl.data || []);
-        portalState.operations.visitorLogUnits = vlu.error ? [] : (vlu.data || []);
-        portalState.operations.gateParcels = gp.error ? [] : (gp.data || []);
-        portalState.operations.staffAttendance = att.error ? [] : (att.data || []);
-        portalState.operations.payrollRuns = pr.error ? [] : (pr.data || []);
-
-        if (!portalState.parking) portalState.parking = {};
-        portalState.parking.visitorPasses = vpp.error ? [] : (vpp.data || []);
-        portalState.parking.fineRules = pfr.error ? [] : (pfr.data || []);
-        portalState.parking.violations = pv.error ? [] : (pv.data || []);
-
-        if (!portalState.ledger) portalState.ledger = {};
-        portalState.ledger.accounts = coa.error ? [] : (coa.data || []);
-        portalState.ledger.entries = je.error ? [] : (je.data || []);
-        portalState.ledger.lines = jl.error ? [] : (jl.data || []);
-
-        if (!portalState.email) portalState.email = {};
-        portalState.email.outbox = em.error ? [] : (em.data || []);
-
-        portalState.finances.ledgerSyncSettings = lss.error ? null : (lss.data || null);
-        portalState.finances.ledgerOAuthApps = loa.error ? [] : (loa.data || []);
-        portalState.finances.myOAuthConnections = uoc.error ? [] : (uoc.data || []);
-        portalState.finances.syncServiceAccounts = ssa.error ? [] : (ssa.data || []);
-
-        // Hydrate slots with vehicle plate numbers
-        portalState.slots = (p.data || []).map(slot => {
-            const vMatch = vehicles.find(veh => veh.id === slot.assigned_vehicle_id);
-            return { ...slot, occupant: vMatch ? vMatch.plate : null, unit_num: vMatch ? units.find(ux => ux.id === vMatch.unit_id)?.number : null };
-        });
+        portalState.slots = state.slots || [];
+        portalState.finances = { ...portalState.finances, ...(state.finances || {}) };
+        portalState.admin = { ...portalState.admin, ...(state.admin || {}) };
+        portalState.portal = { ...portalState.portal, ...(state.portal || {}) };
+        portalState.operations = { ...portalState.operations, ...(state.operations || {}) };
+        portalState.parking = { ...portalState.parking, ...(state.parking || {}) };
+        portalState.ledger = { ...portalState.ledger, ...(state.ledger || {}) };
+        portalState.email = { ...portalState.email, ...(state.email || {}) };
 
         try {
             const { loadModuleAccess } = await import('./moduleAccess.js');
@@ -275,6 +143,7 @@ export const pullState = async () => {
             console.warn('[pullState] page access load skipped:', pageErr?.message);
         }
 
+        console.groupEnd();
         return true;
     } catch (err) { console.error('Cloud-Link Broken:', err); return false; }
     };

@@ -4,6 +4,7 @@
 import './ledgerSync.css';
 import ExcelJS from 'exceljs';
 import { portalState, supabase, pullState } from './store.js';
+import { proxyExternalRequest } from './dbClient.js';
 import { processFinances, renderCashLedger } from './finances.js';
 import { logActivity } from './activityAudit.js';
 import { hasClientPermission } from './rbac.js';
@@ -192,11 +193,21 @@ function detectProviderFromUrl(url) {
     return null;
 }
 
+async function externalFetch(url, init = {}) {
+    const proxy = await proxyExternalRequest(url, init);
+    return {
+        ok: proxy.ok,
+        status: proxy.status,
+        json: async () => proxy.json ?? (proxy.text ? JSON.parse(proxy.text) : {}),
+        text: async () => proxy.text || '',
+    };
+}
+
 async function listGoogleWorksheets(spreadsheetUrl) {
     const sheetId = parseGoogleSheetId(spreadsheetUrl);
     if (!sheetId) throw new Error('Paste a valid Google Sheets URL.');
     const token = await getAccessTokenForProvider('GOOGLE');
-    const res = await fetch(
+    const res = await externalFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
         { headers: { Authorization: `Bearer ${token}` } },
     );
@@ -215,7 +226,7 @@ function encodeMicrosoftShareId(url) {
 }
 
 async function graphGet(path, token, extraHeaders = {}, suppressError = false) {
-    const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    const res = await externalFetch(`https://graph.microsoft.com/v1.0${path}`, {
         headers: {
             Authorization: `Bearer ${token}`,
             ...extraHeaders,
@@ -1084,7 +1095,7 @@ async function fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSetting
     const cols = rangeA1 || settings.range_a1 || 'A:J';
     const fetchRange = buildSyncFetchRange(cols);
     const range = encodeURIComponent(`${sheetName}!${fetchRange}`);
-    const res = await fetch(
+    const res = await externalFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`,
         { headers: { Authorization: `Bearer ${token}` } },
     );
@@ -1150,26 +1161,26 @@ async function updateMicrosoftRow({ driveId, itemId, shareId, useSharesApi, shee
     const safeSheet = sheetName.replace(/'/g, "''");
     const addr = rangeAddress || `A${rowIndex}:J${rowIndex}`;
     
-    let res = await fetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${addr}')`, {
+    let res = await externalFetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${addr}')`, {
         method: 'PATCH',
         headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ values: [values] })
+        body: JSON.stringify({ values: [values] }),
     });
 
     if (!res.ok && base === sharesBase) {
         const json = await res.json().catch(() => ({}));
         if (String(json?.error?.message).includes('not supported for MSA')) {
             base = driveBase;
-            res = await fetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`, {
+            res = await externalFetch(`https://graph.microsoft.com/v1.0${base}/workbook/worksheets('${safeSheet}')/range(address='${rangeAddress}')`, {
                 method: 'PATCH',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ values: [values] })
+                body: JSON.stringify({ values: [values] }),
             });
         }
     }

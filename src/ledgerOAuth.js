@@ -3,6 +3,7 @@
  */
 import { PublicClientApplication } from '@azure/msal-browser';
 import { portalState, supabase, pullState } from './store.js';
+import { proxyExternalRequest } from './dbClient.js';
 import { hasClientPermission } from './rbac.js';
 
 export const GOOGLE_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
@@ -219,7 +220,7 @@ export async function completeGoogleOAuthCallback(code) {
     const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
     if (!app?.client_id || !verifier) throw new Error('OAuth session expired. Try connecting again.');
 
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const proxy = await proxyExternalRequest('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -228,10 +229,10 @@ export async function completeGoogleOAuthCallback(code) {
             redirect_uri: app.redirect_uri || redirectUri(),
             grant_type: 'authorization_code',
             code_verifier: verifier,
-        }),
+        }).toString(),
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error_description || json.error || 'Google token exchange failed.');
+    const json = proxy.json || {};
+    if (!proxy.ok) throw new Error(json.error_description || json.error || 'Google token exchange failed.');
 
     const expiresAt = json.expires_in
         ? new Date(Date.now() + json.expires_in * 1000).toISOString()
@@ -239,10 +240,10 @@ export async function completeGoogleOAuthCallback(code) {
 
     let accountEmail = null;
     try {
-        const profile = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        const profile = await proxyExternalRequest('https://www.googleapis.com/oauth2/v2/userinfo', {
             headers: { Authorization: `Bearer ${json.access_token}` },
         });
-        const p = await profile.json();
+        const p = profile.json || {};
         accountEmail = p.email || null;
     } catch { /* optional */ }
 
@@ -593,17 +594,17 @@ async function completeMicrosoftOAuth() {
 
 async function refreshGoogleToken(conn, app) {
     if (!conn.refresh_token) throw new Error('Google session expired. Connect your Google account again.');
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const proxy = await proxyExternalRequest('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
             client_id: app.client_id,
             refresh_token: conn.refresh_token,
             grant_type: 'refresh_token',
-        }),
+        }).toString(),
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error_description || 'Could not refresh Google access. Connect again.');
+    const json = proxy.json || {};
+    if (!proxy.ok) throw new Error(json.error_description || 'Could not refresh Google access. Connect again.');
 
     const expiresAt = json.expires_in
         ? new Date(Date.now() + json.expires_in * 1000).toISOString()
