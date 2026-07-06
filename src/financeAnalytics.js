@@ -539,24 +539,42 @@ const renderPivotTable = ({
 
     const colTotals = months.map((_, i) => rows.reduce((s, r) => s + r.cells[i], 0));
     const grandTotal = colTotals.reduce((a, b) => a + b, 0);
+    const rangeStart = months[0];
+    const rangeEnd = months[months.length - 1];
+    const monthRangeAttrs = rangeStart && rangeEnd
+        ? `data-pivot-range-start="${rangeStart.y}-${rangeStart.m}" data-pivot-range-end="${rangeEnd.y}-${rangeEnd.m}"`
+        : '';
 
-    const pivotCell = (value, row, monthIndex) => {
-        if (value <= 0.001) return '<td class="fa-num">—</td>';
+    const renderAmountCell = ({
+        value,
+        scope = 'cell',
+        row = null,
+        monthIndex = null,
+        extraClass = '',
+        strong = false,
+    }) => {
+        const content = strong ? `<strong>${formatMoney(value)}</strong>` : formatMoney(value);
+        if (value <= 0.001) return `<td class="fa-num ${extraClass}">—</td>`;
+
         const month = monthIndex != null ? months[monthIndex] : null;
-        if (!clickable || row.key === '__other__') {
-            return `<td class="fa-num ${amountClass}">${formatMoney(value)}</td>`;
+        const rowBlocked = row?.key === '__other__';
+        if (!clickable || rowBlocked) {
+            return `<td class="fa-num ${amountClass} ${extraClass}">${content}</td>`;
         }
+
         const attrs = [
-            `class="fa-num fa-pivot-cell fa-pivot-cell--clickable ${amountClass}"`,
+            `class="fa-num fa-pivot-cell fa-pivot-cell--clickable ${amountClass} ${extraClass}"`,
             'role="button" tabindex="0"',
             `data-pivot-type="${type}"`,
             `data-pivot-dimension="${dimension}"`,
-            `data-pivot-key="${escAttr(row.key)}"`,
-            `data-pivot-label="${escAttr(row.label)}"`,
+            `data-pivot-scope="${scope}"`,
+            row?.key != null ? `data-pivot-key="${escAttr(row.key)}"` : '',
+            row?.label != null ? `data-pivot-label="${escAttr(row.label)}"` : '',
             month ? `data-pivot-year="${month.y}" data-pivot-month="${month.m}"` : '',
+            (scope === 'row-total' || scope === 'grand-total') ? monthRangeAttrs : '',
             `title="View matching ledger entries"`,
         ].filter(Boolean).join(' ');
-        return `<td ${attrs}>${formatMoney(value)}</td>`;
+        return `<td ${attrs}>${content}</td>`;
     };
 
     el.innerHTML = `
@@ -572,15 +590,15 @@ const renderPivotTable = ({
           ${rows.map((r) => `
             <tr>
               <td>${r.label}</td>
-              ${r.cells.map((v, i) => pivotCell(v, r, i)).join('')}
-              <td class="fa-num fa-col-total"><strong>${formatMoney(r.total)}</strong></td>
+              ${r.cells.map((v, i) => renderAmountCell({ value: v, scope: 'cell', row: r, monthIndex: i })).join('')}
+              ${renderAmountCell({ value: r.total, scope: 'row-total', row: r, extraClass: 'fa-col-total', strong: true })}
             </tr>`).join('')}
         </tbody>
         <tfoot>
           <tr>
             <td><strong>Monthly total</strong></td>
-            ${colTotals.map((v) => `<td class="fa-num"><strong>${formatMoney(v)}</strong></td>`).join('')}
-            <td class="fa-num fa-col-total"><strong>${formatMoney(grandTotal)}</strong></td>
+            ${colTotals.map((v, i) => renderAmountCell({ value: v, scope: 'col-total', monthIndex: i, strong: true })).join('')}
+            ${renderAmountCell({ value: grandTotal, scope: 'grand-total', extraClass: 'fa-col-total', strong: true })}
           </tr>
         </tfoot>
       </table>`;
@@ -609,6 +627,7 @@ const renderIncomePivot = (months) => {
         months,
         dimension: 'cat',
         type: 'IN',
+        clickable: true,
         emptyMessage: 'No income in this range.',
     });
 };
@@ -644,21 +663,38 @@ const renderExpensePivot = (months, dimension, sheetOnly) => {
     });
 };
 
-const wirePivotDrilldown = () => {
-    const el = document.getElementById('fa-expense-pivot');
+const wirePivotContainer = (containerId) => {
+    const el = document.getElementById(containerId);
     if (!el || el.dataset.pivotWired) return;
     el.dataset.pivotWired = '1';
 
     const openFromCell = (cell) => {
         if (!cell?.classList.contains('fa-pivot-cell--clickable')) return;
-        navigateToLedgerFromPivot({
+
+        const filter = {
             type: cell.dataset.pivotType || 'OUT',
             dimension: cell.dataset.pivotDimension || 'cat',
-            key: cell.dataset.pivotKey,
-            label: cell.dataset.pivotLabel,
-            year: cell.dataset.pivotYear ? parseInt(cell.dataset.pivotYear, 10) : null,
-            month: cell.dataset.pivotMonth ? parseInt(cell.dataset.pivotMonth, 10) : null,
-        });
+            scope: cell.dataset.pivotScope || 'cell',
+        };
+
+        if (cell.dataset.pivotKey) {
+            filter.key = cell.dataset.pivotKey;
+            filter.label = cell.dataset.pivotLabel;
+        }
+
+        if (cell.dataset.pivotYear) {
+            filter.year = parseInt(cell.dataset.pivotYear, 10);
+            filter.month = parseInt(cell.dataset.pivotMonth, 10);
+        }
+
+        if (cell.dataset.pivotRangeStart) {
+            const [sy, sm] = cell.dataset.pivotRangeStart.split('-').map(Number);
+            const [ey, em] = cell.dataset.pivotRangeEnd.split('-').map(Number);
+            filter.rangeStart = new Date(sy, sm, 1);
+            filter.rangeEnd = new Date(ey, em + 1, 0, 23, 59, 59, 999);
+        }
+
+        navigateToLedgerFromPivot(filter);
     };
 
     el.addEventListener('click', (e) => {
@@ -672,6 +708,11 @@ const wirePivotDrilldown = () => {
         e.preventDefault();
         openFromCell(cell);
     });
+};
+
+const wirePivotDrilldown = () => {
+    wirePivotContainer('fa-income-pivot');
+    wirePivotContainer('fa-expense-pivot');
 };
 
 export const renderFinanceAnalytics = () => {

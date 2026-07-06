@@ -69,22 +69,40 @@ export const txnMatchesLedgerPivotFilter = (txn) => {
     const f = ledgerPivotFilter;
     if (f.type && txn.type !== f.type) return false;
     if (f.key && f.key !== '__other__' && pivotKeyOnTxn(txn, f.dimension) !== f.key) return false;
+    const d = new Date(txn.date);
     if (f.year != null && f.month != null) {
-        const d = new Date(txn.date);
         if (d.getFullYear() !== f.year || d.getMonth() !== f.month) return false;
+    } else if (f.rangeStart != null && f.rangeEnd != null) {
+        if (d < f.rangeStart || d > f.rangeEnd) return false;
     }
     return true;
 };
 
+const formatMonthRangeLabel = (start, end) => {
+    const fmt = (dt) => dt.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+    return `${fmt(start)} – ${fmt(end)}`;
+};
+
 const describeLedgerPivotFilter = (f) => {
     if (!f) return '';
-    const dim =
-        f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
-    const parts = [`${f.type === 'IN' ? 'Income' : 'Expense'} · ${dim}: ${f.label || f.key}`];
-    if (f.year != null && f.month != null) {
-        const d = new Date(f.year, f.month, 1);
-        parts.push(d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
+    const typeLabel = f.type === 'IN' ? 'Income' : 'Expense';
+    const parts = [typeLabel];
+
+    if (f.key && f.key !== '__other__') {
+        const dim =
+            f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
+        parts.push(`${dim}: ${f.label || f.key}`);
+    } else if (f.scope === 'col-total' || f.scope === 'grand-total') {
+        parts.push('all categories');
     }
+
+    if (f.year != null && f.month != null) {
+        const mo = new Date(f.year, f.month, 1);
+        parts.push(mo.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }));
+    } else if (f.rangeStart != null && f.rangeEnd != null) {
+        parts.push(formatMonthRangeLabel(f.rangeStart, f.rangeEnd));
+    }
+
     return parts.join(' · ');
 };
 
