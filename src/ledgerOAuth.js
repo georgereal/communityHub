@@ -3,7 +3,7 @@
  */
 import { PublicClientApplication } from '@azure/msal-browser';
 import { portalState, supabase, pullState } from './store.js';
-import { proxyExternalRequest } from './dbClient.js';
+import { externalRequest } from './externalFetch.js';
 import { hasClientPermission } from './rbac.js';
 
 export const GOOGLE_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
@@ -220,7 +220,7 @@ export async function completeGoogleOAuthCallback(code) {
     const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
     if (!app?.client_id || !verifier) throw new Error('OAuth session expired. Try connecting again.');
 
-    const proxy = await proxyExternalRequest('https://oauth2.googleapis.com/token', {
+    const proxy = await externalRequest('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -240,7 +240,7 @@ export async function completeGoogleOAuthCallback(code) {
 
     let accountEmail = null;
     try {
-        const profile = await proxyExternalRequest('https://www.googleapis.com/oauth2/v2/userinfo', {
+        const profile = await externalRequest('https://www.googleapis.com/oauth2/v2/userinfo', {
             headers: { Authorization: `Bearer ${json.access_token}` },
         });
         const p = profile.json || {};
@@ -594,7 +594,7 @@ async function completeMicrosoftOAuth() {
 
 async function refreshGoogleToken(conn, app) {
     if (!conn.refresh_token) throw new Error('Google session expired. Connect your Google account again.');
-    const proxy = await proxyExternalRequest('https://oauth2.googleapis.com/token', {
+    const proxy = await externalRequest('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({

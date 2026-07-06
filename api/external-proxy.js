@@ -1,4 +1,5 @@
 import { requireSession } from './serverAuth.js';
+import { readJsonBody } from './vercelRequest.js';
 
 const ALLOWED_HOSTS = new Set([
     'graph.microsoft.com',
@@ -19,19 +20,6 @@ function logExternal(userId, url, method, ms, status, error) {
         ok: !error,
         error: error || null,
     }));
-}
-
-async function readJsonBody(req) {
-    if (req.body && typeof req.body === 'object') return req.body;
-    if (!req.body) return {};
-    if (typeof req.body === 'string') {
-        try {
-            return JSON.parse(req.body || '{}');
-        } catch {
-            return {};
-        }
-    }
-    return req.body;
 }
 
 export default async function handler(req, res) {
@@ -65,8 +53,14 @@ export default async function handler(req, res) {
         const init = { method, headers };
         if (body.body != null && method !== 'GET' && method !== 'HEAD') {
             init.body = typeof body.body === 'string' ? body.body : JSON.stringify(body.body);
-            if (!headers['Content-Type'] && !headers['content-type']) {
-                init.headers = { ...headers, 'Content-Type': 'application/json' };
+            const hasContentType = headers['Content-Type'] || headers['content-type'];
+            if (!hasContentType) {
+                init.headers = {
+                    ...headers,
+                    'Content-Type': typeof body.body === 'string' && body.contentType
+                        ? body.contentType
+                        : 'application/json',
+                };
             }
         }
 

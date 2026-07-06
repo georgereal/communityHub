@@ -324,6 +324,7 @@ export async function proxyExternalRequest(url, init = {}) {
             method: init.method || 'GET',
             headers: init.headers || {},
             body: init.body,
+            contentType: init.headers?.['Content-Type'] || init.headers?.['content-type'] || null,
         }),
     });
     const { ok, json, error } = await readApiJson(res);

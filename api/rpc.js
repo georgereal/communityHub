@@ -1,5 +1,6 @@
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
+import { readJsonBody } from './vercelRequest.js';
 
 const ALLOWED_RPC = new Set(['no_admin_exists', 'get_ledger_sync_service_status']);
 
@@ -16,25 +17,12 @@ function logRpc(userId, fn, ms, error) {
 }
 
 async function getService(req) {
+    const { authHeader } = await requireSession(req);
     try {
         return createServiceClient();
     } catch {
-        const { authHeader } = await requireSession(req);
         return createUserClient(authHeader);
     }
-}
-
-async function readJsonBody(req) {
-    if (req.body && typeof req.body === 'object') return req.body;
-    if (!req.body) return {};
-    if (typeof req.body === 'string') {
-        try {
-            return JSON.parse(req.body || '{}');
-        } catch {
-            return {};
-        }
-    }
-    return req.body;
 }
 
 export default async function handler(req, res) {

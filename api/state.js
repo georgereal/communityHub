@@ -1,6 +1,7 @@
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { assertUuid } from './supabaseRest.js';
+import { getQueryParam } from './vercelRequest.js';
 
 function logState(userId, apartmentId, ms, error) {
     console.log(JSON.stringify({
@@ -15,10 +16,10 @@ function logState(userId, apartmentId, ms, error) {
 }
 
 async function getService(req) {
+    const { authHeader } = await requireSession(req);
     try {
         return createServiceClient();
     } catch {
-        const { authHeader } = await requireSession(req);
         return createUserClient(authHeader);
     }
 }
@@ -194,8 +195,7 @@ export default async function handler(req, res) {
     let apartmentId = null;
 
     try {
-        const url = new URL(req.url, 'http://localhost');
-        apartmentId = assertUuid(url.searchParams.get('apartment_id'), 'apartment_id');
+        apartmentId = assertUuid(getQueryParam(req, 'apartment_id'), 'apartment_id');
         const { user } = await requireSession(req);
         userId = user.id;
 

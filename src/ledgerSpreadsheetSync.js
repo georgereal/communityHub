@@ -4,7 +4,7 @@
 import './ledgerSync.css';
 import ExcelJS from 'exceljs';
 import { portalState, supabase, pullState } from './store.js';
-import { proxyExternalRequest } from './dbClient.js';
+import { externalFetch } from './externalFetch.js';
 import { processFinances, renderCashLedger } from './finances.js';
 import { logActivity } from './activityAudit.js';
 import { hasClientPermission } from './rbac.js';
@@ -191,16 +191,6 @@ function detectProviderFromUrl(url) {
     if (u.includes('docs.google.com') || u.includes('google.com/spreadsheets')) return 'GOOGLE';
     if (u.includes('sharepoint') || u.includes('onedrive') || u.includes('1drv') || u.includes('office.com')) return 'MICROSOFT';
     return null;
-}
-
-async function externalFetch(url, init = {}) {
-    const proxy = await proxyExternalRequest(url, init);
-    return {
-        ok: proxy.ok,
-        status: proxy.status,
-        json: async () => proxy.json ?? (proxy.text ? JSON.parse(proxy.text) : {}),
-        text: async () => proxy.text || '',
-    };
 }
 
 async function listGoogleWorksheets(spreadsheetUrl) {

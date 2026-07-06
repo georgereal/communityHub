@@ -1,17 +1,5 @@
 import { runDbQuery } from './dbAccess.js';
-
-async function readJsonBody(req) {
-    if (req.body && typeof req.body === 'object') return req.body;
-    if (!req.body) return {};
-    if (typeof req.body === 'string') {
-        try {
-            return JSON.parse(req.body || '{}');
-        } catch {
-            return {};
-        }
-    }
-    return req.body;
-}
+import { readJsonBody } from './vercelRequest.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {

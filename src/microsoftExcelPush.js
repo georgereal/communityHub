@@ -5,14 +5,14 @@ import {
     normalizeMapping,
 } from './ledgerColumnMapping.js';
 import { colIndexToLetters, parseColumnRange } from './ledgerSheetRegion.js';
-import { proxyExternalRequest } from './dbClient.js';
+import { externalRequest } from './externalFetch.js';
 
 function colLetter(n) {
     return colIndexToLetters(n);
 }
 
 async function graphRequest(path, accessToken, init = {}) {
-    const proxy = await proxyExternalRequest(`https://graph.microsoft.com/v1.0${path}`, {
+    const proxy = await externalRequest(`https://graph.microsoft.com/v1.0${path}`, {
         ...init,
         headers: {
             Authorization: `Bearer ${accessToken}`,

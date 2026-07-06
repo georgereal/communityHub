@@ -1,5 +1,6 @@
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
+import { readJsonBody } from './vercelRequest.js';
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 const ALLOWED_BUCKETS = new Set([RECEIPT_BUCKET]);
@@ -19,25 +20,12 @@ function logStorage(userId, action, bucket, path, ms, error) {
 }
 
 async function getService(req) {
+    const { authHeader } = await requireSession(req);
     try {
         return createServiceClient();
     } catch {
-        const { authHeader } = await requireSession(req);
         return createUserClient(authHeader);
     }
-}
-
-async function readJsonBody(req) {
-    if (req.body && typeof req.body === 'object') return req.body;
-    if (!req.body) return {};
-    if (typeof req.body === 'string') {
-        try {
-            return JSON.parse(req.body || '{}');
-        } catch {
-            return {};
-        }
-    }
-    return req.body;
 }
 
 export default async function handler(req, res) {
