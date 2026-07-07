@@ -203,7 +203,7 @@ const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleC
     const drClass = !isIncome ? ' bank-recon-amt--out' : '';
     const crClass = isIncome ? ' bank-recon-amt--in' : '';
     const calcCell = visibleColumns.calculatedBalance
-        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num">${isBank && runningBalances.has(t.id) ? formatMoney(runningBalances.get(t.id)) : (isBank && needsOpening ? '—' : '—')}</td>`
+        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed">${isBank && runningBalances.has(t.id) ? formatMoney(runningBalances.get(t.id)) : (isBank && needsOpening ? '—' : '—')}</td>`
         : '';
 
     return `<tr class="bank-recon-table__row ledger-txn-row${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}" data-txn-id="${t.id}" data-line-type="${lineType}">

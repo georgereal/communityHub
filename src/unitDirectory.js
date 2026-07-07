@@ -705,8 +705,8 @@ const renderUnitDirectoryExpanded = (u, unitResidents, occ) => {
     const outstanding = open.reduce((s, inv) => s + invoiceBalance(inv), 0);
     const vStats = computeUnitVehicleStats(u);
 
-    const sectionCard = (title, count, body, empty) => `
-      <section class="unit-directory-panel">
+    const sectionCard = (title, count, body, empty, extraClass = '') => `
+      <section class="unit-directory-panel${extraClass ? ` ${extraClass}` : ''}">
         <header class="unit-directory-panel__head">
           <h4 class="unit-directory-panel__title">${title}</h4>
           <span class="unit-directory-panel__count">${count}</span>
@@ -715,6 +715,14 @@ const renderUnitDirectoryExpanded = (u, unitResidents, occ) => {
           ${body || `<p class="unit-directory-panel__empty">${empty}</p>`}
         </div>
       </section>`;
+
+    const ownersHtml = owners.map(renderUnitDirectoryPerson).join('');
+    const tenantsHtml = tenants.map(renderUnitDirectoryPerson).join('');
+    const residentsMobileBody = [
+        owners.length ? `<p class="unit-directory-panel__kind">Owners</p>${ownersHtml}` : '',
+        tenants.length ? `<p class="unit-directory-panel__kind">Tenants</p>${tenantsHtml}` : '',
+    ].filter(Boolean).join('');
+    const residentCount = owners.length + tenants.length;
 
     return `
       <div class="unit-directory-expanded">
@@ -732,19 +740,22 @@ const renderUnitDirectoryExpanded = (u, unitResidents, occ) => {
             <span class="occupancy-badge ${occupancyBadgeClass(occ)}">${esc(occupancyLabel(occ))}</span>
           </div>
           <button type="button" class="btn btn-primary btn--small unit-directory-open-modal" data-unit-id="${u.id}" data-tab="overview">
-            <i class="fa-solid fa-up-right-from-square"></i> Open full details
+            <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
+            <span class="directory-btn-label directory-btn-label--long">Open full details</span>
+            <span class="directory-btn-label directory-btn-label--short" aria-hidden="true">Details</span>
           </button>
         </div>
         <div class="unit-directory-expanded__grid">
-          ${sectionCard('Owners', owners.length, owners.map(renderUnitDirectoryPerson).join(''), 'No owners recorded')}
-          ${sectionCard('Tenants', tenants.length, tenants.map(renderUnitDirectoryPerson).join(''), 'No tenants recorded')}
+          ${sectionCard('Residents', residentCount, residentsMobileBody, 'No residents recorded', 'unit-directory-panel--people-mobile')}
+          ${sectionCard('Owners', owners.length, ownersHtml, 'No owners recorded', 'unit-directory-panel--desktop-split')}
+          ${sectionCard('Tenants', tenants.length, tenantsHtml, 'No tenants recorded', 'unit-directory-panel--desktop-split')}
           ${sectionCard('Parking', vehicles.length, vehicles.map((v) => renderUnitDirectoryVehicle(v, u)).join(''), 'No vehicles registered')}
           ${sectionCard('Invoices', invoices.length, invoices.length
         ? `<div class="unit-directory-panel__summary">
               <span>Outstanding <strong class="${outstanding > 0 ? 'unit-detail-kpi--warn' : ''}">${formatMoney(outstanding)}</strong></span>
               <span>${open.length} open</span>
             </div>${invoices.slice(0, 5).map(renderUnitDirectoryInvoice).join('')}`
-        : '', 'No invoices yet')}
+        : '', 'No invoices yet', 'unit-directory-panel--desktop-split')}
         </div>
         <nav class="unit-directory-expanded__nav" aria-label="Flat detail shortcuts">
           <button type="button" class="unit-directory-full-detail" data-unit-id="${u.id}" data-tab="overview">Edit flat</button>
@@ -879,6 +890,7 @@ const switchUnitDetailTab = (tab) => {
     document.querySelectorAll('.unit-detail-panel').forEach((panel) => {
         panel.hidden = !panel.id.endsWith(tab);
     });
+    document.querySelector('.unit-detail-tab--active')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
     const footer = document.getElementById('unit-detail-footer');
     if (footer) footer.hidden = tab !== 'overview';
     const u = portalState.units.find((x) => x.id === editingUnitId);
@@ -1431,8 +1443,10 @@ export const renderUnitDirectory = async () => {
               <span class="occupancy-badge ${occupancyBadgeClass(occ)}">${esc(occupancyLabel(occ))}</span>
               ${missingOwners ? '<span class="occupancy-badge occ-no-owner">No owner</span>' : ''}
             </span>
-            <span class="unit-directory-group__owners">${formatResidentCell(ownerList, '—', { showAway: true })}</span>
-            <span class="unit-directory-group__tenants">${formatResidentCell(tenantList)}</span>
+            <span class="unit-directory-group__residents">
+              <span class="unit-directory-group__owners">${formatResidentCell(ownerList, '—', { showAway: true })}</span>
+              <span class="unit-directory-group__tenants">${formatResidentCell(tenantList)}</span>
+            </span>
             <span class="unit-directory-group__vehicles">${formatVehicleSummary(u)}</span>
             <span class="unit-directory-group__dues-col">${duesHtml}</span>
             <span class="unit-directory-group__actions">

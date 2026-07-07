@@ -221,6 +221,10 @@
   border-radius: 8px;
 }
 
+.ledger-bulk-bar[hidden] {
+  display: none !important;
+}
+
 .ledger-bulk-bar--busy {
   opacity: 0.92;
   pointer-events: none;
@@ -841,6 +845,13 @@ tr.ledger-txn-row--dirty {
   border-radius: 8px;
 }
 
+.ledger-workspace .ledger-bulk-bar {
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.55rem;
+  gap: 0.35rem 0.45rem;
+  background: #f8fafc;
+}
+
 .ledger-bulk-bar__select-all {
   display: inline-flex;
   align-items: center;
@@ -1145,12 +1156,17 @@ tr.ledger-txn-row--dirty {
   }
 
   .ledger-kpi {
-    flex: 1 1 100%;
-    border-right: 0 !important;
+    flex: 1 1 calc(50% - 1px);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
-  .ledger-kpi:not(:last-child) {
-    border-bottom: 1px solid var(--border);
+  .ledger-kpi:nth-child(odd) {
+    border-right: 1px solid var(--border);
+  }
+
+  .ledger-kpi:nth-last-child(-n + 2) {
+    border-bottom: 0;
   }
 
   .ledger-toolbar {
@@ -1319,65 +1335,7 @@ tr.ledger-txn-row--dirty {
     overflow: visible;
   }
 
-  #cash-ledger-items .ledger-txn-row {
-    display: grid;
-    grid-template-columns: 1fr auto !important;
-    grid-template-areas:
-      "check amount"
-      "date date"
-      "meta meta"
-      "desc desc"
-      "actions actions";
-    gap: 0.35rem 0.75rem;
-    padding: 0.85rem 0.9rem !important;
-    border: 1px solid #eef0f3;
-    border-radius: 14px;
-    margin-bottom: 0.55rem;
-    background: #fff;
-    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
-    border-bottom: 1px solid #eef0f3 !important;
-  }
-
-  .ledger-txn-row__meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-    grid-area: meta;
-  }
-
-  .ledger-txn-row__reports {
-    grid-area: meta;
-  }
-
-  .ledger-txn-row__check { grid-area: check; justify-content: flex-start; }
-  .ledger-txn-row__date { grid-area: date; }
-  .ledger-txn-row__wallet,
-  .ledger-txn-row__cat,
-  .ledger-txn-row__exclude { grid-area: meta; }
-  .ledger-txn-row__desc { grid-area: desc; font-size: 0.8rem; font-weight: 600; color: var(--text-main); }
-  .ledger-txn-row__dr,
-  .ledger-txn-row__cr { display: none !important; }
-  .ledger-txn-row__amount {
-    display: block !important;
-    grid-area: amount;
-    font-size: 0.95rem;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    align-self: start;
-  }
-  .ledger-txn-row__amount--in { color: var(--success); }
-  .ledger-txn-row__amount--out { color: var(--danger); }
-  .ledger-txn-row__actions {
-    grid-area: actions;
-    display: flex !important;
-    justify-content: flex-end;
-    gap: 0.35rem;
-    padding-top: 0.15rem;
-    border-top: 1px solid #f1f3f5;
-    margin-top: 0.15rem;
-  }
+  /* Ledger table cards: see financeMobile.css */
 }
 
 @media (max-width: 520px) {

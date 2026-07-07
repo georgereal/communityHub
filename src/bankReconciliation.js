@@ -1684,7 +1684,7 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
       </div>`;
 
     if (!unmatched.length) {
-        return `<p class="maintenance-dues-empty bank-recon-empty-hint">No unmatched statement lines. Expand <strong>Import statement</strong> or <strong>Passbook scan</strong> above to add rows.</p>${bulkBarHtml}`;
+        return `${bulkBarHtml}<p class="maintenance-dues-empty bank-recon-empty-hint">No unmatched statement lines. Expand <strong>Import statement</strong> or <strong>Passbook scan</strong> above to add rows.</p>`;
     }
 
     const dayHints = buildDayOrderHints(unmatched);
@@ -2885,13 +2885,15 @@ export const renderBankReconciliation = () => {
         }
         statsEl.innerHTML = `
           <div class="bank-recon-kpi-bar" role="group" aria-label="Reconciliation summary">
-            <div class="bank-recon-kpi bank-recon-kpi--calc${recon.calculated.balance == null ? ' bank-recon-kpi--warn' : ''}">
-              <span class="bank-recon-kpi__label">Calculated</span>
-              <span class="bank-recon-kpi__value">${calcValue}</span>
-              <span class="bank-recon-kpi__sub">${calcSub}</span>
+            <div class="bank-recon-kpi-cluster">
+              <div class="bank-recon-kpi bank-recon-kpi--calc${recon.calculated.balance == null ? ' bank-recon-kpi--warn' : ''}">
+                <span class="bank-recon-kpi__label">Calculated</span>
+                <span class="bank-recon-kpi__value">${calcValue}</span>
+                <span class="bank-recon-kpi__sub">${calcSub}</span>
+              </div>
+              ${passbookBlock}
+              ${varianceBlock}
             </div>
-            ${passbookBlock}
-            ${varianceBlock}
             <div class="bank-recon-kpi bank-recon-kpi--progress">
               <span class="bank-recon-kpi__label">Statement</span>
               <span class="bank-recon-kpi__counts">${statusParts.join('<span class="bank-recon-stat-sep" aria-hidden="true">·</span>')}</span>

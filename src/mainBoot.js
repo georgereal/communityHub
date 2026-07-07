@@ -78,6 +78,8 @@ export const renderAccessMappings = () => {
     const sidebarApartmentSelect = document.getElementById('sidebar-apartment-switch');
     const drawerApartmentSelect = document.getElementById('nav-apartment-switch');
     const headerApartmentSelect = document.getElementById('header-apartment-switch');
+    const userMenuApartmentSelect = document.getElementById('user-menu-apartment-switch');
+    const topbarApartmentName = document.getElementById('topbar-apartment-name');
 
     const placeholderOption = isSignedIn() && !apartments.length
         ? '<option value="">No societies</option>'
@@ -96,6 +98,14 @@ export const renderAccessMappings = () => {
     syncSelect(sidebarApartmentSelect);
     syncSelect(drawerApartmentSelect);
     syncSelect(headerApartmentSelect);
+    syncSelect(userMenuApartmentSelect);
+
+    if (topbarApartmentName) {
+        const activeName = apartments.find((a) => a.id === activeId)?.name
+            || (apartments.length === 1 ? apartments[0].name : '');
+        topbarApartmentName.textContent = activeName;
+        topbarApartmentName.hidden = !activeName;
+    }
 
     const usersListV2 = document.getElementById('access-users-list-v2');
     if (usersListV2) {

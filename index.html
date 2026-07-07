@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="stylesheet" href="/src/ledgerSync.css" />
+  <link rel="stylesheet" href="/src/financeMobile.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
@@ -58,8 +59,9 @@
           <div class="topbar-brand">
             <div class="brand-lockup" aria-label="CommunityHub workspace">
               <span class="brand-lockup__app">CommunityHub</span>
-              <span class="brand-lockup__sep">for</span>
-              <select id="header-apartment-switch" class="brand-lockup__workspace brand-lockup__workspace-select" aria-label="Select society">
+              <span class="brand-lockup__sep brand-lockup__sep--desktop">for</span>
+              <span id="topbar-apartment-name" class="brand-lockup__entity" hidden></span>
+              <select id="header-apartment-switch" class="brand-lockup__workspace brand-lockup__workspace-select brand-lockup__workspace-select--header" aria-label="Select society">
                 <option value="">Select society…</option>
               </select>
             </div>
@@ -95,6 +97,13 @@
             <div id="topbar-user-initials" class="topbar-user-avatar">—</div>
           </button>
           <div id="topbar-user-menu" class="user-menu" style="display:none;">
+            <div class="user-menu-section user-menu-section--society">
+              <label class="user-menu-label" for="user-menu-apartment-switch">Society</label>
+              <select id="user-menu-apartment-switch" class="user-menu-select expense-combobox" aria-label="Select society">
+                <option value="">Select society…</option>
+              </select>
+            </div>
+            <div class="user-menu-sep"></div>
             <button id="user-menu-profile" class="user-menu-item"><i class="fa-solid fa-id-badge"></i><span>Profile</span></button>
             <button id="user-menu-manage" class="user-menu-item"><i class="fa-solid fa-users-gear"></i><span>Manage users</span></button>
             <button id="user-menu-make-admin" class="user-menu-item" style="display:none;"><i class="fa-solid fa-shield-halved"></i><span>Make me admin</span></button>
@@ -1487,8 +1496,8 @@
             <div id="unit-detail-panel-overview" class="unit-detail-panel" role="tabpanel">
               <form id="unit-edit-form" class="unit-detail-form">
                 <section class="unit-detail-form__section">
-                  <h3 class="unit-detail-form__section-title">Property</h3>
-                  <div class="unit-detail-form__grid">
+                  <h3 class="unit-detail-form__section-title">Flat details</h3>
+                  <div class="unit-detail-form__grid unit-detail-form__grid--core">
                     <div class="unit-detail-form__field">
                       <label class="expense-label" for="unit-edit-block">Block</label>
                       <input type="text" id="unit-edit-block" class="expense-combobox" autocomplete="off" />
@@ -1501,24 +1510,18 @@
                       <label class="expense-label" for="unit-edit-area">Area (sq ft)</label>
                       <input type="number" id="unit-edit-area" class="expense-combobox" min="0" step="0.01" inputmode="decimal" />
                     </div>
-                  </div>
-                </section>
-
-                <section class="unit-detail-form__section">
-                  <h3 class="unit-detail-form__section-title">Parking slots</h3>
-                  <div class="unit-detail-form__grid">
                     <div class="unit-detail-form__field">
                       <label class="expense-label" for="unit-edit-car">Car slots</label>
-                      <input type="number" id="unit-edit-car" class="expense-combobox" min="0" step="1" />
+                      <input type="number" id="unit-edit-car" class="expense-combobox" min="0" step="1" inputmode="numeric" />
                     </div>
                     <div class="unit-detail-form__field">
                       <label class="expense-label" for="unit-edit-bike">Bike slots</label>
-                      <input type="number" id="unit-edit-bike" class="expense-combobox" min="0" step="1" />
+                      <input type="number" id="unit-edit-bike" class="expense-combobox" min="0" step="1" inputmode="numeric" />
                     </div>
                   </div>
                 </section>
 
-                <section class="unit-detail-form__section">
+                <section class="unit-detail-form__section unit-detail-form__section--status">
                   <h3 class="unit-detail-form__section-title">Occupancy</h3>
                   <div class="unit-detail-form__field">
                     <label class="expense-label" for="unit-edit-occupancy">Status</label>
@@ -1532,15 +1535,18 @@
                       <option value="LOCKED">Locked / dispute</option>
                       <option value="DEVELOPER_HOLD">Developer hold</option>
                     </select>
-                    <p class="unit-detail-form__hint">Leave auto unless renovation, locked, or developer hold. Owner / tenant / vacant is derived from resident records.</p>
+                    <p class="unit-detail-form__hint">
+                      <span class="unit-detail-form__hint--long">Leave auto unless renovation, locked, or developer hold. Owner / tenant / vacant is derived from resident records.</span>
+                      <span class="unit-detail-form__hint--short" aria-hidden="true">Auto from residents unless manually overridden.</span>
+                    </p>
                   </div>
                 </section>
 
-                <section class="unit-detail-form__section unit-detail-form__section--wide">
+                <section class="unit-detail-form__section unit-detail-form__section--wide unit-detail-form__section--notes">
                   <h3 class="unit-detail-form__section-title">Notes</h3>
                   <div class="unit-detail-form__field">
                     <label class="expense-label" for="unit-edit-notes">Internal notes <span class="expense-optional">(optional)</span></label>
-                    <textarea id="unit-edit-notes" class="expense-desc expense-textarea" rows="3" placeholder="Handover details, special instructions…"></textarea>
+                    <textarea id="unit-edit-notes" class="expense-desc expense-textarea" rows="2" placeholder="Handover details, special instructions…"></textarea>
                   </div>
                 </section>
               </form>

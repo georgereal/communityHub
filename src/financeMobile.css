@@ -1,0 +1,1354 @@
+/* Finance pages — mobile & narrow viewport layouts (ledger, recon, reports, invoices) */
+
+/* ── Ledger header chrome (KPIs, sync, toolbar, bulk) ── */
+@media (max-width: 767px) {
+  .ledger-kpi-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 0.25rem;
+    border-radius: 10px;
+  }
+
+  .ledger-kpi {
+    flex: none;
+    padding: 0.38rem 0.5rem;
+    gap: 0.35rem;
+    min-height: 0;
+  }
+
+  .ledger-kpi > i {
+    width: 1.35rem;
+    height: 1.35rem;
+    font-size: 0.62rem;
+  }
+
+  .ledger-kpi__label {
+    font-size: 0.54rem;
+  }
+
+  .ledger-kpi__value {
+    font-size: 0.8rem;
+  }
+
+  #ledger-sync-panel .ledger-sync-panel,
+  .ledger-sync-panel {
+    margin-bottom: 0.25rem;
+    border-radius: 10px;
+  }
+
+  .ledger-sync-panel__summary {
+    padding: 0.38rem 0.55rem;
+    gap: 0.45rem;
+  }
+
+  .ledger-sync-panel__summary strong {
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  .ledger-sync-panel__hint {
+    font-size: 0.66rem;
+    margin-top: 0.05rem;
+  }
+
+  .ledger-sync-panel__icon {
+    font-size: 0.75rem;
+  }
+
+  .ledger-sync-panel__sync-btn {
+    padding: 0.28rem 0.45rem !important;
+    font-size: 0.68rem !important;
+  }
+
+  .ledger-sync-panel__sync-btn .fa-solid {
+    margin-right: 0.15rem;
+  }
+
+  .ledger-workspace {
+    padding-top: 0;
+    padding-bottom: 0.35rem;
+  }
+
+  .ledger-toolbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "search search"
+      "filter filter"
+      "count actions";
+    gap: 0.3rem 0.45rem;
+    padding: 0.38rem 0.48rem;
+    margin-bottom: 0.25rem;
+    border-radius: 10px;
+  }
+
+  .ledger-toolbar__search {
+    grid-area: search;
+    order: unset;
+    min-width: 0;
+  }
+
+  .ledger-toolbar__search-input {
+    padding-top: 0.28rem;
+    padding-bottom: 0.28rem;
+    font-size: 0.76rem;
+  }
+
+  .ledger-toolbar__select {
+    grid-area: filter;
+    width: 100%;
+    max-width: none;
+  }
+
+  .ledger-toolbar__count {
+    grid-area: count;
+    align-self: center;
+    font-size: 0.68rem;
+  }
+
+  .ledger-toolbar__actions {
+    grid-area: actions;
+    width: auto;
+    margin-left: 0;
+    justify-self: end;
+    align-self: center;
+  }
+
+  #ledger-download-xlsx {
+    font-size: 0;
+    padding-left: 0.45rem !important;
+    padding-right: 0.45rem !important;
+  }
+
+  #ledger-download-xlsx .fa-solid {
+    font-size: 0.78rem;
+    margin: 0;
+  }
+
+  .ledger-bulk-bar:not([hidden]) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem;
+    padding: 0.4rem 0.48rem;
+    margin-bottom: 0.25rem;
+    border-radius: 10px;
+  }
+
+  .ledger-bulk-bar__status {
+    grid-column: 1 / -1;
+    font-size: 0.68rem;
+  }
+
+  .ledger-bulk-bar__select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  #ledger-bulk-apply,
+  #ledger-bulk-save {
+    width: 100%;
+  }
+
+  #ledger-bulk-apply {
+    grid-column: 1;
+  }
+
+  #ledger-bulk-save {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 520px) {
+  .ledger-kpi-bar {
+    gap: 0;
+  }
+
+  .ledger-kpi {
+    padding: 0.32rem 0.42rem;
+  }
+
+  .ledger-kpi > i {
+    display: none;
+  }
+
+  .ledger-kpi__value {
+    font-size: 0.76rem;
+  }
+
+  .ledger-sync-panel__summary-right .ledger-sync-panel__sync-btn {
+    font-size: 0 !important;
+    padding: 0.32rem 0.42rem !important;
+    min-width: 2rem;
+  }
+
+  .ledger-sync-panel__summary-right .ledger-sync-panel__sync-btn .fa-solid {
+    font-size: 0.72rem;
+    margin: 0;
+  }
+}
+
+/* ── Shared finance subview spacing ── */
+@media (max-width: 767px) {
+  #subview-reports,
+  #subview-activity,
+  #subview-gl,
+  #subview-bank-recon {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    padding-bottom: 1rem !important;
+  }
+
+  #view-invoices > header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  #view-invoices > header > div:last-child {
+    justify-content: flex-start !important;
+  }
+
+  #view-invoices > header .btn span {
+    font-size: 0.72rem;
+  }
+
+  .invoice-subview-tabs {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    gap: 0.65rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .invoice-subview-desc {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+
+  .billing-block-toolbar,
+  .billing-block-kpi-wrap,
+  .aging-metrics,
+  .aging-toolbar,
+  .aging-reminder-list {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  .invoice-toolbar {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .registry-list.pending-dues-table,
+  .registry-list.invoice-list-table,
+  #invoice-subview-batches .registry-list,
+  #invoice-subview-collections .registry-list {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+}
+
+/* ── Invoice KPI strip ── */
+.invoice-metrics--quad {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .invoice-metrics--quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .invoice-metrics--quad {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-metrics--quad .metric-card .value {
+    font-size: 1.35rem !important;
+  }
+}
+
+/* ── Pending dues & billing runs — card rows ── */
+@media (max-width: 767px) {
+  .pending-dues-table > .registry-header.pending-dues-header,
+  #invoice-subview-batches .registry-header.billing-runs-header {
+    display: none;
+  }
+
+  #pending-dues-items .pending-dues-row,
+  #billing-runs-list .billing-run-row {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 0.55rem;
+    padding: 0.75rem 0.85rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  #pending-dues-items .pending-dues-row > *,
+  #billing-runs-list .billing-run-row > * {
+    display: grid;
+    grid-template-columns: 6.25rem 1fr;
+    gap: 0.25rem 0.65rem;
+    align-items: center;
+    border: 0;
+    padding: 0.2rem 0;
+    text-align: left !important;
+  }
+
+  #pending-dues-items .pending-dues-row > *::before,
+  #billing-runs-list .billing-run-row > *::before {
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-dim);
+  }
+
+  #pending-dues-items .pending-dues-row > *:nth-child(1)::before { content: 'Flat'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(2)::before { content: 'Block'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(3)::before { content: 'Outstanding'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(4)::before { content: 'Open'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(5)::before { content: 'Oldest due'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(6)::before { content: 'Open periods'; }
+
+  #pending-dues-items .pending-dues-row .inv-col-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    grid-template-columns: 1fr;
+    margin-top: 0.35rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--border);
+  }
+
+  #pending-dues-items .pending-dues-row .inv-col-actions::before {
+    display: none;
+  }
+
+  #billing-runs-list .billing-run-row > *:nth-child(1)::before { content: 'Period'; }
+  #billing-runs-list .billing-run-row > *:nth-child(2)::before { content: 'Due'; }
+  #billing-runs-list .billing-run-row > *:nth-child(3)::before { content: 'Created'; }
+  #billing-runs-list .billing-run-row > *:nth-child(4)::before { content: 'Invoices'; }
+  #billing-runs-list .billing-run-row > *:nth-child(5)::before { content: 'Total'; }
+  #billing-runs-list .billing-run-row > *:nth-child(6)::before { content: 'Skipped'; }
+  #billing-runs-list .billing-run-row > *:nth-child(7)::before { content: 'Action'; }
+
+  #billing-runs-list .billing-run-row > *:last-child {
+    justify-content: flex-start;
+    margin-top: 0.25rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* ── Activity log ── */
+@media (max-width: 767px) {
+  .activity-log-toolbar {
+    padding: 0;
+  }
+
+  .activity-log-toolbar .search-container,
+  .activity-log-toolbar label,
+  .activity-log-toolbar select,
+  .activity-log-toolbar input {
+    width: 100%;
+    max-width: none;
+  }
+
+  .activity-log-header,
+  .activity-review-header {
+    display: none !important;
+  }
+
+  #activity-log-list .activity-log-row,
+  #activity-review-list .activity-log-row {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 0.5rem;
+    padding: 0.75rem 0.85rem;
+    background: #fff;
+  }
+
+  #activity-log-list .activity-log-row > *,
+  #activity-review-list .activity-log-row > * {
+    padding: 0.15rem 0;
+  }
+
+  #activity-log-list .activity-log-row__when,
+  #activity-review-list .activity-log-row__when {
+    font-size: 0.72rem;
+    margin-bottom: 0.25rem;
+  }
+}
+
+/* ── Financial reports ── */
+@media (max-width: 767px) {
+  .fa-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fa-toolbar__filters,
+  .fa-toolbar__actions {
+    width: 100%;
+  }
+
+  .fa-toolbar__actions {
+    justify-content: flex-start;
+  }
+
+  .fa-filter {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .fa-filter select,
+  .fa-filter input {
+    width: 100%;
+    max-width: none;
+  }
+
+  .fa-balance-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fa-panel {
+    padding: 0.85rem;
+    border-radius: 10px;
+  }
+
+  .fa-panel__head--row {
+    flex-direction: column;
+  }
+
+  .fa-chart-card--wide,
+  .fa-projection-card {
+    min-height: 0;
+  }
+
+  .fa-chart-wrap {
+    min-height: 220px;
+  }
+
+  .fa-pivot-panel .fa-table-wrap {
+    margin: 0 -0.35rem;
+    padding: 0 0.35rem;
+  }
+
+  .fa-pivot-table {
+    font-size: 0.7rem;
+  }
+
+  .fa-pivot-table th,
+  .fa-pivot-table td {
+    padding: 0.45rem 0.4rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .fa-balance-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── General ledger ── */
+@media (max-width: 767px) {
+  #subview-gl .ops-inline-form--stack {
+    max-width: none;
+    width: 100%;
+  }
+
+  #subview-gl .ops-inline-form--stack > * {
+    width: 100%;
+    max-width: none;
+  }
+
+  .gl-account-row,
+  .gl-entry-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    padding: 0.75rem 0;
+  }
+}
+
+/* ── Bank reconciliation header chrome (sources, KPIs, panels) ── */
+@media (max-width: 900px) {
+  .bank-recon-subview {
+    padding: 0 0.75rem 0.75rem;
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
+  .bank-recon-sources {
+    margin-bottom: 0.35rem;
+    border-radius: 10px;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .bank-recon-source-tabs {
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+
+  .bank-recon-source-tab {
+    position: relative;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0.4rem 0.2rem 0.38rem;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+    gap: 0.18rem;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
+  .bank-recon-source-tab:last-child {
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .bank-recon-tab-label--long {
+    display: none;
+  }
+
+  .bank-recon-tab-label--short {
+    display: inline;
+  }
+
+  .bank-recon-source-tab__icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    font-size: 0.62rem;
+    margin-top: 0;
+  }
+
+  .bank-recon-source-tab__text {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: 100%;
+    align-items: center;
+  }
+
+  .bank-recon-source-tab__text strong {
+    font-size: 0.62rem;
+    line-height: 1.2;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .bank-recon-source-tab:not(#bank-recon-tab-opening) .bank-recon-source-tab__hint {
+    display: none;
+  }
+
+  #bank-recon-tab-opening .bank-recon-source-tab__hint {
+    display: block;
+    font-size: 0.54rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    text-align: center;
+  }
+
+  #bank-recon-tab-opening:has(.bank-recon-opening-panel__badge--warn:not([hidden])) .bank-recon-source-tab__hint,
+  #bank-recon-tab-opening:has(.bank-recon-opening-panel__badge--unset:not([hidden])) .bank-recon-source-tab__hint {
+    display: none;
+  }
+
+  #bank-recon-tab-opening .bank-recon-opening-panel__badge--ok {
+    display: none !important;
+  }
+
+  .bank-recon-passbook-jobs-badge {
+    position: absolute;
+    top: 0.18rem;
+    right: 0.18rem;
+    min-width: 0.95rem;
+    height: 0.95rem;
+    font-size: 0.58rem;
+    flex-shrink: 0;
+    align-self: auto;
+    margin-left: 0;
+  }
+
+  #bank-recon-tab-opening {
+    align-items: center;
+  }
+
+  #bank-recon-tab-opening .bank-recon-source-tab__text {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  #bank-recon-tab-opening .bank-recon-source-tab__title-row {
+    justify-content: center;
+    width: 100%;
+  }
+
+  #bank-recon-tab-opening .bank-recon-source-tab__title-row strong {
+    font-size: 0.62rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #bank-recon-tab-opening .bank-recon-opening-panel__badge--warn,
+  #bank-recon-tab-opening .bank-recon-opening-panel__badge--unset {
+    position: absolute;
+    top: 0.15rem;
+    right: 0.12rem;
+    font-size: 0.5rem;
+    padding: 0.08rem 0.3rem;
+    max-width: calc(100% - 0.25rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bank-recon-source-panels {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .bank-recon-source-panels [role="tabpanel"] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.55rem 0.6rem 0.65rem;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .bank-recon-source-panel__intro,
+  .bank-recon-source-panel__intro p,
+  .bank-recon-passbook-hint {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .bank-recon-source-panel__intro {
+    margin-bottom: 0;
+  }
+
+  .bank-recon-source-panel__intro p {
+    font-size: 0.74rem;
+    line-height: 1.45;
+    margin: 0;
+  }
+
+  .bank-recon-dropzone {
+    width: 100%;
+    max-width: 100%;
+    min-height: 4.25rem;
+    margin-bottom: 0;
+    padding: 0.6rem 0.5rem;
+    box-sizing: border-box;
+  }
+
+  .bank-recon-dropzone__icon {
+    font-size: 1rem;
+    margin-bottom: 0.1rem;
+  }
+
+  .bank-recon-dropzone__title {
+    font-size: 0.76rem;
+    white-space: normal;
+    max-width: 100%;
+  }
+
+  .bank-recon-dropzone__sub {
+    font-size: 0.64rem;
+    white-space: normal;
+    max-width: 100%;
+    line-height: 1.35;
+  }
+
+  .bank-recon-source-panel__actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    margin-bottom: 0;
+    width: 100%;
+  }
+
+  .bank-recon-source-panel__actions .btn {
+    width: 100%;
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    box-sizing: border-box;
+  }
+
+  .bank-recon-passbook-jobs-inline {
+    margin-top: 0.35rem;
+    padding-top: 0.45rem;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .bank-recon-passbook-jobs-inline__list .passbook-jobs-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .bank-recon-manual-entry__table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .bank-recon-stats {
+    margin-bottom: 0.35rem;
+  }
+
+  .bank-recon-kpi-bar {
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+  }
+
+  .bank-recon-kpi-cluster {
+    display: block;
+    padding: 0.42rem 0.55rem 0.38rem;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--accent) 3%, #fff);
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi {
+    display: grid;
+    grid-template-columns: minmax(4.8rem, auto) 1fr;
+    grid-template-areas:
+      "label value"
+      "sub sub";
+    gap: 0.08rem 0.55rem;
+    padding: 0.3rem 0;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    background: transparent;
+    min-height: 0;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi:first-child {
+    padding-top: 0;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi__label {
+    grid-area: label;
+    align-self: center;
+    font-size: 0.54rem;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi__value {
+    grid-area: value;
+    text-align: right;
+    font-size: 0.82rem;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi__sub {
+    grid-area: sub;
+    grid-column: 1 / -1;
+    font-size: 0.58rem;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.2;
+    padding-bottom: 0.05rem;
+  }
+
+  .bank-recon-kpi--progress {
+    border: 0;
+    border-bottom: 0;
+    padding: 0.38rem 0.55rem 0.42rem;
+  }
+
+  .bank-recon-kpi__counts {
+    font-size: 0.68rem;
+    gap: 0.15rem 0.28rem;
+  }
+
+  .bank-recon-stat-sep {
+    display: none;
+  }
+
+  .bank-recon-kpi__counts .bank-recon-stat {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.35rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    font-size: 0.64rem;
+  }
+
+  .bank-recon-kpi__counts .bank-recon-stat--danger {
+    background: color-mix(in srgb, var(--danger) 10%, #fff);
+  }
+
+  .bank-recon-kpi__counts .bank-recon-stat--success {
+    background: color-mix(in srgb, var(--success) 10%, #fff);
+  }
+
+  .bank-recon-panel {
+    padding: 0.55rem;
+    border-radius: 10px;
+  }
+
+  .bank-recon-panel__title {
+    font-size: 0.62rem;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
+  }
+
+  .bank-recon-panel__head {
+    margin-bottom: 0.4rem;
+    gap: 0.35rem;
+  }
+
+  .bank-recon-panel__tools {
+    width: 100%;
+  }
+
+  .bank-recon-panel__tools .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding-left: 0.45rem !important;
+    padding-right: 0.45rem !important;
+    font-size: 0.68rem !important;
+  }
+
+  .bank-recon-split {
+    gap: 0.65rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .bank-recon-source-panel__intro p {
+    font-size: 0.72rem;
+  }
+
+  .bank-recon-source-panel__actions .bank-recon-passbook-jobs-btn,
+  .bank-recon-source-panel__actions #bank-recon-passbook-jobs-refresh-inline {
+    font-size: 0.72rem;
+  }
+
+  .bank-recon-kpi-cluster .bank-recon-kpi__value {
+    font-size: 0.76rem;
+  }
+
+  .bank-recon-panel__tools .btn {
+    font-size: 0 !important;
+    min-width: 2.35rem;
+  }
+
+  .bank-recon-panel__tools .btn .fa-solid {
+    font-size: 0.72rem;
+    margin: 0;
+  }
+}
+
+/* ── Bank reconciliation tables & bulk actions ── */
+@media (max-width: 900px) {
+  .bank-recon-bulk-bar[hidden] {
+    display: none !important;
+  }
+
+  .bank-recon-bulk-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.4rem;
+    align-items: center;
+    margin-bottom: 0.45rem;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+
+  .bank-recon-bulk-bar .bank-recon-bulk-select-all {
+    grid-column: 1 / -1;
+    font-size: 0.74rem;
+    margin-bottom: 0.05rem;
+  }
+
+  .bank-recon-bulk-bar .bank-recon-bulk-count,
+  .bank-recon-bulk-bar #bank-recon-bulk-count {
+    grid-column: 1 / -1;
+    font-size: 0.68rem;
+    margin-top: -0.2rem;
+    margin-bottom: 0.1rem;
+  }
+
+  .bank-recon-bulk-bar #bank-recon-post-all-ready {
+    grid-column: 1 / -1;
+  }
+
+  .bank-recon-bulk-bar .btn,
+  .bank-recon-bulk-bar summary.btn {
+    width: 100%;
+    max-width: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    font-size: 0.7rem !important;
+    padding: 0.38rem 0.45rem !important;
+    box-sizing: border-box;
+  }
+
+  .bank-recon-bulk-bar .bank-recon-height-picker,
+  .bank-recon-bulk-bar .bank-recon-columns-picker {
+    display: block;
+    min-width: 0;
+  }
+
+  .bank-recon-bulk-bar .bank-recon-height-picker summary,
+  .bank-recon-bulk-bar .bank-recon-columns-picker summary {
+    list-style: none;
+    width: 100%;
+  }
+
+  .bank-recon-bulk-bar--processed {
+    grid-template-columns: 1fr auto;
+  }
+
+  .bank-recon-bulk-bar--processed .bank-recon-bulk-select-all {
+    grid-column: 1;
+    margin-bottom: 0;
+  }
+
+  .bank-recon-bulk-bar--processed .bank-recon-processed-bulk-return {
+    grid-column: 2;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .bank-recon-bulk-bar--processed .bank-recon-bulk-count--processed {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  .bank-recon-work-hint {
+    font-size: 0.72rem;
+    line-height: 1.4;
+    margin-bottom: 0.45rem;
+  }
+}
+
+@media (max-width: 767px) {
+  #bank-recon-table-shell {
+    min-height: min(58vh, 520px);
+    height: auto;
+    max-height: none;
+    resize: none;
+  }
+
+  .bank-recon-ledger-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bank-recon-ledger-actions .bank-recon-cell-select,
+  .bank-recon-ledger-actions .btn {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* ── Finance tables → stacked cards (ledger, bank recon) ── */
+@media (max-width: 767px) {
+  #ledger-table-wrap,
+  #cash-ledger-items .bank-recon-table-wrap,
+  #ledger-excluded-items .bank-recon-table-wrap {
+    overflow: visible;
+  }
+
+  #cash-ledger-items .bank-recon-table,
+  #ledger-excluded-items .bank-recon-table,
+  #bank-recon-lines .bank-recon-table,
+  #bank-recon-txns .bank-recon-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  #cash-ledger-items .bank-recon-table thead,
+  #ledger-excluded-items .bank-recon-table thead,
+  #bank-recon-lines .bank-recon-table thead,
+  #bank-recon-txns .bank-recon-table thead {
+    display: none;
+  }
+
+  #cash-ledger-items .bank-recon-table tbody,
+  #ledger-excluded-items .bank-recon-table tbody,
+  #bank-recon-lines .bank-recon-table tbody,
+  #bank-recon-txns .bank-recon-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  #cash-ledger-items .bank-recon-table tr.ledger-txn-row,
+  #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row,
+  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly),
+  #bank-recon-txns .bank-recon-table tr.bank-recon-table__row--ledger {
+    display: grid;
+    border: 1px solid #eef0f3;
+    border-radius: 14px;
+    padding: 0.8rem 0.85rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
+    gap: 0.35rem 0.55rem;
+  }
+
+  #cash-ledger-items .bank-recon-table tr.ledger-txn-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "check date amount"
+      "desc desc desc"
+      "classify classify classify"
+      "meta meta meta"
+      "actions actions actions";
+  }
+
+  #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "date amount"
+      "desc desc"
+      "meta meta"
+      "actions actions";
+  }
+
+  #ledger-excluded-items td.bank-recon-table__cell--date { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  #ledger-excluded-items td.bank-recon-table__cell--desc { grid-area: desc; font-size: 0.82rem; }
+  #ledger-excluded-items td.bank-recon-table__cell--num {
+    grid-area: amount;
+    display: inline-block;
+    text-align: right;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #ledger-excluded-items td.bank-recon-table__cell--num + td.bank-recon-table__cell--num {
+    margin-left: 0.35rem;
+  }
+  #ledger-excluded-items td.bank-recon-table__cell:nth-child(5),
+  #ledger-excluded-items td.bank-recon-table__cell:nth-child(6) {
+    grid-area: meta;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+  #ledger-excluded-items td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+
+  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly) {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "check date type"
+      "desc desc desc"
+      "amount amount amount"
+      "classify classify classify"
+      "match match match"
+      "actions actions actions";
+  }
+
+  #bank-recon-txns .bank-recon-table tr.bank-recon-table__row--ledger {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "date amount"
+      "type type"
+      "desc desc"
+      "actions actions";
+  }
+
+  #cash-ledger-items .bank-recon-table tr td,
+  #ledger-excluded-items .bank-recon-table tr td,
+  #bank-recon-lines .bank-recon-table tr td,
+  #bank-recon-txns .bank-recon-table tr td {
+    display: block;
+    border: none;
+    padding: 0;
+    width: auto;
+    min-width: 0;
+  }
+
+  /* Ledger row areas */
+  #cash-ledger-items td.bank-recon-table__cell--check { grid-area: check; align-self: start; }
+  #cash-ledger-items td.bank-recon-table__cell--date { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  #cash-ledger-items td.bank-recon-table__cell--desc { grid-area: desc; }
+  #cash-ledger-items td.bank-recon-table__cell--classify { grid-area: classify; }
+  #cash-ledger-items td.bank-recon-table__cell--type,
+  #cash-ledger-items td.bank-recon-table__cell--ledger { grid-area: meta; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+  #cash-ledger-items td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+
+  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in,
+  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out {
+    grid-area: amount;
+    font-size: 0.95rem;
+    font-weight: 800;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in { color: var(--success); }
+  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out { color: var(--danger); }
+
+  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out):not(.bank-recon-table__cell--computed) {
+    display: none !important;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--computed {
+    grid-area: meta;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out)::before {
+    content: 'Balance ';
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.6rem;
+    margin-right: 0.25rem;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: stretch;
+    gap: 0.35rem;
+    width: 100%;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions .btn {
+    flex: 1 1 auto;
+    min-width: 2.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.38rem 0.45rem !important;
+    font-size: 0.72rem !important;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions .btn--icon::after {
+    content: attr(aria-label);
+    font-size: 0.65rem;
+    font-weight: 600;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions .btn--icon:has(.fa-floppy-disk)::after {
+    content: 'Save';
+  }
+
+  #cash-ledger-items .bank-recon-row-actions .btn--icon:has(.fa-box-archive)::after {
+    content: 'Archive';
+  }
+
+  /* Bank recon statement row areas */
+  #bank-recon-lines td.bank-recon-table__cell--order,
+  #bank-recon-lines td.bank-recon-table__cell--ocr,
+  #bank-recon-lines td.bank-recon-table__cell--num:not(:has(.bank-recon-cell-input--num)) {
+    display: none !important;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--check { grid-area: check; align-self: start; }
+  #bank-recon-lines td.bank-recon-table__cell--date { grid-area: date; }
+  #bank-recon-lines td.bank-recon-table__cell--type { grid-area: type; justify-self: end; align-self: start; }
+  #bank-recon-lines td.bank-recon-table__cell--desc { grid-area: desc; }
+  #bank-recon-lines td.bank-recon-table__cell--classify { grid-area: classify; }
+  #bank-recon-lines td.bank-recon-table__cell--match { grid-area: match; }
+  #bank-recon-lines td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+
+  #bank-recon-lines .bank-recon-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: stretch;
+    gap: 0.35rem;
+    width: 100%;
+  }
+
+  #bank-recon-lines .bank-recon-row-actions .btn {
+    flex: 1 1 calc(50% - 0.2rem);
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.38rem 0.5rem !important;
+    font-size: 0.72rem !important;
+  }
+
+  #bank-recon-lines .bank-recon-row-actions .btn--icon {
+    min-width: 0;
+  }
+
+  #bank-recon-lines .bank-recon-row-actions .btn--icon::after {
+    content: attr(aria-label);
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--match::before {
+    content: 'Match ledger';
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.25rem;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--classify::before {
+    content: 'Category / vendor';
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.25rem;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--num:has(.bank-recon-cell-input--num) {
+    grid-area: amount;
+    display: block;
+    width: 100%;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--num:has([data-field="debit"])::before {
+    content: 'Debit';
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.2rem;
+  }
+
+  #bank-recon-lines td.bank-recon-table__cell--num:has([data-field="credit"])::before {
+    content: 'Credit';
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.2rem;
+  }
+
+  #bank-recon-lines .bank-recon-cell-input--desc,
+  #bank-recon-lines .bank-recon-cell-input--num,
+  #bank-recon-lines .bank-recon-cell-select,
+  #cash-ledger-items .bank-recon-cell-input--desc {
+    width: 100%;
+    max-width: none;
+  }
+
+  /* Processed / readonly bank lines — simpler cards */
+  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly {
+    display: block;
+    padding: 0.7rem 0.85rem;
+  }
+
+  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly td {
+    padding: 0.15rem 0;
+  }
+
+  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly td.bank-recon-table__cell--check {
+    float: left;
+    margin-right: 0.5rem;
+  }
+
+  /* Unmatched ledger in recon panel */
+  #bank-recon-txns td:nth-child(1) { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  #bank-recon-txns td:nth-child(2) { grid-area: type; }
+  #bank-recon-txns td:nth-child(3) { grid-area: amount; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #bank-recon-txns td:nth-child(4) { grid-area: desc; font-size: 0.82rem; }
+  #bank-recon-txns td:nth-child(5) { grid-area: actions; padding-top: 0.4rem; margin-top: 0.2rem; border-top: 1px solid #f1f3f5; }
+
+  #bank-recon-txns .bank-recon-table-wrap--compact {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 520px) {
+  .bank-recon-bulk-bar .bank-recon-height-picker summary,
+  .bank-recon-bulk-bar .bank-recon-columns-picker summary {
+    font-size: 0 !important;
+    min-width: 2.35rem;
+    padding-left: 0.45rem !important;
+    padding-right: 0.45rem !important;
+  }
+
+  .bank-recon-bulk-bar .bank-recon-height-picker summary .fa-solid,
+  .bank-recon-bulk-bar .bank-recon-columns-picker summary .fa-solid {
+    font-size: 0.72rem;
+    margin: 0;
+  }
+
+  #bank-recon-bulk-post,
+  #bank-recon-bulk-delete {
+    font-size: 0 !important;
+  }
+
+  #bank-recon-bulk-post .fa-solid,
+  #bank-recon-bulk-delete .fa-solid {
+    font-size: 0.72rem;
+    margin: 0;
+  }
+
+  #bank-recon-bulk-post::after {
+    content: 'Post';
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+
+  #bank-recon-bulk-delete::after {
+    content: 'Delete';
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions .btn,
+  #bank-recon-lines .bank-recon-row-actions .btn {
+    min-width: 2.25rem;
+  }
+
+  .ledger-bulk-bar {
+    gap: 0.45rem;
+  }
+
+  .ledger-bulk-bar__field,
+  .ledger-bulk-bar__field select {
+    width: 100%;
+    max-width: none;
+  }
+}

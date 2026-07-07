@@ -1085,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // 🏢 Apartment Switching (Global)
-  const apartmentSelectors = ['access-active-apartment', 'nav-apartment-switch', 'sidebar-apartment-switch', 'header-apartment-switch'];
+  const apartmentSelectors = ['access-active-apartment', 'nav-apartment-switch', 'sidebar-apartment-switch', 'header-apartment-switch', 'user-menu-apartment-switch'];
   apartmentSelectors.forEach(id => {
     const el = document.getElementById(id);
     if (el) {

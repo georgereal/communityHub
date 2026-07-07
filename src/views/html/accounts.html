@@ -115,14 +115,14 @@
               <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-import" role="tab" data-bank-recon-tab="import" aria-selected="false" aria-controls="bank-recon-import-panel">
                 <i class="fa-solid fa-file-arrow-up bank-recon-source-tab__icon" aria-hidden="true"></i>
                 <span class="bank-recon-source-tab__text">
-                  <strong>Import statement</strong>
+                  <strong><span class="bank-recon-tab-label bank-recon-tab-label--long">Import statement</span><span class="bank-recon-tab-label bank-recon-tab-label--short">Import</span></strong>
                   <span class="bank-recon-source-tab__hint">Excel / CSV · manual rows</span>
                 </span>
               </button>
               <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-passbook" role="tab" data-bank-recon-tab="passbook" aria-selected="false" aria-controls="bank-recon-passbook-panel">
                 <i class="fa-solid fa-book-open bank-recon-source-tab__icon" aria-hidden="true"></i>
                 <span class="bank-recon-source-tab__text">
-                  <strong>Passbook scan</strong>
+                  <strong><span class="bank-recon-tab-label bank-recon-tab-label--long">Passbook scan</span><span class="bank-recon-tab-label bank-recon-tab-label--short">Passbook</span></strong>
                   <span class="bank-recon-source-tab__hint">PDF or photos · OCR</span>
                 </span>
                 <span id="bank-recon-passbook-jobs-badge" class="bank-recon-passbook-jobs-badge" hidden>0</span>
@@ -130,10 +130,12 @@
               <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-opening" role="tab" data-bank-recon-tab="opening" aria-selected="false" aria-controls="bank-recon-opening-panel">
                 <i class="fa-solid fa-bookmark bank-recon-source-tab__icon" aria-hidden="true"></i>
                 <span class="bank-recon-source-tab__text">
-                  <strong>Opening balance</strong>
+                  <span class="bank-recon-source-tab__title-row">
+                    <strong><span class="bank-recon-tab-label bank-recon-tab-label--long">Opening balance</span><span class="bank-recon-tab-label bank-recon-tab-label--short">Opening</span></strong>
+                    <span id="bank-recon-opening-tab-badge" class="bank-recon-opening-panel__badge bank-recon-opening-panel__badge--unset" hidden></span>
+                  </span>
                   <span id="bank-recon-opening-tab-hint" class="bank-recon-source-tab__hint">Not set</span>
                 </span>
-                <span id="bank-recon-opening-tab-badge" class="bank-recon-opening-panel__badge bank-recon-opening-panel__badge--unset" hidden></span>
               </button>
             </div>
             <div class="bank-recon-source-panels">
