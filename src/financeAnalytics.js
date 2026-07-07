@@ -16,6 +16,7 @@ import {
     reconcileBankWithNoBroker,
     getDateTolerance,
     isTransactionReconciled,
+    getBankBalanceReconciliation,
 } from './bankReconciliation.js';
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
 
@@ -57,21 +58,6 @@ const computeWalletBalances = () => {
         else cash += delta;
     });
     return { cash, bank, total: cash + bank };
-};
-
-const latestStatementClosingBalance = () => {
-    const lines = portalState.finances.bankStatementLines || [];
-    if (!lines.length) return null;
-    const sorted = [...lines].sort((a, b) => {
-        const da = `${a.line_date || ''}T12:00:00`;
-        const db = `${b.line_date || ''}T12:00:00`;
-        return da.localeCompare(db);
-    });
-    for (let i = sorted.length - 1; i >= 0; i--) {
-        const bal = parseFloat(sorted[i].balance);
-        if (Number.isFinite(bal)) return bal;
-    }
-    return null;
 };
 
 const sumUnmatchedStatementNet = () => {
@@ -362,48 +348,59 @@ const renderBalanceMetrics = () => {
     const el = document.getElementById('fa-balance-metrics');
     if (!el) return;
 
-    const { cash, bank, total } = computeWalletBalances();
-    const stmtBal = latestStatementClosingBalance();
-    const variance = stmtBal != null ? bank - stmtBal : null;
+    const { cash } = computeWalletBalances();
+    const recon = getBankBalanceReconciliation();
+    const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
+    const passbookVariance = recon.diff;
+    const asOf = recon.passbook?.asOf || recon.calculated.asOf;
     const unmatchedLines = getUnmatchedBankLines().length;
     const unreconciledTxns = getUnmatchedLedgerTxns().length;
     const unmatchedNet = sumUnmatchedStatementNet();
     const unreconciledNet = sumUnreconciledLedgerNet();
     const matchedCount = getMatchedTransactionIds().size;
 
-    const varianceClass =
-        variance == null ? '' : Math.abs(variance) < 1 ? 'fa-metric--ok' : 'fa-metric--warn';
+    const passbookVarClass = passbookVariance != null && Math.abs(passbookVariance) < 1
+        ? 'fa-metric--ok'
+        : 'fa-metric--warn';
+
+    const bankSub = bankBalance != null
+        ? (asOf ? `As of ${new Date(`${asOf}T12:00:00`).toLocaleDateString('en-GB')}` : 'From bank reconciliation')
+        : 'Import a statement in Bank Reconciliation';
+
+    const varianceCard = passbookVariance != null && Math.abs(passbookVariance) >= 1
+        ? `<div class="metric-card fa-metric ${passbookVarClass} metric-card--clickable" data-goto-bank-recon title="Review in Bank Reconciliation">
+        <span class="label">Reconciliation gap</span>
+        <span class="value">${formatMoney(passbookVariance)}</span>
+        <span class="fa-metric__sub">Passbook does not match calculated — click to review</span>
+      </div>`
+        : '';
 
     el.innerHTML = `
-      <div class="metric-card fa-metric">
-        <span class="label">Ledger bank balance</span>
-        <span class="value">${formatMoney(bank)}</span>
-        <span class="fa-metric__sub">Computed from income & expense ledger</span>
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Open Bank Reconciliation">
+        <span class="label">Bank balance</span>
+        <span class="value">${bankBalance != null ? formatMoney(bankBalance) : '—'}</span>
+        <span class="fa-metric__sub">${bankSub}</span>
       </div>
-      <div class="metric-card fa-metric">
-        <span class="label">Statement closing balance</span>
-        <span class="value">${stmtBal != null ? formatMoney(stmtBal) : '—'}</span>
-        <span class="fa-metric__sub">${stmtBal != null ? 'Latest imported statement' : 'Import via Bank Reconciliation'}</span>
-      </div>
-      <div class="metric-card fa-metric ${varianceClass}">
-        <span class="label">Bank variance</span>
-        <span class="value">${variance != null ? formatMoney(variance) : '—'}</span>
-        <span class="fa-metric__sub">${variance != null && Math.abs(variance) < 1 ? 'Aligned' : 'Ledger minus statement balance'}</span>
-      </div>
+      ${varianceCard}
       <div class="metric-card fa-metric">
         <span class="label">Petty cash</span>
         <span class="value">${formatMoney(cash)}</span>
-        <span class="fa-metric__sub">Total wealth ${formatMoney(total)}</span>
+        <span class="fa-metric__sub">Cash desk</span>
       </div>
       <div class="metric-card fa-metric">
+        <span class="label">Total balance</span>
+        <span class="value">${bankBalance != null ? formatMoney(cash + bankBalance) : formatMoney(cash)}</span>
+        <span class="fa-metric__sub">Petty cash + bank</span>
+      </div>
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Review unmatched statement lines">
         <span class="label">Unmatched statement</span>
         <span class="value" style="color:var(--danger);">${unmatchedLines}</span>
-        <span class="fa-metric__sub">Net ${formatMoney(unmatchedNet)}</span>
+        <span class="fa-metric__sub">Net ${formatMoney(unmatchedNet)} · click to reconcile</span>
       </div>
-      <div class="metric-card fa-metric">
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon data-focus-unmatched-ledger title="Match unreconciled ledger entries">
         <span class="label">Unreconciled ledger</span>
         <span class="value" style="color:var(--warning, #d97706);">${unreconciledTxns}</span>
-        <span class="fa-metric__sub">Net ${formatMoney(unreconciledNet)} · ${matchedCount} matched</span>
+        <span class="fa-metric__sub">Net ${formatMoney(unreconciledNet)} · ${matchedCount} matched · click to act</span>
       </div>`;
 };
 
@@ -704,6 +701,7 @@ export const renderFinanceAnalytics = () => {
     const months = buildMonthRange(settings.monthCount);
 
     renderBalanceMetrics();
+    wireBalanceMetricClicks();
     renderNoBrokerPanel(months);
     wireNoBrokerActions();
     renderCombinedCategoryChart(months, settings.sheetOnly, settings.pivotDimension);
@@ -723,6 +721,26 @@ const handleNoBrokerUpload = async (file) => {
     } catch (err) {
         alert(err.message || 'Could not parse NoBroker file.');
     }
+};
+
+const wireBalanceMetricClicks = () => {
+    const el = document.getElementById('fa-balance-metrics');
+    if (!el || el.dataset.wired) return;
+    el.dataset.wired = '1';
+    el.addEventListener('click', (e) => {
+        const card = e.target.closest('[data-goto-bank-recon]');
+        if (!card) return;
+        const focusUnmatched = card.hasAttribute('data-focus-unmatched-ledger');
+        window.switchView?.('finance-bank-recon');
+        if (focusUnmatched) {
+            requestAnimationFrame(() => {
+                const panel = document.getElementById('bank-recon-txns');
+                panel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                panel?.classList.add('bank-recon-txns--highlight');
+                setTimeout(() => panel?.classList.remove('bank-recon-txns--highlight'), 2400);
+            });
+        }
+    });
 };
 
 const wireNoBrokerActions = () => {

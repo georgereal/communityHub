@@ -44,6 +44,8 @@ import {
 } from './ledgerColumnMapping.js';
 import { pushMicrosoftRows as pushMicrosoftRowsGraph } from './microsoftExcelPush.js';
 import { importExcelRows } from './ledgerSyncApply.js';
+import { isTransactionReconciled } from './bankReconciliation.js';
+import { getLedgerSyncExportRows, resolveSyncColumnMapping } from './ledgerDisplayRows.js';
 import {
     clearSyncLog,
     hydrateSyncLogFromRun,
@@ -1367,7 +1369,7 @@ async function runSync() {
     let pushed = 0;
     let etag = null;
 
-    const customMapping = settings?.column_mapping;
+    let columnMapping = resolveSyncColumnMapping(settings, []);
 
     let boundsWarnings = [];
     let sheetBoundsForJournal = null;
@@ -1376,14 +1378,16 @@ async function runSync() {
         const result = await fetchGoogleRows({ spreadsheetUrl, sheetName, rangeA1, syncSettings: settings });
         boundsWarnings = await persistBoundsFromPull(result);
         sheetBoundsForJournal = result.bounds;
+        columnMapping = resolveSyncColumnMapping(settings, result.bounds?.headersRaw || []);
         syncLogBounds(result.bounds, boundsWarnings);
         syncLog('info', `Pulled ${result.rows.length} aoa row(s) from Google Sheets`);
-        rows = parseLedgerSheet(result.rows, result.sourceKey, customMapping, result.bounds).parsed;
+        rows = parseLedgerSheet(result.rows, result.sourceKey, columnMapping, result.bounds).parsed;
         sourceKey = result.sourceKey;
     } else if (provider === 'MICROSOFT') {
         const result = await fetchMicrosoftRows({ spreadsheetUrl, sheetName, syncSettings: settings });
         boundsWarnings = await persistBoundsFromPull(result);
         sheetBoundsForJournal = result.bounds;
+        columnMapping = resolveSyncColumnMapping(settings, result.bounds?.headersRaw || []);
         syncLogBounds(result.bounds, boundsWarnings);
         syncLog('info', `Pulled ${result.rows.length} aoa row(s) from Excel`, { address: result.rangeMeta });
         console.log(`Excel Pull: Found ${result.rows.length} rows (header row ${result.bounds?.headerRow}, footer ${result.bounds?.footerRow ?? 'none'}).`);
@@ -1395,34 +1399,41 @@ async function runSync() {
             console.log('Excel has changed externally. Pulling latest changes.');
         }
 
-        rows = parseLedgerSheet(result.rows, result.sourceKey, customMapping, result.bounds).parsed;
+        rows = parseLedgerSheet(result.rows, result.sourceKey, columnMapping, result.bounds).parsed;
         console.log(`Excel Parse: Parsed ${rows.length} valid ledger rows.`);
         sourceKey = result.sourceKey;
         etag = result.etag;
 
-        // 2. PUSH (Bidirectional)
-        const allTxns = portalState.finances.txns || [];
-        const localTxns = allTxns.filter(t => !t.external_sync_key);
+        // 2. PUSH (Bidirectional) — ledger UI columns, batch write when possible
+        const reconciledIds = new Set(
+            (portalState.finances.txns || [])
+                .filter((t) => isTransactionReconciled(t.id))
+                .map((t) => t.id),
+        );
+        const unsynced = (portalState.finances.txns || []).filter(
+            (t) => !t.external_sync_key && !t.excluded_from_ledger,
+        );
+        const rowsToPush = getLedgerSyncExportRows(unsynced, { reconciledIds });
 
-        if (localTxns.length > 0) {
-            console.log(`Pushing ${localTxns.length} local transactions to Excel (one row at a time)...`);
+        if (rowsToPush.length > 0) {
+            console.log(`Pushing ${rowsToPush.length} ledger row(s) to Excel...`);
             pushed = await pushMicrosoftRows({
                 driveId: result.driveId,
                 itemId: result.itemId,
                 shareId: result.shareId,
                 useSharesApi: result.useSharesApi,
                 sheetName,
-                rowsToPush: localTxns,
-                columnMapping: customMapping,
-                rangeA1: settings?.range_a1 || 'A:J',
+                rowsToPush,
+                columnMapping,
+                rangeA1: settings?.range_a1 || 'A:M',
                 headerRow: result.bounds?.headerRow ?? settings?.header_row ?? null,
                 footerRow: result.bounds?.footerRow ?? settings?.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
                     const before = snapshotTxn(txn);
                     const syncKey = `app:txn:${txn.id}`;
                     const withKey = { ...txn, external_sync_key: syncKey };
-                    const syncHash = computeSyncHash(withKey, customMapping);
-                    const syncAnchorHash = computeAnchorHash(withKey, customMapping);
+                    const syncHash = computeSyncHash(withKey, columnMapping);
+                    const syncAnchorHash = computeAnchorHash(withKey, columnMapping);
                     const { error } = await supabase.from('transactions').update({
                         external_sync_key: syncKey,
                         sync_hash: syncHash,

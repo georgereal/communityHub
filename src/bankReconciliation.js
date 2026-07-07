@@ -882,6 +882,45 @@ export const findLedgerMatch = (line, txns, maxDays = getDateTolerance()) => {
     return best;
 };
 
+/** Best unmatched statement line for an unreconciled BANK ledger entry. */
+export const findStatementMatchForTxn = (txn, lines = getUnmatchedBankLines(), maxDays = getDateTolerance()) => {
+    if (!txn || (txn.wallet || '').toUpperCase() !== 'BANK') return null;
+    const amt = parseFloat(txn.amount) || 0;
+    let best = null;
+    let bestScore = Infinity;
+    lines.forEach((line) => {
+        const la = lineAmount(line);
+        if (!la || la.type !== txn.type) return;
+        if (Math.abs(la.amount - amt) > 0.01) return;
+        const diff = daysDiff(line.line_date, txnDateStr(txn));
+        if (diff > maxDays) return;
+        const score = diff * 1000 + Math.abs(la.amount - amt);
+        if (score < bestScore) {
+            bestScore = score;
+            best = line;
+        }
+    });
+    return best;
+};
+
+/** Candidate statement lines for manual match (sorted by date proximity). */
+export const findStatementMatchesForTxn = (txn, lines = getUnmatchedBankLines(), maxDays = 30) => {
+    if (!txn || (txn.wallet || '').toUpperCase() !== 'BANK') return [];
+    const amt = parseFloat(txn.amount) || 0;
+    return lines
+        .map((line) => {
+            const la = lineAmount(line);
+            if (!la || la.type !== txn.type) return null;
+            if (Math.abs(la.amount - amt) > 0.01) return null;
+            const diff = daysDiff(line.line_date, txnDateStr(txn));
+            if (diff > maxDays) return null;
+            return { line, score: diff * 1000 + Math.abs(la.amount - amt) };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.score - b.score)
+        .map((x) => x.line);
+};
+
 export async function createLedgerFromBankLine(lineId, { nobrokerRow = null, skipMatch = false } = {}) {
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (!line || line.match_status !== 'UNMATCHED') throw new Error('Statement line is not available for import.');
@@ -1226,6 +1265,13 @@ export async function unmatchBankLine(lineId) {
     await pullState();
 }
 
+export async function unmatchBankLines(lineIds = []) {
+    const ids = [...new Set((lineIds || []).filter(Boolean))];
+    if (!ids.length) return;
+    await postFinanceMutation('unmatchBankLines', { line_ids: ids });
+    await pullState();
+}
+
 export async function ignoreBankLine(lineId) {
     await postFinanceMutation('ignoreBankLine', { line_id: lineId });
     await pullState();
@@ -1268,6 +1314,12 @@ export async function clearAllBankStatementData() {
     return { deleted: lines.length };
 }
 
+export async function returnLedgerTxnToStatement(txnId) {
+    if (!txnId) throw new Error('Transaction id is required.');
+    await postFinanceMutation('returnLedgerTxnToStatement', { transaction_id: txnId });
+    await pullState();
+}
+
 export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_name, exclude_from_reports = false }) {
     const line = portalState.finances.bankStatementLines?.find((l) => l.id === lineId);
     if (!line) throw new Error('Statement line not found.');
@@ -1287,6 +1339,22 @@ export async function createTxnFromBankLine(lineId, { cat, sub_category, vendor_
         exclude_from_reports,
     });
     await pullState();
+}
+
+export async function createTxnsFromBankLines(rows = []) {
+    const clean = (rows || [])
+        .filter((r) => r?.line_id && r?.cat)
+        .map((r) => ({
+            line_id: r.line_id,
+            cat: r.cat,
+            sub_category: r.sub_category || null,
+            vendor_name: r.vendor_name || null,
+            exclude_from_reports: !!r.exclude_from_reports,
+        }));
+    if (!clean.length) return { posted: 0, failed: 0, results: [] };
+    const result = await postFinanceMutation('createTxnsFromBankLines', { rows: clean });
+    await pullState();
+    return result;
 }
 
 const importResultMessage = ({ count, skipped, skippedExisting, skippedBatch }) => {
@@ -1668,6 +1736,9 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
             : '';
 
         return `<tr class="bank-recon-table__row bank-recon-table__row--processed bank-recon-table__row--readonly${line.passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-line-id="${line.id}">
+          <td class="bank-recon-table__cell bank-recon-table__cell--check">
+            <input type="checkbox" class="bank-recon-processed-check" data-line="${line.id}" aria-label="Select processed line" />
+          </td>
           ${visibleColumns.ocrRow ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr">${formatOcrRowDisplay(line) ?? '—'}</td>` : ''}
           <td class="bank-recon-table__cell">${esc(formatDisplayDate(line.line_date))}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--desc">${esc(line.description || '—')}</td>
@@ -1686,11 +1757,22 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
     return `
       <section class="bank-recon-processed">
         <h4 class="bank-recon-processed__title">Matched &amp; ignored <span class="bank-recon-processed__count">(${rows.length})</span></h4>
-        <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue.</p>
+        <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows below and bulk return.</p>
+        <div class="bank-recon-bulk-bar bank-recon-bulk-bar--processed">
+          <label class="bank-recon-bulk-select-all">
+            <input type="checkbox" class="bank-recon-processed-select-all" aria-label="Select all processed rows" />
+            <span>Select all</span>
+          </label>
+          <button type="button" class="btn btn-outline btn--small bank-recon-processed-bulk-return" disabled title="Move selected rows back to unmatched work queue">
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Return selected
+          </button>
+          <span class="bank-recon-bulk-count bank-recon-bulk-count--processed"></span>
+        </div>
         <div class="bank-recon-table-wrap bank-recon-table-wrap--compact">
           <table class="bank-recon-table bank-recon-table--processed">
             <thead>
               <tr>
+                <th class="bank-recon-table__th--check"><span class="sr-only">Select</span></th>
                 ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num bank-recon-table__th--ocr">OCR #</th>' : ''}
                 <th>Date</th>
                 <th>Description</th>
@@ -1708,6 +1790,56 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
 };
 
 const wireProcessedLines = (root) => {
+    const processedRoot = root.querySelector('.bank-recon-processed');
+    if (processedRoot) {
+        const selectAll = processedRoot.querySelector('.bank-recon-processed-select-all');
+        const bulkBtn = processedRoot.querySelector('.bank-recon-processed-bulk-return');
+        const countEl = processedRoot.querySelector('.bank-recon-bulk-count--processed');
+
+        const allChecks = () => [...processedRoot.querySelectorAll('.bank-recon-processed-check')];
+        const selectedLineIds = () => allChecks().filter((c) => c.checked).map((c) => c.dataset.line).filter(Boolean);
+
+        const refresh = () => {
+            const checks = allChecks();
+            const selected = checks.filter((c) => c.checked).length;
+            if (bulkBtn) bulkBtn.disabled = selected === 0;
+            if (countEl) countEl.textContent = selected ? `${selected} selected` : '';
+            if (selectAll) {
+                selectAll.checked = checks.length > 0 && selected === checks.length;
+                selectAll.indeterminate = selected > 0 && selected < checks.length;
+            }
+        };
+
+        processedRoot.addEventListener('change', (e) => {
+            const box = e.target.closest('.bank-recon-processed-check');
+            if (box) refresh();
+            if (e.target === selectAll) {
+                const checks = allChecks();
+                checks.forEach((c) => { c.checked = !!selectAll.checked; });
+                refresh();
+            }
+        });
+
+        if (bulkBtn) {
+            bulkBtn.addEventListener('click', async () => {
+                const ids = selectedLineIds();
+                if (!ids.length) return;
+                if (!confirm(`Return ${ids.length} line(s) to the work queue?`)) return;
+                try {
+                    await withButtonBusy(bulkBtn, 'Returning…', async () => {
+                        await unmatchBankLines(ids);
+                    });
+                    renderBankReconciliation();
+                    window.renderCashLedger?.();
+                } catch (err) {
+                    alert(err?.message || 'Could not bulk return lines.');
+                }
+            });
+        }
+
+        refresh();
+    }
+
     root.querySelectorAll('.bank-edit-btn, .bank-unmatch-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
             try {
@@ -1738,17 +1870,41 @@ const renderLedgerTable = (ledgerTxns) => {
         return '<p class="maintenance-dues-empty">All bank ledger transactions are matched.</p>';
     }
 
-    const rows = ledgerTxns.slice(0, 80).map((t) => `
-      <tr class="bank-recon-table__row">
+    const unmatchedLines = getUnmatchedBankLines();
+    const tol = getDateTolerance();
+
+    const rows = ledgerTxns.slice(0, 80).map((t) => {
+        const suggested = findStatementMatchForTxn(t, unmatchedLines, tol);
+        const candidates = findStatementMatchesForTxn(t, unmatchedLines);
+        const lineOptions = candidates.map((line) => {
+            const star = line.id === suggested?.id ? '★ ' : '';
+            return `<option value="${esc(line.id)}">${star}${formatDisplayDate(line.line_date)} · ${formatMoney(lineAmount(line)?.amount || 0)} · ${esc((line.description || '').slice(0, 36))}</option>`;
+        }).join('');
+
+        return `<tr class="bank-recon-table__row bank-recon-table__row--ledger" data-txn-id="${t.id}">
         <td class="bank-recon-table__cell">${new Date(t.date).toLocaleDateString('en-GB')}</td>
         <td class="bank-recon-table__cell">${esc(t.type)}</td>
         <td class="bank-recon-table__cell bank-recon-table__cell--num ${t.type === 'IN' ? 'bank-recon-amt--in' : 'bank-recon-amt--out'}">
           ${t.type === 'IN' ? '+' : '-'}${formatMoney(t.amount)}
         </td>
         <td class="bank-recon-table__cell bank-recon-table__cell--desc">${esc(t.description || t.cat || '—')}</td>
-      </tr>`).join('');
+        <td class="bank-recon-table__cell bank-recon-table__cell--ledger-actions">
+          <div class="bank-recon-ledger-actions">
+            <select class="bank-recon-cell-select bank-recon-ledger-match-select" data-txn="${t.id}" ${candidates.length ? '' : 'disabled'} title="${candidates.length ? 'Link to a statement line' : 'No unmatched statement line with same amount'}">
+              <option value="">${candidates.length ? 'Match statement…' : 'No statement match'}</option>
+              ${lineOptions}
+            </select>
+            <button type="button" class="btn btn-primary btn--small bank-recon-ledger-auto-match" data-txn="${t.id}" ${suggested ? '' : 'disabled'} title="${suggested ? 'Match best statement line' : 'No auto-match found (±' + tol + ' days, same amount)'}">Match</button>
+            <button type="button" class="btn btn-outline btn--small bank-recon-ledger-to-statement" data-txn="${t.id}" title="Return to unmatched statement lines (removes this ledger entry)"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> To statements</button>
+            <button type="button" class="btn btn-outline btn--small bank-recon-ledger-edit" data-txn="${t.id}" title="Edit in ledger">Edit</button>
+            <button type="button" class="btn btn-outline btn--small btn--danger bank-recon-ledger-delete" data-txn="${t.id}" title="Delete ledger entry">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
 
     return `
+      <p class="bank-recon-work-hint bank-recon-work-hint--ledger">These BANK ledger entries have no linked statement line. <strong>To statements</strong> moves the row back to the work queue so you can classify and post again. Or <strong>Match</strong> to an existing statement row, or <strong>Edit</strong> / <strong>Delete</strong> if duplicate or wrong.</p>
       <div class="bank-recon-table-wrap bank-recon-table-wrap--compact">
         <table class="bank-recon-table bank-recon-table--ledger">
           <thead>
@@ -1757,11 +1913,96 @@ const renderLedgerTable = (ledgerTxns) => {
               <th>Type</th>
               <th class="bank-recon-table__th--num">Amount</th>
               <th>Description</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
+};
+
+const wireLedgerTable = (txnsEl) => {
+    if (!txnsEl || txnsEl.dataset.wired) return;
+    txnsEl.dataset.wired = '1';
+
+    txnsEl.addEventListener('change', async (e) => {
+        const sel = e.target.closest('.bank-recon-ledger-match-select');
+        if (!sel?.value) return;
+        const txnId = sel.dataset.txn;
+        const lineId = sel.value;
+        try {
+            await withButtonBusy(sel, 'Matching…', () => matchBankLine(lineId, txnId));
+            renderBankReconciliation();
+            window.renderCashLedger?.();
+            window.processFinances?.();
+            window.renderFinanceAnalytics?.();
+        } catch (err) {
+            alert(err?.message || 'Could not match.');
+            sel.value = '';
+        }
+    });
+
+    txnsEl.addEventListener('click', async (e) => {
+        const autoBtn = e.target.closest('.bank-recon-ledger-auto-match');
+        if (autoBtn && !autoBtn.disabled) {
+            const txnId = autoBtn.dataset.txn;
+            const txn = portalState.finances.txns?.find((t) => t.id === txnId);
+            const line = txn ? findStatementMatchForTxn(txn) : null;
+            if (!line) {
+                alert('No unmatched statement line found with the same amount within the date tolerance.');
+                return;
+            }
+            try {
+                await withButtonBusy(autoBtn, 'Matching…', () => matchBankLine(line.id, txnId));
+                renderBankReconciliation();
+                window.renderCashLedger?.();
+                window.processFinances?.();
+                window.renderFinanceAnalytics?.();
+            } catch (err) {
+                alert(err?.message || 'Could not match.');
+            }
+            return;
+        }
+
+        const toStatementBtn = e.target.closest('.bank-recon-ledger-to-statement');
+        if (toStatementBtn && toStatementBtn.dataset.busy !== '1') {
+            const txnId = toStatementBtn.dataset.txn;
+            if (!txnId) return;
+            if (!confirm('Return this entry to statement lines? The ledger transaction will be removed and an unmatched statement row will be created so you can classify and post again.')) return;
+            try {
+                await withButtonBusy(toStatementBtn, 'Moving…', async () => {
+                    await returnLedgerTxnToStatement(txnId);
+                    renderBankReconciliation();
+                    window.renderCashLedger?.();
+                    window.processFinances?.();
+                    window.renderFinanceAnalytics?.();
+                });
+            } catch (err) {
+                alert(err?.message || 'Could not return to statement lines.');
+            }
+            return;
+        }
+
+        const editBtn = e.target.closest('.bank-recon-ledger-edit');
+        if (editBtn) {
+            window.switchView?.('finance-ledger');
+            window.editTxn?.(editBtn.dataset.txn);
+            return;
+        }
+
+        const delBtn = e.target.closest('.bank-recon-ledger-delete');
+        if (delBtn) {
+            try {
+                await withButtonBusy(delBtn, 'Deleting…', async () => {
+                    await window.delTxn?.(delBtn.dataset.txn);
+                });
+                renderBankReconciliation();
+                window.renderFinanceAnalytics?.();
+            } catch (err) {
+                alert(err?.message || 'Could not delete.');
+            }
+        }
+    });
 };
 
 const syncBulkSelectionUi = (root) => {
@@ -1826,25 +2067,23 @@ const bulkPostClassifiedRows = async ({ root, selectedOnly = false } = {}) => {
     const postable = collectPostableRows(root, { selectedOnly });
     if (!postable.length) return { posted: 0, failed: 0 };
 
-    let posted = 0;
-    let failed = 0;
-    for (const row of postable) {
-        const lineId = row.dataset.lineId;
-        try {
-            await tryAutoPostFromRow(row, lineId, { allowCustom: true, skipRender: true });
-            posted += 1;
-        } catch {
-            failed += 1;
-        }
-    }
-    if (posted) {
+    const rows = postable.map((row) => ({
+        line_id: row.dataset.lineId,
+        cat: row.querySelector('.bank-recon-cat-input')?.value?.trim() || '',
+        sub_category: row.querySelector('.bank-recon-subcat-input')?.value?.trim() || null,
+        vendor_name: row.querySelector('.bank-recon-vendor-input')?.value?.trim() || null,
+        exclude_from_reports: row.querySelector('.bank-recon-exclude-reports-input')?.checked === true,
+    }));
+
+    const result = await createTxnsFromBankLines(rows);
+    if (result?.posted) {
         renderBankReconciliation();
         window.renderCashLedger?.();
         window.processFinances?.();
     } else {
         syncBulkPostUi();
     }
-    return { posted, failed };
+    return { posted: result?.posted || 0, failed: result?.failed || 0 };
 };
 
 const setRowBusy = (row, busy, label = '') => {
@@ -2568,6 +2807,7 @@ export const renderBankReconciliation = () => {
 
     linesEl.innerHTML = renderStatementTable(unmatched, visibleColumns) + renderProcessedLinesSection(matched, ignored, visibleColumns);
     txnsEl.innerHTML = renderLedgerTable(ledgerTxns);
+    wireLedgerTable(txnsEl);
 
     wireStatementTable(linesEl);
     wireProcessedLines(linesEl);

@@ -177,7 +177,15 @@ async function saveTransactionMutation(service, apartmentId, body) {
     await maybeDeletePaths(service, body.removeReceiptPaths || []);
     await maybeDeletePaths(service, body.removeBankProofPaths || []);
 
-    return { ok: true, txnId };
+    const { data: saved, error: readErr } = await service
+        .from('transactions')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .eq('id', txnId)
+        .maybeSingle();
+    if (readErr) throw Object.assign(new Error(readErr.message), { status: 500 });
+
+    return { ok: true, txnId, transaction: saved || payload };
 }
 
 async function deleteTransactionMutation(service, apartmentId, body) {
@@ -366,6 +374,30 @@ async function updateBankLineMatchMutation(service, apartmentId, userId, body, m
     return { ok: true };
 }
 
+async function bulkUpdateBankLineMatchMutation(service, apartmentId, userId, body, mode) {
+    const ids = [...new Set((body.line_ids || []).filter(Boolean))];
+    if (!ids.length) return { ok: true, updated: 0 };
+
+    const payload = mode === 'match'
+        ? {
+            match_status: 'MATCHED',
+            transaction_id: body.transaction_id,
+            matched_at: new Date().toISOString(),
+            matched_by: userId || null,
+        }
+        : mode === 'unmatch'
+            ? { match_status: 'UNMATCHED', transaction_id: null, matched_at: null, matched_by: null }
+            : { match_status: 'IGNORED', transaction_id: null, matched_at: null, matched_by: null };
+
+    const { error } = await service
+        .from('bank_statement_lines')
+        .update(payload)
+        .eq('apartment_id', apartmentId)
+        .in('id', ids);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    return { ok: true, updated: ids.length };
+}
+
 async function updateBankStatementLineMutation(service, apartmentId, body) {
     const allowed = ['line_date', 'description', 'debit', 'credit', 'balance'];
     const payload = {};
@@ -460,6 +492,93 @@ async function createTxnFromBankLineMutation(service, apartmentId, body) {
     if (matchErr) throw Object.assign(new Error(matchErr.message), { status: 500 });
 
     return { ok: true, txnId };
+}
+
+async function createTxnsFromBankLinesMutation(service, apartmentId, userId, body) {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!rows.length) return { ok: true, posted: 0, failed: 0, results: [] };
+
+    const uniqueLineIds = [...new Set(rows.map((r) => r?.line_id).filter(Boolean))];
+    const { data: lines, error: lineErr } = await service
+        .from('bank_statement_lines')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .in('id', uniqueLineIds);
+    if (lineErr) throw Object.assign(new Error(lineErr.message), { status: 500 });
+    const byId = new Map((lines || []).map((l) => [l.id, l]));
+
+    let posted = 0;
+    let failed = 0;
+    const results = [];
+
+    for (const row of rows) {
+        const lineId = row?.line_id;
+        try {
+            const line = byId.get(lineId);
+            if (!line) throw new Error('Statement line not found.');
+            if (line.match_status !== 'UNMATCHED') throw new Error('Statement line is not available for import.');
+
+            const isIncome = bankLineType(line) === 'IN';
+            const amount = bankLineAmount(line);
+            if (amount <= 0.001) throw new Error('Enter a debit or credit amount.');
+            if (!row.cat) throw new Error('Select a category.');
+            if (!isIncome && !row.sub_category) throw new Error('Enter sub-category for expenses.');
+            if (!isIncome && !row.vendor_name) throw new Error('Enter vendor name for expenses.');
+
+            const txnId = crypto.randomUUID();
+            const payload = {
+                id: txnId,
+                apartment_id: apartmentId,
+                amount,
+                cat: row.cat,
+                sub_category: isIncome ? null : (row.sub_category || null),
+                vendor_name: isIncome ? null : row.vendor_name,
+                vendor_invoice: null,
+                bank_payment_type: null,
+                bank_reference: (line.description || '').slice(0, 120) || null,
+                bank_proof_urls: [],
+                description: line.description || null,
+                wallet: 'BANK',
+                type: isIncome ? 'IN' : 'OUT',
+                date: new Date(`${line.line_date}T12:00:00`).toISOString(),
+                receipt_url: null,
+                receipt_urls: [],
+                exclude_from_reports: Boolean(row.exclude_from_reports) || row.cat === BANK_REJECT_CAT,
+            };
+
+            let { error } = await service.from('transactions').insert(payload);
+            if (error && /sub_category|vendor_name|bank_reference|bank_proof_urls|exclude_from_reports/i.test(error.message)) {
+                const core = { ...payload };
+                delete core.sub_category;
+                delete core.vendor_name;
+                delete core.vendor_invoice;
+                delete core.bank_payment_type;
+                delete core.bank_reference;
+                delete core.bank_proof_urls;
+                delete core.receipt_url;
+                delete core.receipt_urls;
+                delete core.exclude_from_reports;
+                ({ error } = await service.from('transactions').insert(core));
+            }
+            if (error) throw new Error(error.message);
+
+            const { error: matchErr } = await service.from('bank_statement_lines').update({
+                match_status: 'MATCHED',
+                transaction_id: txnId,
+                matched_at: new Date().toISOString(),
+                matched_by: userId || null,
+            }).eq('apartment_id', apartmentId).eq('id', lineId);
+            if (matchErr) throw new Error(matchErr.message);
+
+            posted += 1;
+            results.push({ line_id: lineId, ok: true, txnId });
+        } catch (e) {
+            failed += 1;
+            results.push({ line_id: lineId, ok: false, error: e?.message || String(e) });
+        }
+    }
+
+    return { ok: true, posted, failed, results };
 }
 
 async function loadUnitsAndInvoices(service, apartmentId) {
@@ -740,7 +859,7 @@ async function bulkUpdateTransactionsMutation(service, apartmentId, body) {
     const updates = Array.isArray(body.updates) ? body.updates : [];
     if (!updates.length) return { ok: true, updated: 0 };
 
-    const allowed = new Set(['cat', 'sub_category', 'description', 'exclude_from_reports', 'vendor_name']);
+    const allowed = new Set(['cat', 'sub_category', 'description', 'exclude_from_reports', 'vendor_name', 'excluded_from_ledger']);
     let updated = 0;
 
     for (const item of updates) {
@@ -768,11 +887,12 @@ async function bulkUpdateTransactionsMutation(service, apartmentId, body) {
 
         const payload = { ...existing, ...patch, apartment_id: apartmentId, id };
         let { error } = await service.from('transactions').upsert(payload);
-        if (error && /sub_category|vendor_name|exclude_from_reports/i.test(error.message)) {
+        if (error && /sub_category|vendor_name|exclude_from_reports|excluded_from_ledger/i.test(error.message)) {
             const core = { ...payload };
             delete core.sub_category;
             delete core.vendor_name;
             delete core.exclude_from_reports;
+            delete core.excluded_from_ledger;
             ({ error } = await service.from('transactions').upsert(core));
         }
         if (error) throw Object.assign(new Error(error.message), { status: 500 });
@@ -780,6 +900,106 @@ async function bulkUpdateTransactionsMutation(service, apartmentId, body) {
     }
 
     return { ok: true, updated };
+}
+
+function txnDateToLineDate(txn) {
+    const raw = txn?.date;
+    if (!raw) throw Object.assign(new Error('Transaction has no date.'), { status: 400 });
+    const iso = String(raw).match(/^(\d{4}-\d{2}-\d{2})/);
+    if (iso) return iso[1];
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) throw Object.assign(new Error('Invalid transaction date.'), { status: 400 });
+    return dt.toISOString().slice(0, 10);
+}
+
+/** Orphan BANK ledger entry → unmatched statement line; deletes the transaction. */
+async function returnLedgerTxnToStatementMutation(service, apartmentId, userId, body) {
+    const txnId = body.transaction_id;
+    if (!txnId) throw Object.assign(new Error('transaction_id is required.'), { status: 400 });
+
+    const { data: txn, error: txnErr } = await service
+        .from('transactions')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .eq('id', txnId)
+        .maybeSingle();
+    if (txnErr) throw Object.assign(new Error(txnErr.message), { status: 500 });
+    if (!txn) throw Object.assign(new Error('Transaction not found.'), { status: 404 });
+    if ((txn.wallet || '').toUpperCase() !== 'BANK') {
+        throw Object.assign(new Error('Only BANK ledger entries can be returned to statement lines.'), { status: 400 });
+    }
+
+    const { data: linkedLine, error: linkErr } = await service
+        .from('bank_statement_lines')
+        .select('id')
+        .eq('apartment_id', apartmentId)
+        .eq('transaction_id', txnId)
+        .eq('match_status', 'MATCHED')
+        .maybeSingle();
+    if (linkErr) throw Object.assign(new Error(linkErr.message), { status: 500 });
+    if (linkedLine) {
+        throw Object.assign(new Error('This entry is already linked to a statement line. Unmatch it first.'), { status: 400 });
+    }
+
+    const amount = parseFloat(txn.amount) || 0;
+    if (amount <= 0.001) throw Object.assign(new Error('Transaction amount is invalid.'), { status: 400 });
+    const isIncome = txn.type === 'IN';
+    const lineDate = txnDateToLineDate(txn);
+    const description = txn.description || txn.bank_reference || txn.cat || null;
+
+    const importResult = await importBankStatementMutation(service, apartmentId, userId, {
+        lines: [{
+            line_date: lineDate,
+            description,
+            debit: isIncome ? 0 : amount,
+            credit: isIncome ? amount : 0,
+        }],
+        file_name: `ledger-return:${txnId.slice(0, 8)}`,
+    });
+
+    if (!importResult?.count) {
+        throw Object.assign(new Error('Could not create statement line.'), { status: 500 });
+    }
+
+    let lineId = null;
+    if (importResult.importId) {
+        const { data: newLines, error: lineFetchErr } = await service
+            .from('bank_statement_lines')
+            .select('id')
+            .eq('apartment_id', apartmentId)
+            .eq('import_id', importResult.importId)
+            .order('line_date', { ascending: true })
+            .limit(1);
+        if (lineFetchErr) throw Object.assign(new Error(lineFetchErr.message), { status: 500 });
+        lineId = newLines?.[0]?.id || null;
+    }
+
+    await deleteTransactionMutation(service, apartmentId, { transaction_id: txnId });
+
+    return { ok: true, line_id: lineId, import_id: importResult.importId };
+}
+
+async function setLedgerExclusionMutation(service, apartmentId, body) {
+    const txnId = body.transaction_id;
+    if (!txnId) throw Object.assign(new Error('transaction_id is required.'), { status: 400 });
+    const excluded = body.excluded_from_ledger !== false;
+
+    const { data: existing, error: fetchErr } = await service
+        .from('transactions')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .eq('id', txnId)
+        .maybeSingle();
+    if (fetchErr) throw Object.assign(new Error(fetchErr.message), { status: 500 });
+    if (!existing) throw Object.assign(new Error('Transaction not found.'), { status: 404 });
+
+    const payload = { ...existing, apartment_id: apartmentId, id: txnId, excluded_from_ledger: excluded };
+    let { error } = await service.from('transactions').upsert(payload);
+    if (error && /excluded_from_ledger/i.test(error.message)) {
+        throw Object.assign(new Error('Run docs/scripts/sql/supabase_transactions_ledger_exclude.sql in Supabase first.'), { status: 500 });
+    }
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    return { ok: true, excluded };
 }
 
 export default async function handler(req, res) {
@@ -813,6 +1033,9 @@ export default async function handler(req, res) {
             case 'unmatchBankLine':
                 result = await updateBankLineMatchMutation(service, apartmentId, user?.id, body, 'unmatch');
                 break;
+            case 'unmatchBankLines':
+                result = await bulkUpdateBankLineMatchMutation(service, apartmentId, user?.id, body, 'unmatch');
+                break;
             case 'ignoreBankLine':
                 result = await updateBankLineMatchMutation(service, apartmentId, user?.id, body, 'ignore');
                 break;
@@ -834,6 +1057,9 @@ export default async function handler(req, res) {
             case 'createTxnFromBankLine':
                 result = await createTxnFromBankLineMutation(service, apartmentId, body);
                 break;
+            case 'createTxnsFromBankLines':
+                result = await createTxnsFromBankLinesMutation(service, apartmentId, user?.id, body);
+                break;
             case 'createLedgerFromBankLineAuto':
                 result = await createLedgerFromBankLineAutoMutation(service, apartmentId, body);
                 break;
@@ -851,6 +1077,12 @@ export default async function handler(req, res) {
                 break;
             case 'bulkUpdateTransactions':
                 result = await bulkUpdateTransactionsMutation(service, apartmentId, body);
+                break;
+            case 'setLedgerExclusion':
+                result = await setLedgerExclusionMutation(service, apartmentId, body);
+                break;
+            case 'returnLedgerTxnToStatement':
+                result = await returnLedgerTxnToStatementMutation(service, apartmentId, user?.id, body);
                 break;
             default:
                 return res.status(400).json({ error: 'Unknown finance action.' });

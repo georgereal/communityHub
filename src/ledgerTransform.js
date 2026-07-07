@@ -74,6 +74,52 @@ function normType(val) {
     return null;
 }
 
+function normLedgerType(val) {
+    return normType(val);
+}
+
+function ledgerTypeLabel(val) {
+    if (val === 'IN') return 'Income';
+    if (val === 'OUT') return 'Expense';
+    return val ?? '';
+}
+
+function yesNoBool(val) {
+    const s = String(val ?? '').trim().toLowerCase();
+    if (!s) return false;
+    return s === 'yes' || s === 'y' || s === 'true' || s === '1';
+}
+
+function yesNoLabel(val) {
+    return val ? 'Yes' : 'No';
+}
+
+function ledgerCatLabel(val) {
+    return val ?? '';
+}
+
+function formatLedgerDate(val) {
+    if (val == null || val === '') return '';
+    const iso = formatDate(val);
+    if (!iso) return String(val ?? '');
+    const [, year, month, day] = iso.match(/^(\d{4})-(\d{2})-(\d{2})/) || [];
+    if (!year) return iso;
+    return `${day}-${month}-${year.slice(-2)}`;
+}
+
+function parseLedgerDisplayDate(val) {
+    const s = String(val ?? '').trim();
+    const m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
+    if (m) {
+        const day = m[1].padStart(2, '0');
+        const month = m[2].padStart(2, '0');
+        let year = m[3];
+        if (year.length === 2) year = `20${year}`;
+        return `${year}-${month}-${day}`;
+    }
+    return formatDate(val);
+}
+
 function toDrCr(val) {
     if (val === 'OUT') return 'DR';
     if (val === 'IN') return 'CR';
@@ -331,6 +377,16 @@ function callFn(name, args, ctx, direction) {
     if (U === 'PARSE_AMOUNT') return parseAmount(args[0]);
     if (U === 'NORM_WALLET') return normWallet(args[0]);
     if (U === 'FORMAT_DATE') return formatDate(args[0]);
+    if (U === 'FORMAT_LEDGER_DATE') {
+        return direction === 'export'
+            ? formatLedgerDate(args[0])
+            : (parseLedgerDisplayDate(args[0]) || formatDate(args[0]));
+    }
+    if (U === 'NORM_LEDGER_TYPE') return normLedgerType(args[0]);
+    if (U === 'LEDGER_TYPE_LABEL') return ledgerTypeLabel(args[0]);
+    if (U === 'YES_NO_BOOL') return yesNoBool(args[0]);
+    if (U === 'YES_NO_LABEL') return yesNoLabel(args[0]);
+    if (U === 'LEDGER_CAT_LABEL') return ledgerCatLabel(args[0]);
     if (U === 'FN' && args.length >= 1) {
         const name = String(args[0] ?? '').replace(/^@/, '');
         const body = ctx.mapping?.formulaSnippets?.[name];

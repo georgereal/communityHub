@@ -3,6 +3,7 @@
  * Sort state and context bar for the Financial Ledger table.
  */
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
+import { getActiveLedgerTxns } from './ledgerBalance.js';
 
 const pivotKeyOnTxn = (txn, dimension) => {
     if (dimension === 'sub_category') return txn.sub_category?.trim() || '(none)';
@@ -12,7 +13,7 @@ const pivotKeyOnTxn = (txn, dimension) => {
 
 let ledgerPivotFilter = null;
 let ledgerCategoryFilter = null;
-let ledgerSort = { field: 'date', dir: 'desc' };
+let ledgerSort = { field: 'date', dir: 'asc' };
 let activityTimer = null;
 
 export const getLedgerPivotFilter = () => ledgerPivotFilter;
@@ -67,7 +68,7 @@ export const setLedgerActivity = (message, { busy = false, flashMs = 0 } = {}) =
 
 export const applyLedgerTableFilters = (txns) => {
     const q = (document.getElementById('cash-search')?.value || '').trim();
-    return txns.filter((t) =>
+    return getActiveLedgerTxns(txns).filter((t) =>
         txnMatchesLedgerPivotFilter(t)
         && txnMatchesLedgerSearch(t, q)
         && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
@@ -85,7 +86,7 @@ export const toggleLedgerSort = (field) => {
     if (ledgerSort.field === field) {
         ledgerSort = { field, dir: ledgerSort.dir === 'asc' ? 'desc' : 'asc' };
     } else {
-        ledgerSort = { field, dir: field === 'date' ? 'desc' : 'asc' };
+        ledgerSort = { field, dir: field === 'date' ? 'asc' : 'asc' };
     }
 };
 
@@ -93,7 +94,11 @@ export const sortLedgerTxns = (txns) => {
     const { field, dir } = ledgerSort;
     const mul = dir === 'asc' ? 1 : -1;
     return [...txns].sort((a, b) => {
-        if (field === 'date') return mul * (new Date(a.date) - new Date(b.date));
+        if (field === 'date') {
+            const cmp = new Date(a.date) - new Date(b.date);
+            if (cmp) return mul * cmp;
+            return mul * String(a.id || '').localeCompare(String(b.id || ''));
+        }
         if (field === 'cat') return mul * String(a.cat || '').localeCompare(String(b.cat || ''));
         if (field === 'wallet') return mul * String(a.wallet || '').localeCompare(String(b.wallet || ''));
         if (field === 'dr') {
@@ -109,6 +114,11 @@ export const sortLedgerTxns = (txns) => {
         if (field === 'reports') {
             const av = a.exclude_from_reports ? 1 : 0;
             const bv = b.exclude_from_reports ? 1 : 0;
+            return mul * (av - bv);
+        }
+        if (field === 'computedBalance') {
+            const av = a._ledgerComputedBalance ?? Number.NEGATIVE_INFINITY;
+            const bv = b._ledgerComputedBalance ?? Number.NEGATIVE_INFINITY;
             return mul * (av - bv);
         }
         return 0;
@@ -220,6 +230,7 @@ const sortLabels = {
     dr: 'Debit',
     cr: 'Credit',
     reports: 'Reports',
+    computedBalance: 'Calculated',
 };
 
 const describeLedgerSort = () => {

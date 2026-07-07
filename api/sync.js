@@ -9,6 +9,7 @@ import {
 } from '../src/ledgerColumnMapping.js';
 import { pushMicrosoftRows } from '../src/microsoftExcelPush.js';
 import { importExcelRows } from '../src/ledgerSyncApply.js';
+import { getLedgerSyncExportRows, resolveSyncColumnMapping } from '../src/ledgerDisplayRows.js';
 import { setRunLogSink, syncLog, syncLogBounds } from '../src/ledgerSyncLog.js';
 import {
     buildSyncFetchRange,
@@ -192,8 +193,11 @@ async function resolveSyncCredentials(supabase, settings) {
 
 async function performSync(supabase, settings, { source = 'cron' } = {}) {
     const { apartment_id, provider } = settings;
-    const mapping = normalizeMapping(settings.column_mapping);
-    if (colForField(mapping, 'date') < 0) {
+    let columnMapping = normalizeMapping(settings.column_mapping);
+    if (colForField(columnMapping, 'date') < 0) {
+        columnMapping = resolveSyncColumnMapping(settings, []);
+    }
+    if (colForField(columnMapping, 'date') < 0) {
         throw new Error('Column mapping is incomplete — map Date to an Excel column in Admin → Spreadsheet sync (step 3), then save.');
     }
 
@@ -239,7 +243,11 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
         sheetBounds = reconciled.bounds;
         boundsWarnings = reconciled.warnings;
         boundsPatch = reconciled.settingsPatch;
-        const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, settings.column_mapping, sheetBounds);
+        columnMapping = resolveSyncColumnMapping(
+            { ...settings, column_mapping: columnMapping },
+            sheetBounds?.headersRaw || [],
+        );
+        const sheet = parseLedgerSheet(json.values || [], `google:${sheetId}`, columnMapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = {
             excelDataRows: sheet.excelDataRows,
@@ -268,7 +276,11 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
         sheetBounds = reconciled.bounds;
         boundsWarnings = reconciled.warnings;
         boundsPatch = reconciled.settingsPatch;
-        const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, settings.column_mapping, sheetBounds);
+        columnMapping = resolveSyncColumnMapping(
+            { ...settings, column_mapping: columnMapping },
+            sheetBounds?.headersRaw || [],
+        );
+        const sheet = parseLedgerSheet(json.values || [], `microsoft:${shareIdEncoded.slice(0, 32)}`, columnMapping, sheetBounds);
         rows = sheet.parsed;
         pullStats = {
             excelDataRows: sheet.excelDataRows,
@@ -293,9 +305,11 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
 
     // Push to spreadsheet
     let pushed = 0;
-    const localTxns = await getUnsyncedTransactions(supabase, apartment_id);
+    const reconciledIds = await loadReconciledTxnIds(supabase, apartment_id);
+    const unsynced = await getUnsyncedTransactions(supabase, apartment_id);
+    const rowsToPush = getLedgerSyncExportRows(unsynced, { reconciledIds });
     
-    if (localTxns.length > 0 && provider === 'MICROSOFT') {
+    if (rowsToPush.length > 0 && provider === 'MICROSOFT') {
         if (!driveId || !itemId) {
             throw new Error('Could not resolve Excel workbook for push. Re-save the spreadsheet URL.');
         }
@@ -306,17 +320,17 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
                 shareId,
                 useSharesApi,
                 sheetName: settings.sheet_name,
-                rowsToPush: localTxns,
-                columnMapping: settings.column_mapping,
-                rangeA1: settings.range_a1 || 'A:J',
+                rowsToPush,
+                columnMapping,
+                rangeA1: settings.range_a1 || 'A:M',
                 headerRow: sheetBounds?.headerRow ?? settings.header_row ?? null,
                 footerRow: sheetBounds?.footerRow ?? settings.footer_row ?? null,
                 onRowPushed: async (txn, excelRowIndex) => {
                     const before = snapshotTxn(txn);
                     const syncKey = `app:txn:${txn.id}`;
                     const withKey = { ...txn, external_sync_key: syncKey };
-                    const syncHash = computeSyncHash(withKey, settings.column_mapping);
-                    const syncAnchorHash = computeAnchorHash(withKey, settings.column_mapping);
+                    const syncHash = computeSyncHash(withKey, columnMapping);
+                    const syncAnchorHash = computeAnchorHash(withKey, columnMapping);
                     const { error } = await supabase.from('transactions').update({
                         external_sync_key: syncKey,
                         sync_hash: syncHash,
@@ -338,7 +352,7 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
     // 6. Import to DB
     const { data: allTxns } = await supabase.from('transactions').select('*').eq('apartment_id', apartment_id);
     const { imported, updated, skipped, deleted } = await importExcelRows(
-        supabase, apartment_id, rows, allTxns || [], settings.column_mapping, { journal },
+        supabase, apartment_id, rows, allTxns || [], columnMapping, { journal },
     );
 
     // 7. Update Settings
@@ -364,6 +378,9 @@ async function performSync(supabase, settings, { source = 'cron' } = {}) {
 
     await supabase.from('ledger_sync_settings').update({
         ...boundsPatch,
+        ...(columnMapping?.ledgerUiFormat && !settings.column_mapping?.ledgerUiFormat
+            ? { column_mapping: columnMapping }
+            : {}),
         last_synced_at: new Date().toISOString(),
         last_sync_status: syncStatus,
         last_sync_message: statusMessage,
@@ -470,7 +487,18 @@ async function getUnsyncedTransactions(supabase, apartment_id) {
         .from('transactions')
         .select('*')
         .eq('apartment_id', apartment_id)
-        .is('external_sync_key', null);
+        .is('external_sync_key', null)
+        .or('excluded_from_ledger.is.null,excluded_from_ledger.eq.false');
     if (error) throw error;
     return data || [];
+}
+
+async function loadReconciledTxnIds(supabase, apartment_id) {
+    const { data, error } = await supabase
+        .from('bank_statement_lines')
+        .select('transaction_id')
+        .eq('apartment_id', apartment_id)
+        .eq('match_status', 'MATCHED');
+    if (error) return new Set();
+    return new Set((data || []).map((row) => row.transaction_id).filter(Boolean));
 }

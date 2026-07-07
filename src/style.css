@@ -10639,6 +10639,43 @@ header {
   margin-bottom: 0.75rem;
 }
 
+.bank-recon-work-hint--ledger {
+  margin-bottom: 0.65rem;
+}
+
+.bank-recon-ledger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.bank-recon-ledger-actions .bank-recon-cell-select {
+  min-width: 140px;
+  max-width: 200px;
+  font-size: 0.72rem;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--ledger-actions {
+  min-width: 280px;
+}
+
+.bank-recon-txns--highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+  transition: outline-color 0.3s ease;
+}
+
+.fa-metric.metric-card--clickable {
+  cursor: pointer;
+}
+
+.fa-metric.metric-card--clickable:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+}
+
 .bank-recon-metrics .metric-card--highlight {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   background: color-mix(in srgb, var(--accent) 6%, #fff);

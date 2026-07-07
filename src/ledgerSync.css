@@ -221,10 +221,74 @@
   background: rgba(14, 165, 233, 0.06);
 }
 
+.ledger-summary-stat__hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #b45309;
+  line-height: 1.3;
+  max-width: 14rem;
+}
+
+.ledger-table-toolbar {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.ledger-excluded-section {
+  margin-top: 1.25rem;
+}
+
+.ledger-table-host {
+  margin: 0 1.6rem 0.5rem;
+}
+
+.ledger-excluded-host {
+  margin: 0 1.6rem 1rem;
+}
+
+.ledger-table-hint {
+  margin: 0 0 0.5rem;
+}
+
+#ledger-table-shell {
+  display: flex;
+  flex-direction: column;
+  resize: vertical;
+  overflow: hidden;
+  min-height: 520px;
+  height: 620px;
+  max-height: calc(100vh - 220px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+#ledger-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--ledger {
+  white-space: nowrap;
+}
+
+.bank-recon-table--ledger .ledger-txn-chip {
+  display: inline-block;
+  margin-right: 0.25rem;
+}
+
+tr.ledger-txn-row--dirty {
+  background: rgba(251, 191, 36, 0.08);
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
 .ledger-registry-list .ledger-txn-header,
-.ledger-txn-row {
-  grid-template-columns: 36px 96px 88px 148px 72px minmax(140px, 1fr) 84px 84px 128px;
-  align-items: center;
+.ledger-registry-list .ledger-txn-row {
+  /* legacy grid layout — table rows use bank-recon-table */
 }
 
 .ledger-txn-header__check,

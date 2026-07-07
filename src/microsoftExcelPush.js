@@ -4,6 +4,7 @@ import {
     colForField,
     normalizeMapping,
 } from './ledgerColumnMapping.js';
+import { isLedgerUiMapping, ledgerUiMaxCol } from './ledgerDisplayRows.js';
 import { colIndexToLetters, parseColumnRange } from './ledgerSheetRegion.js';
 
 function colLetter(n) {
@@ -97,7 +98,7 @@ async function resolveWorkbookBase({ accessToken, driveId, itemId, shareId, useS
     return { base, sharesBase, driveBase, nextRowIndex };
 }
 
-async function patchExcelRow({
+async function patchExcelRows({
     base,
     sharesBase,
     driveBase,
@@ -113,7 +114,7 @@ async function patchExcelRow({
         {
             method: 'PATCH',
             headers: sessionHeaders(sessionId, { 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ values: [values] }),
+            body: JSON.stringify({ values }),
         },
     );
 
@@ -131,6 +132,10 @@ async function patchExcelRow({
         const msg = patch.json?.error?.message || `HTTP ${patch.res.status}`;
         throw new Error(`Push to Excel failed: ${msg}${code} (range ${rangeAddress}, sheet "${safeSheet}")`);
     }
+}
+
+async function patchExcelRow(opts) {
+    await patchExcelRows({ ...opts, values: [opts.values] });
 }
 
 function rowHasContent(row) {
@@ -231,12 +236,163 @@ async function insertExcelRow({
     }
 }
 
+/** Insert at the totals/footer row so data rows above stay intact. Falls back to full-row address. */
+async function insertBodyRowBeforeFooter(ctx, footerRow) {
+    const fullRow = `${footerRow}:${footerRow}`;
+    try {
+        await insertExcelRow({ ...ctx, rangeAddress: fullRow });
+        return footerRow;
+    } catch (err) {
+        const startCol = ctx.startCol || 'A';
+        const endCol = ctx.endCol || 'M';
+        await insertExcelRow({ ...ctx, rangeAddress: `${startCol}${footerRow}:${endCol}${footerRow}` });
+        return footerRow;
+    }
+}
+
 function excelRowValues(txn, columnMapping) {
     const { rowData, maxCol } = transactionToExcelRow(txn, columnMapping);
     const width = Math.max(maxCol, maxMappedColumn(columnMapping)) + 1;
     const row = rowData.slice(0, width);
     while (row.length < width) row.push('');
     return { row, maxCol: width - 1 };
+}
+
+function usesLedgerUiBatch(columnMapping) {
+    const m = normalizeMapping(columnMapping);
+    return !!(m.ledgerUiFormat || isLedgerUiMapping(m));
+}
+
+async function pushRowsOneAtATime({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    sessionId,
+    rowsToPush,
+    columnMapping,
+    startCol,
+    endColLetter,
+    insertBeforeFooter,
+    headerRow,
+    footerRow,
+    currentFooterRow,
+    targetRow,
+    onRowPushed,
+}) {
+    const pendingCallbacks = [];
+    let pushed = 0;
+    let footer = currentFooterRow;
+    let rowPtr = targetRow;
+    const insertCtx = {
+        base,
+        sharesBase,
+        driveBase,
+        accessToken,
+        safeSheet,
+        sessionId,
+        startCol,
+        endCol: endColLetter,
+    };
+
+    for (const txn of rowsToPush) {
+        const { row, maxCol } = excelRowValues(txn, columnMapping);
+        const endLetter = colLetter(maxCol);
+
+        if (insertBeforeFooter && rowPtr >= footer) {
+            try {
+                rowPtr = await insertBodyRowBeforeFooter(insertCtx, footer);
+                footer += 1;
+                console.log(`Excel push: inserted row ${rowPtr} (totals now at ${footer})`);
+            } catch (insertErr) {
+                console.warn('Excel push: insert before footer failed, appending after used range:', insertErr.message);
+                insertBeforeFooter = false;
+                rowPtr = Math.max(rowPtr, footer);
+            }
+        }
+
+        const writeRange = `${startCol}${rowPtr}:${endLetter}${rowPtr}`;
+        await patchExcelRow({
+            base,
+            sharesBase,
+            driveBase,
+            accessToken,
+            safeSheet,
+            rangeAddress: writeRange,
+            values: row.slice(0, maxCol + 1),
+            sessionId,
+        });
+
+        pushed += 1;
+        pendingCallbacks.push({ txn, excelRowIndex: rowPtr });
+        console.log(`Excel push: row ${pushed}/${rowsToPush.length} → ${writeRange}`);
+        rowPtr += 1;
+    }
+
+    return { pushed, pendingCallbacks };
+}
+
+async function pushLedgerUiBatch({
+    base,
+    sharesBase,
+    driveBase,
+    accessToken,
+    safeSheet,
+    sessionId,
+    rowsToPush,
+    columnMapping,
+    startCol,
+    headerRow,
+    footerRow,
+    targetRow,
+}) {
+    const rowValues = rowsToPush.map((txn) => {
+        const { row } = excelRowValues(txn, columnMapping);
+        return row;
+    });
+    const maxCol = rowValues.reduce((hi, row) => Math.max(hi, row.length - 1), ledgerUiMaxCol());
+    const endLetter = colLetter(maxCol);
+    const endRow = targetRow + rowValues.length - 1;
+    const rangeAddress = `${startCol}${targetRow}:${endLetter}${endRow}`;
+
+    if (footerRow && endRow >= footerRow) {
+        const insertCtx = {
+            base,
+            sharesBase,
+            driveBase,
+            accessToken,
+            safeSheet,
+            sessionId,
+            startCol,
+            endCol: endLetter,
+        };
+        const rowsToInsert = endRow - footerRow + 1;
+        let footer = footerRow;
+        for (let i = 0; i < rowsToInsert; i += 1) {
+            await insertBodyRowBeforeFooter(insertCtx, footer);
+            footer += 1;
+        }
+        console.log(`Excel push: inserted ${rowsToInsert} row(s) before totals for batch write`);
+    }
+
+    await patchExcelRows({
+        base,
+        sharesBase,
+        driveBase,
+        accessToken,
+        safeSheet,
+        rangeAddress,
+        values: rowValues,
+        sessionId,
+    });
+
+    console.log(`Excel push: batch wrote ${rowValues.length} ledger row(s) → ${rangeAddress}`);
+    const pendingCallbacks = rowsToPush.map((txn, i) => ({
+        txn,
+        excelRowIndex: targetRow + i,
+    }));
+    return { pushed: rowsToPush.length, pendingCallbacks };
 }
 
 /**
@@ -310,45 +466,47 @@ export async function pushMicrosoftRows({
     const pendingCallbacks = [];
     let pushed = 0;
     const total = rowsToPush.length;
+    const useBatch = usesLedgerUiBatch(columnMapping) && total > 0;
 
     try {
-        for (const txn of rowsToPush) {
-            const { row, maxCol } = excelRowValues(txn, columnMapping);
-
-            if (insertBeforeFooter && targetRow >= currentFooterRow) {
-                const insertRow = currentFooterRow - 1;
-                const insertRange = `${startCol}${insertRow}:${colLetter(maxCol)}${insertRow}`;
-                await insertExcelRow({
-                    base,
-                    sharesBase,
-                    driveBase,
-                    accessToken,
-                    safeSheet,
-                    rangeAddress: insertRange,
-                    sessionId,
-                });
-                targetRow = insertRow;
-                currentFooterRow += 1;
-                console.log(`Excel push: inserted row ${insertRow} (totals now at ${currentFooterRow})`);
-            }
-
-            const writeRange = `${startCol}${targetRow}:${colLetter(maxCol)}${targetRow}`;
-
-            await patchExcelRow({
+        if (useBatch) {
+            const batch = await pushLedgerUiBatch({
                 base,
                 sharesBase,
                 driveBase,
                 accessToken,
                 safeSheet,
-                rangeAddress: writeRange,
-                values: row.slice(0, maxCol + 1),
                 sessionId,
+                rowsToPush,
+                columnMapping,
+                startCol,
+                headerRow,
+                footerRow: insertBeforeFooter ? currentFooterRow : null,
+                targetRow,
             });
-
-            pushed += 1;
-            pendingCallbacks.push({ txn, excelRowIndex: targetRow });
-            console.log(`Excel push: row ${pushed}/${total} → ${writeRange}${insertBeforeFooter ? ' (inside table)' : ''}`);
-            targetRow += 1;
+            pushed = batch.pushed;
+            pendingCallbacks.push(...batch.pendingCallbacks);
+        } else {
+            const single = await pushRowsOneAtATime({
+                base,
+                sharesBase,
+                driveBase,
+                accessToken,
+                safeSheet,
+                sessionId,
+                rowsToPush,
+                columnMapping,
+                startCol,
+                endColLetter,
+                insertBeforeFooter,
+                headerRow,
+                footerRow,
+                currentFooterRow,
+                targetRow,
+                onRowPushed,
+            });
+            pushed = single.pushed;
+            pendingCallbacks.push(...single.pendingCallbacks);
         }
 
         if (sessionId) {

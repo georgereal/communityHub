@@ -23,6 +23,13 @@ import {
 } from './syncCodeEditor.js';
 import { resolveSheetBounds, dataRowsFromAoa, looksLikeFooterRow, skipReasonForRow, isExcelRowInsideTable, aoaIndexToExcelRow } from './ledgerSheetRegion.js';
 import { syncLog } from './ledgerSyncLog.js';
+import {
+    buildLedgerUiSyncMapping,
+    detectLedgerUiHeaderScore,
+    isLedgerUiMapping,
+    txnToLedgerUiCells,
+    ledgerUiMaxCol,
+} from './ledgerDisplayRows.js';
 
 /** @typedef {'sync'|'db_only'|'internal'|'excel_import'|'excel_export'} FieldMode */
 
@@ -193,6 +200,10 @@ function findHeaderIndex(headers, aliases) {
 
 /** Auto-detect mapping from spreadsheet header row. */
 export function buildMappingFromHeaders(headersRaw) {
+    if (detectLedgerUiHeaderScore(headersRaw) >= 6) {
+        return buildLedgerUiSyncMapping();
+    }
+
     const headers = (headersRaw || []).map((h) => String(h || '').trim().toLowerCase());
     const mapping = normalizeMapping(null);
 
@@ -520,6 +531,10 @@ export function parseLedgerRowsFromAoA(aoa, sourceKey, customMapping = null, syn
 /** Build a sparse Excel row from a DB transaction using mapping exportExpr formulas. */
 export function transactionToExcelRow(txn, mapping) {
     const m = normalizeMapping(mapping);
+    if (m.ledgerUiFormat || isLedgerUiMapping(m)) {
+        const rowData = txnToLedgerUiCells(txn);
+        return { rowData, maxCol: ledgerUiMaxCol() };
+    }
     const mappedCols = [];
     for (const def of TRANSACTION_FIELD_DEFS) {
         const cfg = m.fields[def.key];
@@ -883,7 +898,4 @@ export function wireMappingFormInteractions(rootEl) {
     });
 }
 
-export const TEMPLATE_HEADERS = [
-    'Date', 'Type', 'Amount', 'Dr', 'Cr', 'Category', 'Sub-category', 'Description',
-    'Wallet', 'Vendor', 'Reference', 'Bank type', 'Bank ref', 'Sync ID', 'Sync status',
-];
+export { LEDGER_UI_HEADERS as TEMPLATE_HEADERS } from './ledgerDisplayRows.js';

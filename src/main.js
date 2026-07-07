@@ -2119,6 +2119,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGeneralLedger();
   window.renderLedgerSyncPanel = renderLedgerSyncPanel;
   window.renderFinanceAnalytics = renderFinanceAnalytics;
+  window.renderCashLedger = renderCashLedger;
   window.processFinances = processFinances;
   initEmailOutbox();
   renderNavModules();

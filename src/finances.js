@@ -2,7 +2,7 @@
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist, supabase, pullState } from './store.js';
-import { renderEditableLedgerRows, initLedgerBulkBar } from './ledgerTable.js';
+import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerContextBar, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, ledgerHasActiveFilters, setLedgerActivity, setLedgerSearchBusy, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
@@ -13,6 +13,10 @@ import {
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
+import { initLedgerExport } from './ledgerExport.js';
+import { getLedgerBankBalance, annotateLedgerRunningBalances, getActiveLedgerTxns } from './ledgerBalance.js';
+import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
+import { getPassbookClosingBalance } from './bankReconciliation.js';
 import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from './expenseCategories.js';
 
 const CAT_LABELS = CATEGORY_LABELS;
@@ -296,6 +300,24 @@ const formatTxnDetail = (t) => {
         if (allocSummary) chunks.push(`<span style="color:var(--accent); font-weight:700;">${allocSummary}</span>`);
     }
     return chunks.join('<span style="color:#cbd5e1;"> · </span>') || '—';
+};
+
+/** Plain-text variant for tables that must not render HTML markup. */
+export const formatTxnDetailPlain = (t) => {
+    const parts = [];
+    if (t.vendor_name) parts.push(t.vendor_name);
+    if (t.vendor_invoice) parts.push(`Inv ${t.vendor_invoice}`);
+    if (t.wallet === 'BANK' && t.bank_reference) {
+        const tag = { CHEQUE: 'Chq', UPI: 'UPI', NEFT: 'NEFT' }[t.bank_payment_type] || 'Bank';
+        parts.push(`${tag} ${t.bank_reference}`);
+    }
+    if (t.description) parts.push(t.description);
+    if (t.sub_category) parts.push(t.sub_category);
+    if (t.cat === 'Maintenance Collection') {
+        const allocSummary = formatAllocationSummary(t.id);
+        if (allocSummary) parts.push(allocSummary);
+    }
+    return parts.join(' · ') || '—';
 };
 
 const syncBankTypePills = (type = 'CHEQUE') => {
@@ -623,21 +645,58 @@ export const initExpenseModal = () => {
 };
 
 export const processFinances = () => {
-    let cash = 0, bank = 0, outToday = 0; const now = new Date();
-    portalState.finances.txns.forEach(t => {
-        const amt = parseFloat(t.amount); const d = new Date(t.date); const wallet = t.wallet || 'CASH';
-        if (t.type === 'IN') { if (wallet === 'CASH') cash += amt; else bank += amt; }
-        else {
-            if (wallet === 'CASH') cash -= amt; else bank -= amt;
+    let cash = 0;
+    let outToday = 0;
+    const now = new Date();
+    portalState.finances.txns.forEach((t) => {
+        const amt = parseFloat(t.amount);
+        const d = new Date(t.date);
+        const wallet = t.wallet || 'CASH';
+        if (t.type === 'IN') {
+            if (wallet === 'CASH') cash += amt;
+        } else {
+            if (wallet === 'CASH') cash -= amt;
             if (d.toDateString() === now.toDateString()) outToday += amt;
         }
     });
+
+    const ledgerBank = getLedgerBankBalance();
+    const bankBalance = ledgerBank.balance;
+    const passbook = getPassbookClosingBalance();
+    const passbookGap = bankBalance != null && passbook?.balance != null
+        ? bankBalance - passbook.balance
+        : null;
+
+    const fmt = (n) => `₹ ${Number(n).toLocaleString('en-IN')}`;
     const k = (id) => document.getElementById(id);
     if (k('cash-balance')) {
-        k('cash-balance').textContent = `₹ ${cash.toLocaleString('en-IN')}`;
-        k('bank-balance').textContent = `₹ ${bank.toLocaleString('en-IN')}`;
-        k('total-wealth').textContent = `₹ ${(cash + bank).toLocaleString('en-IN')}`;
-        k('cash-today-out').textContent = `₹ ${outToday.toLocaleString('en-IN')}`;
+        k('cash-balance').textContent = fmt(cash);
+        const bankEl = k('bank-balance');
+        if (bankEl) {
+            bankEl.textContent = bankBalance != null ? fmt(bankBalance) : '—';
+            if (ledgerBank.needsOpening) {
+                bankEl.title = 'Set opening balance in Bank Reconciliation — ledger balance needs a starting amount';
+            } else if (passbookGap != null && Math.abs(passbookGap) >= 1) {
+                bankEl.title = `Ledger calculated ${fmt(bankBalance)} vs passbook ${fmt(passbook.balance)} (${fmt(passbookGap)} gap)`;
+            } else {
+                bankEl.title = `Opening + ${ledgerBank.txnCount} bank ledger entries`;
+            }
+        }
+        const hintEl = k('ledger-bank-hint');
+        if (hintEl) {
+            if (ledgerBank.needsOpening) {
+                hintEl.hidden = false;
+                hintEl.textContent = 'Set opening balance in Bank Reconciliation to align calculated balance with passbook.';
+            } else if (passbook?.balance != null && passbookGap != null && Math.abs(passbookGap) >= 1) {
+                hintEl.hidden = false;
+                hintEl.textContent = `Passbook shows ${fmt(passbook.balance)} — gap of ${fmt(passbookGap)} (missing ledger entries or opening date mismatch).`;
+            } else {
+                hintEl.hidden = true;
+                hintEl.textContent = '';
+            }
+        }
+        k('total-wealth').textContent = bankBalance != null ? fmt(cash + bankBalance) : fmt(cash);
+        k('cash-today-out').textContent = fmt(outToday);
         if (k('cash-txn-count')) {
             const n = portalState.finances.txns.length;
             k('cash-txn-count').textContent = n ? `· ${n} ${n === 1 ? 'entry' : 'entries'}` : '';
@@ -656,11 +715,16 @@ export const renderCashLedger = () => {
     }
 
     renderLedgerContextBar();
-    const filtered = applyLedgerTableFilters([...portalState.finances.txns]);
+    const running = annotateLedgerRunningBalances();
+    const enriched = getActiveLedgerTxns([...portalState.finances.txns]).map((t) => ({
+        ...t,
+        _ledgerComputedBalance: running.byId.get(t.id) ?? null,
+    }));
+    const filtered = applyLedgerTableFilters(enriched);
     const sorted = sortLedgerTxns(filtered);
     updateLedgerSortIndicators();
 
-    const total = portalState.finances.txns.length;
+    const total = getActiveLedgerTxns().length;
     const showing = sorted.length;
 
     const countEl = document.getElementById('cash-txn-count');
@@ -671,6 +735,8 @@ export const renderCashLedger = () => {
     }
 
     renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
+    renderExcludedLedgerSection({ formatTxnDetailPlain });
+    updateLedgerSortIndicators();
 
     setLedgerSearchBusy(false);
     if (hasFilters) {
@@ -894,7 +960,7 @@ export const saveCashData = async () => {
         const allocations = isIncome && cat === 'Maintenance Collection'
             ? collectAllocationDraft().rows
             : [];
-        await postFinanceMutation('saveTransaction', {
+        const result = await postFinanceMutation('saveTransaction', {
             apartment_id,
             transaction: payload,
             allocations,
@@ -912,12 +978,18 @@ export const saveCashData = async () => {
             }));
         }
 
-        await pullState();
+        if (result.transaction) {
+            applySavedTransactionLocally(result.transaction, { allocations });
+        }
+
         populateVendorDatalist();
         populateSubCatDatalist(cat);
         processFinances();
         renderCashLedger();
         if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
+        if (document.getElementById('subview-reports')?.style.display !== 'none') {
+            renderFinanceAnalytics();
+        }
         portalState.editingTxnId = null;
         portalState.pendingReceiptPaths = [];
         portalState.pendingReceiptFiles = [];
@@ -1080,9 +1152,13 @@ export const delTxn = async (id) => {
             apartment_id: portalState.access?.activeApartmentId,
             transaction_id: id,
         });
-        await pullState();
+        removeTransactionLocally(id);
         processFinances();
         renderCashLedger();
+        if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
+        if (document.getElementById('subview-reports')?.style.display !== 'none') {
+            renderFinanceAnalytics();
+        }
     }
 };
 window.delTxn = delTxn;
@@ -1181,11 +1257,13 @@ const initLedgerSearch = () => {
     if (!input || input.dataset.wired) return;
     input.dataset.wired = '1';
     let debounce = null;
-    input.addEventListener('input', () => {
+    const onSearchInput = () => {
         setLedgerSearchBusy(true);
         clearTimeout(debounce);
-        debounce = setTimeout(() => window.renderCashLedger?.(), 120);
-    });
+        debounce = setTimeout(() => renderCashLedger(), 120);
+    };
+    input.addEventListener('input', onSearchInput);
+    input.addEventListener('search', onSearchInput);
 };
 
 const initLedgerCategoryFilter = () => {
@@ -1195,22 +1273,25 @@ const initLedgerCategoryFilter = () => {
     sel.dataset.wired = '1';
     sel.addEventListener('change', () => {
         setLedgerCategoryFilter(sel.value || null);
-        window.renderCashLedger?.();
+        renderCashLedger();
     });
 };
 
 const initLedgerTableControls = () => {
     initLedgerSearch();
     initLedgerCategoryFilter();
-    document.querySelectorAll('.ledger-sort-btn').forEach((btn) => {
-        if (btn.dataset.wired) return;
-        btn.dataset.wired = '1';
-        btn.addEventListener('click', () => {
+    initLedgerExport();
+    const host = document.querySelector('.ledger-registry-list');
+    if (host && !host.dataset.sortWired) {
+        host.dataset.sortWired = '1';
+        host.addEventListener('click', (e) => {
+            const btn = e.target.closest('.ledger-sort-btn');
+            if (!btn?.dataset.sort) return;
             setLedgerActivity('Sorting…', { busy: true });
             toggleLedgerSort(btn.dataset.sort);
             renderCashLedger();
         });
-    });
+    }
 };
 
 window.switchSubView = (sv) => {

@@ -338,8 +338,9 @@
             <div class="ledger-summary-stat ledger-summary-stat--bank">
               <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
               <div class="ledger-summary-stat__body">
-                <span class="ledger-summary-stat__label">Bank</span>
+                <span class="ledger-summary-stat__label">Bank balance</span>
                 <span class="ledger-summary-stat__value" id="bank-balance">₹ 0</span>
+                <span id="ledger-bank-hint" class="ledger-summary-stat__hint" hidden></span>
               </div>
             </div>
             <div class="ledger-summary-stat ledger-summary-stat--out">
@@ -359,6 +360,9 @@
                 Financial Ledger <span id="cash-txn-count" class="ledger-ledger-toolbar__count"></span>
               </h3>
               <div class="ledger-ledger-toolbar__filters">
+                <button type="button" class="btn btn-outline btn--small" id="ledger-download-xlsx" title="Download filtered ledger as Excel">
+                  <i class="fa-solid fa-download" aria-hidden="true"></i> Excel
+                </button>
                 <label class="ledger-filter-field">
                   <span class="ledger-filter-field__label">Category</span>
                   <select id="ledger-cat-filter" class="expense-combobox" aria-label="Filter by category">
@@ -424,20 +428,9 @@
               <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
               <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
             </div>
-            <datalist id="ledger-subcat-datalist"></datalist>
             <div class="registry-list ledger-registry-list">
-              <div class="registry-header ledger-txn-header">
-                <label class="ledger-txn-header__check"><input type="checkbox" id="ledger-header-select-all" aria-label="Select all" /></label>
-                <button type="button" class="ledger-sort-btn ledger-sort-btn--active" data-sort="date" aria-sort="descending">Date <span class="ledger-sort-indicator">↓</span></button>
-                <button type="button" class="ledger-sort-btn" data-sort="wallet" aria-sort="none">Ledger <span class="ledger-sort-indicator"></span></button>
-                <button type="button" class="ledger-sort-btn" data-sort="cat" aria-sort="none">Category <span class="ledger-sort-indicator"></span></button>
-                <span class="ledger-txn-header__static">Exclude</span>
-                <span class="ledger-txn-header__static">Description</span>
-                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="dr" aria-sort="none">Dr (₹) <span class="ledger-sort-indicator"></span></button>
-                <button type="button" class="ledger-sort-btn ledger-sort-btn--num" data-sort="cr" aria-sort="none">Cr (₹) <span class="ledger-sort-indicator"></span></button>
-                <span class="ledger-txn-header__action">Action</span>
-              </div>
-              <div id="cash-ledger-items"></div>
+              <div id="cash-ledger-items" class="ledger-table-host"></div>
+              <div id="ledger-excluded-items" class="ledger-excluded-host"></div>
             </div>
           </section>
         </div>
@@ -514,7 +507,7 @@
               <div id="bank-recon-lines" class="bank-recon-lines"></div>
             </div>
             <div class="bank-recon-panel bank-recon-panel--ledger">
-              <h3 class="bank-recon-panel__title">Unmatched bank ledger</h3>
+              <h3 class="bank-recon-panel__title">Unmatched bank ledger — match, edit, or delete</h3>
               <div id="bank-recon-txns" class="bank-recon-txns"></div>
             </div>
           </div>
