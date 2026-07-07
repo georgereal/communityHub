@@ -65,11 +65,16 @@ const mergedTxn = (txn) => ({ ...txn, ...(pendingEdits.get(txn.id) || {}) });
 
 const isDirty = (txnId) => pendingEdits.has(txnId);
 
+const CLASSIFY_PATCH_KEYS = new Set(['cat', 'sub_category', 'vendor_name', 'exclude_from_reports']);
+
 const markDirty = (txnId, patch) => {
     pendingEdits.set(txnId, { ...(pendingEdits.get(txnId) || {}), ...patch });
     syncLedgerBulkBar();
     const row = document.querySelector(`.ledger-txn-row[data-txn-id="${txnId}"]`);
     row?.classList.add('ledger-txn-row--dirty');
+    if (Object.keys(patch).some((k) => CLASSIFY_PATCH_KEYS.has(k))) {
+        row?.classList.add('ledger-txn-row--classify-open');
+    }
 };
 
 const categoryOptionsForTxnRow = (row) => {
@@ -96,39 +101,83 @@ const resolvedCategoryForLedgerRow = (row) => {
 
 const syncLedgerRowExcludeForCategory = (row) => {
     const cat = row.querySelector('.bank-recon-cat-input')?.value?.trim();
-    const excludeInput = row.querySelector('.bank-recon-exclude-reports-input');
-    if (excludeInput && (cat === BANK_REJECT_CAT || defaultExcludeFromReports(cat))) {
-        excludeInput.checked = true;
+    const txnId = row?.dataset?.txnId;
+    if (!txnId) return;
+    if (cat === BANK_REJECT_CAT || defaultExcludeFromReports(cat)) {
+        markDirty(txnId, { exclude_from_reports: true });
     }
+};
+
+/** Bank statement narrations copied into vendor (e.g. "To REJECT:…") — hide in table. */
+const isBankNarrationVendor = (vendor, description) => {
+    const v = String(vendor || '').trim();
+    if (!v) return true;
+    if (/^to\s+/i.test(v)) return true;
+    const d = String(description || '').trim();
+    if (!d) return false;
+    if (v === d) return true;
+    const norm = (s) => s.toLowerCase().replace(/\s+/g, ' ');
+    const vn = norm(v);
+    const dn = norm(d);
+    return dn.startsWith(vn) || vn.startsWith(dn.slice(0, Math.min(vn.length + 4, dn.length)));
+};
+
+const formatClassifyDisplayParts = (t, isIncome) => {
+    const catKey = t.cat ? (normalizeCategoryKey(t.cat) || t.cat) : '';
+    const catLabel = catKey ? categoryDisplayLabel(catKey) : '';
+    const sub = String(t.sub_category || '').trim();
+    let main = catLabel || 'Set category…';
+    if (!isIncome && sub && sub.toLowerCase() !== catLabel.toLowerCase()) {
+        main = `${catLabel} – ${sub}`;
+    }
+    const vendor = String(t.vendor_name || '').trim();
+    const showVendor = !isIncome && vendor && !isBankNarrationVendor(vendor, t.description);
+    return { main, vendor: showVendor ? vendor : '', empty: !catLabel };
+};
+
+const renderClassifyDisplay = (t, isIncome) => {
+    const { main, vendor, empty } = formatClassifyDisplayParts(t, isIncome);
+    const vendorLine = vendor
+        ? `<span class="ledger-classify-display__vendor">${esc(vendor)}</span>`
+        : '';
+    return `<button type="button" class="ledger-classify-display${empty ? ' ledger-classify-display--empty' : ''}" title="Click to edit category">
+      <span class="ledger-classify-display__main">${esc(main)}</span>${vendorLine}
+    </button>`;
+};
+
+const openClassifyEdit = (row) => {
+    if (!row) return;
+    row.classList.add('ledger-txn-row--classify-open');
+    row.querySelector('.bank-recon-cat-input')?.focus();
+};
+
+const closeClassifyEditIfClean = (row) => {
+    const txnId = row?.dataset?.txnId;
+    if (txnId && !isDirty(txnId)) row.classList.remove('ledger-txn-row--classify-open');
 };
 
 const renderSortHeader = (label, field, extraClass = '') =>
     `<button type="button" class="ledger-sort-btn ${extraClass}" data-sort="${field}" aria-sort="none">${label} <span class="ledger-sort-indicator"></span></button>`;
 
 const renderLedgerClassifyCell = (t, isIncome) => {
-    const excludeCheck = `
-      <label class="bank-recon-exclude-reports" title="Omit from income/expense reports">
-        <input type="checkbox" class="bank-recon-exclude-reports-input" data-field="exclude_from_reports" ${t.exclude_from_reports ? 'checked' : ''} />
-        <span>No reports</span>
-      </label>`;
     const catCombobox = `
       <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat">
         <input type="text" class="bank-recon-cell-input bank-recon-cat-input" placeholder="Category…" autocomplete="off" />
         <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
       </div>`;
-    if (isIncome) {
-        return `<div class="bank-recon-classify-actions">${catCombobox}${excludeCheck}</div>`;
-    }
-    return `
-      <div class="bank-recon-classify-actions">
-        ${catCombobox}
+    const expenseFields = `
         <div class="bank-recon-classify-combobox bank-recon-classify-combobox--sub">
           <input type="text" class="bank-recon-cell-input bank-recon-subcat-input" placeholder="Sub-category" autocomplete="off" />
           <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
         </div>
-        <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" list="ledger-vendors" placeholder="Vendor" />
-        ${excludeCheck}
-      </div>`;
+        <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" list="ledger-vendors" placeholder="Vendor" />`;
+    const editInner = isIncome
+        ? catCombobox
+        : `${catCombobox}${expenseFields}`;
+    return `<div class="ledger-classify-cell">
+      ${renderClassifyDisplay(t, isIncome)}
+      <div class="ledger-classify-edit bank-recon-classify-actions">${editInner}</div>
+    </div>`;
 };
 
 const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleColumns, runningBalances, needsOpening }) => {
@@ -137,6 +186,9 @@ const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleC
     const lineType = isIncome ? 'IN' : 'OUT';
     const isBank = (t.wallet || '').toUpperCase() === 'BANK';
     const reconciled = isTransactionReconciled(t.id);
+    const reportsBadge = t.exclude_from_reports
+        ? '<span class="ledger-recon-badge ledger-recon-badge--report-excluded" title="Omitted from Financial Reports">No reports</span>'
+        : '';
     const reconBadge = reconciled
         ? '<span class="ledger-recon-badge" title="Reconciled to bank statement">Reconciled</span>'
         : (isBank ? '<span class="ledger-recon-badge ledger-recon-badge--open">Unreconciled</span>' : '');
@@ -173,12 +225,13 @@ const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleC
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--ledger">
         <span class="ledger-txn-chip ledger-txn-chip--wallet">${esc(t.wallet)}</span>
+        ${reportsBadge}
         ${reconBadge}
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
           ${receiptBtn}
-          <button type="button" class="btn btn-outline btn--small ledger-row-save" data-txn="${t.id}" title="Save this row" ${isDirty(t.id) ? '' : 'disabled'}>Save</button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-row-save" data-txn="${t.id}" title="Save this row" aria-label="Save row" ${isDirty(t.id) ? '' : 'disabled'}><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon" onclick="window.editTxn('${t.id}')" title="Full edit" aria-label="Full edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
@@ -209,7 +262,9 @@ const initRowClassifyValues = (row) => {
     }
 
     const vendorInput = row.querySelector('.bank-recon-vendor-input');
-    if (vendorInput && t.vendor_name) vendorInput.value = t.vendor_name;
+    if (vendorInput && t.vendor_name && !isBankNarrationVendor(t.vendor_name, t.description)) {
+        vendorInput.value = t.vendor_name;
+    }
 };
 
 const wireLedgerClassifyRows = (root) => {
@@ -250,6 +305,30 @@ const wireLedgerClassifyRows = (root) => {
     root.querySelectorAll('tr.ledger-txn-row').forEach(initRowClassifyValues);
 };
 
+const mountLedgerColumnsPicker = (visibleColumns) => {
+    const slot = document.getElementById('ledger-columns-slot');
+    if (!slot) return;
+    slot.innerHTML = `
+      <details class="bank-recon-columns-picker ledger-columns-picker">
+        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></summary>
+        <div class="bank-recon-columns-picker__menu">
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
+            <span>Calculated balance</span>
+          </label>
+        </div>
+      </details>`;
+    slot.querySelectorAll('[data-ledger-column-toggle]').forEach((input) => {
+        input.addEventListener('change', () => {
+            const key = input.dataset.ledgerColumnToggle;
+            if (!key) return;
+            ledgerVisibleColumns = { ...ledgerVisibleColumns, [key]: !!input.checked };
+            persistLedgerColumns();
+            window.renderCashLedger?.();
+        });
+    });
+};
+
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
     const list = document.getElementById('cash-ledger-items');
     if (!list) return;
@@ -269,6 +348,7 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
     };
 
     if (!txns.length) {
+        mountLedgerColumnsPicker(visibleColumns);
         list.innerHTML = '<p class="maintenance-dues-empty">No transactions match your filters.</p>';
         syncLedgerBulkBar();
         return;
@@ -279,20 +359,10 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
 
     const rows = txns.map((raw) => renderLedgerRow(raw, rowOpts)).join('');
 
+    mountLedgerColumnsPicker(visibleColumns);
+
     list.innerHTML = `
       <datalist id="ledger-vendors">${vendorDatalist}</datalist>
-      <p class="bank-recon-work-hint ledger-table-hint">Edit inline, then <strong>Save</strong>. <strong>Calculated</strong> is running bank balance from opening + each BANK row (date order). Use <i class="fa-solid fa-box-archive" aria-hidden="true"></i> to move a row to Excluded entries.</p>
-      <div class="bank-recon-bulk-bar ledger-table-toolbar">
-        <details class="bank-recon-columns-picker">
-          <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
-          <div class="bank-recon-columns-picker__menu">
-            <label class="bank-recon-columns-picker__option">
-              <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
-              <span>Calculated balance</span>
-            </label>
-          </div>
-        </details>
-      </div>
       <div class="bank-recon-table-shell ledger-table-shell" id="ledger-table-shell">
         <div class="bank-recon-table-wrap" id="ledger-table-wrap">
           <table class="bank-recon-table bank-recon-table--ledger">
@@ -302,11 +372,11 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
                   <input type="checkbox" id="ledger-header-select-all" aria-label="Select all" />
                 </th>
                 <th>${renderSortHeader('Date', 'date')}</th>
-                <th>${renderSortHeader('Description', 'description')}</th>
+                <th>Description</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Debit', 'dr', 'ledger-sort-btn--num')}</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Credit', 'cr', 'ledger-sort-btn--num')}</th>
                 ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint}>${renderSortHeader('Calculated', 'computedBalance', 'ledger-sort-btn--num')}</th>` : ''}
-                <th>${renderSortHeader('Type', 'type')}</th>
+                <th>Type</th>
                 <th>${renderSortHeader('Category / vendor', 'cat')}</th>
                 <th>${renderSortHeader('Ledger', 'wallet')}</th>
                 <th class="bank-recon-table__th--actions"></th>
@@ -316,16 +386,6 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
           </table>
         </div>
       </div>`;
-
-    list.querySelectorAll('[data-ledger-column-toggle]').forEach((input) => {
-        input.addEventListener('change', () => {
-            const key = input.dataset.ledgerColumnToggle;
-            if (!key) return;
-            ledgerVisibleColumns = { ...ledgerVisibleColumns, [key]: !!input.checked };
-            persistLedgerColumns();
-            window.renderCashLedger?.();
-        });
-    });
 
     wireLedgerClassifyRows(list);
     wireLedgerTableEvents();
@@ -423,13 +483,13 @@ const setLedgerBulkSaving = (saving, statusText = '') => {
     const bar = document.getElementById('ledger-bulk-bar');
     if (!bar) return;
     bar.classList.toggle('ledger-bulk-bar--busy', saving);
-    bar.querySelectorAll('select, input, button:not(#ledger-bulk-save)').forEach((el) => {
+    bar.querySelectorAll('select, button:not(#ledger-bulk-save)').forEach((el) => {
         el.disabled = saving;
     });
     const countEl = bar.querySelector('#ledger-bulk-count');
     if (countEl && saving && statusText) {
         countEl.textContent = statusText;
-        countEl.classList.add('ledger-bulk-bar__count--busy');
+        countEl.classList.add('ledger-bulk-bar__status--busy');
     }
 };
 
@@ -438,10 +498,10 @@ const flashBulkStatus = (message, ms = 2800) => {
     if (!countEl) return;
     clearTimeout(bulkStatusTimer);
     countEl.textContent = message;
-    countEl.classList.remove('ledger-bulk-bar__count--busy');
-    countEl.classList.add('ledger-bulk-bar__count--flash');
+    countEl.classList.remove('ledger-bulk-bar__status--busy');
+    countEl.classList.add('ledger-bulk-bar__status--flash');
     bulkStatusTimer = setTimeout(() => {
-        countEl.classList.remove('ledger-bulk-bar__count--flash');
+        countEl.classList.remove('ledger-bulk-bar__status--flash');
         syncLedgerBulkBar();
     }, ms);
 };
@@ -451,21 +511,21 @@ export const syncLedgerBulkBar = () => {
     if (!bar || bar.classList.contains('ledger-bulk-bar--busy')) return;
     const selected = selectedTxnIds();
     const dirtyCount = pendingEdits.size;
+    const showBar = selected.length > 0 || dirtyCount > 0;
+    bar.hidden = !showBar;
     const countEl = bar.querySelector('#ledger-bulk-count');
     const saveBtn = bar.querySelector('#ledger-bulk-save');
     const applyBtn = bar.querySelector('#ledger-bulk-apply');
-    if (countEl && !countEl.classList.contains('ledger-bulk-bar__count--flash')) {
-        countEl.textContent = `${selected.length} selected · ${dirtyCount} unsaved`;
+    if (countEl && !countEl.classList.contains('ledger-bulk-bar__status--flash')) {
+        const parts = [];
+        if (selected.length) parts.push(`${selected.length} selected`);
+        if (dirtyCount) parts.push(`${dirtyCount} unsaved`);
+        countEl.textContent = parts.length ? parts.join(' · ') : 'Select rows to bulk edit';
     }
     if (saveBtn && saveBtn.dataset.busy !== '1') saveBtn.disabled = dirtyCount === 0;
     if (applyBtn) applyBtn.disabled = selected.length === 0;
-    const selectAll = bar.querySelector('#ledger-select-all');
     const headerAll = document.getElementById('ledger-header-select-all');
     const checks = [...document.querySelectorAll('.ledger-row-check')];
-    if (selectAll && checks.length) {
-        selectAll.checked = checks.every((c) => c.checked);
-        selectAll.indeterminate = checks.some((c) => c.checked) && !selectAll.checked;
-    }
     if (headerAll && checks.length) {
         headerAll.checked = checks.every((c) => c.checked);
         headerAll.indeterminate = checks.some((c) => c.checked) && !headerAll.checked;
@@ -473,6 +533,8 @@ export const syncLedgerBulkBar = () => {
 };
 
 const readRowPatch = (row) => {
+    const txnId = row?.dataset?.txnId;
+    const raw = txnId ? portalState.finances.txns.find((t) => t.id === txnId) : null;
     const patch = {};
     const catInput = row.querySelector('.bank-recon-cat-input');
     const rawCat = catInput?.value?.trim();
@@ -485,8 +547,20 @@ const readRowPatch = (row) => {
     const subInput = row.querySelector('.bank-recon-subcat-input');
     if (subInput) patch.sub_category = subInput.value.trim() || null;
     const vendorInput = row.querySelector('.bank-recon-vendor-input');
-    if (vendorInput) patch.vendor_name = vendorInput.value.trim() || null;
-    patch.exclude_from_reports = row.querySelector('.bank-recon-exclude-reports-input')?.checked === true;
+    if (vendorInput) {
+        const v = vendorInput.value.trim();
+        if (v) {
+            patch.vendor_name = v;
+        } else if (raw && !isBankNarrationVendor(raw.vendor_name, raw.description)) {
+            patch.vendor_name = null;
+        }
+    }
+    const pending = txnId ? pendingEdits.get(txnId) : null;
+    if (pending && 'exclude_from_reports' in pending) {
+        patch.exclude_from_reports = pending.exclude_from_reports;
+    } else if (raw) {
+        patch.exclude_from_reports = !!raw.exclude_from_reports;
+    }
     return patch;
 };
 
@@ -500,8 +574,6 @@ const onRowFieldChange = (row) => {
     markDirty(txnId, patch);
     const saveBtn = row.querySelector('.ledger-row-save');
     if (saveBtn) saveBtn.disabled = false;
-    const excludeEl = row.querySelector('.bank-recon-exclude-reports-input');
-    if (excludeEl && patch.exclude_from_reports) excludeEl.checked = true;
 };
 
 const applyLocalTxnPatches = (updates) => {
@@ -549,11 +621,9 @@ const applyBulkToSelected = () => {
     const cat = document.getElementById('ledger-bulk-cat')?.value?.trim();
     const excludeMode = document.getElementById('ledger-bulk-exclude')?.value || 'nochange';
     if (!cat && excludeMode === 'nochange') {
-        setLedgerActivity('Choose a bulk category or reports option first', { flashMs: 3500 });
+        setLedgerActivity('Choose a category or reports option first', { flashMs: 3500 });
         return;
     }
-
-    setLedgerActivity(`Staging changes for ${ids.length} row${ids.length === 1 ? '' : 's'}…`, { busy: true });
 
     ids.forEach((id) => {
         const row = document.querySelector(`.ledger-txn-row[data-txn-id="${id}"]`);
@@ -572,18 +642,14 @@ const applyBulkToSelected = () => {
         pendingEdits.set(id, patch);
         row?.classList.add('ledger-txn-row--dirty');
         if (row) {
-            if (patch.exclude_from_reports != null) {
-                const ex = row.querySelector('.bank-recon-exclude-reports-input');
-                if (ex) ex.checked = patch.exclude_from_reports;
-            }
             const saveBtn = row.querySelector('.ledger-row-save');
             if (saveBtn) saveBtn.disabled = false;
         }
     });
     syncLedgerBulkBar();
     setLedgerActivity(
-        `Staged ${ids.length} row${ids.length === 1 ? '' : 's'} — click Save changes to persist`,
-        { flashMs: 4000 },
+        `Staged ${ids.length} row${ids.length === 1 ? '' : 's'} — click Save changes`,
+        { flashMs: 3500 },
     );
 };
 
@@ -603,7 +669,6 @@ export const wireLedgerTableEvents = () => {
             syncLedgerBulkBar();
             return;
         }
-        if (e.target.matches('.bank-recon-exclude-reports-input')) onRowFieldChange(row);
     });
 
     list.addEventListener('input', (e) => {
@@ -614,6 +679,12 @@ export const wireLedgerTableEvents = () => {
     });
 
     list.addEventListener('click', async (e) => {
+        const classifyBtn = e.target.closest('.ledger-classify-display');
+        if (classifyBtn) {
+            openClassifyEdit(classifyBtn.closest('.ledger-txn-row'));
+            return;
+        }
+
         const excludeBtn = e.target.closest('.ledger-exclude-btn');
         if (excludeBtn && excludeBtn.dataset.busy !== '1') {
             const txnId = excludeBtn.dataset.txn;
@@ -653,7 +724,7 @@ const populateBulkCategorySelect = () => {
     if (!sel) return;
     const escOpt = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     sel.innerHTML = [
-        '<option value="">— no change —</option>',
+        '<option value="">Set category…</option>',
         `<optgroup label="Income">${INCOME_CATS.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
         `<optgroup label="Expenses">${EXPENSE_CATS.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
     ].join('');
@@ -665,18 +736,24 @@ export const initLedgerBulkBar = () => {
 
     populateBulkCategorySelect();
 
+    if (!document.body.dataset.ledgerClassifyDismissWired) {
+        document.body.dataset.ledgerClassifyDismissWired = '1';
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.ledger-classify-cell')) return;
+            document.querySelectorAll('.ledger-txn-row--classify-open').forEach((row) => {
+                closeClassifyEditIfClean(row);
+            });
+        });
+    }
+
     const setAllSelected = (on) => {
         document.querySelectorAll('.ledger-row-check').forEach((c) => { c.checked = on; });
-        const bulkAll = document.getElementById('ledger-select-all');
         const headerAll = document.getElementById('ledger-header-select-all');
-        if (bulkAll) bulkAll.checked = on;
         if (headerAll) headerAll.checked = on;
         syncLedgerBulkBar();
     };
 
-    document.getElementById('ledger-select-all')?.addEventListener('change', (e) => setAllSelected(e.target.checked));
-
-    document.querySelector('.ledger-registry-list')?.addEventListener('change', (e) => {
+    document.getElementById('cash-ledger-items')?.addEventListener('change', (e) => {
         if (e.target.id === 'ledger-header-select-all') setAllSelected(e.target.checked);
     });
 

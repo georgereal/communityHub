@@ -14,6 +14,7 @@ export const CATEGORY_LABELS = {
     Promotion: 'Promotion / Sponsorship',
     Interest: 'Bank Interest',
     'Petty Inflow': 'Petty Cash Top-up',
+    'Petty Cash': 'Petty Cash',
     'Bank Reject': 'Bank Reject',
     Reconcile: 'Bank Reconciliation',
     'Other Income': 'Other Income',
@@ -22,7 +23,6 @@ export const CATEGORY_LABELS = {
 
 /** Legacy / alternate stored values → canonical key. */
 const CATEGORY_ALIASES = {
-    'Petty Cash': 'Petty Inflow',
     'Petty Cash Top-up': 'Petty Inflow',
 };
 
@@ -60,6 +60,7 @@ export const EXPENSE_CATS = [
     'Water softener Salt',
     'Water Softener Expenses',
     'Bank Charges',
+    'Petty Cash',
     BANK_REJECT_CAT,
     'Water tank cleaning',
     'JMC (ABC Share)',
@@ -100,6 +101,13 @@ export const SUB_CAT_SUGGESTIONS = {
         'GST on bank charges',
         'Other',
     ],
+    'Petty Cash': [
+        'Office supplies',
+        'Refreshments',
+        'Courier',
+        'Miscellaneous',
+        'Other',
+    ],
     Other: ['Miscellaneous'],
 };
 
@@ -111,6 +119,7 @@ export function inferExpenseCategory(desc) {
     if (/GENERATOR\s*AMC|\bDG\s*AMC|GEN\s*AMC/.test(u)) return 'Generator AMC';
     if (/\bDIESEL\b|\bDG\b/.test(u)) return 'Diesel';
     if (/BANK\s*CHARG|IMPS\s*CHG|NEFT\s*CHG|RTGS\s*CHG|CHQ\s*CHG/.test(u)) return 'Bank Charges';
+    if (/PETTY\s*CASH|\bCASH\s*DESK\b/.test(u)) return 'Petty Cash';
     if (/JMC|ABC\s*SHARE/.test(u)) return 'JMC (ABC Share)';
     if (/WATER\s*TANK\s*CLEAN|TANK\s*CLEAN/.test(u)) return 'Water tank cleaning';
     if (/SOFTENER.*SALT/.test(u)) return 'Water softener Salt';

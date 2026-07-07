@@ -47,6 +47,15 @@ const buildMonthRange = (count, endDate = new Date()) => {
     return months;
 };
 
+const txnInMonths = (txn, months) => {
+    const d = new Date(txn.date);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    return months.some((mo) => mo.y === y && mo.m === m);
+};
+
+const filterTxnsInMonthRange = (txns, months) => txns.filter((t) => txnInMonths(t, months));
+
 const computeWalletBalances = () => {
     let cash = 0;
     let bank = 0;
@@ -134,8 +143,8 @@ const buildCategoryPivot = (txns, months, dimension) => {
     return { rows: rows.filter((r) => r.total > 0.001), colTotals, grandTotal };
 };
 
-const buildIncomePivot = (months, dimension = 'cat') =>
-    buildCategoryPivot(filterIncome(), months, dimension);
+const buildIncomePivot = (months, dimension = 'cat', incomeTxns = filterIncome()) =>
+    buildCategoryPivot(incomeTxns, months, dimension);
 
 const buildExpensePivot = (expenses, months, dimension) =>
     buildCategoryPivot(expenses, months, dimension);
@@ -155,26 +164,10 @@ const topCategoryRows = (rows, limit = 8) => {
 const monthsCellsFromRows = (rows, len) =>
     Array.from({ length: len }, (_, i) => rows.reduce((s, r) => s + (r.cells[i] || 0), 0));
 
-const linearProject = (values, futureCount) => {
-    const n = values.length;
-    if (!n) return Array(futureCount).fill(0);
-    if (n === 1) return Array(futureCount).fill(Math.max(0, values[0]));
-    let sumX = 0;
-    let sumY = 0;
-    let sumXY = 0;
-    let sumX2 = 0;
-    for (let i = 0; i < n; i++) {
-        sumX += i;
-        sumY += values[i];
-        sumXY += i * values[i];
-        sumX2 += i * i;
-    }
-    const denom = n * sumX2 - sumX * sumX;
-    const slope = denom ? (n * sumXY - sumX * sumY) / denom : 0;
-    const intercept = (sumY - slope * sumX) / n;
-    return Array.from({ length: futureCount }, (_, i) =>
-        Math.max(0, Math.round(intercept + slope * (n + i))),
-    );
+const averageProject = (values, futureCount) => {
+    const avg = values.reduce((a, b) => a + b, 0) / Math.max(1, values.length);
+    const rounded = Math.round(avg);
+    return Array(futureCount).fill(rounded);
 };
 
 let combinedChartInstance = null;
@@ -198,6 +191,7 @@ const CATEGORY_COLORS = {
     Other: '#64748b',
     Audit: '#7c3aed',
     'Bank Charges': '#ef4444',
+    'Petty Cash': '#0d9488',
     __other__: '#cbd5e1',
 };
 
@@ -225,9 +219,9 @@ const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
         combinedChartInstance = null;
     }
 
-    const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat').rows, 6);
+    const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat', filterTxnsInMonthRange(filterIncome(), months)).rows, 6);
     const expenseRows = topCategoryRows(
-        buildExpensePivot(filterExpenses(sheetOnly), months, pivotDimension).rows,
+        buildExpensePivot(filterTxnsInMonthRange(filterExpenses(sheetOnly), months), months, pivotDimension).rows,
         6,
     );
 
@@ -301,13 +295,13 @@ const renderProjectionSummary = (months, sheetOnly, projectCount) => {
     const summaryEl = document.getElementById('fa-projection-summary');
     if (!summaryEl) return;
 
-    const expenses = filterExpenses(sheetOnly);
-    const income = filterIncome();
+    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly), months);
+    const income = filterTxnsInMonthRange(filterIncome(), months);
     const expenseTotals = monthlyTotals(expenses, months);
     const incomeTotals = monthlyTotals(income, months);
 
-    const projIncome = linearProject(incomeTotals, projectCount);
-    const projExpense = linearProject(expenseTotals, projectCount);
+    const projIncome = averageProject(incomeTotals, projectCount);
+    const projExpense = averageProject(expenseTotals, projectCount);
     const projNet = projIncome.map((v, i) => v - projExpense[i]);
 
     const projLabels = Array.from({ length: projectCount }, (_, i) => {
@@ -322,7 +316,7 @@ const renderProjectionSummary = (months, sheetOnly, projectCount) => {
 
     summaryEl.innerHTML = `
       <h3 class="fa-panel__title">Trend projection</h3>
-      <p class="fa-projection-note">Linear trend forecast for the next ${projectCount} month(s) from recent aggregate totals.</p>
+      <p class="fa-projection-note">Forecast uses average monthly totals over the selected history period (same figures as above).</p>
       <dl class="fa-projection-stats">
         <div><dt>Avg monthly income</dt><dd>${formatMoney(avgIncome)}</dd></div>
         <div><dt>Avg monthly expenses</dt><dd>${formatMoney(avgExpense)}</dd></div>
@@ -338,7 +332,7 @@ const renderProjectionSummary = (months, sheetOnly, projectCount) => {
 const getNobrokerState = () => getNoBrokerDump();
 
 const getSettings = () => ({
-    monthCount: parseInt(document.getElementById('fa-month-range')?.value || '12', 10),
+    monthCount: parseInt(document.getElementById('fa-month-range')?.value || '6', 10),
     pivotDimension: document.getElementById('fa-pivot-dimension')?.value || 'cat',
     sheetOnly: document.getElementById('fa-sheet-only')?.checked !== false,
     projectMonths: parseInt(document.getElementById('fa-project-months')?.value || '3', 10),
@@ -585,12 +579,51 @@ const renderPivotTable = ({
       </table>`;
 };
 
+const expenseSourceCounts = (months, sheetOnly) => {
+    const inRangeOut = (portalState.finances.txns || []).filter(
+        (t) => t.type === 'OUT' && txnInMonths(t, months),
+    );
+    const reportable = inRangeOut.filter(isReportableTxn);
+    const inPivot = sheetOnly ? reportable.filter(isStructuredExpense) : reportable;
+    const fromSheet = inPivot.filter(isExpenseFromSheet).length;
+    const fromBank = inPivot.filter((t) => isExpenseFromBankRecon(t) && !isExpenseFromSheet(t)).length;
+    const excludedFromReports = inRangeOut.filter((t) => t.exclude_from_reports).length;
+    const manualOmitted = sheetOnly ? reportable.filter((t) => !isStructuredExpense(t)).length : 0;
+    return { fromSheet, fromBank, excludedFromReports, manualOmitted, inPivot: inPivot.length };
+};
+
+const pivotRangeFromMonths = (months) => {
+    if (!months.length) return {};
+    const start = months[0];
+    const end = months[months.length - 1];
+    return {
+        rangeStart: new Date(start.y, start.m, 1),
+        rangeEnd: new Date(end.y, end.m + 1, 0, 23, 59, 59, 999),
+    };
+};
+
+const expenseMetaChip = (count, label, sourceScope, extraClass = '') => {
+    if (!count) return '';
+    return `<button type="button" class="fa-meta-chip fa-meta-chip--clickable ${extraClass}" data-fa-expense-source="${sourceScope}" title="View matching ledger entries">${count} ${label}</button>`;
+};
+
+const renderOmittedMetaChip = (manualOmitted, excludedFromReports) => {
+    if (!manualOmitted && !excludedFromReports) return '';
+    const parts = [];
+    if (manualOmitted) parts.push(`${manualOmitted} manual`);
+    if (excludedFromReports) parts.push(`${excludedFromReports} excluded from reports`);
+    const scope = manualOmitted && excludedFromReports
+        ? 'omitted'
+        : (manualOmitted ? 'manual' : 'excluded-reports');
+    return `<button type="button" class="fa-meta-chip fa-meta-chip--clickable" data-fa-expense-source="${scope}" title="View matching ledger entries">${parts.join(' · ')} omitted</button>`;
+};
+
 const renderIncomePivot = (months) => {
     const el = document.getElementById('fa-income-pivot');
     const metaEl = document.getElementById('fa-income-pivot-meta');
-    const income = filterIncome();
+    const income = filterTxnsInMonthRange(filterIncome(), months);
     const excludedCount = (portalState.finances.txns || []).filter(
-        (t) => t.type === 'IN' && t.exclude_from_reports,
+        (t) => t.type === 'IN' && t.exclude_from_reports && txnInMonths(t, months),
     ).length;
 
     if (metaEl) {
@@ -600,7 +633,7 @@ const renderIncomePivot = (months) => {
             : `<span class="fa-meta-chip">${income.length} income entries</span>`;
     }
 
-    const { rows } = buildIncomePivot(months, 'cat');
+    const { rows } = buildIncomePivot(months, 'cat', income);
     renderPivotTable({
         el,
         metaEl,
@@ -617,18 +650,18 @@ const renderExpensePivot = (months, dimension, sheetOnly) => {
     const el = document.getElementById('fa-expense-pivot');
     const metaEl = document.getElementById('fa-expense-pivot-meta');
 
-    const allOut = (portalState.finances.txns || []).filter((t) => t.type === 'OUT');
-    const expenses = filterExpenses(sheetOnly);
-    const sheetCount = allOut.filter(isExpenseFromSheet).length;
-    const bankCount = allOut.filter(isExpenseFromBankRecon).length;
-    const excludedCount = allOut.length - expenses.length;
+    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly), months);
+    const { fromSheet, fromBank, excludedFromReports, manualOmitted } = expenseSourceCounts(months, sheetOnly);
 
     if (metaEl) {
-        metaEl.innerHTML = sheetOnly
-            ? `<span class="fa-meta-chip fa-meta-chip--sheet">${sheetCount} from expense sheets</span>
-               <span class="fa-meta-chip">${bankCount} from bank reconciliation</span>
-               <span class="fa-meta-chip">${excludedCount} manual entries excluded</span>`
-            : `<span class="fa-meta-chip">${expenses.length} total expenses (${sheetCount} sheets, ${bankCount} bank)</span>`;
+        if (sheetOnly) {
+            metaEl.innerHTML = `${expenseMetaChip(fromSheet, 'from expense sheets', 'sheet', 'fa-meta-chip--sheet')}
+               ${expenseMetaChip(fromBank, 'from bank reconciliation', 'bank')}
+               ${renderOmittedMetaChip(manualOmitted, excludedFromReports)}`;
+        } else {
+            metaEl.innerHTML = `<span class="fa-meta-chip">${expenses.length} in period (${fromSheet} sheets, ${fromBank} bank)</span>
+               ${expenseMetaChip(excludedFromReports, 'excluded from reports', 'excluded-reports')}`;
+        }
     }
 
     const { rows } = buildExpensePivot(expenses, months, dimension);
@@ -691,9 +724,28 @@ const wirePivotContainer = (containerId) => {
     });
 };
 
+const wireExpensePivotMeta = () => {
+    const metaEl = document.getElementById('fa-expense-pivot-meta');
+    if (!metaEl || metaEl.dataset.metaWired) return;
+    metaEl.dataset.metaWired = '1';
+
+    metaEl.addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-fa-expense-source]');
+        if (!chip?.dataset.faExpenseSource) return;
+        const settings = getSettings();
+        const months = buildMonthRange(settings.monthCount);
+        navigateToLedgerFromPivot({
+            type: 'OUT',
+            sourceScope: chip.dataset.faExpenseSource,
+            ...pivotRangeFromMonths(months),
+        });
+    });
+};
+
 const wirePivotDrilldown = () => {
     wirePivotContainer('fa-income-pivot');
     wirePivotContainer('fa-expense-pivot');
+    wireExpensePivotMeta();
 };
 
 export const renderFinanceAnalytics = () => {

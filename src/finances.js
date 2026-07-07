@@ -4,7 +4,7 @@
 import { portalState, persist, supabase, pullState } from './store.js';
 import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
-import { renderLedgerContextBar, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, ledgerHasActiveFilters, setLedgerActivity, setLedgerSearchBusy, setLedgerCategoryFilter } from './ledgerFilter.js';
+import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, ledgerHasActiveFilters, setLedgerSearchBusy, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
     collectAllocationDraft,
     formatAllocationSummary,
@@ -699,7 +699,7 @@ export const processFinances = () => {
         k('cash-today-out').textContent = fmt(outToday);
         if (k('cash-txn-count')) {
             const n = portalState.finances.txns.length;
-            k('cash-txn-count').textContent = n ? `· ${n} ${n === 1 ? 'entry' : 'entries'}` : '';
+            k('cash-txn-count').textContent = n ? `${n} entries` : '';
         }
     }
 };
@@ -709,12 +709,9 @@ export const renderCashLedger = () => {
     if (!list) return;
 
     const hasFilters = ledgerHasActiveFilters();
-    if (hasFilters) {
-        setLedgerActivity('Filtering…', { busy: true });
-        setLedgerSearchBusy(true);
-    }
+    if (hasFilters) setLedgerSearchBusy(true);
 
-    renderLedgerContextBar();
+    renderLedgerPivotBanner();
     const running = annotateLedgerRunningBalances();
     const enriched = getActiveLedgerTxns([...portalState.finances.txns]).map((t) => ({
         ...t,
@@ -730,8 +727,8 @@ export const renderCashLedger = () => {
     const countEl = document.getElementById('cash-txn-count');
     if (countEl) {
         countEl.textContent = showing === total
-            ? (total ? `· ${total} ${total === 1 ? 'entry' : 'entries'}` : '')
-            : `· ${showing} of ${total} entries`;
+            ? (total ? `${total} entries` : '')
+            : `${showing} of ${total}`;
     }
 
     renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
@@ -739,13 +736,6 @@ export const renderCashLedger = () => {
     updateLedgerSortIndicators();
 
     setLedgerSearchBusy(false);
-    if (hasFilters) {
-        const parts = [`Showing ${showing} of ${total}`];
-        if (!showing) parts.push('— no matches');
-        setLedgerActivity(parts.join(' '), { busy: false });
-    } else {
-        setLedgerActivity(null);
-    }
 };
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
@@ -1281,13 +1271,12 @@ const initLedgerTableControls = () => {
     initLedgerSearch();
     initLedgerCategoryFilter();
     initLedgerExport();
-    const host = document.querySelector('.ledger-registry-list');
+    const host = document.getElementById('cash-ledger-items');
     if (host && !host.dataset.sortWired) {
         host.dataset.sortWired = '1';
         host.addEventListener('click', (e) => {
             const btn = e.target.closest('.ledger-sort-btn');
             if (!btn?.dataset.sort) return;
-            setLedgerActivity('Sorting…', { busy: true });
             toggleLedgerSort(btn.dataset.sort);
             renderCashLedger();
         });

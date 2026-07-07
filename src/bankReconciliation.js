@@ -15,9 +15,7 @@ import {
 } from './passbookEvolyx.js';
 import {
     ensureExternalConnectionsLoaded,
-    getPassbookWebhookBaseUrl,
     isPassbookOcrConfigured,
-    savePassbookWebhookBaseUrl,
 } from './externalConnections.js';
 import {
     buildDayOrderHints,
@@ -53,6 +51,45 @@ import {
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+let activeBankReconTab = null;
+
+const BANK_RECON_TAB_PANELS = {
+    import: 'bank-recon-import-panel',
+    passbook: 'bank-recon-passbook-panel',
+    opening: 'bank-recon-opening-panel',
+};
+
+const setActiveBankReconTab = (tabKey) => {
+    activeBankReconTab = tabKey || null;
+    document.querySelectorAll('.bank-recon-source-tab').forEach((btn) => {
+        const on = btn.dataset.bankReconTab === tabKey;
+        btn.classList.toggle('bank-recon-source-tab--active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    Object.entries(BANK_RECON_TAB_PANELS).forEach(([key, panelId]) => {
+        const panel = document.getElementById(panelId);
+        if (panel) panel.hidden = key !== tabKey;
+    });
+};
+
+const wireBankReconSourceTabs = () => {
+    const root = document.querySelector('.bank-recon-sources');
+    if (!root || root.dataset.tabsWired === '1') return;
+    root.dataset.tabsWired = '1';
+    root.querySelectorAll('.bank-recon-source-tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.bankReconTab;
+            setActiveBankReconTab(activeBankReconTab === key ? null : key);
+        });
+    });
+};
+
+/** @deprecated use setActiveBankReconTab */
+const openBankReconSourcePanel = (panelId) => {
+    const key = Object.entries(BANK_RECON_TAB_PANELS).find(([, id]) => id === panelId)?.[0];
+    if (key) setActiveBankReconTab(key);
+};
 
 const formatAmountInput = (n) => {
     const v = parseFloat(n || 0);
@@ -1521,6 +1558,39 @@ const renderBalanceCells = (line, visibleColumns) => {
       ${showPassbook ? `<td class="bank-recon-table__cell bank-recon-table__cell--num${mismatchClass}"${mismatchTitle}>${passbook}${icon}</td>` : ''}`;
 };
 
+const updateOpeningBalanceTabMeta = () => {
+    const opening = getBankOpeningConfig();
+    const recon = getBankBalanceReconciliation();
+    const hasOpening = opening.amount != null && opening.date;
+    const hintEl = document.getElementById('bank-recon-opening-tab-hint');
+    const badgeEl = document.getElementById('bank-recon-opening-tab-badge');
+    if (hintEl) {
+        hintEl.textContent = hasOpening
+            ? `${formatMoney(opening.amount)} · ${formatDisplayDate(opening.date)}`
+            : 'Not set — required';
+    }
+    if (!badgeEl) return;
+    if (!hasOpening) {
+        badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--unset';
+        badgeEl.textContent = 'Not set';
+        badgeEl.hidden = false;
+        return;
+    }
+    if (recon.mismatchCount > 0 || (recon.passbook && recon.hasDiscrepancy)) {
+        badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--warn';
+        badgeEl.textContent = recon.mismatchCount > 0 ? 'Mismatch' : 'Review';
+        badgeEl.hidden = false;
+        return;
+    }
+    if (recon.passbook && !recon.hasDiscrepancy) {
+        badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--ok';
+        badgeEl.textContent = 'In balance';
+        badgeEl.hidden = false;
+        return;
+    }
+    badgeEl.hidden = true;
+};
+
 const renderOpeningBalancePanel = () => {
     const opening = getBankOpeningConfig();
     const recon = getBankBalanceReconciliation();
@@ -1546,29 +1616,72 @@ const renderOpeningBalancePanel = () => {
         : '';
 
     return `
-      <div class="bank-recon-balance-panel__inner">
-        <div class="bank-recon-balance-panel__opening">
-          <h4 class="bank-recon-balance-panel__title">Opening balance</h4>
-          <div class="bank-recon-balance-panel__fields">
-            <label class="bank-recon-balance-panel__field">
-              <span>As of date</span>
-              <input type="date" id="bank-recon-opening-date" value="${esc(opening.date || '')}" />
-            </label>
-            <label class="bank-recon-balance-panel__field">
-              <span>Amount (₹)</span>
-              <input type="number" step="0.01" id="bank-recon-opening-amount" value="${opening.amount != null ? esc(opening.amount) : ''}" placeholder="e.g. 150000" />
-            </label>
-            <button type="button" class="btn btn-outline btn--small" id="bank-recon-opening-save">Save opening</button>
-          </div>
-          ${mismatchNote}
-        </div>
-        ${statusHtml}
-      </div>`;
+      <div class="bank-recon-balance-panel__fields">
+        <label class="bank-recon-balance-panel__field">
+          <span>As of date</span>
+          <input type="date" id="bank-recon-opening-date" value="${esc(opening.date || '')}" />
+        </label>
+        <label class="bank-recon-balance-panel__field">
+          <span>Amount (₹)</span>
+          <input type="number" step="0.01" id="bank-recon-opening-amount" value="${opening.amount != null ? esc(opening.amount) : ''}" placeholder="e.g. 150000" />
+        </label>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-opening-save">Save opening</button>
+      </div>
+      ${mismatchNote}
+      ${statusHtml}`;
 };
 
 const renderStatementTable = (unmatched, visibleColumns = {}) => {
+    const bulkBarHtml = `
+      <div class="bank-recon-bulk-bar">
+        <label class="bank-recon-bulk-select-all">
+          <input type="checkbox" id="bank-recon-select-all" aria-label="Select all rows" />
+          <span>Select all</span>
+        </label>
+        <button type="button" class="btn btn-primary btn--small" id="bank-recon-post-all-ready" disabled title="Create ledger entries for every row with category filled">
+          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Post all ready
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-post" disabled title="Post selected rows that have category filled">
+          <i class="fa-solid fa-check-double" aria-hidden="true"></i> Post selected
+        </button>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-delete" disabled>
+          <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+        </button>
+        <details class="bank-recon-height-picker">
+          <summary class="btn btn-outline btn--small" title="Table height"><i class="fa-solid fa-up-down" aria-hidden="true"></i> Height</summary>
+          <div class="bank-recon-height-picker__menu">
+            <button type="button" class="bank-recon-height-preset" data-height-preset="compact">Compact</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="medium">Medium</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="tall">Tall</button>
+            <button type="button" class="bank-recon-height-preset" data-height-preset="full">Full screen</button>
+          </div>
+        </details>
+        <details class="bank-recon-columns-picker">
+          <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
+          <div class="bank-recon-columns-picker__menu">
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
+              <span>Calculated balance</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
+              <span>Passbook balance</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
+              <span>OCR row #</span>
+            </label>
+            <label class="bank-recon-columns-picker__option">
+              <input type="checkbox" data-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
+              <span>Row order (↑ ↓)</span>
+            </label>
+          </div>
+        </details>
+        <span id="bank-recon-bulk-count" class="bank-recon-bulk-count"></span>
+      </div>`;
+
     if (!unmatched.length) {
-        return '<p class="maintenance-dues-empty">No unmatched statement lines. Import a bank statement to begin.</p>';
+        return `<p class="maintenance-dues-empty bank-recon-empty-hint">No unmatched statement lines. Expand <strong>Import statement</strong> or <strong>Passbook scan</strong> above to add rows.</p>${bulkBarHtml}`;
     }
 
     const dayHints = buildDayOrderHints(unmatched);
@@ -1645,53 +1758,8 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
 
     return `
       <datalist id="bank-recon-vendors">${vendorDatalist}</datalist>
-      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. After <strong>Rules</strong>, use <strong>Post all ready</strong>. Drag the <strong>bottom-right corner</strong> of the table frame to resize it, or use <strong>Height</strong>.</p>
-      <div class="bank-recon-bulk-bar">
-        <label class="bank-recon-bulk-select-all">
-          <input type="checkbox" id="bank-recon-select-all" aria-label="Select all rows" />
-          <span>Select all</span>
-        </label>
-        <button type="button" class="btn btn-primary btn--small" id="bank-recon-post-all-ready" disabled title="Create ledger entries for every row with category filled">
-          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Post all ready
-        </button>
-        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-post" disabled title="Post selected rows that have category filled">
-          <i class="fa-solid fa-check-double" aria-hidden="true"></i> Post selected
-        </button>
-        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-delete" disabled>
-          <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
-        </button>
-        <details class="bank-recon-height-picker">
-          <summary class="btn btn-outline btn--small" title="Table height"><i class="fa-solid fa-up-down" aria-hidden="true"></i> Height</summary>
-          <div class="bank-recon-height-picker__menu">
-            <button type="button" class="bank-recon-height-preset" data-height-preset="compact">Compact</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="medium">Medium</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="tall">Tall</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="full">Full screen</button>
-          </div>
-        </details>
-        <details class="bank-recon-columns-picker">
-          <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
-          <div class="bank-recon-columns-picker__menu">
-            <label class="bank-recon-columns-picker__option">
-              <input type="checkbox" data-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
-              <span>Calculated balance</span>
-            </label>
-            <label class="bank-recon-columns-picker__option">
-              <input type="checkbox" data-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
-              <span>Passbook balance</span>
-            </label>
-            <label class="bank-recon-columns-picker__option">
-              <input type="checkbox" data-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
-              <span>OCR row #</span>
-            </label>
-            <label class="bank-recon-columns-picker__option">
-              <input type="checkbox" data-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
-              <span>Row order (↑ ↓)</span>
-            </label>
-          </div>
-        </details>
-        <span id="bank-recon-bulk-count" class="bank-recon-bulk-count"></span>
-      </div>
+      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. Use <strong>Rules</strong> above, then <strong>Post all ready</strong>. Drag the table corner to resize, or use <strong>Height</strong>.</p>
+      ${bulkBarHtml}
       <div class="bank-recon-table-shell" id="bank-recon-table-shell">
         <div class="bank-recon-table-wrap" id="bank-recon-table-wrap">
         <table class="bank-recon-table">
@@ -2730,9 +2798,8 @@ export const renderBankReconciliation = () => {
     const linesEl = document.getElementById('bank-recon-lines');
     const txnsEl = document.getElementById('bank-recon-txns');
     const statsEl = document.getElementById('bank-recon-stats');
-    const balancePanelEl = document.getElementById('bank-recon-balance-panel');
+    const openingPanelEl = document.getElementById('bank-recon-opening-panel');
     const passbookBtn = document.getElementById('bank-recon-passbook-btn');
-    const passbookSettingsBtn = document.getElementById('bank-recon-passbook-settings-btn');
     const passbookHint = document.getElementById('bank-recon-passbook-hint');
     if (!linesEl || !txnsEl) return;
 
@@ -2742,14 +2809,6 @@ export const renderBankReconciliation = () => {
         passbookBtn.title = passbookReady
             ? 'Scan passbook photos or PDF with Evolyx OCR'
             : 'Configure Evolyx under Administration → External Connections';
-    }
-    if (passbookSettingsBtn) {
-        passbookSettingsBtn.disabled = !passbookReady;
-        passbookSettingsBtn.title = passbookReady
-            ? (getPassbookWebhookBaseUrl()
-                ? `Passbook webhook target: ${getPassbookWebhookBaseUrl()}`
-                : 'Passbook webhook settings (currently auto-detecting from app URL)')
-            : 'Configure Evolyx under Administration → External Connections first';
     }
     if (passbookHint) {
         passbookHint.hidden = passbookReady;
@@ -2767,8 +2826,9 @@ export const renderBankReconciliation = () => {
     const recon = getBankBalanceReconciliation();
     const visibleColumns = getVisibleBalanceColumns();
 
-    if (balancePanelEl) {
-        balancePanelEl.innerHTML = renderOpeningBalancePanel();
+    if (openingPanelEl) {
+        openingPanelEl.innerHTML = renderOpeningBalancePanel();
+        updateOpeningBalanceTabMeta();
         document.getElementById('bank-recon-opening-save')?.addEventListener('click', async () => {
             const date = document.getElementById('bank-recon-opening-date')?.value;
             const raw = document.getElementById('bank-recon-opening-amount')?.value?.trim();
@@ -2783,24 +2843,57 @@ export const renderBankReconciliation = () => {
         });
     }
 
+    const openingCfg = getBankOpeningConfig();
+    const needsOpeningTab = openingCfg.amount == null || !openingCfg.date;
+    if (needsOpeningTab && !activeBankReconTab) {
+        setActiveBankReconTab('opening');
+    } else if (activeBankReconTab) {
+        setActiveBankReconTab(activeBankReconTab);
+    } else if (recon.hasDiscrepancy || recon.mismatchCount > 0) {
+        setActiveBankReconTab('opening');
+    }
+
     if (statsEl) {
-        const calcCard = recon.calculated.balance != null
-            ? `<div class="metric-card metric-card--highlight"><span class="label">Calculated balance</span><span class="value">${formatMoney(recon.calculated.balance)}</span><span class="metric-card__sub">opening + ${recon.calculated.lineCount} line(s)${recon.calculated.asOf ? ` · as of ${formatDisplayDate(recon.calculated.asOf)}` : ''}</span></div>`
-            : `<div class="metric-card metric-card--warn"><span class="label">Calculated balance</span><span class="value">—</span><span class="metric-card__sub">set opening balance above</span></div>`;
-        const passbookCard = recon.passbook
-            ? `<div class="metric-card${recon.hasDiscrepancy ? ' metric-card--danger' : ''}"><span class="label">Passbook balance</span><span class="value">${formatMoney(recon.passbook.balance)}</span><span class="metric-card__sub">last in statement order · ${formatDisplayDate(recon.passbook.asOf)}</span></div>`
+        const calcValue = recon.calculated.balance != null ? formatMoney(recon.calculated.balance) : '—';
+        const calcSub = recon.calculated.balance != null
+            ? `opening + ${recon.calculated.lineCount} line(s)${recon.calculated.asOf ? ` · ${formatDisplayDate(recon.calculated.asOf)}` : ''}`
+            : 'set opening balance';
+        const passbookBlock = recon.passbook
+            ? `<div class="bank-recon-kpi bank-recon-kpi--passbook${recon.hasDiscrepancy ? ' bank-recon-kpi--warn-border' : ''}">
+                <span class="bank-recon-kpi__label">Passbook</span>
+                <span class="bank-recon-kpi__value">${formatMoney(recon.passbook.balance)}</span>
+                <span class="bank-recon-kpi__sub">last in order · ${formatDisplayDate(recon.passbook.asOf)}</span>
+              </div>`
             : '';
-        const varianceCard = recon.diff != null
-            ? `<div class="metric-card${recon.hasDiscrepancy ? ' metric-card--danger' : ' metric-card--ok'}"><span class="label">Variance</span><span class="value">${recon.diff >= 0 ? '+' : ''}${formatMoney(recon.diff)}</span><span class="metric-card__sub">${recon.hasDiscrepancy ? 'needs review' : 'in balance'}</span></div>`
+        const varianceBlock = recon.diff != null
+            ? `<div class="bank-recon-kpi bank-recon-kpi--var${recon.hasDiscrepancy ? ' bank-recon-kpi--danger' : ' bank-recon-kpi--ok'}">
+                <span class="bank-recon-kpi__label">Variance</span>
+                <span class="bank-recon-kpi__value">${recon.diff >= 0 ? '+' : ''}${formatMoney(recon.diff)}</span>
+                <span class="bank-recon-kpi__sub">${recon.hasDiscrepancy ? 'needs review' : 'in balance'}</span>
+              </div>`
             : '';
+        const statusParts = [
+            `<span class="bank-recon-stat"><strong>${lines.length}</strong> lines</span>`,
+            `<span class="bank-recon-stat bank-recon-stat--danger"><strong>${unmatched.length}</strong> unmatched</span>`,
+            `<span class="bank-recon-stat bank-recon-stat--success"><strong>${matched.length}</strong> matched</span>`,
+        ];
+        if (ignored.length) {
+            statusParts.push(`<span class="bank-recon-stat"><strong>${ignored.length}</strong> ignored</span>`);
+        }
         statsEl.innerHTML = `
-          ${calcCard}
-          ${passbookCard}
-          ${varianceCard}
-          <div class="metric-card"><span class="label">Statement lines</span><span class="value">${lines.length}</span></div>
-          <div class="metric-card"><span class="label">Unmatched</span><span class="value" style="color:var(--danger);">${unmatched.length}</span></div>
-          <div class="metric-card"><span class="label">Matched</span><span class="value" style="color:var(--success);">${matched.length}</span></div>
-          <div class="metric-card"><span class="label">Ignored</span><span class="value">${ignored.length}</span></div>`;
+          <div class="bank-recon-kpi-bar" role="group" aria-label="Reconciliation summary">
+            <div class="bank-recon-kpi bank-recon-kpi--calc${recon.calculated.balance == null ? ' bank-recon-kpi--warn' : ''}">
+              <span class="bank-recon-kpi__label">Calculated</span>
+              <span class="bank-recon-kpi__value">${calcValue}</span>
+              <span class="bank-recon-kpi__sub">${calcSub}</span>
+            </div>
+            ${passbookBlock}
+            ${varianceBlock}
+            <div class="bank-recon-kpi bank-recon-kpi--progress">
+              <span class="bank-recon-kpi__label">Statement</span>
+              <span class="bank-recon-kpi__counts">${statusParts.join('<span class="bank-recon-stat-sep" aria-hidden="true">·</span>')}</span>
+            </div>
+          </div>`;
     }
 
     const ledgerTxns = getUnmatchedLedgerTxns();
@@ -2841,6 +2934,7 @@ export async function downloadBankStatementTemplate() {
 }
 
 export const initBankReconciliationUi = () => {
+    wireBankReconSourceTabs();
     initBankReconTableHeightControls(document.getElementById('bank-recon-lines'));
     const setPassbookStatus = (msg, isError = false) => {
         const el = document.getElementById('bank-recon-passbook-status');
@@ -2851,13 +2945,11 @@ export const initBankReconciliationUi = () => {
     };
     const getActiveApartmentId = () => portalState.access?.activeApartmentId;
     const passbookJobsModal = document.getElementById('passbook-jobs-modal');
-    const passbookSettingsModal = document.getElementById('passbook-settings-modal');
     const passbookJobsListEl = document.getElementById('passbook-jobs-list');
     const passbookJobsEmptyEl = document.getElementById('passbook-jobs-empty');
     const passbookJobDetailModal = document.getElementById('passbook-job-detail-modal');
     const passbookJobDetailBody = document.getElementById('passbook-job-detail-body');
     const passbookJobDetailTitle = document.getElementById('passbook-job-detail-title');
-    const passbookWebhookBaseUrlInput = document.getElementById('passbook-settings-webhook-base-url');
 
     const importPassbookJobRows = async (btn, job, lines, { skipDedupe = false, confirmMessage } = {}) => {
         const apartmentId = getActiveApartmentId();
@@ -3005,12 +3097,28 @@ export const initBankReconciliationUi = () => {
             passbookJobsModalTimer = null;
         }
     };
-    const renderPassbookJobsModal = () => {
-        if (!passbookJobsListEl || !passbookJobsEmptyEl) return;
-        passbookJobsListEl.innerHTML = renderPassbookJobsTable(latestPassbookJobs);
-        passbookJobsEmptyEl.hidden = latestPassbookJobs.length > 0;
+    const renderPassbookJobsLists = () => {
+        const tableHtml = renderPassbookJobsTable(latestPassbookJobs);
+        const hasJobs = latestPassbookJobs.length > 0;
 
-        passbookJobsListEl.querySelectorAll('.bank-recon-import-passbook-job').forEach((btn) => {
+        if (passbookJobsListEl && passbookJobsEmptyEl) {
+            passbookJobsListEl.innerHTML = tableHtml;
+            passbookJobsEmptyEl.hidden = hasJobs;
+            wirePassbookJobButtons(passbookJobsListEl);
+        }
+
+        const inlineList = document.getElementById('bank-recon-passbook-jobs-inline-list');
+        const inlineEmpty = document.getElementById('bank-recon-passbook-jobs-inline-empty');
+        if (inlineList) {
+            inlineList.innerHTML = tableHtml;
+            if (inlineEmpty) inlineEmpty.hidden = hasJobs;
+            wirePassbookJobButtons(inlineList);
+        }
+    };
+
+    const wirePassbookJobButtons = (root) => {
+        if (!root) return;
+        root.querySelectorAll('.bank-recon-import-passbook-job').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const apartmentId = getActiveApartmentId();
                 if (!apartmentId) return alert('Select an apartment first.');
@@ -3030,13 +3138,17 @@ export const initBankReconciliationUi = () => {
             });
         });
 
-        passbookJobsListEl.querySelectorAll('.passbook-job-detail-btn').forEach((btn) => {
+        root.querySelectorAll('.passbook-job-detail-btn').forEach((btn) => {
             btn.addEventListener('click', () => {
                 openPassbookJobDetail(btn.dataset.job).catch((err) => {
                     alert(err?.message || 'Could not open job details.');
                 });
             });
         });
+    };
+
+    const renderPassbookJobsModal = () => {
+        renderPassbookJobsLists();
     };
     const loadPassbookJobs = async () => {
         const apartmentId = getActiveApartmentId();
@@ -3067,23 +3179,6 @@ export const initBankReconciliationUi = () => {
     const closePassbookJobsModal = () => {
         passbookJobsModal?.classList.remove('active');
         stopPassbookJobsPolling();
-    };
-    const openPassbookSettingsModal = async () => {
-        if (!passbookSettingsModal) return;
-        try {
-            await ensureExternalConnectionsLoaded();
-        } catch (err) {
-            alert(err?.message || 'Could not load passbook settings.');
-            return;
-        }
-        if (passbookWebhookBaseUrlInput) {
-            passbookWebhookBaseUrlInput.value = getPassbookWebhookBaseUrl();
-        }
-        passbookSettingsModal.classList.add('active');
-        passbookWebhookBaseUrlInput?.focus();
-    };
-    const closePassbookSettingsModal = () => {
-        passbookSettingsModal?.classList.remove('active');
     };
 
     const manualWrap = document.getElementById('bank-recon-manual-entry');
@@ -3182,13 +3277,86 @@ export const initBankReconciliationUi = () => {
         if (!manualWrap) return;
         manualWrap.hidden = !open;
         if (open) {
+            setActiveBankReconTab('import');
             if (!manualRowsEl?.querySelector('tr[data-manual-row]')) addManualEntryRow();
             manualRowsEl?.querySelector('.manual-row-date')?.focus();
         }
     };
 
+    const processBankStatementFile = async (file) => {
+        const lines = await parseBankStatementFile(file);
+        const { unique, skipped } = dedupeBankImportLines(lines);
+        const dupNote = skipped ? `\n\n${skipped} duplicate(s) will be skipped.` : '';
+        if (!unique.length) {
+            alert(`All ${lines.length} line(s) are duplicates (same date, description, and amount). Nothing to import.`);
+            return;
+        }
+        if (!confirm(`Import ${unique.length} new line(s) from ${file.name}?${dupNote}`)) return;
+        const result = await importBankStatement(file, lines);
+        alert(importResultMessage(result));
+        renderBankReconciliation();
+    };
+
+    const queuePassbookScan = async (fileList, btn) => {
+        if (!isPassbookOcrConfigured()) {
+            alert('Passbook OCR is not configured. Go to Administration → External Connections to add your Evolyx API key.');
+            return;
+        }
+        const files = validatePassbookFiles(fileList);
+        if (!confirm(`Queue OCR for ${files.length} passbook file(s)? You can keep working while the scan runs in the background.`)) return;
+
+        setPassbookStatus('Passbook scan queued. Track progress below and import rows once the run completes.');
+        setActiveBankReconTab('passbook');
+
+        const { job } = await withButtonBusy(btn, 'Queueing…', () => parsePassbookFiles(files));
+        await loadPassbookJobs();
+        if (job?.id) {
+            setPassbookStatus(`Passbook scan queued. Job ${job.id.slice(0, 8)} is running — see Recent scans below.`);
+        }
+    };
+
+    const wireDropzone = (el, { onFiles, onActivate }) => {
+        if (!el) return;
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('button, a, input, label')) return;
+            onActivate?.();
+        });
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onActivate?.();
+            }
+        });
+        el.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            el.classList.add('bank-recon-dropzone--active');
+        });
+        el.addEventListener('dragleave', (e) => {
+            if (!el.contains(e.relatedTarget)) el.classList.remove('bank-recon-dropzone--active');
+        });
+        el.addEventListener('drop', (e) => {
+            e.preventDefault();
+            el.classList.remove('bank-recon-dropzone--active');
+            const files = [...(e.dataTransfer?.files || [])];
+            if (files.length) onFiles(files);
+        });
+    };
+
     document.getElementById('bank-recon-import-btn')?.addEventListener('click', () => {
+        setActiveBankReconTab('import');
         document.getElementById('bank-recon-file')?.click();
+    });
+    wireDropzone(document.getElementById('bank-recon-import-dropzone'), {
+        onActivate: () => document.getElementById('bank-recon-file')?.click(),
+        onFiles: async (files) => {
+            const file = files[0];
+            if (!file) return;
+            try {
+                await processBankStatementFile(file);
+            } catch (err) {
+                alert(err?.message || 'Import failed.');
+            }
+        },
     });
     document.getElementById('bank-recon-add-row-btn')?.addEventListener('click', () => {
         toggleManualForm(manualWrap?.hidden ?? true);
@@ -3222,45 +3390,31 @@ export const initBankReconciliationUi = () => {
         }
     });
     document.getElementById('bank-recon-passbook-btn')?.addEventListener('click', () => {
-        if (!isPassbookOcrConfigured()) {
-            alert('Passbook OCR is not configured. Go to Administration → External Connections to add your Evolyx API key.');
-            return;
-        }
+        setActiveBankReconTab('passbook');
         document.getElementById('bank-recon-passbook-files')?.click();
     });
-    document.getElementById('bank-recon-passbook-settings-btn')?.addEventListener('click', () => {
-        if (!isPassbookOcrConfigured()) {
-            alert('Configure Evolyx first under Administration → External Connections, then set the webhook base URL here.');
-            return;
-        }
-        openPassbookSettingsModal().catch((err) => alert(err?.message || 'Could not open passbook settings.'));
+    wireDropzone(document.getElementById('bank-recon-passbook-dropzone'), {
+        onActivate: () => document.getElementById('bank-recon-passbook-files')?.click(),
+        onFiles: async (files) => {
+            const btn = document.getElementById('bank-recon-passbook-btn');
+            setPassbookStatus('');
+            try {
+                await queuePassbookScan(files, btn);
+            } catch (err) {
+                const msg = err?.message || 'Passbook scan failed.';
+                setPassbookStatus(msg, true);
+                alert(msg);
+            }
+        },
     });
     document.getElementById('bank-recon-passbook-jobs-btn')?.addEventListener('click', () => {
         openPassbookJobsModal().catch((err) => alert(err?.message || 'Could not open passbook jobs.'));
     });
-    document.getElementById('passbook-settings-close')?.addEventListener('click', closePassbookSettingsModal);
-    document.getElementById('passbook-settings-reset')?.addEventListener('click', () => {
-        if (passbookWebhookBaseUrlInput) passbookWebhookBaseUrlInput.value = '';
-    });
-    document.getElementById('passbook-settings-save')?.addEventListener('click', async () => {
-        const btn = document.getElementById('passbook-settings-save');
-        const value = passbookWebhookBaseUrlInput?.value?.trim() || '';
-        try {
-            if (value) new URL(value);
-            await withButtonBusy(btn, 'Saving…', () => savePassbookWebhookBaseUrl(value));
-            setPassbookStatus(
-                value
-                    ? `Passbook webhook base URL saved: ${value}`
-                    : 'Passbook webhook base URL cleared. New scans will use the current app host automatically.',
-            );
-            closePassbookSettingsModal();
-            renderBankReconciliation();
-        } catch (err) {
-            alert(err?.message || 'Could not save passbook settings.');
-        }
-    });
     document.getElementById('passbook-jobs-close')?.addEventListener('click', closePassbookJobsModal);
     document.getElementById('passbook-jobs-refresh')?.addEventListener('click', () => {
+        loadPassbookJobs().catch((err) => alert(err?.message || 'Could not refresh passbook jobs.'));
+    });
+    document.getElementById('bank-recon-passbook-jobs-refresh-inline')?.addEventListener('click', () => {
         loadPassbookJobs().catch((err) => alert(err?.message || 'Could not refresh passbook jobs.'));
     });
     document.getElementById('passbook-job-detail-close')?.addEventListener('click', closePassbookJobDetail);
@@ -3269,9 +3423,6 @@ export const initBankReconciliationUi = () => {
     });
     passbookJobsModal?.addEventListener('click', (e) => {
         if (e.target?.id === 'passbook-jobs-modal') closePassbookJobsModal();
-    });
-    passbookSettingsModal?.addEventListener('click', (e) => {
-        if (e.target?.id === 'passbook-settings-modal') closePassbookSettingsModal();
     });
     document.getElementById('bank-recon-move-cancel')?.addEventListener('click', () => closeRowMoveConfirmModal('cancel'));
     document.getElementById('bank-recon-move-just')?.addEventListener('click', () => closeRowMoveConfirmModal('just'));
@@ -3393,17 +3544,7 @@ export const initBankReconciliationUi = () => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
-            const lines = await parseBankStatementFile(file);
-            const { unique, skipped } = dedupeBankImportLines(lines);
-            const dupNote = skipped ? `\n\n${skipped} duplicate(s) will be skipped.` : '';
-            if (!unique.length) {
-                alert(`All ${lines.length} line(s) are duplicates (same date, description, and amount). Nothing to import.`);
-                return;
-            }
-            if (!confirm(`Import ${unique.length} new line(s) from ${file.name}?${dupNote}`)) return;
-            const result = await importBankStatement(file, lines);
-            alert(importResultMessage(result));
-            renderBankReconciliation();
+            await processBankStatementFile(file);
         } catch (err) {
             alert(err?.message || 'Import failed.');
         } finally {
@@ -3418,16 +3559,7 @@ export const initBankReconciliationUi = () => {
         const btn = document.getElementById('bank-recon-passbook-btn');
         setPassbookStatus('');
         try {
-            const files = validatePassbookFiles(fileList);
-            if (!confirm(`Queue OCR for ${files.length} passbook file(s)? You can keep working while the scan runs in the background.`)) return;
-
-            setPassbookStatus('Passbook scan queued. Track progress in Jobs and import rows once the run completes.');
-            const { job } = await withButtonBusy(btn, 'Queueing…', () => parsePassbookFiles(files));
-            await loadPassbookJobs();
-            await openPassbookJobsModal();
-            if (job?.id) {
-                setPassbookStatus(`Passbook scan queued successfully. Job ${job.id.slice(0, 8)} is now running in the background.`);
-            }
+            await queuePassbookScan(fileList, btn);
         } catch (err) {
             const msg = err?.message || 'Passbook scan failed.';
             setPassbookStatus(msg, true);

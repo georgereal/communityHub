@@ -138,19 +138,21 @@ export const renderExternalConnectionsAdmin = () => {
         </header>
         <div class="ext-conn-form">
           <label class="ext-conn-field">
-            <span class="ext-conn-label">API base URL</span>
+            <span class="ext-conn-label">Evolyx API URL</span>
             <input type="url" class="expense-combobox" id="${fieldId(def.provider, def.connectionKey, 'base_url')}"
               value="${esc(row?.base_url || def.defaults.base_url)}" placeholder="https://api.example.com" autocomplete="off" />
+            <span class="ext-conn-field__help">Evolyx service endpoint — not this app's URL.</span>
           </label>
           <label class="ext-conn-field">
             <span class="ext-conn-label">Client ID</span>
             <input type="text" class="expense-combobox" id="${fieldId(def.provider, def.connectionKey, 'client_id')}"
               value="${esc(row?.client_id || def.defaults.client_id)}" autocomplete="off" />
           </label>
-          <label class="ext-conn-field">
-            <span class="ext-conn-label">Webhook app base URL</span>
+          <label class="ext-conn-field ext-conn-field--wide">
+            <span class="ext-conn-label">This app's public URL</span>
             <input type="url" class="expense-combobox" id="${fieldId(def.provider, def.connectionKey, 'webhook_base_url')}"
-              value="${esc(row?.webhook_base_url || def.defaults.webhook_base_url || '')}" placeholder="https://your-public-app-url.example" autocomplete="off" />
+              value="${esc(row?.webhook_base_url || def.defaults.webhook_base_url || '')}" placeholder="https://your-app.example.com" autocomplete="off" />
+            <span class="ext-conn-field__help">OCR callbacks go to <code>{this URL}/api/passbook-webhook</code>. Leave blank to use the host from the browser when you queue a scan.</span>
           </label>
           <label class="ext-conn-field">
             <span class="ext-conn-label">Workflow ID</span>
@@ -168,7 +170,7 @@ export const renderExternalConnectionsAdmin = () => {
           </label>
         </div>
         <footer class="ext-conn-card__foot">
-          <p class="ext-conn-hint">Keys are stored per society in the database. They are never shown again after save. Set Webhook app base URL when callbacks should go to a public URL like ngrok instead of the current app host.</p>
+          <p class="ext-conn-hint">Keys are stored per society in the database and are never shown again after save. For local development, set <strong>This app's public URL</strong> to your ngrok or tunnel URL so Evolyx can reach <code>/api/passbook-webhook</code>.</p>
           <button type="button" class="btn btn-primary btn--small ext-conn-save"
             data-provider="${def.provider}" data-connection-key="${def.connectionKey}">
             Save connection
@@ -222,28 +224,4 @@ export async function saveExternalConnection(provider, connectionKey) {
     if (!api_key_input && !existing?.api_key_set) throw new Error('API key is required for a new connection.');
 
     await upsertExternalConnectionRow(row);
-}
-
-export async function savePassbookWebhookBaseUrl(webhookBaseUrl) {
-    const apt = apartmentId();
-    if (!apt) throw new Error('Select a society first.');
-    await ensureExternalConnectionsLoaded();
-    const def = CONNECTION_CATALOG.find((d) => d.provider === EVOLYX_PROVIDER && d.connectionKey === EVOLYX_PASSBOOK_KEY);
-    const existing = getConnectionRow(EVOLYX_PROVIDER, EVOLYX_PASSBOOK_KEY);
-    if (!def) throw new Error('Passbook connection definition is missing.');
-    if (!existing?.api_key_set) {
-        throw new Error('Configure Evolyx API access first under Administration → External Connections.');
-    }
-    await upsertExternalConnectionRow({
-        apartment_id: apt,
-        provider: EVOLYX_PROVIDER,
-        connection_key: EVOLYX_PASSBOOK_KEY,
-        display_name: def.label,
-        base_url: existing?.base_url || def.defaults.base_url,
-        client_id: existing?.client_id || def.defaults.client_id,
-        workflow_id: existing?.workflow_id || def.defaults.workflow_id,
-        webhook_base_url: webhookBaseUrl?.trim() || null,
-        enabled: existing?.enabled !== false,
-        api_key: '',
-    });
 }
