@@ -15,7 +15,8 @@ export const APARTMENT_SCOPED_TABLES = new Set([
     'society_assets', 'asset_service_log', 'amenities', 'amenity_bookings', 'visitor_log',
     'staff_attendance', 'payroll_runs', 'visitor_parking_passes', 'parking_fine_rules',
     'parking_violations', 'chart_of_accounts', 'journal_entries', 'journal_lines', 'email_outbox',
-    'gate_parcels', 'visitor_log_units', 'ledger_sync_settings', 'ledger_sync_oauth_apps',
+    'gate_parcels', 'visitor_log_units', 'ledger_sync_settings', 'ledger_sync_runs',
+    'ledger_sync_oauth_apps',
     'user_oauth_connections', 'apartment_external_connections', 'residents', 'activity_audit_log',
     'vehicle_audit_log', 'sms_outbox', 'user_notifications', 'apartment_module_settings',
     'user_module_access', 'society_role_page_access', 'user_page_overrides',
@@ -25,6 +26,7 @@ export const ALLOWED_TABLES = new Set([
     ...APARTMENT_SCOPED_TABLES,
     'apartments', 'profiles', 'user_apartments', 'user_role_assignments', 'notice_read_log',
     'permissions', 'role_permissions',
+    'ledger_sync_run_logs', 'ledger_sync_run_changes',
 ]);
 
 const WRITE_OPS = new Set(['insert', 'update', 'upsert', 'delete']);
@@ -51,6 +53,9 @@ const TABLE_WRITE_PERMISSION = {
     journal_entries: 'accounts.edit',
     journal_lines: 'accounts.edit',
     ledger_sync_settings: 'accounts.edit',
+    ledger_sync_runs: 'accounts.edit',
+    ledger_sync_run_logs: 'accounts.edit',
+    ledger_sync_run_changes: 'accounts.edit',
     ledger_sync_oauth_apps: 'accounts.edit',
     user_oauth_connections: 'accounts.edit',
     apartment_external_connections: 'accounts.edit',
@@ -88,6 +93,43 @@ export function extractApartmentId(query) {
         return payload.apartment_id;
     }
     return query.apartment_id || null;
+}
+
+function extractRunId(query) {
+    const fromFilters = (query.filters || []).find((f) => f.column === 'run_id' && f.type === 'eq');
+    if (fromFilters?.value) return fromFilters.value;
+
+    const payload = query.payload;
+    if (Array.isArray(payload)) {
+        const row = payload.find((r) => r?.run_id);
+        if (row?.run_id) return row.run_id;
+    } else if (payload?.run_id) {
+        return payload.run_id;
+    }
+    return null;
+}
+
+async function verifyLedgerSyncRunAccess(service, user, runId) {
+    if (!runId) {
+        throw Object.assign(new Error('run_id scope required for this table.'), { status: 400 });
+    }
+    const { data: run, error } = await service
+        .from('ledger_sync_runs')
+        .select('apartment_id')
+        .eq('id', runId)
+        .maybeSingle();
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    if (!run) throw Object.assign(new Error('Sync run not found.'), { status: 404 });
+
+    const { data: mapping, error: mapErr } = await service
+        .from('user_apartments')
+        .select('apartment_id')
+        .eq('user_id', user.id)
+        .eq('apartment_id', run.apartment_id)
+        .maybeSingle();
+    if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
+    if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+    return run.apartment_id;
 }
 
 async function resolveService(req, apartmentId, permissionKey) {
@@ -136,6 +178,10 @@ export async function authorizeDbQuery(req, query) {
         if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
     } else if (isApartmentScoped && !apartmentId) {
         throw Object.assign(new Error('apartment_id scope required for this table.'), { status: 400 });
+    }
+
+    if (query.table === 'ledger_sync_run_logs' || query.table === 'ledger_sync_run_changes') {
+        await verifyLedgerSyncRunAccess(service, user, extractRunId(query));
     }
 
     if (WRITE_OPS.has(op) && permissionKey) {
