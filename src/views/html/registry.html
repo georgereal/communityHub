@@ -1,0 +1,70 @@
+<section id="view-registry" class="content-view">
+        <header class="registry-page-header">
+          <div class="header-title registry-page-header__title">
+            <h2 id="complex-title" class="page-title">Parking & Vehicles</h2>
+            <p class="registry-page-header__subtitle">Parking slots, vehicle registry, stickers & compliance</p>
+          </div>
+          <div class="registry-page-header__actions">
+            <button class="btn btn-outline btn--with-badge" type="button" id="registry-change-log">
+              <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Change Log</span>
+              <span class="btn-badge" id="audit-pending-badge" hidden>0</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-base-capacity">
+              <i class="fa-solid fa-table-cells" aria-hidden="true"></i> <span>Base Capacity</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-download-xlsx">
+              <i class="fa-solid fa-download" aria-hidden="true"></i> <span>Download</span>
+            </button>
+            <button class="btn btn-outline" type="button" id="registry-import-xlsx">
+              <i class="fa-solid fa-file-excel" aria-hidden="true"></i> <span>Reconcile Excel</span>
+            </button>
+            <input type="file" id="xlsx-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;" />
+            <button class="btn btn-outline" onclick="document.getElementById('csv-file').click()">
+              <i class="fa-solid fa-file-import" aria-hidden="true"></i> <span>Import CSV</span>
+            </button>
+            <input type="file" id="csv-file" accept=".csv" style="display: none;" />
+          </div>
+        </header>
+
+        <div class="page-sections">
+        <details class="page-section page-section--summaries mobile-disclosure" id="registry-summaries">
+          <summary class="page-section__header mobile-summary">
+            <span class="page-section__title">
+              <span class="page-section__icon" aria-hidden="true"><i class="fa-solid fa-chart-simple"></i></span>
+              Summary & pools
+            </span>
+            <span class="mobile-summary__stats">
+              <span class="ms-pill bad"><b id="ms-over-cars">0</b> Car+</span>
+              <span class="ms-pill bad"><b id="ms-over-bikes">0</b> Bike+</span>
+              <span class="ms-pill ms-pill--occ"><b id="ms-occ">—</b> Occ</span>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="cars" title="Show car pool (EH) only">
+                <b id="ms-pool-occ">0</b>/<b id="ms-pool-total">0</b> EH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="bikes" title="Show bike pool (BH) only">
+                <b id="ms-bike-pool-occ">0</b>/<b id="ms-bike-pool-total">0</b> BH
+              </button>
+              <button type="button" class="ms-pill ms-pill--jump" data-summary-focus="rentals" title="Show flat-to-flat rentals only">
+                <b id="ms-flat-rent-count">0</b> rent
+              </button>
+            </span>
+          </summary>
+          <div class="page-section__body page-section__body--summaries">
+          <div class="summary-focus-bar" id="summary-focus-bar" hidden>
+            <span class="summary-focus-bar__label" id="summary-focus-label"></span>
+            <button type="button" class="btn btn-outline btn--small" id="summary-show-all">Show all</button>
+          </div>
+
+          <div class="summary-block" id="registry-overview">
+            <h3 class="summary-block__label">Overview</h3>
+            <section class="dashboard-metrics dashboard-metrics--compact">
+              <div class="metric-card"><span class="label">Overlimit Cars</span><span class="value value--danger"
+                  id="kpi-overlimit-cars">0</span></div>
+              <div class="metric-card"><span class="label">Overlimit Bikes</span><span class="value value--danger"
+                  id="kpi-overlimit-bikes">0</span></div>
+              <div class="metric-card"><span class="label">Active Cars</span><span class="value value--accent"
+                  id="kpi-cars">0</span></div>
+              <div class="metric-card"><span class="label">Active Bikes</span><span class="value value--success"
+                  id="kpi-bikes">0</span></div>
+              <div class="metric-card" title="Active vehicles vs total base slot capacity (car + bike limits)"><span class="label">Occupancy</span><span class="value value--accent"
+                  id="kpi-occupancy">—</span></div>
+            </section>

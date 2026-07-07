@@ -1,0 +1,13 @@
+<section id="view-email" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Email Outbox</h2>
+            <p>Queued emails — processed by Edge Function / Resend (test mode marks sent in-app)</p>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button type="button" class="btn btn-outline" id="email-outbox-process">Process pending (test)</button>
+            <button type="button" class="btn btn-primary" id="email-outbox-compose"><i class="fa-solid fa-plus"></i> Compose</button>
+          </div>
+        </header>
+        <div id="email-outbox-list" style="padding: 0 1.6rem 1.6rem;"></div>
+      </section>

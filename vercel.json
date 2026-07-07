@@ -1,4 +1,22 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ],
   "crons": [
     {
       "path": "/api/sync",
@@ -8,6 +26,27 @@
   "functions": {
     "api/passbook-parse.js": {
       "maxDuration": 300
+    },
+    "api/sync.js": {
+      "maxDuration": 300
+    },
+    "api/state.js": {
+      "maxDuration": 60
+    },
+    "api/db.js": {
+      "maxDuration": 30
+    },
+    "api/storage.js": {
+      "maxDuration": 30
+    },
+    "api/external-proxy.js": {
+      "maxDuration": 30
+    },
+    "api/rpc.js": {
+      "maxDuration": 15
+    },
+    "api/finance-mutations.js": {
+      "maxDuration": 60
     }
   }
 }

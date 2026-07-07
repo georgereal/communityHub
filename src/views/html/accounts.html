@@ -1,0 +1,109 @@
+<section id="view-accounts" class="content-view">
+        <header class="ledger-page-header ledger-page-header--compact">
+          <div class="header-title ledger-page-header__title">
+            <h2>Income & Expenses</h2>
+          </div>
+          <div class="ledger-page-header__actions">
+            <button class="btn btn-primary" type="button" onclick="window.openExpense('CASH')">
+              <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add Expense</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openIncome('CASH')">
+              <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record Income</span>
+            </button>
+            <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> <span>Bank Sync</span>
+            </button>
+          </div>
+        </header>
+
+        <nav class="accounts-subview-tabs accounts-subview-tabs--compact" aria-label="Income and expenses views">
+          <button type="button" class="active" data-accounts-subview="ledger">Ledger</button>
+          <button type="button" data-accounts-subview="reports">Financial Reports</button>
+          <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
+          <button type="button" data-accounts-subview="activity">Activity Log</button>
+          <button type="button" data-accounts-subview="gl">General Ledger</button>
+        </nav>
+
+        <div id="subview-ledger" class="ledger-subview">
+          <div class="ledger-kpi-bar" aria-label="Account balances">
+            <div class="ledger-kpi ledger-kpi--total">
+              <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Total</span>
+                <span class="ledger-kpi__value ledger-kpi__value--total" id="total-wealth">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--cash">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Petty cash</span>
+                <span class="ledger-kpi__value" id="cash-balance">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--bank">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Bank</span>
+                <span class="ledger-kpi__value" id="bank-balance">₹ 0</span>
+                <span id="ledger-bank-hint" class="ledger-kpi__hint" hidden></span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--out">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Today out</span>
+                <span class="ledger-kpi__value ledger-kpi__value--out" id="cash-today-out">₹ 0</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="ledger-sync-panel"></div>
+
+          <section class="ledger-workspace">
+            <div class="ledger-toolbar" id="ledger-toolbar">
+              <form class="search-container ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
+                <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+                <i class="fa-solid fa-circle-notch fa-spin ledger-search-spinner" aria-hidden="true" hidden></i>
+                <input
+                  type="search"
+                  id="cash-search"
+                  name="ledger-txn-filter"
+                  class="ledger-toolbar__search-input"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  inputmode="search"
+                  data-lpignore="true"
+                  data-1p-ignore
+                  data-form-type="other"
+                  placeholder="Search description, vendor…"
+                />
+              </form>
+              <select id="ledger-cat-filter" class="expense-combobox ledger-toolbar__select" aria-label="Filter by category" title="Filter by category">
+                <option value="">All categories</option>
+              </select>
+              <span id="cash-txn-count" class="ledger-toolbar__count" aria-live="polite"></span>
+              <div class="ledger-toolbar__actions">
+                <span id="ledger-columns-slot"></span>
+                <button type="button" class="btn btn-outline btn--small" id="ledger-download-xlsx" title="Download filtered ledger as Excel">
+                  <i class="fa-solid fa-download" aria-hidden="true"></i> Excel
+                </button>
+              </div>
+            </div>
+            <div id="ledger-pivot-banner" class="ledger-pivot-banner" hidden></div>
+            <div id="ledger-bulk-bar" class="ledger-bulk-bar" hidden>
+              <span id="ledger-bulk-count" class="ledger-bulk-bar__status">0 selected</span>
+              <select id="ledger-bulk-cat" class="expense-combobox ledger-bulk-bar__select" title="Bulk category">
+                <option value="">Set category…</option>
+              </select>
+              <select id="ledger-bulk-exclude" class="expense-combobox ledger-bulk-bar__select" title="Omit from Financial Reports or include again">
+                <option value="nochange">Reports: keep</option>
+                <option value="exclude">Omit from reports</option>
+                <option value="include">Show in reports</option>
+              </select>
+              <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
+              <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
+            </div>
+            <div id="cash-ledger-items" class="ledger-table-host"></div>
+            <div id="ledger-excluded-items" class="ledger-excluded-host"></div>
+          </section>

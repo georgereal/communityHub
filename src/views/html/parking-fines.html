@@ -1,0 +1,33 @@
+<section id="view-parking-fines" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Parking Violations & Fines</h2>
+            <p>Record violations and bill fines on maintenance invoices</p>
+          </div>
+        </header>
+        <div style="padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <h3>Fine rules</h3>
+              <form class="ops-inline-form" onsubmit="return false">
+                <input type="text" id="parking-fine-rule-name" class="expense-combobox" placeholder="Rule name" />
+                <input type="number" id="parking-fine-rule-amount" class="expense-combobox" placeholder="Amount" step="0.01" />
+                <button type="button" class="btn btn-primary btn--small" id="parking-fine-rule-save">Add rule</button>
+              </form>
+              <div id="parking-fine-rules-list" style="margin-top:0.75rem;"></div>
+            </div>
+            <div>
+              <h3>Record violation</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <select id="parking-violation-unit" class="expense-combobox"><option value="">Flat</option></select>
+                <select id="parking-violation-rule" class="expense-combobox"><option value="">Rule</option></select>
+                <input type="date" id="parking-violation-date" class="expense-combobox" />
+                <input type="text" id="parking-violation-desc" class="expense-combobox" placeholder="Description" />
+                <button type="button" class="btn btn-primary btn--small" id="parking-violation-save">Record</button>
+              </form>
+            </div>
+          </div>
+          <h3 style="margin-top:1.5rem;">Violations</h3>
+          <div id="parking-violations-list"></div>
+        </div>
+      </section>

@@ -1027,6 +1027,19 @@ main {
   display: block;
 }
 
+.app-views {
+  display: contents;
+}
+
+body.route-loading {
+  cursor: progress;
+}
+
+body.route-loading .content-view.active {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
 header {
   padding: 1.5rem 1.6rem 1.2rem;
   background: #fff;

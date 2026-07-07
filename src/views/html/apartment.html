@@ -1,0 +1,50 @@
+<section id="view-apartment" class="content-view directory-page">
+        <header class="directory-page__header">
+          <div class="header-title">
+            <h2>Residents</h2>
+            <p>Owner and tenant directory — used for billing emails and notices</p>
+          </div>
+          <div class="directory-page__actions">
+            <button class="btn btn-outline" id="resident-export-btn"><i class="fa-solid fa-download"></i> <span>Export</span></button>
+            <button class="btn btn-outline" id="resident-import-btn"><i class="fa-solid fa-file-import"></i> <span>Import file</span></button>
+            <button class="btn btn-outline" id="resident-refresh-btn"><i class="fa-solid fa-rotate"></i> <span>Refresh</span></button>
+            <button class="btn btn-primary" id="resident-add-btn"><i class="fa-solid fa-plus"></i> <span>Add</span></button>
+            <input type="file" id="resident-import-file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
+          </div>
+        </header>
+        <div class="directory-page__toolbar-wrap">
+          <div class="invoice-toolbar resident-toolbar directory-page__toolbar">
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="resident-filter" placeholder="Search name, flat, phone, email…" autocomplete="off" />
+            </form>
+            <label class="invoice-filter-status">
+              <span>Type</span>
+              <select id="resident-kind-filter">
+                <option value="">All types</option>
+                <option value="OWNER">Owners</option>
+                <option value="TENANT">Tenants</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status">
+              <span>Residency</span>
+              <select id="resident-residency-filter">
+                <option value="">Any</option>
+                <option value="residing">Residing</option>
+                <option value="non-residing">Non-residing</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status resident-primary-filter">
+              <input type="checkbox" id="resident-primary-filter" />
+              <span>Primary only</span>
+            </label>
+            <label class="invoice-filter-status">
+              <span>Block</span>
+              <select id="resident-block-filter"><option value="">All blocks</option></select>
+            </label>
+          </div>
+        </div>
+        <div class="directory-page__body">
+          <div id="resident-items" class="resident-items-panel"></div>
+        </div>
+      </section>

@@ -1,0 +1,49 @@
+<section id="view-invoices" class="content-view">
+        <header>
+          <div class="header-title">
+            <h2>Maintenance Billing</h2>
+            <p>Raise flat invoices, track dues, and reconcile maintenance collections</p>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+            <button class="btn btn-primary" type="button" onclick="window.openRaiseInvoiceModal()">
+              <i class="fa-solid fa-file-circle-plus"></i> <span>Raise Invoices</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openChargeHeadsModal()">
+              <i class="fa-solid fa-tags"></i> <span>Charge Heads</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openPenaltyRulesModal()">
+              <i class="fa-solid fa-gavel"></i> <span>Penalty Rules</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openBillingGroupsModal()">
+              <i class="fa-solid fa-object-group"></i> <span>Billing Groups</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openApplyPenaltiesModal()">
+              <i class="fa-solid fa-clock-rotate-left"></i> <span>Apply Penalties</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openSendInvoicesModal()">
+              <i class="fa-solid fa-paper-plane"></i> <span>Send Invoices</span>
+            </button>
+            <button class="btn btn-outline" type="button" onclick="window.openMaintenanceCollection()">
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Record payment</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="dashboard-metrics invoice-metrics" style="grid-template-columns: repeat(4, 1fr); padding: 0 1.6rem 0.2rem;">
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Total Outstanding</span>
+            <span class="value" id="invoice-kpi-outstanding" style="color: var(--danger); font-size: 1.55rem;">₹ 0.00</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Collected This Month</span>
+            <span class="value" id="invoice-kpi-collected" style="color: var(--success); font-size: 1.55rem;">₹ 0.00</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Open Invoices</span>
+            <span class="value" id="invoice-kpi-open" style="font-size: 1.55rem;">0</span>
+          </div>
+          <div class="metric-card" style="padding: 0.65rem 0.8rem;">
+            <span class="label">Flats with Dues</span>
+            <span class="value" id="invoice-kpi-flats" style="font-size: 1.55rem;">0</span>
+          </div>
+        </section>

@@ -8,6 +8,7 @@ export async function postFinanceMutation(action, payload = {}) {
     const res = await fetch('/api/finance-mutations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
             action,
             apartment_id,
