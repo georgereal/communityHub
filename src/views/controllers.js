@@ -19,12 +19,11 @@ export async function activateView(route, page) {
             break;
         }
         case 'accounts': {
-            const { syncAccountsSubViewTabs } = await import('../finances.js');
+            const { syncAccountsSubViewTabs, processFinances, renderCashLedger } = await import('../finances.js');
             const { renderFinanceAnalytics } = await import('../financeAnalytics.js');
             const { renderBankReconciliation } = await import('../bankReconciliation.js');
             const { renderActivityLogPage } = await import('../activityAudit.js');
             const { renderGeneralLedger } = await import('../generalLedger.js');
-            const { renderCashLedger } = await import('../finances.js');
             const { renderLedgerSyncPanel } = await import('../ledgerSpreadsheetSync.js');
 
             syncAccountsSubViewTabs(route);
@@ -36,6 +35,7 @@ export async function activateView(route, page) {
             else if (sub === 'activity') await renderActivityLogPage();
             else if (sub === 'gl') renderGeneralLedger();
             else {
+                processFinances();
                 renderCashLedger();
                 renderLedgerSyncPanel();
             }

@@ -1,4 +1,4 @@
-<section id="view-accounts" class="content-view">
+      <section id="view-accounts" class="content-view">
         <header class="ledger-page-header ledger-page-header--compact">
           <div class="header-title ledger-page-header__title">
             <h2>Income & Expenses</h2>
@@ -107,3 +107,296 @@
             <div id="cash-ledger-items" class="ledger-table-host"></div>
             <div id="ledger-excluded-items" class="ledger-excluded-host"></div>
           </section>
+        </div>
+
+        <div id="subview-bank-recon" class="bank-recon-subview">
+          <div class="bank-recon-sources">
+            <div class="bank-recon-source-tabs" role="tablist" aria-label="Statement data sources">
+              <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-import" role="tab" data-bank-recon-tab="import" aria-selected="false" aria-controls="bank-recon-import-panel">
+                <i class="fa-solid fa-file-arrow-up bank-recon-source-tab__icon" aria-hidden="true"></i>
+                <span class="bank-recon-source-tab__text">
+                  <strong>Import statement</strong>
+                  <span class="bank-recon-source-tab__hint">Excel / CSV · manual rows</span>
+                </span>
+              </button>
+              <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-passbook" role="tab" data-bank-recon-tab="passbook" aria-selected="false" aria-controls="bank-recon-passbook-panel">
+                <i class="fa-solid fa-book-open bank-recon-source-tab__icon" aria-hidden="true"></i>
+                <span class="bank-recon-source-tab__text">
+                  <strong>Passbook scan</strong>
+                  <span class="bank-recon-source-tab__hint">PDF or photos · OCR</span>
+                </span>
+                <span id="bank-recon-passbook-jobs-badge" class="bank-recon-passbook-jobs-badge" hidden>0</span>
+              </button>
+              <button type="button" class="bank-recon-source-tab" id="bank-recon-tab-opening" role="tab" data-bank-recon-tab="opening" aria-selected="false" aria-controls="bank-recon-opening-panel">
+                <i class="fa-solid fa-bookmark bank-recon-source-tab__icon" aria-hidden="true"></i>
+                <span class="bank-recon-source-tab__text">
+                  <strong>Opening balance</strong>
+                  <span id="bank-recon-opening-tab-hint" class="bank-recon-source-tab__hint">Not set</span>
+                </span>
+                <span id="bank-recon-opening-tab-badge" class="bank-recon-opening-panel__badge bank-recon-opening-panel__badge--unset" hidden></span>
+              </button>
+            </div>
+            <div class="bank-recon-source-panels">
+              <div id="bank-recon-import-panel" class="bank-recon-source-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-import" hidden>
+                <div class="bank-recon-source-panel__intro">
+                  <p>Upload a bank export with columns <strong>Date</strong>, <strong>Description</strong>, <strong>Debit</strong>, <strong>Credit</strong>, and optionally <strong>Balance</strong>. Duplicates (same date, description, amount) are skipped automatically.</p>
+                  <ul class="bank-recon-source-panel__steps">
+                    <li>Download the template and paste your statement rows.</li>
+                    <li>Drag a file onto the zone below or browse for <code>.xlsx</code> / <code>.csv</code>.</li>
+                    <li>Use <strong>Add rows manually</strong> when OCR misses lines or for one-off entries.</li>
+                  </ul>
+                </div>
+                <div class="bank-recon-dropzone" id="bank-recon-import-dropzone" tabindex="0" role="button" aria-label="Drop Excel or CSV file to import">
+                  <i class="fa-solid fa-cloud-arrow-up bank-recon-dropzone__icon" aria-hidden="true"></i>
+                  <p class="bank-recon-dropzone__title">Drop Excel or CSV here</p>
+                  <p class="bank-recon-dropzone__sub">or use Browse below · one file per import</p>
+                </div>
+                <div class="bank-recon-source-panel__actions">
+                  <button type="button" class="btn btn-outline btn--small" id="bank-recon-template-btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download template</button>
+                  <button type="button" class="btn btn-primary btn--small" id="bank-recon-import-btn"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Browse file</button>
+                  <button type="button" class="btn btn-outline btn--small" id="bank-recon-add-row-btn"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add rows manually</button>
+                  <button type="button" class="btn btn-outline btn--small btn--danger-outline" id="bank-recon-clear-all-btn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Clear all imports</button>
+                </div>
+                <section id="bank-recon-manual-entry" class="bank-recon-manual-entry" hidden>
+                  <div class="bank-recon-manual-entry__head">
+                    <h4 class="bank-recon-manual-entry__title">Add statement rows manually</h4>
+                    <button type="button" class="btn btn-outline btn--small" id="bank-recon-manual-add-row"><i class="fa-solid fa-plus"></i> Add another row</button>
+                  </div>
+                  <div class="bank-recon-manual-entry__table-wrap">
+                    <table class="bank-recon-manual-entry__table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Description</th>
+                          <th class="bank-recon-manual-entry__th--num">Debit</th>
+                          <th class="bank-recon-manual-entry__th--num">Credit</th>
+                          <th class="bank-recon-manual-entry__th--num">Balance</th>
+                          <th class="bank-recon-manual-entry__th--actions"></th>
+                        </tr>
+                      </thead>
+                      <tbody id="bank-recon-manual-rows"></tbody>
+                    </table>
+                  </div>
+                  <div class="bank-recon-manual-entry__actions">
+                    <p class="bank-recon-manual-entry__hint">Use when OCR misses rows or print overlaps. Add multiple rows, then save — balances are recalculated after insert.</p>
+                    <div class="bank-recon-manual-entry__buttons">
+                      <button type="button" class="btn btn-outline btn--small" id="bank-recon-manual-cancel">Cancel</button>
+                      <button type="button" class="btn btn-primary btn--small" id="bank-recon-manual-save"><i class="fa-solid fa-floppy-disk"></i> Save rows</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <div id="bank-recon-passbook-panel" class="bank-recon-source-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-passbook" hidden>
+                <p id="bank-recon-passbook-hint" class="bank-recon-passbook-hint" hidden></p>
+                <div class="bank-recon-source-panel__intro">
+                  <p>Queue one or more passbook pages (PDF, JPG, PNG, WebP). Evolyx OCR runs in the background — track jobs below and import mapped rows when complete. API key and callback URL are configured under <a href="#admin-connections">Administration → External Connections</a>.</p>
+                </div>
+                <div class="bank-recon-dropzone bank-recon-dropzone--passbook" id="bank-recon-passbook-dropzone" tabindex="0" role="button" aria-label="Drop passbook files to scan">
+                  <i class="fa-solid fa-images bank-recon-dropzone__icon" aria-hidden="true"></i>
+                  <p class="bank-recon-dropzone__title">Drop passbook files here</p>
+                  <p class="bank-recon-dropzone__sub">multiple files supported · PDF, JPG, PNG, WebP</p>
+                </div>
+                <div class="bank-recon-source-panel__actions">
+                  <button type="button" class="btn btn-primary btn--small" id="bank-recon-passbook-btn"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Browse files</button>
+                  <button type="button" class="btn btn-outline btn--small bank-recon-passbook-jobs-btn" id="bank-recon-passbook-jobs-btn" title="Open passbook scan jobs in full view">
+                    <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i> Full jobs view
+                  </button>
+                  <button type="button" class="btn btn-outline btn--small" id="bank-recon-passbook-jobs-refresh-inline" title="Refresh scan jobs">
+                    <i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh
+                  </button>
+                </div>
+                <p id="bank-recon-passbook-status" class="bank-recon-passbook-status" hidden></p>
+                <div class="bank-recon-passbook-jobs-inline">
+                  <h4 class="bank-recon-passbook-jobs-inline__title">Recent scans</h4>
+                  <div id="bank-recon-passbook-jobs-inline-list" class="bank-recon-passbook-jobs-inline__list"></div>
+                  <p id="bank-recon-passbook-jobs-inline-empty" class="bank-recon-passbook-jobs-inline__empty" hidden>No passbook scans yet.</p>
+                </div>
+              </div>
+              <div id="bank-recon-opening-panel" class="bank-recon-source-panel__body bank-recon-opening-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-opening" hidden></div>
+            </div>
+          </div>
+          <input type="file" id="bank-recon-file" accept=".xlsx,.csv" hidden />
+          <input type="file" id="bank-recon-passbook-files" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf" multiple hidden />
+
+          <section id="bank-recon-stats" class="bank-recon-stats"></section>
+          <div class="bank-recon-split">
+            <div class="bank-recon-panel bank-recon-panel--statement">
+              <div class="bank-recon-panel__head">
+                <h3 class="bank-recon-panel__title">Statement lines — classify, match, or post</h3>
+                <div class="bank-recon-panel__tools">
+                  <button type="button" class="btn btn-outline btn--small" id="bank-recon-rules-btn" title="Manage description → category rules and run on unmatched lines">
+                    <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Rules
+                  </button>
+                  <button type="button" class="btn btn-outline btn--small" id="bank-recon-recalc-btn" title="Recalculate the Calculated balance column after reordering rows">
+                    <i class="fa-solid fa-calculator" aria-hidden="true"></i> Recalculate
+                  </button>
+                </div>
+              </div>
+              <p id="bank-recon-recalc-status" class="bank-recon-recalc-status bank-recon-recalc-status--inline" hidden></p>
+              <div id="bank-recon-lines" class="bank-recon-lines"></div>
+            </div>
+            <div class="bank-recon-panel bank-recon-panel--ledger">
+              <h3 class="bank-recon-panel__title">Unmatched bank ledger — match, edit, or delete</h3>
+              <div id="bank-recon-txns" class="bank-recon-txns"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="subview-activity" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div id="activity-review-queue" class="activity-review-queue" style="display:none;">
+            <div class="activity-review-queue__head">
+              <h3><i class="fa-solid fa-clipboard-check"></i> Pending review — office manager entries</h3>
+              <p class="activity-review-queue__hint">Association office bearers must approve these entries before they appear in the official activity log.</p>
+            </div>
+            <div class="registry-list">
+              <div class="registry-header activity-review-header">
+                <span>When</span><span>Type</span><span>Summary</span><span>Actions</span>
+              </div>
+              <div id="activity-review-list"></div>
+            </div>
+          </div>
+          <div class="invoice-toolbar activity-log-toolbar">
+            <label class="invoice-filter-status">
+              <span>Entity</span>
+              <select id="activity-filter-entity">
+                <option value="">All types</option>
+                <option value="INVOICE">Invoice</option>
+                <option value="RESIDENT">Resident</option>
+                <option value="ROLE">Role</option>
+                <option value="ALLOCATION">Payment allocation</option>
+                <option value="REMINDER">Reminder</option>
+                <option value="BANK_MATCH">Bank reconciliation</option>
+              </select>
+            </label>
+            <label class="invoice-filter-status">
+              <span>From</span>
+              <input type="date" id="activity-filter-from" />
+            </label>
+            <label class="invoice-filter-status">
+              <span>To</span>
+              <input type="date" id="activity-filter-to" />
+            </label>
+            <form class="search-container" role="search" autocomplete="off" onsubmit="return false" style="max-width:200px;">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="activity-filter-actor" placeholder="Actor…" autocomplete="off" />
+            </form>
+            <button type="button" class="btn btn-primary btn--small" id="activity-filter-apply">Apply</button>
+            <button type="button" class="btn btn-outline btn--small" id="activity-filter-reset">Reset</button>
+          </div>
+          <div class="registry-list">
+            <div class="registry-header activity-log-header">
+              <span>When</span><span>Type</span><span>Summary</span>
+            </div>
+            <div id="activity-log-list"></div>
+          </div>
+        </div>
+
+        <div id="subview-reports" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="fa-toolbar invoice-toolbar">
+            <div class="fa-toolbar__filters">
+              <label class="fa-filter">
+                <span>History</span>
+                <select id="fa-month-range" class="expense-combobox">
+                  <option value="6" selected>Last 6 months</option>
+                  <option value="12">Last 12 months</option>
+                  <option value="18">Last 18 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Pivot by</span>
+                <select id="fa-pivot-dimension" class="expense-combobox">
+                  <option value="cat">Category</option>
+                  <option value="sub_category">Sub-category</option>
+                  <option value="vendor">Vendor</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Forecast</span>
+                <select id="fa-project-months" class="expense-combobox">
+                  <option value="1">1 month</option>
+                  <option value="3" selected>3 months</option>
+                  <option value="6">6 months</option>
+                </select>
+              </label>
+              <label class="fa-filter">
+                <span>Match dates</span>
+                <select id="fa-date-tolerance" class="expense-combobox">
+                  <option value="0">Exact date</option>
+                  <option value="3" selected>±3 days</option>
+                  <option value="7">±7 days</option>
+                </select>
+              </label>
+              <label class="fa-filter fa-filter--check">
+                <input type="checkbox" id="fa-sheet-only" checked />
+                <span>Structured expenses only (sheets + bank)</span>
+              </label>
+            </div>
+            <div class="fa-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fa-goto-bank-recon"><i class="fa-solid fa-scale-balanced"></i> Bank reconciliation</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-nobroker-upload-btn"><i class="fa-solid fa-file-arrow-up"></i> Upload NoBroker dump</button>
+              <button type="button" class="btn btn-outline btn--small" id="fa-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
+              <input type="file" id="fa-nobroker-file" accept=".xlsx,.xls,.csv" hidden />
+            </div>
+          </div>
+
+          <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
+
+          <section class="fa-panel" id="fa-nobroker-panel"></section>
+
+          <div class="fa-charts-grid fa-charts-grid--dual">
+            <div class="metric-card fa-chart-card fa-chart-card--wide">
+              <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
+              <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+              <div class="fa-chart-wrap"><canvas id="fa-combined-chart"></canvas></div>
+            </div>
+            <div class="metric-card fa-projection-card" id="fa-projection-summary"></div>
+          </div>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Income pivot</h3>
+                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. Rows excluded from reports are omitted.</p>
+              </div>
+              <div id="fa-income-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-income-pivot"></div>
+          </section>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Expense pivot</h3>
+                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries.</p>
+              </div>
+              <div id="fa-expense-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-expense-pivot"></div>
+          </section>
+        </div>
+
+        <div id="subview-gl" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <div class="ops-toolbar">
+                <h3>Chart of accounts</h3>
+                <button type="button" class="btn btn-outline btn--small" id="gl-seed-accounts">Seed default chart</button>
+              </div>
+              <div id="gl-accounts-list"></div>
+              <form class="ops-inline-form ops-inline-form--stack" style="margin-top:1rem;" onsubmit="return false">
+                <h3>Post journal entry</h3>
+                <input type="date" id="gl-entry-date" class="expense-combobox" />
+                <input type="text" id="gl-entry-desc" class="expense-combobox" placeholder="Description" />
+                <select id="gl-debit-account" class="expense-combobox"><option value="">Debit account</option></select>
+                <select id="gl-credit-account" class="expense-combobox"><option value="">Credit account</option></select>
+                <input type="number" id="gl-entry-amount" class="expense-combobox" placeholder="Amount" step="0.01" />
+                <button type="button" class="btn btn-primary btn--small" id="gl-post-entry">Post entry</button>
+              </form>
+            </div>
+            <div>
+              <h3>Recent journal entries</h3>
+              <div id="gl-journal-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>

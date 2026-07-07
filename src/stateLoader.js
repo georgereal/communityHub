@@ -8,7 +8,7 @@ export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'secu
 const VIEW_DOMAINS = {
     dashboard: ['core'],
     registry: ['property'],
-    accounts: ['finance'],
+    accounts: ['finance', 'admin'],
     invoices: ['finance'],
     portal: ['portal', 'finance'],
     security: ['security', 'property'],

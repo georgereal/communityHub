@@ -203,7 +203,9 @@ const applyAuthToUIInner = async (session) => {
   const manageBtn = document.getElementById('user-menu-manage');
   if (manageBtn) manageBtn.style.display = (isApartmentAdminUser() || can('rbac.view')) ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
-  refreshStaffNotifications().catch(() => {});
+  if (aptId && !isPlaceholderApartmentId(aptId)) {
+    refreshStaffNotifications().catch(() => {});
+  }
 
   // Show "Make me admin" only if no admin exists yet and user isn't already an office bearer.
   const makeAdminBtn = document.getElementById('user-menu-make-admin');
@@ -396,27 +398,23 @@ const resolveActiveApartment = async (uid, profile) => {
   const { data: mappings, error: mapError } = await withTimeout(
     supabase
       .from('user_apartments')
-      .select('apartment_id, apartments(id, name)')
+      .select('apartment_id')
       .eq('user_id', uid),
     15000,
     'Apartment access',
   );
   if (mapError) console.error('[access] user_apartments query failed:', mapError.message);
 
-  let pool = (mappings || [])
-    .map((m) => m.apartments)
-    .filter((a) => a && a.name !== '__SYSTEM__');
-
-  if (!pool.length && !mapError && (mappings || []).length) {
-    const ids = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
-    if (ids.length) {
-      const { data: apartmentsRaw } = await withTimeout(
-        supabase.from('apartments').select('id, name').in('id', ids),
-        15000,
-        'Apartments list',
-      );
-      pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
-    }
+  let pool = [];
+  const mappedIds = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
+  if (mappedIds.length) {
+    const { data: apartmentsRaw, error: aptListErr } = await withTimeout(
+      supabase.from('apartments').select('id, name').in('id', mappedIds),
+      15000,
+      'Apartments list',
+    );
+    if (aptListErr) console.error('[access] apartments query failed:', aptListErr.message);
+    pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
   }
 
   if (!pool.length && (profile?.role === 'admin' || portalState.auth?.role === 'admin')) {

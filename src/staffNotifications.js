@@ -1,7 +1,7 @@
 /**
  * Staff in-app notifications — bell popover + optional toast on new alerts
  */
-import { portalState, supabase } from './store.js';
+import { portalState, supabase, isPlaceholderApartmentId } from './store.js';
 import { routeIsAllowed } from './rbac.js';
 
 const REVIEWER_V2 = new Set(['apartment_admin', 'accounts_manager']);
@@ -36,7 +36,8 @@ export function staffNotificationsEnabled() {
 export async function fetchStaffNotifications({ limit = 40, unreadOnly = false } = {}) {
     if (!supabase || !staffNotificationsEnabled()) return [];
     const uid = portalState.auth?.id;
-    if (!uid) return [];
+    const aptId = portalState.access?.activeApartmentId;
+    if (!uid || !aptId || isPlaceholderApartmentId(aptId)) return [];
 
     let q = supabase
         .from('user_notifications')

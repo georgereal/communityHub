@@ -2,7 +2,7 @@
  * Phase 2.2 — Bank statement import and reconciliation
  */
 import ExcelJS from 'exceljs';
-import { portalState, pullState, supabase } from './store.js';
+import { portalState, pullState, supabase, loadStateDomain } from './store.js';
 import { matchFlatFromText, parseNoBrokerCollectionLines } from './bulkCollectionImport.js';
 import { withButtonBusy, setButtonBusy, clearButtonBusy } from './buttonBusy.js';
 import { postFinanceMutation } from './financeApi.js';
@@ -527,7 +527,10 @@ export async function saveBankOpeningBalance(date, amount, { pull = true } = {})
         amount,
         bank,
     });
-    if (pull) await pullState();
+    if (pull) {
+        await loadStateDomain('admin', { force: true });
+        await pullState();
+    }
 }
 
 export async function reorderBankStatementLines(updates = [], { recalculate = false } = {}) {

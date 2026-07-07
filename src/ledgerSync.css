@@ -607,17 +607,18 @@
   max-width: 220px;
 }
 
+.ledger-search-icon,
 .ledger-search-spinner {
   position: absolute;
   left: 0.65rem;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 0.8rem;
-  color: var(--accent);
+  pointer-events: none;
 }
 
-.ledger-search--busy input {
-  padding-left: 2rem;
+.ledger-search-spinner {
+  font-size: 0.8rem;
+  color: var(--accent);
 }
 
 .ledger-activity {

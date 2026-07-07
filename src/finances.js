@@ -4,7 +4,7 @@
 import { portalState, persist, supabase, pullState } from './store.js';
 import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
-import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, ledgerHasActiveFilters, setLedgerSearchBusy, setLedgerCategoryFilter } from './ledgerFilter.js';
+import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
     collectAllocationDraft,
     formatAllocationSummary,
@@ -708,9 +708,6 @@ export const renderCashLedger = () => {
     const list = document.getElementById('cash-ledger-items');
     if (!list) return;
 
-    const hasFilters = ledgerHasActiveFilters();
-    if (hasFilters) setLedgerSearchBusy(true);
-
     renderLedgerPivotBanner();
     const running = annotateLedgerRunningBalances();
     const enriched = getActiveLedgerTxns([...portalState.finances.txns]).map((t) => ({
@@ -734,8 +731,6 @@ export const renderCashLedger = () => {
     renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
     renderExcludedLedgerSection({ formatTxnDetailPlain });
     updateLedgerSortIndicators();
-
-    setLedgerSearchBusy(false);
 };
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
@@ -1248,7 +1243,6 @@ const initLedgerSearch = () => {
     input.dataset.wired = '1';
     let debounce = null;
     const onSearchInput = () => {
-        setLedgerSearchBusy(true);
         clearTimeout(debounce);
         debounce = setTimeout(() => renderCashLedger(), 120);
     };
@@ -1300,5 +1294,9 @@ window.switchSubView = (sv) => {
     if (sv === 'bank-recon') window.renderBankReconciliation?.();
     if (sv === 'activity') window.renderActivityLogPage?.();
     if (sv === 'gl') window.renderGeneralLedger?.();
-    if (sv === 'ledger') window.renderLedgerSyncPanel?.();
+    if (sv === 'ledger') {
+        processFinances();
+        renderCashLedger();
+        window.renderLedgerSyncPanel?.();
+    }
 };

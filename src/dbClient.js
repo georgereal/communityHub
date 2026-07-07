@@ -21,6 +21,10 @@ const APARTMENT_SCOPED_TABLES = new Set([
     'user_module_access', 'society_role_page_access', 'user_page_overrides',
 ]);
 
+function isPlaceholderApartmentId(id) {
+    return !id || id === 'apt-default';
+}
+
 function activeApartmentId() {
     try {
         return globalThis.__portalActiveApartmentId || null;
@@ -45,7 +49,7 @@ async function postDb(query) {
                 aptId = portalState.access?.activeApartmentId || null;
             } catch { /* store not ready */ }
         }
-        if (aptId) {
+        if (aptId && !isPlaceholderApartmentId(aptId)) {
             query = {
                 ...query,
                 filters: [{ type: 'eq', column: 'apartment_id', value: aptId }, ...(query.filters || [])],

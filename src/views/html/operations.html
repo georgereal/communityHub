@@ -269,3 +269,82 @@
                 </div>
               </form>
             </section>
+
+            <section class="visitor-parcels-panel metric-card">
+              <div class="visitor-parcels-panel__head">
+                <h4>Parcels at gate</h4>
+                <button type="button" class="btn btn-outline btn--small" id="visitor-receive-toggle">Receive parcel</button>
+              </div>
+              <div id="visitor-parcels-list"></div>
+              <div id="visitor-parcel-receive" class="visitor-parcel-receive" hidden>
+                <p class="visitor-parcel-row__meta" style="margin:0 0 0.65rem;">Log a parcel left at security without a courier entry.</p>
+                <form id="visitor-receive-form" class="visitor-entry-form" onsubmit="return false">
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-unit">Flat</label>
+                    <select id="visitor-receive-unit" class="expense-combobox"><option value="">Select flat</option></select>
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-courier">Courier name</label>
+                    <input type="text" id="visitor-receive-courier" class="expense-combobox" placeholder="Optional" />
+                  </div>
+                  <div class="visitor-entry-form__field visitor-entry-form__field--full">
+                    <label class="visitor-entry-form__label" for="visitor-receive-company">Company</label>
+                    <input type="text" id="visitor-receive-company" class="expense-combobox" placeholder="e.g. Amazon" />
+                    <div class="visitor-company-chips" id="visitor-receive-chips"></div>
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-packages">Packages</label>
+                    <input type="number" id="visitor-receive-packages" class="expense-combobox" min="1" value="1" />
+                  </div>
+                  <div class="visitor-entry-form__field">
+                    <label class="visitor-entry-form__label" for="visitor-receive-desc">Description</label>
+                    <input type="text" id="visitor-receive-desc" class="expense-combobox" placeholder="Optional" />
+                  </div>
+                  <div class="visitor-entry-form__actions">
+                    <button type="button" class="btn btn-primary btn--small" id="visitor-receive-save">Save parcel</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+          </div>
+
+          <nav class="ops-subview-tabs visitor-log-tabs" id="visitor-log-filters" aria-label="Filter visitor log">
+            <button type="button" class="active" data-visitor-filter="on-premises">On premises</button>
+            <button type="button" data-visitor-filter="today">Today's log</button>
+            <button type="button" data-visitor-filter="all">All entries</button>
+          </nav>
+
+          <div id="ops-visitors-list" class="registry-list visitor-registry"></div>
+        </div>
+
+        <div id="ops-subview-payroll" class="ops-subview" hidden style="padding: 0 1.6rem 1.6rem;">
+          <div class="ops-split">
+            <div>
+              <h3>Mark attendance</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <select id="ops-att-staff" class="expense-combobox"><option value="">Staff</option></select>
+                <input type="date" id="ops-att-date" class="expense-combobox" />
+                <select id="ops-att-status" class="expense-combobox">
+                  <option value="PRESENT">Present</option>
+                  <option value="ABSENT">Absent</option>
+                  <option value="HALF_DAY">Half day</option>
+                  <option value="LEAVE">Leave</option>
+                </select>
+                <button type="button" class="btn btn-primary btn--small" id="ops-att-save">Save</button>
+              </form>
+              <div id="ops-attendance-list" style="margin-top:0.75rem;"></div>
+            </div>
+            <div>
+              <h3>Payroll run</h3>
+              <form class="ops-inline-form ops-inline-form--stack" onsubmit="return false">
+                <input type="text" id="ops-payroll-period" class="expense-combobox" placeholder="e.g. Mar 2026" />
+                <input type="number" id="ops-payroll-total" class="expense-combobox" placeholder="Total amount" step="0.01" />
+                <button type="button" class="btn btn-primary btn--small" id="ops-payroll-save">Record run</button>
+              </form>
+              <div id="ops-payroll-list" style="margin-top:0.75rem;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: ROLES & PAGE ACCESS -->

@@ -167,6 +167,10 @@ export async function authorizeDbQuery(req, query) {
 
     const { user, service } = await resolveService(req, apartmentId, permissionKey || 'accounts.edit');
 
+    if (isApartmentScoped && apartmentId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(apartmentId)) {
+        throw Object.assign(new Error('Invalid apartment_id scope.'), { status: 400 });
+    }
+
     if (isApartmentScoped && apartmentId) {
         const { data: mapping, error: mapErr } = await service
             .from('user_apartments')
