@@ -64,20 +64,38 @@ export function rolePermissionFloor(roleKey = portalState.auth?.effectiveRoleKey
     return permissionsFromV1Role(v1);
 }
 
-export async function fetchEffectivePermissions(apartmentId) {
+let roleAssignmentsCache = { userId: null, rows: [] };
+
+export function clearRoleAssignmentsCache() {
+    roleAssignmentsCache = { userId: null, rows: [] };
+}
+
+export async function loadAllUserRoleAssignmentsCached(userId, { force = false } = {}) {
+    if (!supabase || !userId) return [];
+    if (!force && roleAssignmentsCache.userId === userId) return roleAssignmentsCache.rows;
+    const rows = await loadAllUserRoleAssignments(userId);
+    roleAssignmentsCache = { userId, rows };
+    return rows;
+}
+
+export async function fetchEffectivePermissions(apartmentId, rolesOverride = null) {
     if (!supabase || !apartmentId) return null;
     const { data: s } = await supabase.auth.getSession();
     const uid = s?.session?.user?.id;
     if (!uid) return null;
 
-    const { data: roles, error } = await supabase
-        .from('user_role_assignments')
-        .select('role_key, scope, apartment_id')
-        .eq('user_id', uid);
+    let roles = rolesOverride;
+    if (!roles) {
+        const { data, error } = await supabase
+            .from('user_role_assignments')
+            .select('role_key, scope, apartment_id')
+            .eq('user_id', uid);
 
-    if (error) {
-        if (/user_role_assignments/i.test(error.message)) return null;
-        throw error;
+        if (error) {
+            if (/user_role_assignments/i.test(error.message)) return null;
+            throw error;
+        }
+        roles = data;
     }
     if (!roles?.length) return null;
 
@@ -121,10 +139,10 @@ export function routeIsAllowed(route, offline = !supabase) {
     return pageIsVisible(meta.page, new Set(perms), false, meta.module.id);
 }
 
-export async function refreshAuthPermissions(apartmentId) {
+export async function refreshAuthPermissions(apartmentId, rolesOverride = null) {
     const floor = rolePermissionFloor();
     try {
-        const dbPerms = await fetchEffectivePermissions(apartmentId);
+        const dbPerms = await fetchEffectivePermissions(apartmentId, rolesOverride);
         if (dbPerms?.length) {
             portalState.authPermissions = [...new Set([...floor, ...dbPerms])];
             return portalState.authPermissions;
@@ -154,7 +172,7 @@ export async function loadAllUserRoleAssignments(userId) {
 }
 
 export async function userHasSystemAdminRole(userId) {
-    const rows = await loadAllUserRoleAssignments(userId);
+    const rows = await loadAllUserRoleAssignmentsCached(userId);
     return rows.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
 }
 

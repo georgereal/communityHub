@@ -6,7 +6,7 @@ import { findPage } from './navigation.js';
 export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin', 'parking'];
 
 const VIEW_DOMAINS = {
-    dashboard: ['core'],
+    dashboard: ['core', 'admin'],
     registry: ['property'],
     accounts: ['finance', 'admin'],
     invoices: ['finance'],

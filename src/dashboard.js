@@ -9,8 +9,18 @@ import { isModuleEnabled } from './moduleAccess.js';
 import { invoiceBalance, invoiceStatus } from './maintenanceBilling.js';
 import { countPendingVehicleAudit } from './vehicleAudit.js';
 import { effectiveAllocationType } from './registry.js';
+import { getActiveLedgerTxns, getLedgerBankBalance } from './ledgerBalance.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
+
+const formatAsOn = (iso) => {
+    if (!iso) return null;
+    return new Date(`${String(iso).slice(0, 10)}T12:00:00`).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+};
 
 const esc = (s) => String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -87,14 +97,13 @@ function computeBillingStats() {
 }
 
 function computeFinanceStats() {
-    const txns = portalState.finances?.txns || [];
+    const txns = getActiveLedgerTxns(portalState.finances?.txns || []);
     const monthStart = new Date();
     monthStart.setDate(1);
     const monthStr = monthStart.toISOString().slice(0, 10);
     let monthIn = 0;
     let monthOut = 0;
     let cashBalance = 0;
-    let bankBalance = 0;
 
     txns.forEach((t) => {
         const amt = parseFloat(t.amount || 0);
@@ -103,14 +112,21 @@ function computeFinanceStats() {
             if (t.type === 'IN') monthIn += amt;
             else monthOut += amt;
         }
-        if (t.wallet === 'BANK') {
-            bankBalance += t.type === 'IN' ? amt : -amt;
-        } else {
+        if ((t.wallet || 'CASH').toUpperCase() !== 'BANK') {
             cashBalance += t.type === 'IN' ? amt : -amt;
         }
     });
 
-    return { monthIn, monthOut, cashBalance, bankBalance };
+    const bank = getLedgerBankBalance(txns);
+
+    return {
+        monthIn,
+        monthOut,
+        cashBalance,
+        bankBalance: bank.balance,
+        bankAsOf: bank.asOf,
+        bankNeedsOpening: bank.needsOpening,
+    };
 }
 
 function computeOpsStats() {
@@ -363,9 +379,12 @@ export async function renderDashboard() {
           ${hasClientPermission('apartment_mgmt.view') ? statCard('Open tickets', String(ops.openTickets), {
         tone: ops.openTickets > 0 ? 'danger' : '',
     }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Petty cash', formatMoney(finance.cashBalance), {
-        sub: `Bank ${formatMoney(finance.bankBalance)}`,
+          ${hasClientPermission('accounts.view') ? statCard('Bank balance', finance.bankBalance != null ? formatMoney(finance.bankBalance) : '—', {
+        sub: finance.bankNeedsOpening
+            ? 'Set opening balance in Bank Reconciliation'
+            : (finance.bankAsOf ? `Balance as on ${formatAsOn(finance.bankAsOf)}` : ''),
     }) : ''}
+          ${hasClientPermission('accounts.view') ? statCard('Petty cash', formatMoney(finance.cashBalance)) : ''}
         </div>
       </section>
 
