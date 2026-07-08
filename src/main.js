@@ -16,7 +16,12 @@ import {
   addVehicleToUnit,
 } from './registry.js';
 import { processFinances, renderCashLedger } from './finances.js';
-import { handleOAuthRedirectIfPresent } from './ledgerOAuth.js';
+import {
+  cleanAuthRedirectFromUrl,
+  getEnabledSocialProviders,
+  isSupabaseAuthRedirect,
+  signInWithSocialProvider,
+} from './socialAuth.js';
 import { ensureViewMounted, showView } from './views/viewShell.js';
 import { activateView } from './views/controllers.js';
 import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
@@ -669,6 +674,61 @@ const setBootLoaderMessage = (message) => {
 
 const removeBootLoader = () => document.getElementById('sentry-boot-loader')?.remove();
 
+const finishAuthSession = async (session) => {
+  if (!session?.user?.id) return false;
+  await syncBackendSession(session);
+  await applyAuthToUI(session);
+  hideAuth();
+  hideWorkspaceGate();
+  portalState.access = portalState.access || { users: [], apartments: [] };
+  portalState.access.activeUserId = session.user.id;
+  const profile = await getProfile(session.user.id);
+  const synced = await syncAccessFromSupabase(profile);
+  if (!synced) showWorkspaceGate('Sign-in succeeded but society data did not load. Select your society below.');
+  else {
+    processAnalytics();
+    processFinances();
+    renderRegistry();
+  }
+  window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+  return synced;
+};
+
+const renderSocialAuthButtons = () => {
+  const section = document.getElementById('auth-social-section');
+  const container = document.getElementById('auth-social-buttons');
+  if (!section || !container) return;
+
+  const providers = supabase ? getEnabledSocialProviders() : [];
+  container.replaceChildren();
+  if (!providers.length) {
+    section.hidden = true;
+    return;
+  }
+
+  section.hidden = false;
+  providers.forEach((provider) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'auth-social-btn';
+    btn.dataset.provider = provider.id;
+    btn.setAttribute('aria-label', `Continue with ${provider.label}`);
+    btn.innerHTML = `<i class="${provider.iconClass}" aria-hidden="true"></i><span>${provider.label}</span>`;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const { error } = await signInWithSocialProvider(supabase, provider.id);
+        if (error) showAuth(error.message);
+      } catch (err) {
+        showAuth(err?.message || 'Social sign-in failed.');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    container.appendChild(btn);
+  });
+};
+
 const boot = async () => {
   document.body.prepend(Object.assign(document.createElement('div'), { id: 'sentry-boot-loader', innerHTML: '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; color:#fff;"><i class="fa-solid fa-hotel fa-spin" style="font-size:2rem; margin-bottom:1rem; color:var(--accent);"></i><div style="font-weight:900; letter-spacing:1px; text-transform:uppercase; font-size:0.75rem;">Initializing CommunityHub</div></div>' }));
 
@@ -679,7 +739,16 @@ const boot = async () => {
   try {
     if (supabase) {
       setBootLoaderMessage('Checking session…');
+      const authRedirect = isSupabaseAuthRedirect();
+      const oauthParams = authRedirect ? new URLSearchParams(window.location.search) : null;
       const { data } = await withTimeout(supabase.auth.getSession(), 15000, 'Session check');
+      if (authRedirect) {
+        const oauthError = oauthParams?.get('error');
+        if (oauthError && !data?.session) {
+          showAuth(oauthParams.get('error_description') || oauthError);
+        }
+        cleanAuthRedirectFromUrl();
+      }
       if (!data?.session) {
         showAuth();
         return;
@@ -855,20 +924,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!email || !password) return showAuth('Email and password required.');
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return showAuth(error.message);
-    await syncBackendSession(data.session);
-    await applyAuthToUI(data.session);
-    hideAuth();
-    hideWorkspaceGate();
-    if (data?.session?.user?.id) portalState.access = portalState.access || { users: [], apartments: [] };
-    if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
-    const synced = await syncAccessFromSupabase();
-    if (!synced) showWorkspaceGate('Sign-in succeeded but society data did not load. Select your society below.');
-    else {
-      processAnalytics();
-      processFinances();
-      renderRegistry();
-    }
-    window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+    await finishAuthSession(data.session);
   };
 
   const signUp = async () => {
@@ -879,24 +935,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return showAuth(error.message);
     if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
-    await syncBackendSession(data.session);
-    await applyAuthToUI(data.session);
-    hideAuth();
-    hideWorkspaceGate();
-    if (data?.session?.user?.id) portalState.access = portalState.access || { users: [], apartments: [] };
-    if (data?.session?.user?.id) portalState.access.activeUserId = data.session.user.id;
-    const synced = await syncAccessFromSupabase();
-    if (!synced) showWorkspaceGate('Account created but society data did not load. Select your society below.');
-    else {
-      processAnalytics();
-      processFinances();
-      renderRegistry();
-    }
-    window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+    await finishAuthSession(data.session);
   };
 
   if (loginBtn) loginBtn.onclick = signIn;
   if (signupBtn) signupBtn.onclick = signUp;
+  renderSocialAuthButtons();
 
   initWorkspaceGate();
 

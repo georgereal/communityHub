@@ -701,6 +701,12 @@ export async function handleOAuthRedirectIfPresent() {
 
     console.log('handleOAuthRedirectIfPresent: checking URL and storage...');
 
+    // Supabase Auth social login also returns ?code= — only handle ledger flows when pending.
+    if (code && !pending && !serviceGooglePending) {
+        const msPendingRaw = sessionStorage.getItem(MS_OAUTH_PENDING_KEY) || localStorage.getItem(MS_OAUTH_PENDING_KEY);
+        if (!msPendingRaw) return false;
+    }
+
     if (error && serviceGooglePending) {
         sessionStorage.removeItem(SERVICE_GOOGLE_OAUTH_PENDING_KEY);
         sessionStorage.removeItem(PKCE_VERIFIER_KEY);
