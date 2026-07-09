@@ -106,6 +106,8 @@ export async function activateView(route, page) {
             renderAccessMappings();
             void renderResidentLinksAdmin();
             void renderApartmentModulePanel();
+            const { renderAccessRequestsAdmin } = await import('../accessRequests.js');
+            void renderAccessRequestsAdmin();
             switchSetupSubView(sub || 'society');
             break;
         }

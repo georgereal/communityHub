@@ -3292,14 +3292,85 @@ header {
 }
 
 #workspace-gate-modal .modal-content {
-  width: min(420px, 100%);
-  max-width: 420px;
+  width: min(460px, 100%);
+  max-width: 460px;
   height: auto;
   max-height: calc(100vh - 2.4rem);
   transform: none;
   border-radius: 16px;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
   padding: 1.5rem;
+}
+
+.workspace-gate-pending-list {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  list-style: none;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.workspace-gate-pending-list li {
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.access-requests-admin {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.access-request-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.access-request-user {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.access-request-email {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.access-request-meta {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 0.25rem;
+}
+
+.access-request-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  font-style: italic;
+}
+
+.access-request-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: min(240px, 100%);
+}
+
+.access-request-btns {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 #cash-modal .modal-content,

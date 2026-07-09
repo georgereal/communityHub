@@ -34,13 +34,19 @@ export function getEnabledSocialProviders() {
 }
 
 export function getAuthRedirectUrl() {
-    const hash = window.location.hash || '';
-    return `${window.location.origin}${window.location.pathname}${hash}`;
+    // Use origin root so redirect matches Supabase allowlist (localhost + production).
+    return `${window.location.origin}/`;
 }
 
-function hasLedgerOAuthPending() {
+function hasActiveLedgerOAuthPending() {
     try {
-        return LEDGER_OAUTH_PENDING_KEYS.some((key) => sessionStorage.getItem(key) || localStorage.getItem(key));
+        if (sessionStorage.getItem('ledger_oauth_pending')) return true;
+        if (sessionStorage.getItem('google_service_oauth_pending')) return true;
+        if (sessionStorage.getItem('ms_web_oauth_pending')) return true;
+        if (sessionStorage.getItem('ms_service_oauth_pending')) return true;
+        const msPending = sessionStorage.getItem('ms_oauth_pending') || localStorage.getItem('ms_oauth_pending');
+        if (msPending && sessionStorage.getItem('ledger_oauth_pkce_verifier')) return true;
+        return false;
     } catch {
         return false;
     }
@@ -51,17 +57,120 @@ export function isSupabaseAuthRedirect() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     if (!code) return false;
-    if (hasLedgerOAuthPending()) return false;
+    if (hasActiveLedgerOAuthPending()) return false;
     return true;
+}
+
+export function clearStaleLedgerOAuthMarkersForSupabaseAuth() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('code') || hasActiveLedgerOAuthPending()) return;
+    try {
+        LEDGER_OAUTH_PENDING_KEYS.forEach((key) => {
+            sessionStorage.removeItem(key);
+            localStorage.removeItem(key);
+        });
+        sessionStorage.removeItem('ledger_oauth_pkce_verifier');
+        sessionStorage.removeItem('ledger_oauth_return_hash');
+    } catch {
+        /* ignore */
+    }
 }
 
 export function cleanAuthRedirectFromUrl() {
     const hash = window.location.hash || '';
-    window.history.replaceState({}, document.title, `${window.location.pathname}${hash}`);
+    const keepHash = hash && !hash.includes('access_token=') ? hash : '';
+    window.history.replaceState({}, document.title, `${window.location.pathname}${keepHash}`);
 }
 
-export async function signInWithSocialProvider(supabase, provider) {
+/** Exchange PKCE code (or read session if auto-detect already ran). */
+export async function resolveSessionAfterOAuthRedirect(supabase) {
     if (!supabase) {
+        return { session: null, error: { message: 'Supabase is not configured.' } };
+    }
+
+    clearStaleLedgerOAuthMarkersForSupabaseAuth();
+
+    const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get('error');
+    if (oauthError) {
+        return {
+            session: null,
+            error: { message: params.get('error_description') || oauthError },
+        };
+    }
+
+    const code = params.get('code');
+    if (!code) {
+        const { data } = await supabase.auth.getSession();
+        return { session: data?.session ?? null, error: null };
+    }
+
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error && data?.session) {
+        return { session: data.session, error: null };
+    }
+
+    // Auto-detect may have consumed the code before boot ran.
+    const { data: retry } = await supabase.auth.getSession();
+    if (retry?.session) {
+        return { session: retry.session, error: null };
+    }
+
+    return {
+        session: null,
+        error: error || { message: 'Social sign-in did not complete. Please try again.' },
+    };
+}
+
+import { authClient, ensureAuthInitialized } from './authClient.js';
+
+/** Wait for Supabase session after OAuth redirect or stored session. */
+export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs = 250 } = {}) {
+    const client = authClient || supabase;
+    if (!client) return { session: null, error: null };
+
+    clearStaleLedgerOAuthMarkersForSupabaseAuth();
+
+    const params = new URLSearchParams(window.location.search);
+    const hasOAuthCode = !!params.get('code');
+    const hasHashToken = window.location.hash.includes('access_token=');
+
+    const primed = await ensureAuthInitialized();
+    if (primed.session) {
+        if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+        return primed;
+    }
+    if (primed.error) {
+        if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+        return primed;
+    }
+
+    for (let i = 0; i < attempts; i++) {
+        const { data } = await client.auth.getSession();
+        if (data?.session) {
+            console.log('[auth] session-ready-after-wait', { email: data.session.user?.email || null, attempt: i });
+            if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+            return { session: data.session, error: null };
+        }
+        if (i < attempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+
+    console.warn('[auth] boot-session-missing', {
+        hasOAuthCode,
+        hasHashToken,
+        href: window.location.href,
+    });
+    return { session: null, error: null };
+}
+
+export const NO_SOCIETY_ACCESS_MESSAGE =
+    'You are signed in but not linked to a society yet. Submit an access request below and an admin will approve it.';
+
+export async function signInWithSocialProvider(supabase, provider) {
+    const client = authClient || supabase;
+    if (!client) {
         return { data: null, error: { message: 'Supabase is not configured.' } };
     }
 
@@ -76,5 +185,5 @@ export async function signInWithSocialProvider(supabase, provider) {
         };
     }
 
-    return supabase.auth.signInWithOAuth({ provider, options });
+    return client.auth.signInWithOAuth({ provider, options });
 }

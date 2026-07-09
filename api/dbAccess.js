@@ -27,6 +27,7 @@ export const ALLOWED_TABLES = new Set([
     'apartments', 'profiles', 'user_apartments', 'user_role_assignments', 'notice_read_log',
     'permissions', 'role_permissions',
     'ledger_sync_run_logs', 'ledger_sync_run_changes',
+    'access_requests',
 ]);
 
 const WRITE_OPS = new Set(['insert', 'update', 'upsert', 'delete']);
@@ -166,6 +167,33 @@ export async function authorizeDbQuery(req, query) {
         : null;
 
     const { user, service } = await resolveService(req, apartmentId, permissionKey || 'accounts.edit');
+
+    if (query.table === 'access_requests') {
+        const payload = Array.isArray(query.payload) ? query.payload[0] : query.payload;
+        const userIdFilter = (query.filters || []).find((f) => f.column === 'user_id' && f.type === 'eq')?.value;
+
+        if (op === 'insert') {
+            if (payload?.user_id !== user.id) {
+                throw Object.assign(new Error('Not permitted.'), { status: 403 });
+            }
+            return { user, service, apartmentId: payload?.apartment_id || apartmentId };
+        }
+
+        if (op === 'select' && userIdFilter === user.id) {
+            return { user, service, apartmentId };
+        }
+
+        if ((op === 'select' || op === 'update') && apartmentId) {
+            const allowed = await userHasPermission(service, user.id, apartmentId, 'rbac.view');
+            const { data: prof } = await service.from('profiles').select('role').eq('id', user.id).maybeSingle();
+            if (!allowed && prof?.role !== 'admin') {
+                throw Object.assign(new Error('Not permitted.'), { status: 403 });
+            }
+            return { user, service, apartmentId };
+        }
+
+        throw Object.assign(new Error('Not permitted.'), { status: 403 });
+    }
 
     if (isApartmentScoped && apartmentId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(apartmentId)) {
         throw Object.assign(new Error('Invalid apartment_id scope.'), { status: 400 });

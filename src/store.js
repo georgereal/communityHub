@@ -1,15 +1,14 @@
 /**
  * Sentry Cloud Store (Relational)
  */
-import { createClient } from '@supabase/supabase-js';
 import { createApiSupabaseClient, fetchApartmentState, setActiveApartmentIdForApi } from './dbClient.js';
+import { authClient, ensureAuthInitialized } from './authClient.js';
 import { domainsForRoute, STATE_DOMAINS } from './stateLoader.js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export { authClient, ensureAuthInitialized };
 
-const authClient = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-export const supabase = createApiSupabaseClient(authClient);
+const authClientRef = authClient;
+export const supabase = createApiSupabaseClient(authClientRef);
 
 let pullStateChain = Promise.resolve(true);
 const loadedDomains = new Set();

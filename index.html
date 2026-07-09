@@ -921,13 +921,33 @@
 
   <!-- WORKSPACE GATE (signed in but no society loaded) -->
   <div class="modal-backdrop" id="workspace-gate-modal">
-    <div class="modal-content auth-card" style="max-width:420px;">
-      <h2 style="font-size: 1.25rem; font-weight: 950; letter-spacing: -0.3px;">Select your society</h2>
+    <div class="modal-content auth-card" style="max-width:460px;">
+      <h2 id="workspace-gate-title" style="font-size: 1.25rem; font-weight: 950; letter-spacing: -0.3px;">Select your society</h2>
       <p id="workspace-gate-message" style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1.25rem;">Choose which apartment society to load. Your data is stored per society.</p>
-      <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
-      <select id="workspace-gate-select" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:1rem;"></select>
+
+      <div id="workspace-gate-select-panel">
+        <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
+        <select id="workspace-gate-select" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:1rem;"></select>
+        <button type="button" id="workspace-gate-confirm" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem; margin-bottom:0.5rem;">Load society</button>
+      </div>
+
+      <div id="workspace-gate-request-panel" hidden>
+        <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
+        <select id="workspace-gate-request-apartment" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:0.75rem;"></select>
+        <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Access type</label>
+        <select id="workspace-gate-request-role" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:0.75rem;"></select>
+        <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Message (optional)</label>
+        <textarea id="workspace-gate-request-message" rows="3" placeholder="Flat number, your name, or why you need access" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:600; margin-bottom:0.75rem; resize:vertical;"></textarea>
+        <button type="button" id="workspace-gate-request-submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem; margin-bottom:0.5rem;">Request access</button>
+      </div>
+
+      <div id="workspace-gate-pending-panel" hidden>
+        <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">Your request was sent to the association admin. You will be notified when it is approved.</p>
+        <ul id="workspace-gate-pending-list" class="workspace-gate-pending-list"></ul>
+        <button type="button" id="workspace-gate-refresh-pending" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem; margin-top:0.5rem;">Check again</button>
+      </div>
+
       <div id="workspace-gate-error" style="display:none; padding:0.6rem 0.7rem; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-weight:800; font-size:0.8rem; margin-bottom:0.75rem;"></div>
-      <button type="button" id="workspace-gate-confirm" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem; margin-bottom:0.5rem;">Load society</button>
       <button type="button" id="workspace-gate-logout" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Sign out</button>
     </div>
   </div>

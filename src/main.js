@@ -17,15 +17,17 @@ import {
 } from './registry.js';
 import { processFinances, renderCashLedger } from './finances.js';
 import {
-  cleanAuthRedirectFromUrl,
   getEnabledSocialProviders,
-  isSupabaseAuthRedirect,
+  NO_SOCIETY_ACCESS_MESSAGE,
   signInWithSocialProvider,
+  waitForBootAuthSession,
 } from './socialAuth.js';
 import { ensureViewMounted, showView } from './views/viewShell.js';
 import { activateView } from './views/controllers.js';
 import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
 import { renderResidentLinksAdmin, autoLinkResidentByEmail, acceptPendingInvites } from './residentLinks.js';
+import { initAccessRequestWorkspaceGate } from './accessRequests.js';
+import { ensureAuthInitialized } from './authClient.js';
 import { openTransitionWizard } from './unitTransitions.js';
 import { renderDashboard } from './dashboard.js';
 import { renderApartmentModulePanel, renderUserModulePanel, saveUserModuleOverridesFromPanel } from './moduleAccessAdmin.js';
@@ -61,6 +63,9 @@ import {
     updateNavBreadcrumb,
 } from './navigation.js';
 import { withButtonBusy } from './buttonBusy.js';
+
+// Start OAuth code exchange as early as possible (before DOMContentLoaded / boot).
+void ensureAuthInitialized();
 
 window.openTransitionWizard = openTransitionWizard;
 
@@ -323,6 +328,7 @@ const showWorkspaceGate = (message = '') => {
 
   if (err) { err.style.display = 'none'; err.textContent = ''; }
   modal.classList.add('active');
+  void initAccessRequestWorkspaceGate();
 };
 
 const initWorkspaceGate = () => {
@@ -337,6 +343,28 @@ const initWorkspaceGate = () => {
       void signOut();
     };
   }
+
+  document.getElementById('workspace-gate-refresh-pending')?.addEventListener('click', async () => {
+    const btn = document.getElementById('workspace-gate-refresh-pending');
+    if (btn) btn.disabled = true;
+    try {
+      const { data } = await supabase?.auth.getSession() || { data: null };
+      if (data?.session) {
+        const synced = await syncAccessFromSupabase();
+        if (synced) {
+          hideWorkspaceGate();
+          processAnalytics();
+          processFinances();
+          renderRegistry();
+          window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+          return;
+        }
+      }
+      await initAccessRequestWorkspaceGate();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
 
   if (confirmBtn && select) {
     confirmBtn.onclick = async () => {
@@ -585,7 +613,7 @@ const loadAccessUserDirectory = async (activeId, uid) => {
   }
 };
 
-const syncAccessFromSupabase = async (profileOverride = null) => {
+export const syncAccessFromSupabase = async (profileOverride = null) => {
   if (!supabase) return false;
   const { data: sessionData } = await supabase.auth.getSession();
   const uid = sessionData?.session?.user?.id;
@@ -684,7 +712,7 @@ const finishAuthSession = async (session) => {
   portalState.access.activeUserId = session.user.id;
   const profile = await getProfile(session.user.id);
   const synced = await syncAccessFromSupabase(profile);
-  if (!synced) showWorkspaceGate('Sign-in succeeded but society data did not load. Select your society below.');
+  if (!synced) showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
   else {
     processAnalytics();
     processFinances();
@@ -739,22 +767,24 @@ const boot = async () => {
   try {
     if (supabase) {
       setBootLoaderMessage('Checking session…');
-      const authRedirect = isSupabaseAuthRedirect();
-      const oauthParams = authRedirect ? new URLSearchParams(window.location.search) : null;
-      const { data } = await withTimeout(supabase.auth.getSession(), 15000, 'Session check');
-      if (authRedirect) {
-        const oauthError = oauthParams?.get('error');
-        if (oauthError && !data?.session) {
-          showAuth(oauthParams.get('error_description') || oauthError);
-        }
-        cleanAuthRedirectFromUrl();
+      const { session: bootResolvedSession, error: bootAuthErr } = await withTimeout(
+        waitForBootAuthSession(supabase),
+        20000,
+        'Session check',
+      );
+      if (bootAuthErr && !bootResolvedSession) {
+        console.warn('[boot] Social sign-in failed:', bootAuthErr.message);
+        showAuth(bootAuthErr.message || 'Social sign-in failed.');
+        return;
       }
-      if (!data?.session) {
+      if (!bootResolvedSession) {
+        console.warn('[boot] No Supabase session after auth wait');
         showAuth();
         return;
       }
+      hideAuth();
       bootHasSupabaseSession = true;
-      bootSession = data.session;
+      bootSession = bootResolvedSession;
       bootAuthHandled = true;
       repairLocalCache();
       await syncBackendSession(bootSession);
@@ -793,10 +823,12 @@ const boot = async () => {
         await setActiveApartment(portalState.access.activeApartmentId);
       }
     } else if (!accessSynced && bootHasSupabaseSession) {
+      hideAuth();
       refreshAuthUiShell();
       renderAccessMappings();
-      showWorkspaceGate('Could not load society data automatically. Select your society below, or check the browser console.');
+      showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
     } else if (bootSession && accessSynced) {
+      hideAuth();
       refreshAuthUiShell();
     }
 
@@ -806,6 +838,7 @@ const boot = async () => {
   } catch (err) {
     console.error('[boot] failed:', err);
     if (bootHasSupabaseSession) {
+      hideAuth();
       renderAccessMappings();
       showWorkspaceGate(err?.message || 'Startup failed. Select your society below or refresh the page.');
     } else {
@@ -946,22 +979,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (supabase) {
     supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'INITIAL_SESSION' && !bootAuthHandled) return;
+      if (event === 'INITIAL_SESSION' && !bootAuthHandled) {
+        if (session) {
+          bootAuthHandled = true;
+          await finishAuthSession(session);
+        }
+        return;
+      }
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
         await syncBackendSession(session);
         if (event === 'TOKEN_REFRESHED') {
           await applyAuthToUI(session, { refreshPermissions: false, notifications: false, adminRpc: false });
         } else if (event === 'SIGNED_IN') {
-          await applyAuthToUI(session, { refreshPermissions: false, notifications: false, adminRpc: false });
+          bootAuthHandled = true;
+          await finishAuthSession(session);
         } else {
           await applyAuthToUI(session);
-        }
-        if (event === 'SIGNED_IN') {
-          hideAuth();
-          hideWorkspaceGate();
-          const profile = await getProfile(session.user.id);
-          const synced = await syncAccessFromSupabase(profile);
-          if (!synced) showWorkspaceGate();
         }
       }
       if (event === 'SIGNED_OUT') {

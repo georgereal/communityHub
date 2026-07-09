@@ -90,11 +90,15 @@ export async function queueStaffNotifications(rows = []) {
         visitor_log_id: row.visitor_log_id || null,
         visitor_unit_id: row.visitor_unit_id || null,
         activity_audit_log_id: row.activity_audit_log_id || null,
+        access_request_id: row.access_request_id || null,
     }));
     const { error } = await supabase.from('user_notifications').insert(payload);
     if (error) {
-        if (/activity_audit_log_id/i.test(error.message)) {
-            payload.forEach((p) => delete p.activity_audit_log_id);
+        if (/activity_audit_log_id|access_request_id/i.test(error.message)) {
+            payload.forEach((p) => {
+                delete p.activity_audit_log_id;
+                delete p.access_request_id;
+            });
             const { error: retryErr } = await supabase.from('user_notifications').insert(payload);
             if (retryErr) {
                 console.warn('[notifications] queue failed:', retryErr.message);
@@ -156,6 +160,18 @@ const activityLogRoute = () => {
 };
 
 const navigateForNotification = async (note) => {
+    if (note.access_request_id) {
+        if (routeIsAllowed('admin-society')) {
+            await window.switchView?.('admin-society');
+            const { renderAccessRequestsAdmin } = await import('./accessRequests.js');
+            await renderAccessRequestsAdmin();
+            document.getElementById('access-requests-admin-wrap')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        alert('Open Administration → Society Profile to review pending access requests.');
+        return;
+    }
     if (note.activity_audit_log_id) {
         window.switchView?.(activityLogRoute());
         return;
@@ -214,7 +230,10 @@ function renderNotificationPanel() {
 
     list.innerHTML = notes.map((n) => `
       <button type="button" class="notifications-panel__item${n.read_at ? '' : ' notifications-panel__item--unread'}"
-        data-notif-id="${n.id}" data-audit-id="${n.activity_audit_log_id || ''}">
+        data-notif-id="${n.id}"
+        data-audit-id="${n.activity_audit_log_id || ''}"
+        data-access-request-id="${n.access_request_id || ''}"
+        data-visitor-log-id="${n.visitor_log_id || ''}">
         <span class="notifications-panel__item-title">${esc(n.title)}</span>
         <span class="notifications-panel__item-body">${esc(n.body)}</span>
         <span class="notifications-panel__item-when">${formatWhen(n.created_at)}</span>
@@ -290,9 +309,15 @@ export function initStaffNotificationsUi() {
         const item = e.target.closest('.notifications-panel__item');
         if (!item) return;
         const id = item.dataset.notifId;
+        const note = (portalState.notifications?.items || []).find((n) => n.id === id) || {
+            id,
+            activity_audit_log_id: item.dataset.auditId || null,
+            access_request_id: item.dataset.accessRequestId || null,
+            visitor_log_id: item.dataset.visitorLogId || null,
+        };
         markNotificationRead(id)
             .then(() => refreshStaffNotifications({ showToast: false }))
-            .then(() => navigateForNotification({ activity_audit_log_id: item.dataset.auditId || null }))
+            .then(() => navigateForNotification(note))
             .catch((err) => alert(err?.message || 'Could not open notification.'));
         setPanelOpen(false);
     });

@@ -1,6 +1,7 @@
 import { portalState, persist, supabase, pullState, upsertSocietyConfig } from '../../store.js';
 import { initSetupAdmin } from '../../admin.js';
 import { initResidentLinks } from '../../residentLinks.js';
+import { renderAccessRequestsAdmin } from '../../accessRequests.js';
 import { renderAccessMappings, ensureAccessState } from '../../mainBoot.js';
 import { processAnalytics, renderRegistry } from '../../registry.js';
 
@@ -67,4 +68,9 @@ export default async function initSetupView() {
     });
 
     document.getElementById('access-users-show-unassigned')?.addEventListener('change', () => renderAccessMappings());
+}
+
+export async function refreshSetupAccessPanels() {
+    renderAccessMappings();
+    await renderAccessRequestsAdmin();
 }
