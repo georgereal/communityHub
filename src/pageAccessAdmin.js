@@ -8,12 +8,12 @@ import { pageCatalogByModule } from './navigation.js';
 import { applyNavPermissions } from './navigation.js';
 import { resolveEffectivePermissions } from './rbac.js';
 import {
-    SOCIETY_SCOPED_ROLES,
     buildRolePageEditorState,
     buildUserPageOverrideState,
     saveSocietyRolePageAccess,
     saveUserPageOverrides,
     loadUserPageAccess,
+    getSocietyScopedRoles,
 } from './pageAccess.js';
 
 const esc = (s) => String(s ?? '')
@@ -48,7 +48,7 @@ function moduleSection(mod, innerHtml, open = false) {
     </details>`;
 }
 
-let selectedRoleKey = SOCIETY_SCOPED_ROLES[0] || 'property_manager';
+let selectedRoleKey = 'property_manager';
 
 export async function renderPageAccessAdmin() {
     const host = document.getElementById('page-access-admin-host');
@@ -68,15 +68,20 @@ export async function renderPageAccessAdmin() {
     const aptName = portalState.access.apartments.find((a) => a.id === apartmentId)?.name || 'this society';
     host.innerHTML = '<p class="page-access-hint"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</p>';
 
+    let societyRoles = [];
     let editorState = { states: {} };
     try {
+        societyRoles = await getSocietyScopedRoles();
+        if (!societyRoles.includes(selectedRoleKey)) {
+            selectedRoleKey = societyRoles[0] || 'property_manager';
+        }
         editorState = await buildRolePageEditorState(apartmentId, selectedRoleKey);
     } catch (err) {
         host.innerHTML = `<p class="page-access-hint page-access-hint--error">${esc(err.message)}</p>`;
         return;
     }
 
-    const roleOptions = SOCIETY_SCOPED_ROLES.map((key) =>
+    const roleOptions = societyRoles.map((key) =>
         `<option value="${key}" ${key === selectedRoleKey ? 'selected' : ''}>${esc(v2KeyToLabel(key))}</option>`,
     ).join('');
 
@@ -91,9 +96,9 @@ export async function renderPageAccessAdmin() {
     host.innerHTML = `
       <header class="page-access-header">
         <div>
-          <h2 class="page-access-title">Roles &amp; Page Access</h2>
+          <h2 class="page-access-title">Page Access</h2>
           <p class="page-access-hint">Configure which pages each role can open in <strong>${esc(aptName)}</strong>.
-            Unchecked pages are hidden from the menu and blocked by route. Changes here override platform defaults for this society only.</p>
+            Unchecked pages are hidden from the menu and blocked by route. Page access builds on the permissions set in the <strong>Role Permissions</strong> tab.</p>
         </div>
       </header>
       <div class="page-access-toolbar">

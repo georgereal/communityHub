@@ -76,11 +76,30 @@ export async function userHasPermission(service, userId, apartmentId, permission
             .map((r) => r.role_key);
 
         if (aptRoleKeys.length) {
-            const { data: perms } = await service
-                .from('role_permissions')
-                .select('permission_key')
-                .in('role_key', aptRoleKeys);
-            if ((perms || []).some((row) => row.permission_key === permissionKey)) return true;
+            const [{ data: overrides }, { data: platformPerms }] = await Promise.all([
+                service
+                    .from('society_role_permissions')
+                    .select('role_key, granted')
+                    .eq('apartment_id', apartmentId)
+                    .in('role_key', aptRoleKeys)
+                    .eq('permission_key', permissionKey),
+                service
+                    .from('role_permissions')
+                    .select('role_key')
+                    .in('role_key', aptRoleKeys)
+                    .eq('permission_key', permissionKey),
+            ]);
+
+            const overrideByRole = new Map((overrides || []).map((row) => [row.role_key, row.granted]));
+            const platformRoles = new Set((platformPerms || []).map((row) => row.role_key));
+
+            for (const roleKey of aptRoleKeys) {
+                if (overrideByRole.has(roleKey)) {
+                    if (overrideByRole.get(roleKey)) return true;
+                    continue;
+                }
+                if (platformRoles.has(roleKey)) return true;
+            }
         }
     } catch {
         // fall back to v1 role
