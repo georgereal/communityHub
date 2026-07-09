@@ -305,7 +305,7 @@ export const NAV_MODULES = [
         pages: [
             {
                 route: 'admin-access',
-                label: 'Roles & Pages',
+                label: 'Roles & Access',
                 icon: 'fa-user-lock',
                 view: 'access-control',
                 permission: 'rbac.edit',

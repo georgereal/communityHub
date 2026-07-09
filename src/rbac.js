@@ -5,6 +5,7 @@ import { portalState, supabase } from './store.js';
 import { pageIsVisible, findPage } from './navigation.js';
 import { isModuleEnabled } from './moduleAccess.js';
 import { logActivity } from './activityAudit.js';
+import { effectiveRolePermissionKeysForRoles } from './rolePermissions.js';
 
 export const ROLE_OPTIONS = [
     { key: 'system_admin', v1Key: 'admin', label: 'System Administrator' },
@@ -111,12 +112,7 @@ export async function fetchEffectivePermissions(apartmentId, rolesOverride = nul
 
     if (!aptRoleKeys.length) return null;
 
-    const { data: rp } = await supabase
-        .from('role_permissions')
-        .select('permission_key')
-        .in('role_key', aptRoleKeys);
-
-    return Array.from(new Set((rp || []).map((x) => x.permission_key)));
+    return effectiveRolePermissionKeysForRoles(apartmentId, aptRoleKeys);
 }
 
 export function resolveEffectivePermissions(apartmentId) {
@@ -144,7 +140,7 @@ export async function refreshAuthPermissions(apartmentId, rolesOverride = null) 
     try {
         const dbPerms = await fetchEffectivePermissions(apartmentId, rolesOverride);
         if (dbPerms?.length) {
-            portalState.authPermissions = [...new Set([...floor, ...dbPerms])];
+            portalState.authPermissions = dbPerms;
             return portalState.authPermissions;
         }
     } catch { /* ignore */ }

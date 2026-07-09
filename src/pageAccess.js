@@ -3,25 +3,23 @@
  */
 import { portalState, supabase } from './store.js';
 import { buildPageCatalog, findCatalogPage, pageAllowedByPermissions } from './navigation.js';
-import { ROLE_OPTIONS } from './rbac.js';
+import {
+    effectiveRolePermissionKeys,
+    fetchPlatformRolePermissionKeys,
+    getSocietyRoleOptions,
+} from './rolePermissions.js';
 
 export { resolvePageAccess, pageAccessBlocksRoute, pageAccessGrantsRoute } from './pageAccessResolve.js';
 
-const SOCIETY_SCOPED_ROLES = ROLE_OPTIONS.map((r) => r.key);
+export async function getSocietyScopedRoles() {
+    const roles = await getSocietyRoleOptions();
+    return roles.map((r) => r.key);
+}
 
-export { SOCIETY_SCOPED_ROLES };
-
-export async function fetchRolePermissionKeys(roleKey) {
-    if (!supabase || !roleKey) return [];
-    const { data, error } = await supabase
-        .from('role_permissions')
-        .select('permission_key')
-        .eq('role_key', roleKey);
-    if (error) {
-        if (/role_permissions/i.test(error.message)) return [];
-        throw new Error(error.message);
-    }
-    return (data || []).map((r) => r.permission_key);
+export async function fetchRolePermissionKeys(roleKey, apartmentId = null) {
+    const aptId = apartmentId || portalState.access?.activeApartmentId;
+    if (aptId) return effectiveRolePermissionKeys(aptId, roleKey);
+    return fetchPlatformRolePermissionKeys(roleKey);
 }
 
 export async function fetchSocietyRolePageMap(apartmentId, roleKey) {
@@ -93,7 +91,7 @@ export async function loadUserPageAccess(apartmentId, userId, roleKey) {
  */
 export async function saveSocietyRolePageAccess(apartmentId, roleKey, pageStates) {
     if (!supabase || !apartmentId || !roleKey) throw new Error('Apartment and role required.');
-    const permKeys = await fetchRolePermissionKeys(roleKey);
+    const permKeys = await fetchRolePermissionKeys(roleKey, apartmentId);
     const catalog = buildPageCatalog();
 
     const toUpsert = [];
@@ -139,7 +137,7 @@ export async function saveSocietyRolePageAccess(apartmentId, roleKey, pageStates
  */
 export async function saveUserPageOverrides(userId, apartmentId, roleKey, overrideStates) {
     if (!supabase || !userId || !apartmentId) throw new Error('User and apartment required.');
-    const permKeys = await fetchRolePermissionKeys(roleKey);
+    const permKeys = await fetchRolePermissionKeys(roleKey, apartmentId);
     const societyMap = await fetchSocietyRolePageMap(apartmentId, roleKey);
     const catalog = buildPageCatalog();
 
@@ -192,7 +190,7 @@ export async function saveUserPageOverrides(userId, apartmentId, roleKey, overri
 
 /** Build initial checkbox state for role editor. */
 export async function buildRolePageEditorState(apartmentId, roleKey) {
-    const permKeys = await fetchRolePermissionKeys(roleKey);
+    const permKeys = await fetchRolePermissionKeys(roleKey, apartmentId);
     const societyMap = await fetchSocietyRolePageMap(apartmentId, roleKey);
     const states = {};
     buildPageCatalog().forEach((page) => {
@@ -207,7 +205,7 @@ export async function buildRolePageEditorState(apartmentId, roleKey) {
 
 /** Build tri-state for user override editor. */
 export async function buildUserPageOverrideState(userId, apartmentId, roleKey) {
-    const permKeys = await fetchRolePermissionKeys(roleKey);
+    const permKeys = await fetchRolePermissionKeys(roleKey, apartmentId);
     const [societyMap, overrides] = await Promise.all([
         fetchSocietyRolePageMap(apartmentId, roleKey),
         fetchUserPageOverrides(userId, apartmentId),

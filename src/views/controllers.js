@@ -58,8 +58,8 @@ export async function activateView(route, page) {
             break;
         }
         case 'access-control': {
-            const { renderPageAccessAdmin } = await import('../pageAccessAdmin.js');
-            await renderPageAccessAdmin();
+            const { renderAccessControlAdmin } = await import('../accessControlAdmin.js');
+            await renderAccessControlAdmin();
             break;
         }
         case 'invoices': {
