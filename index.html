@@ -57,44 +57,57 @@
             <i class="fa-solid fa-bars"></i>
           </button>
           <div class="topbar-brand">
-            <div class="brand-lockup" aria-label="CommunityHub workspace">
-              <span class="brand-lockup__app">CommunityHub</span>
-              <span class="brand-lockup__sep brand-lockup__sep--desktop">for</span>
-              <span id="topbar-apartment-name" class="brand-lockup__entity" hidden></span>
-              <select id="header-apartment-switch" class="brand-lockup__workspace brand-lockup__workspace-select brand-lockup__workspace-select--header" aria-label="Select society">
-                <option value="">Select society…</option>
-              </select>
+            <div class="topbar-identity">
+              <div class="topbar-logo" aria-hidden="true">
+                <i class="fa-solid fa-building-columns"></i>
+              </div>
+              <div class="topbar-identity-body">
+                <div class="brand-lockup">
+                  <span class="brand-lockup__app">CommunityHub</span>
+                  <span class="brand-lockup__divider" aria-hidden="true"></span>
+                  <div class="topbar-workspace-wrap">
+                    <i class="fa-solid fa-city topbar-workspace-icon" aria-hidden="true"></i>
+                    <span id="topbar-apartment-name" class="brand-lockup__entity" hidden></span>
+                    <select id="header-apartment-switch" class="brand-lockup__workspace brand-lockup__workspace-select brand-lockup__workspace-select--header" aria-label="Select society">
+                      <option value="">Select society…</option>
+                    </select>
+                  </div>
+                </div>
+                <nav class="topbar-breadcrumb" aria-label="Current page">
+                  <span id="topbar-nav-module">Home</span>
+                  <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                  <span id="topbar-nav-page">Dashboard</span>
+                </nav>
+              </div>
             </div>
-            <nav class="topbar-breadcrumb" aria-label="Current page">
-              <span id="topbar-nav-module">Home</span>
-              <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-              <span id="topbar-nav-page">Dashboard</span>
-            </nav>
           </div>
         </div>
         <div class="topbar-right">
-          <div class="topbar-notifications-anchor" id="topbar-notifications-anchor" hidden>
-            <button id="topbar-notifications-btn" class="topbar-icon-btn topbar-notifications-btn" type="button" aria-label="Notifications" aria-expanded="false" aria-controls="topbar-notifications-panel" title="Notifications">
-              <i class="fa-solid fa-bell" aria-hidden="true"></i>
-              <span class="topbar-notif-badge" id="topbar-notif-badge" hidden>0</span>
-            </button>
-            <div id="topbar-notifications-panel" class="notifications-panel" role="dialog" aria-label="Notifications" hidden>
-              <div class="notifications-panel__head">
-                <strong>Notifications</strong>
-                <button type="button" class="btn btn-outline btn--small" id="topbar-notifications-mark-all">Mark all read</button>
+          <div class="topbar-actions">
+            <div class="topbar-notifications-anchor" id="topbar-notifications-anchor" hidden>
+              <button id="topbar-notifications-btn" class="topbar-icon-btn topbar-notifications-btn" type="button" aria-label="Notifications" aria-expanded="false" aria-controls="topbar-notifications-panel" title="Notifications">
+                <i class="fa-solid fa-bell" aria-hidden="true"></i>
+                <span class="topbar-notif-badge" id="topbar-notif-badge" hidden>0</span>
+              </button>
+              <div id="topbar-notifications-panel" class="notifications-panel" role="dialog" aria-label="Notifications" hidden>
+                <div class="notifications-panel__head">
+                  <strong>Notifications</strong>
+                  <button type="button" class="btn btn-outline btn--small" id="topbar-notifications-mark-all">Mark all read</button>
+                </div>
+                <div id="topbar-notifications-list" class="notifications-panel__list"></div>
               </div>
-              <div id="topbar-notifications-list" class="notifications-panel__list"></div>
             </div>
+            <button id="topbar-logout-btn" class="topbar-icon-btn topbar-icon-btn--logout" type="button" aria-label="Sign out" title="Sign out">
+              <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+            </button>
           </div>
-          <button id="topbar-logout-btn" class="topbar-icon-btn" type="button" aria-label="Sign out" title="Sign out">
-            <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
-          </button>
-          <button id="topbar-user-btn" class="topbar-user" type="button" aria-label="User menu">
+          <button id="topbar-user-btn" class="topbar-user" type="button" aria-label="User menu" aria-haspopup="true">
+            <div id="topbar-user-initials" class="topbar-user-avatar">—</div>
             <div class="topbar-user-meta">
               <div id="topbar-user-name" class="topbar-user-name">—</div>
               <div id="topbar-user-role" class="topbar-user-role">—</div>
             </div>
-            <div id="topbar-user-initials" class="topbar-user-avatar">—</div>
+            <i class="fa-solid fa-chevron-down topbar-user-chevron" aria-hidden="true"></i>
           </button>
           <div id="topbar-user-menu" class="user-menu" style="display:none;">
             <div class="user-menu-section user-menu-section--society">
