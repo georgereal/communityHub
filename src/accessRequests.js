@@ -261,7 +261,7 @@ export async function renderAccessRequestsAdmin() {
             btn.disabled = true;
             try {
                 await approveAccessRequest(request, { roleKey, adminNote });
-                const { syncAccessFromSupabase } = await import('./main.js');
+                const { syncAccessFromSupabase } = await import('./accessSync.js');
                 await syncAccessFromSupabase();
                 const { renderAccessMappings } = await import('./mainBoot.js');
                 renderAccessMappings();

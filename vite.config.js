@@ -31,6 +31,11 @@ export default defineConfig(({ mode }) => {
           main: resolve(__dirname, 'index.html'),
           microsoftAuth: resolve(__dirname, 'microsoft-auth.html'),
         },
+        output: {
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/chunk-[hash].js',
+          assetFileNames: 'assets/[name]-[hash][extname]',
+        },
       },
     },
   };
