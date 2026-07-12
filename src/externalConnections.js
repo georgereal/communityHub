@@ -15,7 +15,7 @@ export const CONNECTION_CATALOG = [
         label: 'Evolyx — Passbook Reader',
         description: 'Scan passbook photos or PDFs into bank statement lines for reconciliation.',
         defaults: {
-            base_url: 'https://communityhub.evolyx.in',
+            base_url: 'https://ai.evolyx.in',
             client_id: 'communityhub',
             workflow_id: '6a44f36f5ddde12aabd18023',
             webhook_base_url: '',

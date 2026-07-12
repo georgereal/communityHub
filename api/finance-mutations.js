@@ -280,15 +280,21 @@ async function persistComputedBalances(service, apartmentId, opening) {
     const lines = await fetchApartmentStatementLines(service, apartmentId);
     const importById = await fetchApartmentImportMap(service, apartmentId);
     const balances = computeRunningBalances(lines, opening, importById);
-    for (const [id, computed_balance] of balances) {
-        const { error } = await service
-            .from('bank_statement_lines')
-            .update({ computed_balance })
-            .eq('apartment_id', apartmentId)
-            .eq('id', id);
-        if (error && !/computed_balance/i.test(error.message)) {
-            throw Object.assign(new Error(error.message), { status: 500 });
-        }
+    const entries = [...balances.entries()];
+    const batchSize = 25;
+
+    for (let i = 0; i < entries.length; i += batchSize) {
+        const batch = entries.slice(i, i + batchSize);
+        await Promise.all(batch.map(async ([id, computed_balance]) => {
+            const { error } = await service
+                .from('bank_statement_lines')
+                .update({ computed_balance })
+                .eq('apartment_id', apartmentId)
+                .eq('id', id);
+            if (error && !/computed_balance/i.test(error.message)) {
+                throw Object.assign(new Error(error.message), { status: 500 });
+            }
+        }));
     }
 }
 

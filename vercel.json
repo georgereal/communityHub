@@ -64,7 +64,7 @@
       "maxDuration": 15
     },
     "api/finance-mutations.js": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   }
 }
