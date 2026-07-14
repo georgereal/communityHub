@@ -213,6 +213,45 @@ async function deleteTransactionMutation(service, apartmentId, body) {
     return { ok: true };
 }
 
+async function deleteTransactionsMutation(service, apartmentId, body) {
+    const ids = [...new Set((body.transaction_ids || []).filter(Boolean))];
+    if (!ids.length) return { ok: true, deleted: 0 };
+
+    const { data: txns, error: fetchErr } = await service
+        .from('transactions')
+        .select('id, receipt_urls, receipt_url, bank_proof_urls')
+        .eq('apartment_id', apartmentId)
+        .in('id', ids);
+    if (fetchErr) throw Object.assign(new Error(fetchErr.message), { status: 500 });
+
+    await service.from('maintenance_payment_allocations').delete().in('transaction_id', ids);
+
+    // Unlink matched statement lines so they don't point at deleted txns.
+    await service
+        .from('bank_statement_lines')
+        .update({
+            match_status: 'UNMATCHED',
+            transaction_id: null,
+            matched_at: null,
+            matched_by: null,
+        })
+        .eq('apartment_id', apartmentId)
+        .in('transaction_id', ids);
+
+    const { error } = await service.from('transactions').delete().eq('apartment_id', apartmentId).in('id', ids);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    const paths = [];
+    for (const txn of txns || []) {
+        if (Array.isArray(txn.receipt_urls)) paths.push(...txn.receipt_urls);
+        else if (txn.receipt_url) paths.push(txn.receipt_url);
+        if (Array.isArray(txn.bank_proof_urls)) paths.push(...txn.bank_proof_urls);
+    }
+    await maybeDeletePaths(service, paths);
+
+    return { ok: true, deleted: ids.length };
+}
+
 async function saveBankOpeningBalanceMutation(service, apartmentId, body) {
     const { date, amount } = body;
     const bank = body.bank && typeof body.bank === 'object' ? body.bank : {};
@@ -1026,6 +1065,9 @@ export default async function handler(req, res) {
                 break;
             case 'deleteTransaction':
                 result = await deleteTransactionMutation(service, apartmentId, body);
+                break;
+            case 'deleteTransactions':
+                result = await deleteTransactionsMutation(service, apartmentId, body);
                 break;
             case 'saveBankOpeningBalance':
                 result = await saveBankOpeningBalanceMutation(service, apartmentId, body);

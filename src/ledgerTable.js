@@ -3,6 +3,7 @@
  */
 import { portalState } from './store.js';
 import { postFinanceMutation } from './financeApi.js';
+import { removeTransactionsLocally } from './ledgerTxnLocal.js';
 import {
     INCOME_CATS,
     EXPENSE_CATS,
@@ -516,6 +517,7 @@ export const syncLedgerBulkBar = () => {
     const countEl = bar.querySelector('#ledger-bulk-count');
     const saveBtn = bar.querySelector('#ledger-bulk-save');
     const applyBtn = bar.querySelector('#ledger-bulk-apply');
+    const deleteBtn = bar.querySelector('#ledger-bulk-delete');
     if (countEl && !countEl.classList.contains('ledger-bulk-bar__status--flash')) {
         const parts = [];
         if (selected.length) parts.push(`${selected.length} selected`);
@@ -524,6 +526,7 @@ export const syncLedgerBulkBar = () => {
     }
     if (saveBtn && saveBtn.dataset.busy !== '1') saveBtn.disabled = dirtyCount === 0;
     if (applyBtn) applyBtn.disabled = selected.length === 0;
+    if (deleteBtn) deleteBtn.disabled = selected.length === 0;
     const headerAll = document.getElementById('ledger-header-select-all');
     const checks = [...document.querySelectorAll('.ledger-row-check')];
     if (headerAll && checks.length) {
@@ -588,6 +591,7 @@ const applyLocalTxnPatches = (updates) => {
 const refreshAfterLedgerSave = ({ analytics = false } = {}) => {
     window.renderCashLedger?.();
     window.processFinances?.();
+    window.renderBankReconciliation?.();
     if (analytics) window.renderFinanceAnalytics?.();
 };
 
@@ -776,6 +780,28 @@ export const initLedgerBulkBar = () => {
             });
         } catch (err) {
             alert(err?.message || 'Bulk save failed.');
+            syncLedgerBulkBar();
+        } finally {
+            setLedgerBulkSaving(false);
+        }
+    });
+
+    document.getElementById('ledger-bulk-delete')?.addEventListener('click', async () => {
+        const btn = document.getElementById('ledger-bulk-delete');
+        const ids = selectedTxnIds();
+        if (!ids.length || btn?.dataset.busy === '1') return;
+        if (!confirm(`Permanently delete ${ids.length} ledger entr${ids.length === 1 ? 'y' : 'ies'}? This cannot be undone.`)) return;
+        try {
+            await withButtonBusy(btn, 'Deleting…', async () => {
+                setLedgerBulkSaving(true, `Deleting ${ids.length}…`);
+                await postFinanceMutation('deleteTransactions', { transaction_ids: ids });
+                ids.forEach((id) => pendingEdits.delete(id));
+                removeTransactionsLocally(ids);
+                refreshAfterLedgerSave({ analytics: true });
+                flashBulkStatus(`Deleted ${ids.length} row${ids.length === 1 ? '' : 's'}.`);
+            });
+        } catch (err) {
+            alert(err?.message || 'Bulk delete failed.');
             syncLedgerBulkBar();
         } finally {
             setLedgerBulkSaving(false);

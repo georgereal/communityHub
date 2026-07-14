@@ -72,3 +72,20 @@ export function removeTransactionLocally(txnId) {
     portalState.finances.maintenanceAllocations = (portalState.finances.maintenanceAllocations || [])
         .filter((a) => a.transaction_id !== txnId);
 }
+
+export function removeTransactionsLocally(txnIds = []) {
+    const ids = new Set((txnIds || []).filter(Boolean));
+    if (!ids.size) return;
+    portalState.finances.txns = (portalState.finances.txns || []).filter((t) => !ids.has(t.id));
+    portalState.finances.maintenanceAllocations = (portalState.finances.maintenanceAllocations || [])
+        .filter((a) => !ids.has(a.transaction_id));
+    // Unlink matched statement lines (server also does this).
+    (portalState.finances.bankStatementLines || []).forEach((line) => {
+        if (line.transaction_id && ids.has(line.transaction_id)) {
+            line.match_status = 'UNMATCHED';
+            line.transaction_id = null;
+            line.matched_at = null;
+            line.matched_by = null;
+        }
+    });
+}

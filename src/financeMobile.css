@@ -428,8 +428,18 @@
   }
 
   .fa-chart-card--wide,
+  .fa-chart-card--full,
   .fa-projection-card {
     min-height: 0;
+  }
+
+  .fa-chart-card__head {
+    gap: 0.5rem;
+  }
+
+  .fa-projection-popover {
+    right: -0.25rem;
+    width: min(300px, calc(100vw - 1.5rem));
   }
 
   .fa-chart-wrap {

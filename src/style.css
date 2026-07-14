@@ -14440,7 +14440,7 @@ textarea.bank-recon-cell-input {
 
 .fa-charts-grid {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: 1fr;
   gap: 1rem;
   margin-bottom: 1rem;
 }
@@ -14449,8 +14449,97 @@ textarea.bank-recon-cell-input {
   grid-template-columns: 1.65fr 1fr;
 }
 
-.fa-chart-card--wide {
-  min-height: 400px;
+.fa-charts-grid--single {
+  grid-template-columns: 1fr;
+}
+
+.fa-chart-card--wide,
+.fa-chart-card--full {
+  min-height: 420px;
+}
+
+.fa-chart-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.fa-chart-card__head .fa-panel__title {
+  margin-bottom: 0.25rem;
+}
+
+.fa-chart-card__head .fa-panel__hint {
+  margin: 0;
+}
+
+.fa-projection-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.fa-projection-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.fa-projection-icon-btn:hover,
+.fa-projection-icon-btn--open {
+  color: var(--accent);
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+
+.fa-projection-icon-btn__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--text-dim);
+}
+
+.fa-projection-icon-btn__badge--pos {
+  background: var(--success);
+}
+
+.fa-projection-icon-btn__badge--neg {
+  background: var(--danger);
+}
+
+.fa-projection-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 40;
+  width: min(340px, calc(100vw - 2rem));
+  padding: 0.9rem 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+
+.fa-projection-popover[hidden] {
+  display: none;
 }
 
 .fa-chart-card,
@@ -14464,10 +14553,14 @@ textarea.bank-recon-cell-input {
   border-radius: 12px;
 }
 
+.fa-chart-card--full {
+  min-height: 440px;
+}
+
 .fa-chart-wrap {
   flex: 1;
   position: relative;
-  min-height: 300px;
+  min-height: 340px;
 }
 
 .fa-pivot-cell--clickable {

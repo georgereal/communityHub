@@ -1828,7 +1828,7 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
     return `
       <section class="bank-recon-processed">
         <h4 class="bank-recon-processed__title">Matched &amp; ignored <span class="bank-recon-processed__count">(${rows.length})</span></h4>
-        <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows below and bulk return.</p>
+        <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows for bulk return / delete.</p>
         <div class="bank-recon-bulk-bar bank-recon-bulk-bar--processed">
           <label class="bank-recon-bulk-select-all">
             <input type="checkbox" class="bank-recon-processed-select-all" aria-label="Select all processed rows" />
@@ -1836,6 +1836,9 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
           </label>
           <button type="button" class="btn btn-outline btn--small bank-recon-processed-bulk-return" disabled title="Move selected rows back to unmatched work queue">
             <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Return selected
+          </button>
+          <button type="button" class="btn btn-outline btn--small btn--danger bank-recon-processed-bulk-delete" disabled title="Permanently delete selected statement lines">
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
           </button>
           <span class="bank-recon-bulk-count bank-recon-bulk-count--processed"></span>
         </div>
@@ -1865,6 +1868,7 @@ const wireProcessedLines = (root) => {
     if (processedRoot) {
         const selectAll = processedRoot.querySelector('.bank-recon-processed-select-all');
         const bulkBtn = processedRoot.querySelector('.bank-recon-processed-bulk-return');
+        const bulkDeleteBtn = processedRoot.querySelector('.bank-recon-processed-bulk-delete');
         const countEl = processedRoot.querySelector('.bank-recon-bulk-count--processed');
 
         const allChecks = () => [...processedRoot.querySelectorAll('.bank-recon-processed-check')];
@@ -1874,6 +1878,7 @@ const wireProcessedLines = (root) => {
             const checks = allChecks();
             const selected = checks.filter((c) => c.checked).length;
             if (bulkBtn) bulkBtn.disabled = selected === 0;
+            if (bulkDeleteBtn) bulkDeleteBtn.disabled = selected === 0;
             if (countEl) countEl.textContent = selected ? `${selected} selected` : '';
             if (selectAll) {
                 selectAll.checked = checks.length > 0 && selected === checks.length;
@@ -1904,6 +1909,23 @@ const wireProcessedLines = (root) => {
                     window.renderCashLedger?.();
                 } catch (err) {
                     alert(err?.message || 'Could not bulk return lines.');
+                }
+            });
+        }
+
+        if (bulkDeleteBtn) {
+            bulkDeleteBtn.addEventListener('click', async () => {
+                const ids = selectedLineIds();
+                if (!ids.length) return;
+                if (!confirm(`Permanently delete ${ids.length} matched/ignored statement line(s)? Linked ledger entries are not deleted.`)) return;
+                try {
+                    await withButtonBusy(bulkDeleteBtn, 'Deleting…', async () => {
+                        await deleteBankStatementLines(ids);
+                    });
+                    renderBankReconciliation();
+                    window.renderCashLedger?.();
+                } catch (err) {
+                    alert(err?.message || 'Could not delete selected lines.');
                 }
             });
         }
@@ -1953,6 +1975,9 @@ const renderLedgerTable = (ledgerTxns) => {
         }).join('');
 
         return `<tr class="bank-recon-table__row bank-recon-table__row--ledger" data-txn-id="${t.id}">
+        <td class="bank-recon-table__cell bank-recon-table__cell--check">
+          <input type="checkbox" class="bank-recon-ledger-check" data-txn="${t.id}" aria-label="Select ledger entry" />
+        </td>
         <td class="bank-recon-table__cell">${new Date(t.date).toLocaleDateString('en-GB')}</td>
         <td class="bank-recon-table__cell">${esc(t.type)}</td>
         <td class="bank-recon-table__cell bank-recon-table__cell--num ${t.type === 'IN' ? 'bank-recon-amt--in' : 'bank-recon-amt--out'}">
@@ -1976,10 +2001,24 @@ const renderLedgerTable = (ledgerTxns) => {
 
     return `
       <p class="bank-recon-work-hint bank-recon-work-hint--ledger">These BANK ledger entries have no linked statement line. <strong>To statements</strong> moves the row back to the work queue so you can classify and post again. Or <strong>Match</strong> to an existing statement row, or <strong>Edit</strong> / <strong>Delete</strong> if duplicate or wrong.</p>
+      <div class="bank-recon-bulk-bar bank-recon-bulk-bar--ledger">
+        <label class="bank-recon-bulk-select-all">
+          <input type="checkbox" id="bank-recon-ledger-select-all" aria-label="Select all unmatched ledger entries" />
+          <span>Select all</span>
+        </label>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-ledger-bulk-to-statement" disabled title="Return selected entries to unmatched statement lines">
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> To statements
+        </button>
+        <button type="button" class="btn btn-outline btn--small btn--danger" id="bank-recon-ledger-bulk-delete" disabled title="Permanently delete selected ledger entries">
+          <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+        </button>
+        <span class="bank-recon-bulk-count" id="bank-recon-ledger-bulk-count"></span>
+      </div>
       <div class="bank-recon-table-wrap bank-recon-table-wrap--compact">
         <table class="bank-recon-table bank-recon-table--ledger">
           <thead>
             <tr>
+              <th class="bank-recon-table__th--check"><span class="sr-only">Select</span></th>
               <th>Date</th>
               <th>Type</th>
               <th class="bank-recon-table__th--num">Amount</th>
@@ -1996,7 +2035,37 @@ const wireLedgerTable = (txnsEl) => {
     if (!txnsEl || txnsEl.dataset.wired) return;
     txnsEl.dataset.wired = '1';
 
+    const syncLedgerBulkUi = () => {
+        const checks = [...txnsEl.querySelectorAll('.bank-recon-ledger-check')];
+        const selected = checks.filter((c) => c.checked);
+        const selectAll = txnsEl.querySelector('#bank-recon-ledger-select-all');
+        const bulkDelete = txnsEl.querySelector('#bank-recon-ledger-bulk-delete');
+        const bulkToStmt = txnsEl.querySelector('#bank-recon-ledger-bulk-to-statement');
+        const countEl = txnsEl.querySelector('#bank-recon-ledger-bulk-count');
+        if (bulkDelete) bulkDelete.disabled = selected.length === 0;
+        if (bulkToStmt) bulkToStmt.disabled = selected.length === 0;
+        if (countEl) countEl.textContent = selected.length ? `${selected.length} selected` : '';
+        if (selectAll) {
+            selectAll.checked = checks.length > 0 && selected.length === checks.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
+        }
+    };
+
+    const selectedLedgerTxnIds = () =>
+        [...txnsEl.querySelectorAll('.bank-recon-ledger-check:checked')].map((c) => c.dataset.txn).filter(Boolean);
+
     txnsEl.addEventListener('change', async (e) => {
+        if (e.target.id === 'bank-recon-ledger-select-all') {
+            const on = !!e.target.checked;
+            txnsEl.querySelectorAll('.bank-recon-ledger-check').forEach((c) => { c.checked = on; });
+            syncLedgerBulkUi();
+            return;
+        }
+        if (e.target.classList.contains('bank-recon-ledger-check')) {
+            syncLedgerBulkUi();
+            return;
+        }
+
         const sel = e.target.closest('.bank-recon-ledger-match-select');
         if (!sel?.value) return;
         const txnId = sel.dataset.txn;
@@ -2014,6 +2083,47 @@ const wireLedgerTable = (txnsEl) => {
     });
 
     txnsEl.addEventListener('click', async (e) => {
+        const bulkDeleteBtn = e.target.closest('#bank-recon-ledger-bulk-delete');
+        if (bulkDeleteBtn && !bulkDeleteBtn.disabled) {
+            const ids = selectedLedgerTxnIds();
+            if (!ids.length) return;
+            if (!confirm(`Permanently delete ${ids.length} ledger entr${ids.length === 1 ? 'y' : 'ies'}?`)) return;
+            try {
+                await withButtonBusy(bulkDeleteBtn, 'Deleting…', async () => {
+                    await postFinanceMutation('deleteTransactions', { transaction_ids: ids });
+                    await pullState();
+                });
+                renderBankReconciliation();
+                window.renderCashLedger?.();
+                window.processFinances?.();
+                window.renderFinanceAnalytics?.();
+            } catch (err) {
+                alert(err?.message || 'Could not delete selected entries.');
+            }
+            return;
+        }
+
+        const bulkToStmtBtn = e.target.closest('#bank-recon-ledger-bulk-to-statement');
+        if (bulkToStmtBtn && !bulkToStmtBtn.disabled) {
+            const ids = selectedLedgerTxnIds();
+            if (!ids.length) return;
+            if (!confirm(`Return ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'} to statement lines? Ledger transaction(s) will be removed.`)) return;
+            try {
+                await withButtonBusy(bulkToStmtBtn, 'Moving…', async () => {
+                    for (const txnId of ids) {
+                        await returnLedgerTxnToStatement(txnId);
+                    }
+                });
+                renderBankReconciliation();
+                window.renderCashLedger?.();
+                window.processFinances?.();
+                window.renderFinanceAnalytics?.();
+            } catch (err) {
+                alert(err?.message || 'Could not return selected entries to statements.');
+            }
+            return;
+        }
+
         const autoBtn = e.target.closest('.bank-recon-ledger-auto-match');
         if (autoBtn && !autoBtn.disabled) {
             const txnId = autoBtn.dataset.txn;
@@ -2074,6 +2184,8 @@ const wireLedgerTable = (txnsEl) => {
             }
         }
     });
+
+    syncLedgerBulkUi();
 };
 
 const syncBulkSelectionUi = (root) => {

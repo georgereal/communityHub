@@ -293,6 +293,7 @@ const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
 
 const renderProjectionSummary = (months, sheetOnly, projectCount) => {
     const summaryEl = document.getElementById('fa-projection-summary');
+    const badgeEl = document.getElementById('fa-projection-badge');
     if (!summaryEl) return;
 
     const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly), months);
@@ -314,9 +315,16 @@ const renderProjectionSummary = (months, sheetOnly, projectCount) => {
     const avgExpense = expenseTotals.reduce((a, b) => a + b, 0) / Math.max(1, expenseTotals.length);
     const nextNet = projNet.reduce((a, b) => a + b, 0);
 
+    if (badgeEl) {
+        badgeEl.hidden = false;
+        badgeEl.textContent = nextNet >= 0 ? '+' : '−';
+        badgeEl.classList.toggle('fa-projection-icon-btn__badge--pos', nextNet >= 0);
+        badgeEl.classList.toggle('fa-projection-icon-btn__badge--neg', nextNet < 0);
+    }
+
     summaryEl.innerHTML = `
       <h3 class="fa-panel__title">Trend projection</h3>
-      <p class="fa-projection-note">Forecast uses average monthly totals over the selected history period (same figures as above).</p>
+      <p class="fa-projection-note">Avg monthly totals over the selected history · ${projectCount}-month forecast</p>
       <dl class="fa-projection-stats">
         <div><dt>Avg monthly income</dt><dd>${formatMoney(avgIncome)}</dd></div>
         <div><dt>Avg monthly expenses</dt><dd>${formatMoney(avgExpense)}</dd></div>
@@ -851,6 +859,29 @@ export const initFinanceAnalyticsUi = () => {
     ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', rerender);
     });
+
+    const projectionToggle = document.getElementById('fa-projection-toggle');
+    const projectionPopover = document.getElementById('fa-projection-popover');
+    if (projectionToggle && projectionPopover && !projectionToggle.dataset.wired) {
+        projectionToggle.dataset.wired = '1';
+        const setOpen = (open) => {
+            projectionPopover.hidden = !open;
+            projectionToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            projectionToggle.classList.toggle('fa-projection-icon-btn--open', open);
+        };
+        projectionToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(projectionPopover.hidden);
+        });
+        document.addEventListener('click', (e) => {
+            if (projectionPopover.hidden) return;
+            if (e.target.closest('.fa-projection-anchor')) return;
+            setOpen(false);
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !projectionPopover.hidden) setOpen(false);
+        });
+    }
 
     document.getElementById('fa-nobroker-upload-btn')?.addEventListener('click', () => {
         document.getElementById('fa-nobroker-file')?.click();

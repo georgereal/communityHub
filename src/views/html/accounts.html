@@ -103,6 +103,9 @@
               </select>
               <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
               <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="ledger-bulk-delete" disabled title="Permanently delete selected ledger entries">
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+              </button>
             </div>
             <div id="cash-ledger-items" class="ledger-table-host"></div>
             <div id="ledger-excluded-items" class="ledger-excluded-host"></div>
@@ -345,13 +348,26 @@
 
           <section class="fa-panel" id="fa-nobroker-panel"></section>
 
-          <div class="fa-charts-grid fa-charts-grid--dual">
-            <div class="metric-card fa-chart-card fa-chart-card--wide">
-              <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
-              <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+          <div class="fa-charts-grid fa-charts-grid--single">
+            <div class="metric-card fa-chart-card fa-chart-card--full">
+              <div class="fa-chart-card__head">
+                <div>
+                  <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
+                  <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+                </div>
+                <div class="fa-projection-anchor">
+                  <button type="button" class="fa-projection-icon-btn" id="fa-projection-toggle" aria-expanded="false" aria-controls="fa-projection-popover" title="Trend projection">
+                    <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+                    <span class="sr-only">Trend projection</span>
+                    <span class="fa-projection-icon-btn__badge" id="fa-projection-badge" hidden></span>
+                  </button>
+                  <div class="fa-projection-popover" id="fa-projection-popover" hidden role="dialog" aria-label="Trend projection">
+                    <div id="fa-projection-summary"></div>
+                  </div>
+                </div>
+              </div>
               <div class="fa-chart-wrap"><canvas id="fa-combined-chart"></canvas></div>
             </div>
-            <div class="metric-card fa-projection-card" id="fa-projection-summary"></div>
           </div>
 
           <section class="fa-panel fa-pivot-panel">
