@@ -3,7 +3,7 @@
  * Sort state and context bar for the Financial Ledger table.
  */
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
-import { getActiveLedgerTxns } from './ledgerBalance.js';
+import { getActiveLedgerTxns, ledgerTxnDayKey } from './ledgerBalance.js';
 import { isTransactionReconciled } from './bankReconciliation.js';
 import {
     buildLedgerStatementContext,
@@ -127,7 +127,9 @@ export const sortLedgerTxns = (txns) => {
     const statementCtx = field === 'date' ? buildLedgerStatementContext() : null;
     return [...txns].sort((a, b) => {
         if (field === 'date') {
-            const cmp = new Date(a.date) - new Date(b.date);
+            const dayA = ledgerTxnDayKey(a, statementCtx);
+            const dayB = ledgerTxnDayKey(b, statementCtx);
+            const cmp = dayA.localeCompare(dayB);
             if (cmp) return mul * cmp;
             return mul * compareLedgerTxnStatementOrder(a, b, statementCtx);
         }

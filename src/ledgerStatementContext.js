@@ -7,7 +7,7 @@ import {
     getBankOpeningConfig,
     reorderBankStatementLines,
 } from './bankReconciliation.js';
-import { compareLineOrder, linePassbookBalance } from './bankStatementOrdering.js';
+import { compareLineOrder, linePassbookBalance, ORDER_SOURCE } from './bankStatementOrdering.js';
 
 const PASSBOOK_IMPORT_PREFIX = 'evolyx-passbook:';
 
@@ -18,7 +18,12 @@ const passbookBalanceForLine = (line, importById) => {
     return linePassbookBalance(line);
 };
 
-const txnDateKey = (txn) => String(txn?.date || '').slice(0, 10);
+/** Calendar day key from a statement line_date (YYYY-MM-DD). */
+const lineDateKey = (line) => {
+    const raw = String(line?.line_date || '');
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[1]}-${match[2]}-${match[3]}` : raw.slice(0, 10);
+};
 
 const isBankTxn = (txn) => (txn?.wallet || '').toUpperCase() === 'BANK';
 
@@ -72,21 +77,23 @@ export function compareLedgerTxnStatementOrder(a, b, ctx) {
     return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
-/** Same-day peers for reconciled BANK ledger rows (matched statement line required). */
+/** Same-day peers grouped by matched statement line_date (not txn ISO timestamp). */
 export function buildSameDayLedgerOrderMeta(ctx = null) {
     const statementCtx = ctx || buildLedgerStatementContext();
     const byDate = new Map();
     for (const txn of getActiveBankLedgerTxns()) {
-        if (!statementCtx.byTxnId.has(txn.id)) continue;
-        const key = txnDateKey(txn);
+        const line = statementCtx.byTxnId.get(txn.id);
+        if (!line) continue;
+        const key = lineDateKey(line);
+        if (!key) continue;
         if (!byDate.has(key)) byDate.set(key, []);
-        byDate.get(key).push(txn);
+        byDate.get(key).push({ txn, line });
     }
     const meta = new Map();
-    for (const list of byDate.values()) {
-        list.sort((a, b) => compareLedgerTxnStatementOrder(a, b, statementCtx));
-        list.forEach((txn, index) => {
-            meta.set(txn.id, { index, count: list.length, date: txnDateKey(txn) });
+    for (const [date, list] of byDate) {
+        list.sort((a, b) => compareLineOrder(a.line, b.line, statementCtx.importById));
+        list.forEach((row, index) => {
+            meta.set(row.txn.id, { index, count: list.length, date });
         });
     }
     return meta;
@@ -94,50 +101,76 @@ export function buildSameDayLedgerOrderMeta(ctx = null) {
 
 /**
  * Move a reconciled BANK ledger row among same-day peers.
- * Reorders matched statement lines in those peer slots (unmatched lines keep their positions).
+ * Keys off matched statement line_date and remumbers the whole day as manual order.
  */
 export async function moveLedgerTxnInDay(txnId, direction, { steps = 1, recalculate = true } = {}) {
     const ctx = buildLedgerStatementContext();
     const txn = (portalState.finances.txns || []).find((row) => row.id === txnId);
     if (!txn) throw new Error('Transaction not found.');
     if (!isBankTxn(txn)) throw new Error('Only BANK ledger rows can be reordered.');
-    if (!ctx.byTxnId.has(txnId)) {
+
+    const focusLine = ctx.byTxnId.get(txnId);
+    if (!focusLine) {
         throw new Error('Reconcile this row to a statement line first — order is kept on the matched passbook entry.');
     }
 
-    const date = txnDateKey(txn);
-    const peers = getActiveBankLedgerTxns()
-        .filter((row) => txnDateKey(row) === date && ctx.byTxnId.has(row.id))
-        .sort((a, b) => compareLedgerTxnStatementOrder(a, b, ctx));
+    const date = lineDateKey(focusLine);
+    if (!date) throw new Error('Statement line is missing a date.');
 
-    if (peers.length <= 1) return null;
+    const activeTxnIds = new Set(getActiveBankLedgerTxns().map((row) => row.id));
+    const allDayLines = (portalState.finances.bankStatementLines || [])
+        .filter((line) => lineDateKey(line) === date);
 
-    const idx = peers.findIndex((row) => row.id === txnId);
-    if (idx < 0) return null;
+    if (!allDayLines.length) {
+        throw new Error(`No statement lines found for ${date}.`);
+    }
+
+    const dayLines = [...allDayLines].sort((a, b) => compareLineOrder(a, b, ctx.importById));
+
+    const peers = dayLines.filter(
+        (line) => line.transaction_id && activeTxnIds.has(line.transaction_id),
+    );
+
+    if (peers.length <= 1) {
+        throw new Error('Need at least two reconciled BANK rows on this date to reorder.');
+    }
+
+    const idx = peers.findIndex((line) => line.id === focusLine.id);
+    if (idx < 0) {
+        throw new Error('Could not find this row among same-day reconciled entries.');
+    }
 
     const stepCount = Math.max(1, parseInt(steps, 10) || 1);
     const targetIdx = Math.max(0, Math.min(peers.length - 1, idx + direction * stepCount));
-    if (targetIdx === idx) return null;
+    if (targetIdx === idx) {
+        throw new Error(direction < 0 ? 'Already at the top for this date.' : 'Already at the bottom for this date.');
+    }
 
     const reorderedPeers = [...peers];
     const [moved] = reorderedPeers.splice(idx, 1);
     reorderedPeers.splice(targetIdx, 0, moved);
 
-    const dayLines = (portalState.finances.bankStatementLines || [])
-        .filter((line) => String(line.line_date || '').slice(0, 10) === date)
-        .sort((a, b) => compareLineOrder(a, b, ctx.importById));
-
-    const peerLineIds = new Set(reorderedPeers.map((row) => ctx.byTxnId.get(row.id).id));
-    const linkedQueue = reorderedPeers.map((row) => ctx.byTxnId.get(row.id));
+    const peerLineIds = new Set(peers.map((line) => line.id));
+    const linkedQueue = [...reorderedPeers];
     let qi = 0;
     const merged = dayLines.map((line) => {
         if (!peerLineIds.has(line.id)) return line;
         return linkedQueue[qi++];
     });
 
-    const updates = merged.map((line, index) => ({ id: line.id, line_order: index }));
+    if (qi !== linkedQueue.length) {
+        throw new Error('Could not rebuild same-day order — peer rows were missing from the statement day.');
+    }
+
+    // Always rewrite the whole day so line_order is unique and order_source becomes manual.
+    const updates = merged.map((line, index) => ({
+        id: line.id,
+        line_order: index,
+        order_source: ORDER_SOURCE.MANUAL,
+    }));
+
     await reorderBankStatementLines(updates, { recalculate });
-    return { txnId, peerIds: reorderedPeers.map((row) => row.id) };
+    return { txnId, date, peerIds: reorderedPeers.map((line) => line.transaction_id) };
 }
 
 export function getLedgerCalculatedHeaderHint(visibleColumns) {

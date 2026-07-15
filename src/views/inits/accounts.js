@@ -6,6 +6,7 @@ import { initGeneralLedger } from '../../generalLedger.js';
 import { initBulkCollectionImport } from '../../bulkCollectionImport.js';
 import { renderLedgerSyncPanel } from '../../ledgerSpreadsheetSync.js';
 import { processFinances } from '../../finances.js';
+import { setLedgerViewRefresh } from '../../ledgerTable.js';
 import { withButtonBusy } from '../../buttonBusy.js';
 
 let wired = false;
@@ -30,4 +31,5 @@ export default async function initAccountsView() {
     window.renderFinanceAnalytics = renderFinanceAnalytics;
     window.renderCashLedger = renderCashLedger;
     window.processFinances = processFinances;
+    setLedgerViewRefresh(renderCashLedger);
 }

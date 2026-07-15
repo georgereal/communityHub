@@ -345,6 +345,24 @@ async function importBankStatementMutation(service, apartmentId, userId, body) {
     const lines = prepareImportedStatementLines(rawLines, opening);
     const importId = crypto.randomUUID();
     const dates = lines.map((l) => l.line_date).filter(Boolean).sort();
+
+    // Append onto existing same-day rows so a later upload cannot reuse 0..n
+    // and fight earlier files for sort position.
+    const maxOrderByDate = new Map();
+    const uniqueDates = [...new Set(lines.map((l) => l.line_date).filter(Boolean))];
+    if (uniqueDates.length) {
+        const { data: existing, error: existingErr } = await service
+            .from('bank_statement_lines')
+            .select('line_date, line_order')
+            .eq('apartment_id', apartmentId)
+            .in('line_date', uniqueDates);
+        if (existingErr) throw Object.assign(new Error(existingErr.message), { status: 500 });
+        for (const row of existing || []) {
+            const key = row.line_date;
+            maxOrderByDate.set(key, Math.max(maxOrderByDate.get(key) ?? -1, row.line_order ?? 0));
+        }
+    }
+
     const { error: impErr } = await service.from('bank_statement_imports').insert({
         id: importId,
         apartment_id: apartmentId,
@@ -356,20 +374,25 @@ async function importBankStatementMutation(service, apartmentId, userId, body) {
     });
     if (impErr) throw Object.assign(new Error(impErr.message), { status: 500 });
 
-    const payload = lines.map((line) => ({
-        id: crypto.randomUUID(),
-        import_id: importId,
-        apartment_id: apartmentId,
-        line_date: line.line_date,
-        description: line.description || null,
-        debit: line.debit || 0,
-        credit: line.credit || 0,
-        balance: line.balance ?? null,
-        line_order: line.line_order ?? 0,
-        source_row_index: line.source_row_index ?? null,
-        order_source: line.order_source || 'auto',
-        match_status: 'UNMATCHED',
-    }));
+    const payload = lines.map((line) => {
+        const date = line.line_date || '';
+        const localOrder = line.line_order ?? 0;
+        const offset = date && maxOrderByDate.has(date) ? maxOrderByDate.get(date) + 1 : 0;
+        return {
+            id: crypto.randomUUID(),
+            import_id: importId,
+            apartment_id: apartmentId,
+            line_date: line.line_date,
+            description: line.description || null,
+            debit: line.debit || 0,
+            credit: line.credit || 0,
+            balance: line.balance ?? null,
+            line_order: offset + localOrder,
+            source_row_index: line.source_row_index ?? null,
+            order_source: line.order_source || 'auto',
+            match_status: 'UNMATCHED',
+        };
+    });
     const { error: lineErr } = await service.from('bank_statement_lines').insert(payload);
     if (lineErr) throw Object.assign(new Error(lineErr.message), { status: 500 });
     await persistComputedBalances(service, apartmentId, opening);
@@ -381,13 +404,17 @@ async function reorderBankStatementLinesMutation(service, apartmentId, body) {
     if (!updates.length) {
         throw Object.assign(new Error('updates array is required.'), { status: 400 });
     }
-    for (const row of updates) {
-        if (!row?.id) continue;
-        const { error } = await service.from('bank_statement_lines').update({
-            line_order: row.line_order ?? 0,
-            order_source: 'manual',
-        }).eq('apartment_id', apartmentId).eq('id', row.id);
-        if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    const rows = updates.filter((row) => row?.id);
+    const batchSize = 25;
+    for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (row) => {
+            const { error } = await service.from('bank_statement_lines').update({
+                line_order: row.line_order ?? 0,
+                order_source: row.order_source || 'manual',
+            }).eq('apartment_id', apartmentId).eq('id', row.id);
+            if (error) throw Object.assign(new Error(error.message), { status: 500 });
+        }));
     }
     if (body.recalculate_balances === true) {
         const opening = await getBankOpeningForApartment(service, apartmentId);

@@ -11244,6 +11244,18 @@ header {
   color: var(--text-dim);
 }
 
+.bank-recon-processed__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.bank-recon-processed__head .bank-recon-processed__hint {
+  margin-bottom: 0;
+}
+
 .bank-recon-processed__count {
   font-weight: 600;
   color: var(--text);

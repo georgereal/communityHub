@@ -153,10 +153,24 @@ export function compareLineOrder(a, b, importById = null) {
 
     const aManual = a?.order_source === ORDER_SOURCE.MANUAL;
     const bManual = b?.order_source === ORDER_SOURCE.MANUAL;
+
+    // After ↑ ↓, trust line_order completely for that day.
     if (aManual || bManual) {
-        return (a?.line_order ?? 0) - (b?.line_order ?? 0);
+        const byOrder = (a?.line_order ?? 0) - (b?.line_order ?? 0);
+        if (byOrder !== 0) return byOrder;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
     }
 
+    // Same upload batch: line_order then OCR row.
+    if (a?.import_id && a.import_id === b?.import_id) {
+        const byOrder = (a?.line_order ?? 0) - (b?.line_order ?? 0);
+        if (byOrder !== 0) return byOrder;
+        const byOcr = (a?.source_row_index ?? 0) - (b?.source_row_index ?? 0);
+        if (byOcr !== 0) return byOcr;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+    }
+
+    // Different uploads, not yet manually ordered: upload time, then OCR, then line_order.
     if (importById) {
         const byImportOcr = compareImportThenOcr(a, b, importById);
         if (byImportOcr !== 0) return byImportOcr;
@@ -165,7 +179,9 @@ export function compareLineOrder(a, b, importById = null) {
         if (byOcr !== 0) return byOcr;
     }
 
-    return (a?.line_order ?? 0) - (b?.line_order ?? 0);
+    const byOrder = (a?.line_order ?? 0) - (b?.line_order ?? 0);
+    if (byOrder !== 0) return byOrder;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
 }
 
 /** Compute running balance per line id in chronological order. */
@@ -198,13 +214,17 @@ export function applyRunningBalances(lines = [], openingConfig = {}) {
 export function dayOrderHint(dayLines = []) {
     if (dayLines.length <= 1) return '';
     if (dayLines.some((line) => line.order_source === ORDER_SOURCE.MANUAL)) {
-        return 'Manual order';
+        return 'Manual order (↑ ↓)';
     }
     if (dayLines.some((line) => line.order_source === ORDER_SOURCE.BALANCE_INFERRED)) {
         return 'Order matches passbook balance chain (import + OCR sequence)';
     }
+    const importIds = new Set(dayLines.map((line) => line.import_id).filter(Boolean));
+    if (importIds.size > 1) {
+        return 'Same-day rows from different uploads — use ↑ ↓ to set free order';
+    }
     if (dayLines.some((line) => line.order_source === ORDER_SOURCE.AUTO && line.source_row_index != null)) {
-        return 'Order by import file, then OCR row #';
+        return 'Order by import file, then OCR row # — use ↑ ↓ to change';
     }
     return 'Use ↑ ↓ to fix order';
 }

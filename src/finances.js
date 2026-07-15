@@ -2,7 +2,7 @@
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist, supabase, pullState } from './store.js';
-import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection } from './ledgerTable.js';
+import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection, setLedgerViewRefresh } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
@@ -14,7 +14,7 @@ import {
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
 import { initLedgerExport } from './ledgerExport.js';
-import { getLedgerBankBalance, annotateLedgerRunningBalances, getActiveLedgerTxns } from './ledgerBalance.js';
+import { getLedgerBankBalance, annotateLedgerRunningBalancesInOrder, getActiveLedgerTxns } from './ledgerBalance.js';
 import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
 import {
     getPassbookClosingBalance,
@@ -712,21 +712,25 @@ export const processFinances = () => {
 };
 
 export const renderCashLedger = () => {
+    window.renderCashLedger = renderCashLedger;
+    setLedgerViewRefresh(renderCashLedger);
     const list = document.getElementById('cash-ledger-items');
     if (!list) return;
 
     renderLedgerPivotBanner();
-    const running = annotateLedgerRunningBalances();
-    const enriched = getActiveLedgerTxns([...portalState.finances.txns]).map((t) => ({
+    const active = getActiveLedgerTxns([...portalState.finances.txns]);
+    const filtered = applyLedgerTableFilters(active);
+    const sorted = sortLedgerTxns(filtered);
+    // Enrich balances after sort so _ledgerComputedBalance matches table order.
+    const running = annotateLedgerRunningBalancesInOrder(sorted);
+    const enrichedSorted = sorted.map((t) => ({
         ...t,
         _ledgerComputedBalance: running.byId.get(t.id) ?? null,
     }));
-    const filtered = applyLedgerTableFilters(enriched);
-    const sorted = sortLedgerTxns(filtered);
     updateLedgerSortIndicators();
 
     const total = getActiveLedgerTxns().length;
-    const showing = sorted.length;
+    const showing = enrichedSorted.length;
 
     const countEl = document.getElementById('cash-txn-count');
     if (countEl) {
@@ -735,7 +739,7 @@ export const renderCashLedger = () => {
             : `${showing} of ${total}`;
     }
 
-    renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
+    renderEditableLedgerRows(enrichedSorted, { formatTxnDetail, getAllAttachmentPaths });
     renderExcludedLedgerSection({ formatTxnDetailPlain });
     updateLedgerSortIndicators();
     syncLedgerOpeningFields();
@@ -1389,6 +1393,8 @@ const initLedgerRecalculate = () => {
 };
 
 const initLedgerTableControls = () => {
+    setLedgerViewRefresh(renderCashLedger);
+    window.renderCashLedger = renderCashLedger;
     initLedgerSearch();
     initLedgerCategoryFilter();
     initLedgerExport();

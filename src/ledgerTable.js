@@ -16,7 +16,7 @@ import {
 import { isTransactionReconciled, getBankOpeningConfig } from './bankReconciliation.js';
 import { withButtonBusy } from './buttonBusy.js';
 import { setLedgerActivity } from './ledgerFilter.js';
-import { annotateLedgerRunningBalances, getExcludedLedgerTxns, patchAffectsLedgerBalance } from './ledgerBalance.js';
+import { annotateLedgerRunningBalancesInOrder, getExcludedLedgerTxns, patchAffectsLedgerBalance } from './ledgerBalance.js';
 import {
     wireClassifyCombobox,
     setClassifyInputState,
@@ -69,6 +69,62 @@ let ledgerVisibleColumns = loadLedgerColumns();
 
 const persistLedgerColumns = () => {
     localStorage.setItem(LEDGER_COLUMNS_KEY, JSON.stringify(ledgerVisibleColumns));
+};
+
+/** Registered by finances.js — avoids relying on a stale window.renderCashLedger after HMR. */
+let refreshLedgerView = () => {
+    if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
+};
+
+export const setLedgerViewRefresh = (fn) => {
+    if (typeof fn === 'function') refreshLedgerView = fn;
+};
+
+const applyLedgerColumnToggle = (key, checked) => {
+    if (!key || !(key in DEFAULT_LEDGER_COLUMNS)) return;
+    ledgerVisibleColumns = { ...ledgerVisibleColumns, [key]: !!checked };
+    persistLedgerColumns();
+    refreshLedgerView();
+};
+
+const ensureLedgerColumnsSlotWired = () => {
+    const slot = document.getElementById('ledger-columns-slot');
+    if (!slot || slot.dataset.columnWired === '1') return;
+    slot.dataset.columnWired = '1';
+    slot.addEventListener('change', (e) => {
+        const input = e.target.closest('[data-ledger-column-toggle]');
+        if (!input || !slot.contains(input)) return;
+        applyLedgerColumnToggle(input.dataset.ledgerColumnToggle, input.checked);
+    });
+};
+
+const mountLedgerColumnsPicker = (visibleColumns) => {
+    const slot = document.getElementById('ledger-columns-slot');
+    if (!slot) return;
+    ensureLedgerColumnsSlotWired();
+    const wasOpen = slot.querySelector('details.ledger-columns-picker')?.open;
+    slot.innerHTML = `
+      <details class="bank-recon-columns-picker ledger-columns-picker"${wasOpen ? ' open' : ''}>
+        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
+        <div class="bank-recon-columns-picker__menu">
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
+            <span>Ledger calculated</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
+            <span>Passbook balance</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
+            <span>OCR row #</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
+            <span>Row order (↑ ↓)</span>
+          </label>
+        </div>
+      </details>`;
 };
 
 /** @type {Map<string, object>} pending field patches keyed by transaction id */
@@ -257,7 +313,7 @@ const renderLedgerRow = (raw, {
     const calcTitle = ledgerCalcNum != null
         ? (passbookMismatch
             ? `Ledger calculated ${ledgerCalc} ≠ passbook ${formatMoney(passbookNum)}`
-            : 'Running balance from opening + BANK ledger entries only (excludes unmatched statement lines)')
+            : 'Running balance: previous Calculated ± this row (current table order)')
         : (needsOpening ? 'Set opening balance to calculate' : '');
     const calcCell = visibleColumns.calculatedBalance
         ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed${mismatchClass}"${calcTitle ? ` title="${esc(calcTitle)}"` : ''}>${ledgerCalc}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`
@@ -371,54 +427,19 @@ const wireLedgerClassifyRows = (root) => {
     root.querySelectorAll('tr.ledger-txn-row').forEach(initRowClassifyValues);
 };
 
-const mountLedgerColumnsPicker = (visibleColumns) => {
-    const slot = document.getElementById('ledger-columns-slot');
-    if (!slot) return;
-    slot.innerHTML = `
-      <details class="bank-recon-columns-picker ledger-columns-picker">
-        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
-        <div class="bank-recon-columns-picker__menu">
-          <label class="bank-recon-columns-picker__option">
-            <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
-            <span>Ledger calculated</span>
-          </label>
-          <label class="bank-recon-columns-picker__option">
-            <input type="checkbox" data-ledger-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
-            <span>Passbook balance</span>
-          </label>
-          <label class="bank-recon-columns-picker__option">
-            <input type="checkbox" data-ledger-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
-            <span>OCR row #</span>
-          </label>
-          <label class="bank-recon-columns-picker__option">
-            <input type="checkbox" data-ledger-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
-            <span>Row order (↑ ↓)</span>
-          </label>
-        </div>
-      </details>`;
-    slot.querySelectorAll('[data-ledger-column-toggle]').forEach((input) => {
-        input.addEventListener('change', () => {
-            const key = input.dataset.ledgerColumnToggle;
-            if (!key) return;
-            ledgerVisibleColumns = { ...ledgerVisibleColumns, [key]: !!input.checked };
-            persistLedgerColumns();
-            window.renderCashLedger?.();
-        });
-    });
-};
-
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
     const list = document.getElementById('cash-ledger-items');
     if (!list) return;
 
     const visibleColumns = { ...ledgerVisibleColumns };
-    const running = annotateLedgerRunningBalances();
+    // Calculated follows this table order: previous bank calculated ± this row.
+    const running = annotateLedgerRunningBalancesInOrder(txns);
     const opening = getBankOpeningConfig();
     const statementCtx = buildLedgerStatementContext();
     const orderMeta = buildSameDayLedgerOrderMeta(statementCtx);
     const calculatedHeaderHint = visibleColumns.calculatedBalance && opening.amount == null
         ? ' title="Set opening balance via the Opening control above"'
-        : '';
+        : ' title="Running balance: previous Calculated ± this row (table order)"';
     const rowOpts = {
         formatTxnDetail,
         getAllAttachmentPaths,
@@ -741,38 +762,47 @@ const applyBulkToSelected = () => {
     );
 };
 
-let ledgerTableWired = false;
+const LEDGER_EVENTS_VERSION = 'ledger-events-v3';
 
 export const wireLedgerTableEvents = () => {
     syncLedgerBulkBar();
 
     const list = document.getElementById('cash-ledger-items');
-    if (!list || list.dataset.editWired) return;
-    list.dataset.editWired = '1';
+    if (!list) return;
 
-    list.addEventListener('change', (e) => {
+    // Rebind when handler version changes (avoids stale HMR listeners with no ↑ ↓ handlers).
+    if (list.dataset.editWired === LEDGER_EVENTS_VERSION) return;
+    if (list._ledgerOnClick) {
+        list.removeEventListener('click', list._ledgerOnClick);
+        list.removeEventListener('change', list._ledgerOnChange);
+        list.removeEventListener('input', list._ledgerOnInput);
+    }
+    list.dataset.editWired = LEDGER_EVENTS_VERSION;
+
+    list._ledgerOnChange = (e) => {
         const row = e.target.closest('.ledger-txn-row');
         if (!row) return;
         if (e.target.matches('.ledger-row-check')) {
             syncLedgerBulkBar();
-            return;
         }
-    });
+    };
 
-    list.addEventListener('input', (e) => {
+    list._ledgerOnInput = (e) => {
         const row = e.target.closest('.ledger-txn-row');
         if (row && e.target.matches('.bank-recon-cell-input--desc, .bank-recon-vendor-input')) {
             onRowFieldChange(row);
         }
-    });
+    };
 
-    list.addEventListener('click', async (e) => {
+    list._ledgerOnClick = async (e) => {
         if (e.target.closest('.ledger-move-step')) {
             e.stopPropagation();
         }
 
         const moveBtn = e.target.closest('.ledger-move-up, .ledger-move-down');
         if (moveBtn) {
+            e.preventDefault();
+            e.stopPropagation();
             if (moveBtn.disabled || moveBtn.dataset.busy === '1') return;
             const txnId = moveBtn.dataset.txn;
             if (!txnId) return;
@@ -786,6 +816,7 @@ export const wireLedgerTableEvents = () => {
                     window.renderCashLedger?.();
                 });
             } catch (err) {
+                console.error('Ledger row reorder failed', err);
                 alert(err?.message || 'Could not reorder row.');
             }
             return;
@@ -828,7 +859,11 @@ export const wireLedgerTableEvents = () => {
         } finally {
             setLedgerBulkSaving(false);
         }
-    });
+    };
+
+    list.addEventListener('change', list._ledgerOnChange);
+    list.addEventListener('input', list._ledgerOnInput);
+    list.addEventListener('click', list._ledgerOnClick);
 };
 
 const populateBulkCategorySelect = () => {
@@ -843,8 +878,8 @@ const populateBulkCategorySelect = () => {
 };
 
 export const initLedgerBulkBar = () => {
-    if (ledgerTableWired) return;
-    ledgerTableWired = true;
+    if (document.body.dataset.ledgerBulkBarWired === '1') return;
+    document.body.dataset.ledgerBulkBarWired = '1';
 
     populateBulkCategorySelect();
 

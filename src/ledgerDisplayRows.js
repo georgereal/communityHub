@@ -1,7 +1,8 @@
 /**
  * Financial ledger row shape — shared by on-screen table, download export, and spreadsheet sync.
  */
-import { annotateLedgerRunningBalances, getActiveLedgerTxns } from './ledgerBalance.js';
+import { annotateLedgerRunningBalancesInOrder, getActiveLedgerTxns, ledgerTxnDayKey } from './ledgerBalance.js';
+import { buildLedgerStatementContext, compareLedgerTxnStatementOrder } from './ledgerStatementContext.js';
 import { categoryDisplayLabel } from './expenseCategories.js';
 import { formatTxnDetailPlain } from './finances.js';
 import { getDefaultImportExpr, getDefaultExportExpr } from './ledgerTransform.js';
@@ -149,12 +150,13 @@ export function resolveSyncColumnMapping(settings, headersRaw = []) {
  * @param {{ reconciledIds?: Set<string> }} opts
  */
 export function getLedgerSyncExportRows(txns, { reconciledIds = new Set() } = {}) {
-    const running = annotateLedgerRunningBalances(txns);
+    const ctx = buildLedgerStatementContext();
     const sorted = [...getActiveLedgerTxns(txns)].sort((a, b) => {
-        const byDate = String(a.date || '').localeCompare(String(b.date || ''));
-        if (byDate) return byDate;
-        return String(a.id || '').localeCompare(String(b.id || ''));
+        const byDay = ledgerTxnDayKey(a, ctx).localeCompare(ledgerTxnDayKey(b, ctx));
+        if (byDay) return byDay;
+        return compareLedgerTxnStatementOrder(a, b, ctx);
     });
+    const running = annotateLedgerRunningBalancesInOrder(sorted);
     return sorted.map((t) => ({
         ...t,
         _ledgerComputedBalance: running.byId.get(t.id) ?? null,

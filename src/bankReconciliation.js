@@ -360,15 +360,16 @@ export async function importBankStatement(file, lines, { fileLabel, skipDedupe =
 }
 
 const showRecalcStatus = (message = 'Recalculating calculated balances… please wait.') => {
-    const el = document.getElementById('bank-recon-recalc-status');
-    if (!el) return;
-    el.hidden = false;
-    el.textContent = message;
+    document.querySelectorAll('.bank-recon-recalc-status').forEach((el) => {
+        el.hidden = false;
+        el.textContent = message;
+    });
 };
 
 const hideRecalcStatus = () => {
-    const el = document.getElementById('bank-recon-recalc-status');
-    if (el) el.hidden = true;
+    document.querySelectorAll('.bank-recon-recalc-status').forEach((el) => {
+        el.hidden = true;
+    });
 };
 
 /** Save mutation first, then refresh state with visible recalc feedback. */
@@ -384,6 +385,18 @@ async function saveThenRecalculate(btn, savingLabel, onSave) {
         hideRecalcStatus();
         clearButtonBusy(btn, snapshot);
     }
+}
+
+async function runBankReconRecalculate(btn) {
+    const opening = getBankOpeningConfig();
+    if (opening.amount == null) {
+        alert('Set the opening balance first — calculated balances need a starting point.');
+        return false;
+    }
+    await saveThenRecalculate(btn, 'Recalculating…', () => recalculateBankStatementBalances());
+    renderBankReconciliation();
+    window.renderCashLedger?.();
+    return true;
 }
 
 export const getUnmatchedBankLines = () =>
@@ -542,12 +555,12 @@ export async function reorderBankStatementLines(updates = [], { recalculate = fa
         updates,
         recalculate_balances: recalculate,
     });
+    // Always apply locally so same-day sort switches to manual line_order immediately.
+    patchLocalLineOrder(updates);
     if (recalculate) {
         showRecalcStatus();
         await pullState();
         hideRecalcStatus();
-    } else {
-        patchLocalLineOrder(updates);
     }
 }
 
@@ -558,11 +571,12 @@ export async function recalculateBankStatementBalances() {
 }
 
 const patchLocalLineOrder = (updates = []) => {
-    const byId = new Map(updates.map((u) => [u.id, u.line_order]));
+    const byId = new Map(updates.map((u) => [u.id, u]));
     for (const line of portalState.finances.bankStatementLines || []) {
         if (!byId.has(line.id)) continue;
-        line.line_order = byId.get(line.id);
-        line.order_source = 'manual';
+        const patch = byId.get(line.id);
+        line.line_order = patch.line_order;
+        line.order_source = patch.order_source || 'manual';
     }
 };
 
@@ -1231,7 +1245,7 @@ async function moveStatementLineInDay(lineId, direction, { recalculate = false, 
     const ids = sorted.map((l) => l.id);
     const [moved] = ids.splice(idx, 1);
     ids.splice(targetIdx, 0, moved);
-    const updates = ids.map((id, index) => ({ id, line_order: index }));
+    const updates = ids.map((id, index) => ({ id, line_order: index, order_source: 'manual' }));
     await reorderBankStatementLines(updates, { recalculate });
     return { lineId, dayLineIds: ids, orderMeta: buildSameDayOrderIndex(lines) };
 }
@@ -1827,8 +1841,16 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
 
     return `
       <section class="bank-recon-processed">
-        <h4 class="bank-recon-processed__title">Matched &amp; ignored <span class="bank-recon-processed__count">(${rows.length})</span></h4>
-        <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows for bulk return / delete.</p>
+        <div class="bank-recon-processed__head">
+          <div>
+            <h4 class="bank-recon-processed__title">Matched &amp; ignored <span class="bank-recon-processed__count">(${rows.length})</span></h4>
+            <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows for bulk return / delete.</p>
+          </div>
+          <button type="button" class="btn btn-outline btn--small bank-recon-processed-recalc-btn" title="Recalculate Calculated balance for all statement lines (including matched)">
+            <i class="fa-solid fa-calculator" aria-hidden="true"></i> Recalculate
+          </button>
+        </div>
+        <p class="bank-recon-recalc-status bank-recon-recalc-status--inline bank-recon-processed-recalc-status" hidden></p>
         <div class="bank-recon-bulk-bar bank-recon-bulk-bar--processed">
           <label class="bank-recon-bulk-select-all">
             <input type="checkbox" class="bank-recon-processed-select-all" aria-label="Select all processed rows" />
@@ -1926,6 +1948,18 @@ const wireProcessedLines = (root) => {
                     window.renderCashLedger?.();
                 } catch (err) {
                     alert(err?.message || 'Could not delete selected lines.');
+                }
+            });
+        }
+
+        const recalcBtn = processedRoot.querySelector('.bank-recon-processed-recalc-btn');
+        if (recalcBtn && !recalcBtn.dataset.wired) {
+            recalcBtn.dataset.wired = '1';
+            recalcBtn.addEventListener('click', async () => {
+                try {
+                    await runBankReconRecalculate(recalcBtn);
+                } catch (err) {
+                    alert(err?.message || 'Could not recalculate balances.');
                 }
             });
         }
@@ -3628,15 +3662,9 @@ export const initBankReconciliationUi = () => {
     });
 
     document.getElementById('bank-recon-recalc-btn')?.addEventListener('click', async () => {
-        const opening = getBankOpeningConfig();
-        if (opening.amount == null) {
-            alert('Set the opening balance first — calculated balances need a starting point.');
-            return;
-        }
         const btn = document.getElementById('bank-recon-recalc-btn');
         try {
-            await saveThenRecalculate(btn, 'Recalculating…', () => recalculateBankStatementBalances());
-            renderBankReconciliation();
+            await runBankReconRecalculate(btn);
         } catch (err) {
             alert(err?.message || 'Could not recalculate balances.');
         }
