@@ -5,6 +5,10 @@
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
 import { getActiveLedgerTxns } from './ledgerBalance.js';
 import { isTransactionReconciled } from './bankReconciliation.js';
+import {
+    buildLedgerStatementContext,
+    compareLedgerTxnStatementOrder,
+} from './ledgerStatementContext.js';
 
 const isExpenseFromSheet = (txn) =>
     txn?.type === 'OUT' && Boolean(txn.external_sync_key || txn.sync_hash);
@@ -120,11 +124,12 @@ export const toggleLedgerSort = (field) => {
 export const sortLedgerTxns = (txns) => {
     const { field, dir } = ledgerSort;
     const mul = dir === 'asc' ? 1 : -1;
+    const statementCtx = field === 'date' ? buildLedgerStatementContext() : null;
     return [...txns].sort((a, b) => {
         if (field === 'date') {
             const cmp = new Date(a.date) - new Date(b.date);
             if (cmp) return mul * cmp;
-            return mul * String(a.id || '').localeCompare(String(b.id || ''));
+            return mul * compareLedgerTxnStatementOrder(a, b, statementCtx);
         }
         if (field === 'cat') return mul * String(a.cat || '').localeCompare(String(b.cat || ''));
         if (field === 'wallet') return mul * String(a.wallet || '').localeCompare(String(b.wallet || ''));

@@ -22,6 +22,13 @@ import {
     setClassifyInputState,
     isExactListMatch,
 } from './classifyCombobox.js';
+import {
+    buildLedgerStatementContext,
+    enrichTxnWithStatementLine,
+    buildSameDayLedgerOrderMeta,
+    moveLedgerTxnInDay,
+} from './ledgerStatementContext.js';
+import { formatOcrRowDisplay } from './bankStatementLineUtils.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
@@ -37,12 +44,24 @@ const formatDisplayDate = (isoDate) => {
 
 const LEDGER_COLUMNS_KEY = 'ledgerTableColumns_v1';
 
+const DEFAULT_LEDGER_COLUMNS = {
+    calculatedBalance: true,
+    passbookBalance: false,
+    ocrRow: false,
+    rowOrder: false,
+};
+
 const loadLedgerColumns = () => {
     try {
         const saved = JSON.parse(localStorage.getItem(LEDGER_COLUMNS_KEY) || 'null');
-        return { calculatedBalance: saved?.calculatedBalance !== false };
+        return {
+            calculatedBalance: saved?.calculatedBalance !== false,
+            passbookBalance: !!saved?.passbookBalance,
+            ocrRow: !!saved?.ocrRow,
+            rowOrder: !!saved?.rowOrder,
+        };
     } catch {
-        return { calculatedBalance: true };
+        return { ...DEFAULT_LEDGER_COLUMNS };
     }
 };
 
@@ -181,12 +200,37 @@ const renderLedgerClassifyCell = (t, isIncome) => {
     </div>`;
 };
 
-const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleColumns, runningBalances, needsOpening }) => {
+const renderLedgerOrderButtons = (txnId, orderMeta) => {
+    const o = orderMeta.get(txnId);
+    if (!o || o.count <= 1) {
+        return '<td class="bank-recon-table__cell bank-recon-table__cell--order"></td>';
+    }
+    const upDisabled = o.index === 0 ? ' disabled' : '';
+    const downDisabled = o.index === o.count - 1 ? ' disabled' : '';
+    return `<td class="bank-recon-table__cell bank-recon-table__cell--order">
+      <div class="bank-recon-order-btns">
+        <button type="button" class="btn btn-outline btn--small btn--icon ledger-move-up" data-txn="${txnId}" title="Move up (same day)" aria-label="Move up"${upDisabled}><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
+        <input type="number" class="bank-recon-move-step expense-combobox ledger-move-step" min="1" max="${Math.max(1, o.count - 1)}" value="1" title="Number of positions to move" aria-label="Rows to move" />
+        <button type="button" class="btn btn-outline btn--small btn--icon ledger-move-down" data-txn="${txnId}" title="Move down (same day)" aria-label="Move down"${downDisabled}><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+      </div>
+    </td>`;
+};
+
+const renderLedgerRow = (raw, {
+    formatTxnDetail,
+    getAllAttachmentPaths,
+    visibleColumns,
+    runningBalances,
+    needsOpening,
+    statementCtx,
+    orderMeta,
+}) => {
     const t = mergedTxn(raw);
     const isIncome = t.type === 'IN';
     const lineType = isIncome ? 'IN' : 'OUT';
     const isBank = (t.wallet || '').toUpperCase() === 'BANK';
     const reconciled = isTransactionReconciled(t.id);
+    const stmt = enrichTxnWithStatementLine(t, statementCtx);
     const reportsBadge = t.exclude_from_reports
         ? '<span class="ledger-recon-badge ledger-recon-badge--report-excluded" title="Omitted from Financial Reports">No reports</span>'
         : '';
@@ -203,14 +247,34 @@ const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleC
     const cr = isIncome ? formatMoney(t.amount) : '—';
     const drClass = !isIncome ? ' bank-recon-amt--out' : '';
     const crClass = isIncome ? ' bank-recon-amt--in' : '';
+
+    const ledgerCalcNum = isBank && runningBalances.has(t.id) ? runningBalances.get(t.id) : null;
+    const ledgerCalc = ledgerCalcNum != null ? formatMoney(ledgerCalcNum) : '—';
+    const passbookNum = stmt.passbookBalance;
+    const passbookMismatch = passbookNum != null && ledgerCalcNum != null
+        && Math.abs(ledgerCalcNum - passbookNum) > 0.01;
+    const mismatchClass = passbookMismatch ? ' bank-recon-balance--mismatch' : '';
+    const calcTitle = ledgerCalcNum != null
+        ? (passbookMismatch
+            ? `Ledger calculated ${ledgerCalc} ≠ passbook ${formatMoney(passbookNum)}`
+            : 'Running balance from opening + BANK ledger entries only (excludes unmatched statement lines)')
+        : (needsOpening ? 'Set opening balance to calculate' : '');
     const calcCell = visibleColumns.calculatedBalance
-        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed">${isBank && runningBalances.has(t.id) ? formatMoney(runningBalances.get(t.id)) : (isBank && needsOpening ? '—' : '—')}</td>`
+        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed${mismatchClass}"${calcTitle ? ` title="${esc(calcTitle)}"` : ''}>${ledgerCalc}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`
+        : '';
+    const passbookCell = visibleColumns.passbookBalance
+        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--passbook${mismatchClass}"${passbookMismatch ? ` title="${esc(calcTitle)}"` : ''}>${passbookNum != null ? formatMoney(passbookNum) : '—'}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`
+        : '';
+    const ocrCell = visibleColumns.ocrRow
+        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr" title="OCR / statement row sequence">${formatOcrRowDisplay(stmt.line) ?? '—'}</td>`
         : '';
 
-    return `<tr class="bank-recon-table__row ledger-txn-row${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}" data-txn-id="${t.id}" data-line-type="${lineType}">
+    return `<tr class="bank-recon-table__row ledger-txn-row${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}${passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-txn-id="${t.id}" data-line-type="${lineType}" data-txn-date="${esc(String(t.date || '').slice(0, 10))}">
+      ${visibleColumns.rowOrder ? renderLedgerOrderButtons(t.id, orderMeta) : ''}
       <td class="bank-recon-table__cell bank-recon-table__cell--check">
         <input type="checkbox" class="ledger-row-check" data-txn="${t.id}" aria-label="Select row" />
       </td>
+      ${ocrCell}
       <td class="bank-recon-table__cell bank-recon-table__cell--date">${esc(formatDisplayDate(t.date))}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--desc">
         <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="2"${descPlaceholder}>${esc(t.description || '')}</textarea>
@@ -218,6 +282,7 @@ const renderLedgerRow = (raw, { formatTxnDetail, getAllAttachmentPaths, visibleC
       <td class="bank-recon-table__cell bank-recon-table__cell--num${drClass}">${dr}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${crClass}">${cr}</td>
       ${calcCell}
+      ${passbookCell}
       <td class="bank-recon-table__cell bank-recon-table__cell--type">
         <span class="bank-recon-type-badge bank-recon-type-badge--${lineType.toLowerCase()}">${isIncome ? 'Income' : 'Expense'}</span>
       </td>
@@ -311,11 +376,23 @@ const mountLedgerColumnsPicker = (visibleColumns) => {
     if (!slot) return;
     slot.innerHTML = `
       <details class="bank-recon-columns-picker ledger-columns-picker">
-        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></summary>
+        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
         <div class="bank-recon-columns-picker__menu">
           <label class="bank-recon-columns-picker__option">
             <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
-            <span>Calculated balance</span>
+            <span>Ledger calculated</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="passbookBalance" ${visibleColumns.passbookBalance ? 'checked' : ''} />
+            <span>Passbook balance</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
+            <span>OCR row #</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
+            <span>Row order (↑ ↓)</span>
           </label>
         </div>
       </details>`;
@@ -337,8 +414,10 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
     const visibleColumns = { ...ledgerVisibleColumns };
     const running = annotateLedgerRunningBalances();
     const opening = getBankOpeningConfig();
+    const statementCtx = buildLedgerStatementContext();
+    const orderMeta = buildSameDayLedgerOrderMeta(statementCtx);
     const calculatedHeaderHint = visibleColumns.calculatedBalance && opening.amount == null
-        ? ' title="Set opening balance in Bank Reconciliation"'
+        ? ' title="Set opening balance via the Opening control above"'
         : '';
     const rowOpts = {
         formatTxnDetail,
@@ -346,6 +425,8 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
         visibleColumns,
         runningBalances: running.byId,
         needsOpening: running.needsOpening,
+        statementCtx,
+        orderMeta,
     };
 
     if (!txns.length) {
@@ -369,14 +450,17 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
           <table class="bank-recon-table bank-recon-table--ledger">
             <thead>
               <tr>
+                ${visibleColumns.rowOrder ? '<th class="bank-recon-table__th--order" title="Reorder reconciled rows on the same date">Order</th>' : ''}
                 <th class="bank-recon-table__th--check">
                   <input type="checkbox" id="ledger-header-select-all" aria-label="Select all" />
                 </th>
+                ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num" title="OCR / statement row sequence">OCR #</th>' : ''}
                 <th>${renderSortHeader('Date', 'date')}</th>
                 <th>Description</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Debit', 'dr', 'ledger-sort-btn--num')}</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Credit', 'cr', 'ledger-sort-btn--num')}</th>
-                ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint}>${renderSortHeader('Calculated', 'computedBalance', 'ledger-sort-btn--num')}</th>` : ''}
+                ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint || ' title="Opening + BANK ledger entries only — does not include unmatched statement lines"'}>${renderSortHeader('Calculated', 'computedBalance', 'ledger-sort-btn--num')}</th>` : ''}
+                ${visibleColumns.passbookBalance ? '<th class="bank-recon-table__th--num" title="Balance printed on the matched passbook / statement line">Passbook</th>' : ''}
                 <th>Type</th>
                 <th>${renderSortHeader('Category / vendor', 'cat')}</th>
                 <th>${renderSortHeader('Ledger', 'wallet')}</th>
@@ -683,6 +767,30 @@ export const wireLedgerTableEvents = () => {
     });
 
     list.addEventListener('click', async (e) => {
+        if (e.target.closest('.ledger-move-step')) {
+            e.stopPropagation();
+        }
+
+        const moveBtn = e.target.closest('.ledger-move-up, .ledger-move-down');
+        if (moveBtn) {
+            if (moveBtn.disabled || moveBtn.dataset.busy === '1') return;
+            const txnId = moveBtn.dataset.txn;
+            if (!txnId) return;
+            const direction = moveBtn.classList.contains('ledger-move-up') ? -1 : 1;
+            const stepInput = moveBtn.closest('.bank-recon-order-btns')?.querySelector('.ledger-move-step');
+            const steps = Math.max(1, parseInt(stepInput?.value, 10) || 1);
+            try {
+                await withButtonBusy(moveBtn, '…', async () => {
+                    await moveLedgerTxnInDay(txnId, direction, { steps, recalculate: true });
+                    window.processFinances?.();
+                    window.renderCashLedger?.();
+                });
+            } catch (err) {
+                alert(err?.message || 'Could not reorder row.');
+            }
+            return;
+        }
+
         const classifyBtn = e.target.closest('.ledger-classify-display');
         if (classifyBtn) {
             openClassifyEdit(classifyBtn.closest('.ledger-txn-row'));

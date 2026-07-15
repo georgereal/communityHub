@@ -1,9 +1,13 @@
 /**
  * Ledger bank balance — opening + BANK ledger movements (active rows only).
- * Running balance per row is chronological (date, then id); final total is order-independent.
+ * Running balance uses statement order for reconciled same-day rows when linked.
  */
 import { portalState } from './store.js';
 import { getBankOpeningConfig } from './bankReconciliation.js';
+import {
+    buildLedgerStatementContext,
+    compareLedgerTxnStatementOrder,
+} from './ledgerStatementContext.js';
 
 export const isActiveLedgerTxn = (t) => !t?.excluded_from_ledger;
 
@@ -21,12 +25,10 @@ const txnMovement = (t) => {
     return t.type === 'IN' ? amt : -amt;
 };
 
-const chronologicalBankTxns = (txns) =>
-    bankWalletTxns(txns).sort((a, b) => {
-        const byDate = String(a.date || '').localeCompare(String(b.date || ''));
-        if (byDate) return byDate;
-        return String(a.id || '').localeCompare(String(b.id || ''));
-    });
+const chronologicalBankTxns = (txns) => {
+    const ctx = buildLedgerStatementContext();
+    return bankWalletTxns(txns).sort((a, b) => compareLedgerTxnStatementOrder(a, b, ctx));
+};
 
 /** Fields that change running bank balance when edited. */
 export const LEDGER_BALANCE_FIELDS = new Set(['amount', 'type', 'wallet', 'date', 'excluded_from_ledger']);

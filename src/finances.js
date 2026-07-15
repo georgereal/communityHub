@@ -16,7 +16,13 @@ import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
 import { initLedgerExport } from './ledgerExport.js';
 import { getLedgerBankBalance, annotateLedgerRunningBalances, getActiveLedgerTxns } from './ledgerBalance.js';
 import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
-import { getPassbookClosingBalance } from './bankReconciliation.js';
+import {
+    getPassbookClosingBalance,
+    getBankOpeningConfig,
+    recalculateBankStatementBalances,
+    saveBankOpeningBalance,
+} from './bankReconciliation.js';
+import { withButtonBusy } from './buttonBusy.js';
 import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from './expenseCategories.js';
 
 const CAT_LABELS = CATEGORY_LABELS;
@@ -675,7 +681,7 @@ export const processFinances = () => {
         if (bankEl) {
             bankEl.textContent = bankBalance != null ? fmt(bankBalance) : '—';
             if (ledgerBank.needsOpening) {
-                bankEl.title = 'Set opening balance in Bank Reconciliation — ledger balance needs a starting amount';
+                bankEl.title = 'Set opening balance via the Opening control in the ledger toolbar';
             } else if (passbookGap != null && Math.abs(passbookGap) >= 1) {
                 bankEl.title = `Ledger calculated ${fmt(bankBalance)} vs passbook ${fmt(passbook.balance)} (${fmt(passbookGap)} gap)`;
             } else {
@@ -686,7 +692,7 @@ export const processFinances = () => {
         if (hintEl) {
             if (ledgerBank.needsOpening) {
                 hintEl.hidden = false;
-                hintEl.textContent = 'Set opening balance in Bank Reconciliation to align calculated balance with passbook.';
+                hintEl.innerHTML = '<button type="button" class="ledger-kpi__hint-btn" id="ledger-bank-hint-open">Set opening balance</button>';
             } else if (passbook?.balance != null && passbookGap != null && Math.abs(passbookGap) >= 1) {
                 hintEl.hidden = false;
                 hintEl.textContent = `Passbook shows ${fmt(passbook.balance)} — gap of ${fmt(passbookGap)} (missing ledger entries or opening date mismatch).`;
@@ -702,6 +708,7 @@ export const processFinances = () => {
             k('cash-txn-count').textContent = n ? `${n} entries` : '';
         }
     }
+    syncLedgerOpeningFields();
 };
 
 export const renderCashLedger = () => {
@@ -731,6 +738,7 @@ export const renderCashLedger = () => {
     renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
     renderExcludedLedgerSection({ formatTxnDetailPlain });
     updateLedgerSortIndicators();
+    syncLedgerOpeningFields();
 };
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
@@ -1261,10 +1269,131 @@ const initLedgerCategoryFilter = () => {
     });
 };
 
+const showLedgerRecalcStatus = (message = 'Recalculating calculated balances… please wait.') => {
+    const el = document.getElementById('ledger-recalc-status');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = message;
+};
+
+const hideLedgerRecalcStatus = () => {
+    const el = document.getElementById('ledger-recalc-status');
+    if (el) el.hidden = true;
+};
+
+const formatOpeningShort = (opening) => {
+    if (opening?.amount == null || !opening?.date) return null;
+    const amt = `₹${Number(opening.amount).toLocaleString('en-IN')}`;
+    const match = String(opening.date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const dateLabel = match ? `${match[3]}-${match[2]}-${match[1].slice(-2)}` : opening.date;
+    return `${amt} · ${dateLabel}`;
+};
+
+const syncLedgerOpeningFields = () => {
+    const opening = getBankOpeningConfig();
+    const dateEl = document.getElementById('ledger-opening-date');
+    const amountEl = document.getElementById('ledger-opening-amount');
+    const summary = document.getElementById('ledger-opening-summary');
+    if (dateEl && document.activeElement !== dateEl) {
+        dateEl.value = opening.date || '';
+    }
+    if (amountEl && document.activeElement !== amountEl) {
+        amountEl.value = opening.amount != null ? String(opening.amount) : '';
+    }
+    if (summary) {
+        const short = formatOpeningShort(opening);
+        summary.innerHTML = short
+            ? `<i class="fa-solid fa-bookmark" aria-hidden="true"></i> Opening <span class="ledger-opening-picker__badge">${short}</span>`
+            : '<i class="fa-solid fa-bookmark" aria-hidden="true"></i> Opening';
+        summary.classList.toggle('ledger-opening-picker__summary--unset', !short);
+        summary.title = short
+            ? `Opening balance ${short}`
+            : 'Set bank opening balance for Calculated values';
+    }
+};
+
+const openLedgerOpeningPicker = ({ focusAmount = true } = {}) => {
+    const picker = document.getElementById('ledger-opening-picker');
+    if (!picker) return;
+    syncLedgerOpeningFields();
+    picker.open = true;
+    if (focusAmount) {
+        requestAnimationFrame(() => document.getElementById('ledger-opening-amount')?.focus());
+    }
+};
+
+const initLedgerOpeningBalance = () => {
+    const saveBtn = document.getElementById('ledger-opening-save');
+    if (!saveBtn || saveBtn.dataset.wired) return;
+    saveBtn.dataset.wired = '1';
+
+    document.getElementById('ledger-bank-hint')?.addEventListener('click', (e) => {
+        if (!e.target.closest('#ledger-bank-hint-open')) return;
+        openLedgerOpeningPicker();
+    });
+
+    saveBtn.addEventListener('click', async () => {
+        const date = document.getElementById('ledger-opening-date')?.value;
+        const raw = document.getElementById('ledger-opening-amount')?.value?.trim();
+        const amount = raw === '' || raw == null ? NaN : parseFloat(raw);
+        try {
+            await withButtonBusy(saveBtn, 'Saving…', async () => {
+                showLedgerRecalcStatus('Saving opening balance and recalculating…');
+                try {
+                    await saveBankOpeningBalance(date, amount, { pull: true });
+                    document.getElementById('ledger-opening-picker')?.removeAttribute('open');
+                    processFinances();
+                    renderCashLedger();
+                } finally {
+                    hideLedgerRecalcStatus();
+                }
+            });
+        } catch (err) {
+            hideLedgerRecalcStatus();
+            alert(err?.message || 'Could not save opening balance.');
+        }
+    });
+
+    syncLedgerOpeningFields();
+};
+
+const initLedgerRecalculate = () => {
+    const btn = document.getElementById('ledger-recalc-btn');
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', async () => {
+        const opening = getBankOpeningConfig();
+        if (opening.amount == null) {
+            openLedgerOpeningPicker();
+            return;
+        }
+        try {
+            await withButtonBusy(btn, 'Recalculating…', async () => {
+                showLedgerRecalcStatus('Refreshing ledger calculated balances…');
+                try {
+                    // Statement-line balances power Passbook compare on matched rows;
+                    // ledger Calculated is always recomputed client-side from BANK entries.
+                    await recalculateBankStatementBalances();
+                    await pullState();
+                    processFinances();
+                    renderCashLedger();
+                } finally {
+                    hideLedgerRecalcStatus();
+                }
+            });
+        } catch (err) {
+            hideLedgerRecalcStatus();
+            alert(err?.message || 'Could not recalculate balances.');
+        }
+    });
+};
+
 const initLedgerTableControls = () => {
     initLedgerSearch();
     initLedgerCategoryFilter();
     initLedgerExport();
+    initLedgerOpeningBalance();
+    initLedgerRecalculate();
     const host = document.getElementById('cash-ledger-items');
     if (host && !host.dataset.sortWired) {
         host.dataset.sortWired = '1';

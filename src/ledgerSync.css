@@ -407,6 +407,82 @@
   display: inline-block;
 }
 
+.ledger-columns-picker .bank-recon-columns-picker__menu {
+  left: auto;
+  right: 0;
+  z-index: 20;
+}
+
+.ledger-opening-picker {
+  display: inline-block;
+}
+
+.ledger-opening-picker .ledger-opening-picker__menu {
+  left: auto;
+  right: 0;
+  z-index: 20;
+  min-width: 15.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.ledger-opening-picker__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.ledger-opening-picker__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.ledger-opening-picker__field input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  background: #fff;
+}
+
+.ledger-opening-picker__badge {
+  display: inline-block;
+  margin-left: 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ledger-opening-picker__summary--unset {
+  border-color: color-mix(in srgb, #b45309 35%, var(--border));
+  color: #92400e;
+}
+
+.ledger-kpi__hint-btn {
+  all: unset;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ledger-kpi__hint-btn:hover,
+.ledger-kpi__hint-btn:focus-visible {
+  color: #92400e;
+}
+
 .ledger-activity--inline,
 .ledger-context-bar--inline {
   margin: 0;
