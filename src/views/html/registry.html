@@ -15,7 +15,8 @@
             <button class="btn btn-outline" type="button" id="registry-download-xlsx">
               <i class="fa-solid fa-download" aria-hidden="true"></i> <span>Download</span>
             </button>
-            <button class="btn btn-outline" type="button" id="registry-import-xlsx">
+            <button class="btn btn-outline" type="button" id="registry-import-xlsx"
+              onclick="window.openParkingReconcileWorkspace && window.openParkingReconcileWorkspace()">
               <i class="fa-solid fa-file-excel" aria-hidden="true"></i> <span>Reconcile Excel</span>
             </button>
             <input type="file" id="xlsx-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;" />
@@ -175,6 +176,74 @@
           </section>
           </div>
         </details>
+        </div>
+
+        <!-- Full-page reconcile workspace (system vs Excel delta) -->
+        <div id="parking-reconcile-workspace" class="parking-reconcile" hidden>
+          <header class="parking-reconcile__header">
+            <div>
+              <button type="button" class="btn btn-outline btn--small" id="parking-reconcile-back">
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to registry
+              </button>
+              <h2 class="parking-reconcile__title">Reconcile from Excel</h2>
+              <p class="parking-reconcile__subtitle">
+                Upload a file (same format as <strong>Download</strong>). Review each flat: system vs file, with Add / Matched / Remove marked before applying.
+              </p>
+            </div>
+          </header>
+
+          <div class="parking-reconcile__setup">
+            <div class="parking-reconcile__modes">
+              <label class="capacity-section-label">Import mode</label>
+              <label class="import-mode-option">
+                <input type="radio" name="parking-reconcile-mode" value="merge" checked />
+                <span><strong>Merge</strong> — add/update from file; keep vehicles not in the file.</span>
+              </label>
+              <label class="import-mode-option">
+                <input type="radio" name="parking-reconcile-mode" value="overwrite_bikes" />
+                <span><strong>Replace bikes only</strong> — delete bikes (Change Log), keep cars, import bikes from file.</span>
+              </label>
+              <label class="import-mode-option">
+                <input type="radio" name="parking-reconcile-mode" value="overwrite_cars" />
+                <span><strong>Replace cars only</strong> — delete cars (Change Log), keep bikes, import cars from file.</span>
+              </label>
+              <label class="import-mode-option">
+                <input type="radio" name="parking-reconcile-mode" value="overwrite" />
+                <span><strong>Overwrite all</strong> — delete every vehicle, then load the file.</span>
+              </label>
+            </div>
+            <div class="parking-reconcile__file-panel">
+              <label class="capacity-section-label">Excel file</label>
+              <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
+                Use the spreadsheet from <strong>Download</strong> on Parking &amp; Vehicles — same columns.
+              </p>
+              <div id="parking-reconcile-file-name" class="parking-reconcile__file-name">No file selected</div>
+              <div class="parking-reconcile__file-actions">
+                <button type="button" class="btn btn-primary" id="parking-reconcile-choose-file">
+                  <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Choose Excel file
+                </button>
+                <button type="button" class="btn btn-outline" id="parking-reconcile-clear-file" hidden>Clear file</button>
+              </div>
+              <p id="parking-reconcile-error" class="nb-form-error" style="display: none; margin-top: 0.75rem;"></p>
+            </div>
+          </div>
+
+          <div id="parking-reconcile-results" class="parking-reconcile__results" hidden>
+            <div class="parking-reconcile__summary" id="parking-reconcile-summary"></div>
+            <div class="parking-reconcile__filters" id="parking-reconcile-filters" role="tablist">
+              <button type="button" class="parking-reconcile__filter active" data-diff-filter="all">All flats</button>
+              <button type="button" class="parking-reconcile__filter" data-diff-filter="add">Adds</button>
+              <button type="button" class="parking-reconcile__filter" data-diff-filter="update">Mismatches</button>
+              <button type="button" class="parking-reconcile__filter" data-diff-filter="unchanged">Matched</button>
+              <button type="button" class="parking-reconcile__filter" data-diff-filter="remove">Removes</button>
+              <button type="button" class="parking-reconcile__filter" data-diff-filter="retain">System-only</button>
+            </div>
+            <div id="parking-reconcile-flats" class="parking-reconcile__flats"></div>
+            <div class="parking-reconcile__footer">
+              <p id="parking-reconcile-warn" class="parking-reconcile__warn" hidden></p>
+              <button type="button" class="btn btn-primary" id="parking-reconcile-apply">Apply import</button>
+            </div>
+          </div>
         </div>
       </section>
 

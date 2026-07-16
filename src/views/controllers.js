@@ -11,8 +11,11 @@ export async function activateView(route, page) {
             break;
         }
         case 'registry': {
-            const { renderRegistry, refreshParkingUi } = await import('../registry.js');
+            const { renderRegistry } = await import('../registry.js');
+            const { refreshParkingUi } = await import('../parkingOps.js');
             const { refreshAuditBadge } = await import('../vehicleAudit.js');
+            const { initParkingReconcileUi } = await import('../parkingReconcileUi.js');
+            initParkingReconcileUi();
             renderRegistry();
             refreshParkingUi();
             void refreshAuditBadge();

@@ -1663,60 +1663,6 @@
     </div>
   </div>
 
-  <!-- PARKING RECONCILE IMPORT -->
-  <div class="modal-backdrop" id="parking-import-modal">
-    <div class="modal-content" style="max-width: 520px;">
-      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-        <div>
-          <h2 style="font-size: 1.25rem; font-weight: 900;">Reconcile from Excel</h2>
-          <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;">
-            One file can include cars, bikes, or both — each row is classified from <strong>Vehicle_Type</strong> and <strong>Parking_No</strong>.
-          </p>
-        </div>
-        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" id="parking-import-close" type="button">&times;</button>
-      </div>
-
-      <div id="parking-import-step-pick">
-        <p class="nb-muted" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
-          No separate car/bike upload needed. Each row is handled individually:
-          <strong>Vehicle_Type</strong> (CAR / BIKE / TWO_WHEELER / FOUR_WHEELER),
-          slot limits via <strong>two_wheeler_count</strong> &amp; <strong>four_wheeler_count</strong>,
-          and pool/neighbor slots via <strong>Parking_No</strong> (EH/BH or another flat).
-        </p>
-        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-          <label style="font-size: 0.65rem; font-weight: 900; color: var(--text-dim); text-transform: uppercase;">Import mode</label>
-          <label class="import-mode-option">
-            <input type="radio" name="parking-import-mode" value="merge" checked />
-            <span><strong>Merge</strong> — add/update units and vehicles from the file; keep records not in the file.</span>
-          </label>
-          <label class="import-mode-option">
-            <input type="radio" name="parking-import-mode" value="overwrite" />
-            <span><strong>Overwrite</strong> — replace all vehicles for this apartment with the file (units are updated/added).</span>
-          </label>
-        </div>
-        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
-          <button type="button" class="btn btn-outline" style="flex: 1;" id="parking-import-cancel">Cancel</button>
-          <button type="button" class="btn btn-primary" style="flex: 1;" id="parking-import-choose-file">
-            <i class="fa-solid fa-file-arrow-up"></i> Choose Excel file
-          </button>
-        </div>
-      </div>
-
-      <div id="parking-import-step-preview" style="display: none;">
-        <div id="parking-import-file-name" style="font-weight: 700; margin-bottom: 0.5rem;"></div>
-        <div id="parking-import-summary" class="import-preview-box"></div>
-        <p id="parking-import-warn" style="display: none; font-size: 0.78rem; color: #b45309; font-weight: 700; margin-top: 0.75rem;"></p>
-        <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem;">
-          <button type="button" class="btn btn-outline" style="flex: 1;" id="parking-import-back">Back</button>
-          <button type="button" class="btn btn-primary" style="flex: 1;" id="parking-import-apply">Apply import</button>
-        </div>
-      </div>
-
-      <p id="parking-import-error" class="nb-form-error" style="display: none; margin-top: 1rem;"></p>
-    </div>
-  </div>
-
-  <!-- Portal ticket modal -->
   <div id="portal-ticket-modal" class="modal-backdrop">
     <div class="modal-content expense-modal" style="max-width: 480px;">
       <div class="expense-modal__header">

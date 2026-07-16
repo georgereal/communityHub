@@ -137,33 +137,22 @@ export const fetchVehicleAuditLog = async ({ pendingOnly = true, limit = 5000 } 
   const apartment_id = portalState.access?.activeApartmentId;
   if (!apartment_id) return [];
 
-  const pageSize = 100;
-  let all = [];
-  let from = 0;
+  // Custom API client supports limit(), not PostgREST range().
+  let q = supabase
+    .from('vehicle_audit_log')
+    .select('*')
+    .eq('apartment_id', apartment_id)
+    .order('changed_at', { ascending: false })
+    .limit(limit);
 
-  while (all.length < limit) {
-    let q = supabase
-      .from('vehicle_audit_log')
-      .select('*')
-      .eq('apartment_id', apartment_id)
-      .order('changed_at', { ascending: false })
-      .range(from, from + pageSize - 1);
+  if (pendingOnly) q = q.is('synced_at', null);
 
-    if (pendingOnly) q = q.is('synced_at', null);
-
-    const { data, error } = await q;
-    if (error) {
-      if (/vehicle_audit_log/i.test(error.message)) return [];
-      throw error;
-    }
-    if (!data?.length) break;
-
-    all = all.concat(data);
-    if (data.length < pageSize) break;
-    from += pageSize;
+  const { data, error } = await q;
+  if (error) {
+    if (/vehicle_audit_log/i.test(error.message)) return [];
+    throw error;
   }
-
-  return all.slice(0, limit);
+  return data || [];
 };
 
 export const countPendingVehicleAudit = async () => {
@@ -212,15 +201,28 @@ const escapeHtml = (val) => {
     .replace(/"/g, '&quot;');
 };
 
+const normalizeChanges = (raw) => {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 const formatChangeSummary = (entry) => {
-  const changes = entry.changes || [];
+  const changes = normalizeChanges(entry.changes);
   if (!changes.length) {
-    if (entry.action === 'insert') return 'New vehicle';
-    if (entry.action === 'delete') return 'Removed';
+    if (entry.action === 'insert') return 'Added from Excel / registry';
+    if (entry.action === 'delete') return 'Removed from system';
     return '—';
   }
   return changes
-    .map((c) => `${c.label}: ${c.old ?? '—'} → ${c.new ?? '—'}`)
+    .map((c) => `${c.label || c.field || 'Field'}: ${c.old ?? '—'} → ${c.new ?? '—'}`)
     .join('; ');
 };
 
@@ -235,17 +237,6 @@ export const exportAuditLogCsv = (entries) => {
   const rows = [header.join(',')];
 
   entries.forEach((entry) => {
-    const base = [
-      entry.changed_at,
-      entry.action,
-      entry.unit_number,
-      entry.plate,
-      '',
-      '',
-      '',
-      entry.source,
-      entry.changed_by,
-    ];
     const changes = entry.changes?.length ? entry.changes : [{ field: '', label: formatChangeSummary(entry), old: '', new: '' }];
     changes.forEach((c, idx) => {
       rows.push(
@@ -293,8 +284,46 @@ const formatWhen = (iso) => {
 
 const actionBadge = (action) => {
   const cls = action === 'insert' ? 'insert' : action === 'delete' ? 'delete' : 'update';
-  return `<span class="audit-badge audit-badge--${cls}">${action}</span>`;
+  const label = action === 'insert' ? 'added' : action === 'delete' ? 'removed' : 'updated';
+  return `<span class="audit-badge audit-badge--${cls}">${label}</span>`;
 };
+
+const actionOrder = { delete: 0, insert: 1, update: 2 };
+
+const groupAuditByFlat = (entries) => {
+  const map = new Map();
+  entries.forEach((e) => {
+    const flat = String(e.unit_number || '—').toUpperCase();
+    if (!map.has(flat)) map.set(flat, []);
+    map.get(flat).push(e);
+  });
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([flat, items]) => {
+      const sorted = [...items].sort((a, b) =>
+        (actionOrder[a.action] ?? 9) - (actionOrder[b.action] ?? 9)
+        || String(a.plate || '').localeCompare(String(b.plate || ''))
+        || String(b.changed_at || '').localeCompare(String(a.changed_at || '')),
+      );
+      const counts = {
+        insert: sorted.filter((x) => x.action === 'insert').length,
+        delete: sorted.filter((x) => x.action === 'delete').length,
+        update: sorted.filter((x) => x.action === 'update').length,
+      };
+      return { flat, items: sorted, counts };
+    });
+};
+
+const renderAuditEntry = (e) => `
+    <div class="audit-row" data-id="${escapeHtml(e.id)}">
+      <div class="audit-row__head">
+        ${actionBadge(e.action)}
+        <strong class="audit-row__plate">${escapeHtml(e.plate || '—')}</strong>
+        <span class="audit-row__when">${escapeHtml(formatWhen(e.changed_at))}</span>
+      </div>
+      <div class="audit-row__delta">${escapeHtml(formatChangeSummary(e))}</div>
+      <div class="audit-row__meta">${escapeHtml(e.source || 'ui')} · ${escapeHtml(e.changed_by || 'unknown')}${e.synced_at ? ` · synced ${escapeHtml(formatWhen(e.synced_at))}` : ''}</div>
+    </div>`;
 
 export const renderVehicleAuditModal = async () => {
   const list = document.getElementById('audit-log-list');
@@ -332,26 +361,36 @@ export const renderVehicleAuditModal = async () => {
   }
   if (empty) empty.hidden = true;
 
-  list.innerHTML = entries
-    .map(
-      (e) => `
-    <div class="audit-row" data-id="${escapeHtml(e.id)}">
-      <div class="audit-row__head">
-        ${actionBadge(e.action)}
-        <strong>${escapeHtml(e.plate)}</strong>
-        <span class="audit-row__unit">${escapeHtml(e.unit_number || '—')}</span>
-        <span class="audit-row__when">${escapeHtml(formatWhen(e.changed_at))}</span>
+  let groups;
+  try {
+    groups = groupAuditByFlat(entries);
+    list.innerHTML = groups.map(({ flat, items, counts }) => {
+      const chips = [
+        counts.insert ? `<span class="audit-flat__chip audit-flat__chip--insert">${counts.insert} added</span>` : '',
+        counts.delete ? `<span class="audit-flat__chip audit-flat__chip--delete">${counts.delete} removed</span>` : '',
+        counts.update ? `<span class="audit-flat__chip audit-flat__chip--update">${counts.update} updated</span>` : '',
+      ].filter(Boolean).join('');
+      // Use divs only — global `header` / page styles were collapsing these rows to empty lines.
+      return `
+    <div class="audit-flat-group">
+      <div class="audit-flat-group__head">
+        <div class="audit-flat-group__title">Flat ${escapeHtml(flat)}</div>
+        <div class="audit-flat-group__chips">${chips}</div>
       </div>
-      <div class="audit-row__delta">${escapeHtml(formatChangeSummary(e))}</div>
-      <div class="audit-row__meta">${escapeHtml(e.source)} · ${escapeHtml(e.changed_by || 'unknown')}${e.synced_at ? ` · synced ${escapeHtml(formatWhen(e.synced_at))}` : ''}</div>
-    </div>`,
-    )
-    .join('');
+      <div class="audit-flat-group__body">
+        ${items.map(renderAuditEntry).join('')}
+      </div>
+    </div>`;
+    }).join('');
+  } catch (err) {
+    list.innerHTML = `<div class="audit-error">${escapeHtml(err.message || 'Could not render audit log.')}</div>`;
+    return;
+  }
 
   if (footer) {
     footer.textContent = pendingOnly && totalPending > entries.length
-      ? `Showing ${entries.length} of ${totalPending} pending — scroll for more`
-      : `Showing ${entries.length} ${pendingOnly ? 'pending ' : ''}${entries.length === 1 ? 'entry' : 'entries'}`;
+      ? `Showing ${entries.length} of ${totalPending} pending across ${groups.length} flats`
+      : `Showing ${entries.length} ${pendingOnly ? 'pending ' : ''}entr${entries.length === 1 ? 'y' : 'ies'} across ${groups.length} flat${groups.length === 1 ? '' : 's'}`;
   }
 };
 

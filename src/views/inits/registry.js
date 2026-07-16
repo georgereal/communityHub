@@ -1,6 +1,5 @@
 import {
     renderRegistry,
-    processAnalytics,
     handleCSVImport,
     downloadVehicleRegistryXlsx,
     addCommunityPoolSlot,
@@ -18,13 +17,8 @@ import {
     markAllPendingVehicleAuditSynced,
     refreshAuditBadge,
 } from '../../vehicleAudit.js';
-import {
-    parseParkingExcelFile,
-    buildImportPreview,
-    applyParkingImport,
-} from '../../parkingImport.js';
+import { initParkingReconcileUi } from '../../parkingReconcileUi.js';
 import { withButtonBusy } from '../../buttonBusy.js';
-import { supabase } from '../../store.js';
 
 let wired = false;
 
@@ -186,132 +180,5 @@ export default async function initRegistryView() {
     });
     document.getElementById('capacity-search')?.addEventListener('input', refreshCapacityUnitList);
 
-    const parkingImportModal = document.getElementById('parking-import-modal');
-    const parkingImportStepPick = document.getElementById('parking-import-step-pick');
-    const parkingImportStepPreview = document.getElementById('parking-import-step-preview');
-    const parkingImportError = document.getElementById('parking-import-error');
-    const parkingImportSummary = document.getElementById('parking-import-summary');
-    const parkingImportWarn = document.getElementById('parking-import-warn');
-    const parkingImportFileName = document.getElementById('parking-import-file-name');
-    const xlsxFileInput = document.getElementById('xlsx-file');
-    let pendingParkingImport = null;
-
-    const showParkingImportError = (msg) => {
-        if (!parkingImportError) return;
-        if (msg) {
-            parkingImportError.style.display = 'block';
-            parkingImportError.textContent = msg;
-        } else {
-            parkingImportError.style.display = 'none';
-            parkingImportError.textContent = '';
-        }
-    };
-
-    const resetParkingImportModal = () => {
-        pendingParkingImport = null;
-        if (parkingImportStepPick) parkingImportStepPick.style.display = 'block';
-        if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'none';
-        showParkingImportError('');
-        if (xlsxFileInput) xlsxFileInput.value = '';
-    };
-
-    const openParkingImportModal = () => {
-        if (!supabase) return alert('Supabase is required for Excel reconcile.');
-        resetParkingImportModal();
-        parkingImportModal?.classList.add('active');
-    };
-
-    const closeParkingImportModal = () => {
-        parkingImportModal?.classList.remove('active');
-        resetParkingImportModal();
-    };
-
-    const getParkingImportMode = () => {
-        const picked = document.querySelector('input[name="parking-import-mode"]:checked');
-        return picked?.value === 'overwrite' ? 'overwrite' : 'merge';
-    };
-
-    const renderParkingPreview = (parsed, mode, fileName) => {
-        const preview = buildImportPreview(parsed, mode);
-        if (parkingImportFileName) parkingImportFileName.textContent = fileName;
-        if (parkingImportSummary) {
-            parkingImportSummary.innerHTML = `
-        <div><strong>Mode:</strong> ${mode === 'overwrite' ? 'Overwrite' : 'Merge'}</div>
-        <div><strong>Rows parsed:</strong> ${preview.rowCount}</div>
-        <div><strong>Units:</strong> ${preview.unitCount} (${preview.newUnits} new, ${preview.updatedUnits} updated)</div>
-        <div><strong>Vehicles:</strong> ${preview.vehicleCount} (${preview.carCount ?? 0} cars, ${preview.bikeCount ?? 0} bikes)</div>
-        <div><strong>Changes:</strong> ${preview.newVehicles} new, ${preview.updatedVehicles} to update</div>
-        <div><strong>Sticker / RFID rows:</strong> ${preview.withSticker ?? 0} with sticker, ${preview.withRfid ?? 0} with RFID data</div>
-        <div><strong>Rented / external parking:</strong> ${preview.rentedParking ?? 0} vehicle(s) with Parking_No ≠ Flat</div>
-        ${mode === 'overwrite' && preview.removedVehicles > 0
-            ? `<div style="color:#b45309;"><strong>Will remove:</strong> ${preview.removedVehicles} existing vehicle(s) not in file</div>`
-            : ''}
-      `;
-        }
-        if (parkingImportWarn) {
-            if (mode === 'overwrite') {
-                parkingImportWarn.style.display = 'block';
-                parkingImportWarn.textContent =
-                    'Overwrite deletes all current vehicles for this apartment, then loads vehicles from the spreadsheet.';
-            } else {
-                parkingImportWarn.style.display = 'none';
-                parkingImportWarn.textContent = '';
-            }
-        }
-        if (parkingImportStepPick) parkingImportStepPick.style.display = 'none';
-        if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'block';
-    };
-
-    document.getElementById('registry-import-xlsx')?.addEventListener('click', openParkingImportModal);
-    document.getElementById('parking-import-close')?.addEventListener('click', closeParkingImportModal);
-    document.getElementById('parking-import-cancel')?.addEventListener('click', closeParkingImportModal);
-    document.getElementById('parking-import-back')?.addEventListener('click', () => {
-        if (parkingImportStepPick) parkingImportStepPick.style.display = 'block';
-        if (parkingImportStepPreview) parkingImportStepPreview.style.display = 'none';
-        showParkingImportError('');
-    });
-    document.getElementById('parking-import-choose-file')?.addEventListener('click', () => xlsxFileInput?.click());
-
-    if (xlsxFileInput) {
-        xlsxFileInput.onchange = async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            showParkingImportError('');
-            try {
-                const parsed = await parseParkingExcelFile(file);
-                pendingParkingImport = parsed;
-                renderParkingPreview(parsed, getParkingImportMode(), file.name);
-            } catch (err) {
-                showParkingImportError(err?.message || 'Could not read that Excel file.');
-            }
-        };
-    }
-
-    document.getElementById('parking-import-apply')?.addEventListener('click', async () => {
-        if (!pendingParkingImport) return;
-        const mode = getParkingImportMode();
-        if (mode === 'overwrite') {
-            const ok = confirm(
-                'This will delete ALL vehicles for the active apartment and replace them with the spreadsheet. Continue?',
-            );
-            if (!ok) return;
-        }
-        const applyBtn = document.getElementById('parking-import-apply');
-        showParkingImportError('');
-        await withButtonBusy(applyBtn, 'Importing…', async () => {
-            const result = await applyParkingImport(pendingParkingImport, mode);
-            processAnalytics();
-            renderRegistry();
-            void refreshAuditBadge();
-            closeParkingImportModal();
-            if (result.skippedRegistryMeta) {
-                alert(
-                    'Import completed for units and vehicles, but RFID/sticker columns are missing in Supabase.\n\n' +
-                    'Open Supabase → SQL Editor and run supabase_vehicle_rfid_sticker.sql, then re-import to save sticker/RFID data.',
-                );
-            } else {
-                alert(`Parking registry ${mode === 'overwrite' ? 'overwritten' : 'merged'} successfully.`);
-            }
-        }).catch((err) => showParkingImportError(err?.message || 'Import failed.'));
-    });
+    initParkingReconcileUi();
 }
