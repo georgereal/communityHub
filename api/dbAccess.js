@@ -20,6 +20,7 @@ export const APARTMENT_SCOPED_TABLES = new Set([
     'user_oauth_connections', 'apartment_external_connections', 'residents', 'activity_audit_log',
     'vehicle_audit_log', 'sms_outbox', 'user_notifications', 'apartment_module_settings',
     'user_module_access', 'society_role_page_access', 'user_page_overrides',
+    'nobroker_invoices_raised',
 ]);
 
 export const ALLOWED_TABLES = new Set([

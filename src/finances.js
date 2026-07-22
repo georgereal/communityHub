@@ -1416,6 +1416,7 @@ window.switchSubView = (sv) => {
     const views = {
         ledger: 'subview-ledger',
         reports: 'subview-reports',
+        'invoices-raised': 'subview-invoices-raised',
         'bank-recon': 'subview-bank-recon',
         activity: 'subview-activity',
         gl: 'subview-gl',
@@ -1426,6 +1427,12 @@ window.switchSubView = (sv) => {
     });
 
     if (sv === 'reports') renderFinanceAnalytics();
+    if (sv === 'invoices-raised') {
+        import('./invoicesRaisedPage.js').then((m) => {
+            m.initInvoicesRaisedPage();
+            m.renderInvoicesRaisedPage();
+        });
+    }
     if (sv === 'bank-recon') window.renderBankReconciliation?.();
     if (sv === 'activity') window.renderActivityLogPage?.();
     if (sv === 'gl') window.renderGeneralLedger?.();

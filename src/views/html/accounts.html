@@ -19,6 +19,7 @@
         <nav class="accounts-subview-tabs accounts-subview-tabs--compact" aria-label="Income and expenses views">
           <button type="button" class="active" data-accounts-subview="ledger">Ledger</button>
           <button type="button" data-accounts-subview="reports">Financial Reports</button>
+          <button type="button" data-accounts-subview="invoices-raised">Invoices Raised</button>
           <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
           <button type="button" data-accounts-subview="activity">Activity Log</button>
           <button type="button" data-accounts-subview="gl">General Ledger</button>
@@ -360,6 +361,9 @@
               </label>
             </div>
             <div class="fa-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fa-download-xlsx" title="Download monthly stacks and pivots as Excel">
+                <i class="fa-solid fa-download" aria-hidden="true"></i> Excel
+              </button>
               <button type="button" class="btn btn-outline btn--small" id="fa-goto-bank-recon"><i class="fa-solid fa-scale-balanced"></i> Bank reconciliation</button>
               <button type="button" class="btn btn-outline btn--small" id="fa-nobroker-upload-btn"><i class="fa-solid fa-file-arrow-up"></i> Upload NoBroker dump</button>
               <button type="button" class="btn btn-outline btn--small" id="fa-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
@@ -369,14 +373,12 @@
 
           <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
 
-          <section class="fa-panel" id="fa-nobroker-panel"></section>
-
           <div class="fa-charts-grid fa-charts-grid--single">
             <div class="metric-card fa-chart-card fa-chart-card--full">
               <div class="fa-chart-card__head">
                 <div>
-                  <h3 class="fa-panel__title">Income &amp; expenses by category</h3>
-                  <p class="fa-panel__hint">Two stacked bars per month — green stacks are income, other colours are expenses (<strong>Pivot by</strong> applies to expense side).</p>
+                  <h3 class="fa-panel__title">Monthly stacks: raised, income &amp; expenses</h3>
+                  <p class="fa-panel__hint">Three stacked bars per month — <strong>raised</strong> (NoBroker invoices), <strong>income</strong> (cash in), and <strong>expenses</strong> (<strong>Pivot by</strong> applies to the expense bar).</p>
                 </div>
                 <div class="fa-projection-anchor">
                   <button type="button" class="fa-projection-icon-btn" id="fa-projection-toggle" aria-expanded="false" aria-controls="fa-projection-popover" title="Trend projection">
@@ -392,6 +394,17 @@
               <div class="fa-chart-wrap"><canvas id="fa-combined-chart"></canvas></div>
             </div>
           </div>
+
+          <section class="fa-panel fa-pivot-panel">
+            <div class="fa-panel__head fa-panel__head--row">
+              <div>
+                <h3 class="fa-panel__title">Invoices raised pivot</h3>
+                <p class="fa-panel__hint">NoBroker current-period charge heads by month (from Start Period Date). Upload on the <strong>Invoices Raised</strong> tab.</p>
+              </div>
+              <div id="fa-raised-pivot-meta" class="fa-pivot-meta"></div>
+            </div>
+            <div class="fa-table-wrap" id="fa-raised-pivot"></div>
+          </section>
 
           <section class="fa-panel fa-pivot-panel">
             <div class="fa-panel__head fa-panel__head--row">
@@ -414,6 +427,34 @@
             </div>
             <div class="fa-table-wrap" id="fa-expense-pivot"></div>
           </section>
+        </div>
+
+        <div id="subview-invoices-raised" class="raised-subview" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="raised-page-toolbar">
+            <div class="raised-page-toolbar__left">
+              <div>
+                <h3 class="fa-panel__title" style="margin:0;">Invoices raised</h3>
+                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">Full Excel row in DB. Type in the filter row under each column — amounts support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</p>
+              </div>
+              <p id="raised-page-meta" class="raised-page-meta"></p>
+            </div>
+            <div class="raised-page-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="raised-clear-filters" hidden title="Clear column filters">
+                Clear filters
+              </button>
+              <div id="raised-col-picker"></div>
+              <button type="button" class="btn btn-primary btn--small" id="raised-page-upload-btn">
+                <i class="fa-solid fa-file-arrow-up"></i> Upload Excel
+              </button>
+              <input type="file" id="raised-page-file" accept=".xlsx,.xls" hidden />
+            </div>
+          </div>
+          <div class="fa-table-wrap raised-table-wrap">
+            <table class="fa-pivot-table raised-table">
+              <thead id="raised-table-head"></thead>
+              <tbody id="raised-table-body"></tbody>
+            </table>
+          </div>
         </div>
 
         <div id="subview-gl" style="display:none; padding: 0 1.6rem 1.6rem;">

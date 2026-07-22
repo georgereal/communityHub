@@ -34,6 +34,11 @@ export async function activateView(route, page) {
                 window.switchSubView(sub || 'ledger');
             }
             if (sub === 'reports') renderFinanceAnalytics();
+            else if (sub === 'invoices-raised') {
+                const { initInvoicesRaisedPage, renderInvoicesRaisedPage } = await import('../invoicesRaisedPage.js');
+                initInvoicesRaisedPage();
+                renderInvoicesRaisedPage();
+            }
             else if (sub === 'bank-recon') renderBankReconciliation();
             else if (sub === 'activity') await renderActivityLogPage();
             else if (sub === 'gl') renderGeneralLedger();

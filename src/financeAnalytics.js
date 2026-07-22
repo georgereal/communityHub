@@ -1,6 +1,6 @@
 /**
- * Financial Reports — balance reconciliation, NoBroker alignment,
- * expense-sheet pivot, and income/expense trend projections.
+ * Financial Reports — balance reconciliation, raised/income/expense pivots,
+ * and income/expense trend projections.
  */
 import { portalState } from './store.js';
 import { navigateToLedgerFromPivot } from './ledgerFilter.js';
@@ -8,17 +8,16 @@ import {
     getMatchedTransactionIds,
     getUnmatchedBankLines,
     getUnmatchedLedgerTxns,
-    getNoBrokerDump,
     loadNoBrokerDumpFile,
     clearNoBrokerDump,
-    autoMatchByDateAndAmount,
-    autoCreateFromUnmatchedLines,
-    reconcileBankWithNoBroker,
-    getDateTolerance,
     isTransactionReconciled,
     getBankBalanceReconciliation,
 } from './bankReconciliation.js';
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
+import {
+    getNoBrokerInvoicesRaised,
+    buildRaisedInvoicesStack,
+} from './nobrokerInvoicesRaised.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -87,6 +86,53 @@ const sumUnreconciledLedgerNet = () => {
 };
 
 export const isReportableTxn = (txn) => !txn?.exclude_from_reports;
+
+/** Snapshot of report pivots/stacks using the same filters as the on-screen reports. */
+export const getFinanceReportsExportSnapshot = () => {
+  const settings = getSettings();
+  const months = buildMonthRange(settings.monthCount);
+
+  const invoices = getNoBrokerInvoicesRaised();
+  const { heads, series, monthTotals: raisedMonthTotals } = buildRaisedInvoicesStack(months, invoices);
+  const raisedRows = heads.map((head) => {
+    const cells = (series[head] || months.map(() => 0)).map((v) => Math.round((v || 0) * 100) / 100);
+    const total = cells.reduce((a, b) => a + b, 0);
+    return { key: head, label: head, cells, total };
+  }).filter((r) => r.total > 0.001);
+
+  const incomeTxns = filterTxnsInMonthRange(filterIncome(), months);
+  const incomePivot = buildIncomePivot(months, 'cat', incomeTxns);
+
+  const expenseTxns = filterTxnsInMonthRange(filterExpenses(settings.sheetOnly), months);
+  const expensePivot = buildExpensePivot(expenseTxns, months, settings.pivotDimension);
+
+  const incomeMonthTotals = monthlyTotals(incomeTxns, months).map((v) => Math.round(v * 100) / 100);
+  const expenseMonthTotals = monthlyTotals(expenseTxns, months).map((v) => Math.round(v * 100) / 100);
+  const raisedTotals = (raisedMonthTotals || months.map(() => 0)).map((v) => Math.round((v || 0) * 100) / 100);
+
+  return {
+    months,
+    settings,
+    raised: {
+      rows: raisedRows,
+      invoiceCount: invoices.length,
+    },
+    income: {
+      rows: incomePivot.rows,
+      entryCount: incomeTxns.length,
+    },
+    expense: {
+      rows: expensePivot.rows,
+      entryCount: expenseTxns.length,
+    },
+    monthly: {
+      raised: raisedTotals,
+      income: incomeMonthTotals,
+      expense: expenseMonthTotals,
+      net: incomeMonthTotals.map((v, i) => Math.round((v - expenseMonthTotals[i]) * 100) / 100),
+    },
+  };
+};
 
 const filterExpenses = (structuredOnly) => {
     const txns = portalState.finances.txns || [];
@@ -171,6 +217,47 @@ const averageProject = (values, futureCount) => {
 };
 
 let combinedChartInstance = null;
+let stackInteractionRegistered = false;
+
+/** Hover one bar → tooltip lists only that stack (raised / income / expense). */
+const ensureStackInteractionMode = () => {
+  if (stackInteractionRegistered || typeof Chart === 'undefined') return;
+  const modes = Chart.Interaction?.modes;
+  if (!modes || modes.sameStack) {
+    stackInteractionRegistered = true;
+    return;
+  }
+  modes.sameStack = function sameStack(chart, e, options, useFinalPosition) {
+    const nearest = modes.nearest(chart, e, { ...options, intersect: true }, useFinalPosition);
+    if (!nearest.length) {
+      // Fall back to nearest without intersect so empty gaps still pick a bar
+      const loose = modes.nearest(chart, e, { ...options, intersect: false }, useFinalPosition);
+      if (!loose.length) return [];
+      nearest.push(...loose.slice(0, 1));
+    }
+    const hit = nearest[0];
+    const stack = chart.data.datasets[hit.datasetIndex]?.stack;
+    const index = hit.index;
+    if (stack == null) return nearest;
+
+    const items = [];
+    chart.data.datasets.forEach((ds, datasetIndex) => {
+      if (ds.stack !== stack) return;
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden || ds.hidden) return;
+      const el = meta.data[index];
+      if (el && !el.skip) items.push({ datasetIndex, index, element: el });
+    });
+    return items.length ? items : nearest;
+  };
+  stackInteractionRegistered = true;
+};
+
+const STACK_FOOTER_LABEL = {
+  raised: 'Raised',
+  income: 'Income',
+  expense: 'Expenses',
+};
 
 const INCOME_COLOR_OVERRIDES = {
     'Maintenance Collection': '#16a34a',
@@ -210,23 +297,82 @@ const colorForKey = (key, side = 'expense') => {
 
 const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
-    const canvas = document.getElementById('fa-combined-chart');
-    if (!canvas || typeof Chart === 'undefined') return;
+const RAISED_HEAD_COLORS = {
+  'Maintenance charges': '#2563eb',
+  'Common water consumption charges': '#0ea5e9',
+  'Water Meter Rent': '#06b6d4',
+  'Car Parking': '#8b5cf6',
+  'Home water consumption charges': '#14b8a6',
+  'Non Occupancy Charges': '#f59e0b',
+};
 
-    if (combinedChartInstance) {
-        combinedChartInstance.destroy();
-        combinedChartInstance = null;
+const colorForRaisedHead = (head) => {
+  if (RAISED_HEAD_COLORS[head]) return RAISED_HEAD_COLORS[head];
+  return colorForKey(head, 'expense');
+};
+
+const renderRaisedInvoicesPivot = (months) => {
+  const el = document.getElementById('fa-raised-pivot');
+  const metaEl = document.getElementById('fa-raised-pivot-meta');
+  if (!el) return;
+
+  const invoices = getNoBrokerInvoicesRaised();
+  const { heads, series } = buildRaisedInvoicesStack(months, invoices);
+  const files = [...new Set(invoices.map((r) => r.source_file).filter(Boolean))];
+
+  if (metaEl) {
+    if (!invoices.length) {
+      metaEl.innerHTML = '';
+    } else {
+      metaEl.innerHTML = [
+        `<span class="fa-meta-chip">${invoices.length} invoice row(s)</span>`,
+        files[0] ? `<span class="fa-meta-chip" title="${escAttr(files[0])}">${escAttr(files[0])}</span>` : '',
+      ].filter(Boolean).join('');
     }
+  }
 
+  const rows = heads.map((head) => {
+    const cells = series[head] || months.map(() => 0);
+    const total = cells.reduce((a, b) => a + b, 0);
+    return { key: head, label: head, cells, total };
+  }).filter((r) => r.total > 0.001);
+
+  renderPivotTable({
+    el,
+    metaEl: null, // already filled above
+    rows,
+    months,
+    dimension: 'charge',
+    type: 'IN',
+    clickable: false,
+    emptyMessage: invoices.length
+      ? 'No raised amounts in this month range.'
+      : 'No raised-invoice data yet. Open the Invoices Raised tab to upload the monthly Excel export.',
+  });
+};
+
+const buildCombinedChartDatasets = (months, sheetOnly, pivotDimension) => {
     const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat', filterTxnsInMonthRange(filterIncome(), months)).rows, 6);
     const expenseRows = topCategoryRows(
         buildExpensePivot(filterTxnsInMonthRange(filterExpenses(sheetOnly), months), months, pivotDimension).rows,
         6,
     );
+    const { heads: raisedHeads, series: raisedSeries } = buildRaisedInvoicesStack(months);
+    const raisedRows = raisedHeads.slice(0, 8).map((head) => ({
+        key: head,
+        label: head,
+        cells: raisedSeries[head] || months.map(() => 0),
+    }));
 
-    const labels = months.map((m) => m.label);
-    const datasets = [
+    return [
+        ...raisedRows.map((row) => ({
+            label: `Raised: ${row.label}`,
+            data: row.cells,
+            stack: 'raised',
+            backgroundColor: colorForRaisedHead(row.key),
+            borderWidth: 0,
+            borderRadius: 2,
+        })),
         ...incomeRows.map((row) => ({
             label: `In: ${row.label}`,
             data: row.cells,
@@ -244,51 +390,104 @@ const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
             borderRadius: 2,
         })),
     ];
+};
+
+const combinedChartOptions = (interactive) => ({
+    responsive: interactive,
+    maintainAspectRatio: false,
+    animation: interactive,
+    interaction: interactive
+        ? { mode: 'sameStack', intersect: true, axis: 'xy' }
+        : { mode: 'nearest', intersect: false },
+    plugins: {
+        legend: {
+            position: 'bottom',
+            labels: { boxWidth: 10, font: { size: 10 }, padding: 6 },
+        },
+        tooltip: interactive
+            ? {
+                filter: (item) => (item.parsed?.y || 0) > 0,
+                callbacks: {
+                    title: (items) => {
+                        const month = items[0]?.label || '';
+                        const stack = items[0]?.dataset?.stack;
+                        const kind = STACK_FOOTER_LABEL[stack] || stack || '';
+                        return kind ? `${month} · ${kind}` : month;
+                    },
+                    label: (ctx) => {
+                        const v = ctx.parsed.y;
+                        return v > 0 ? `${ctx.dataset.label}: ${formatMoney(v)}` : null;
+                    },
+                    footer: (items) => {
+                        if (!items.length) return '';
+                        const stack = items[0].dataset.stack;
+                        const total = items.reduce((s, it) => s + (it.parsed.y || 0), 0);
+                        const kind = STACK_FOOTER_LABEL[stack] || 'Total';
+                        return `${kind}: ${formatMoney(total)}`;
+                    },
+                },
+            }
+            : { enabled: false },
+    },
+    scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: {
+            stacked: true,
+            ticks: {
+                callback: (v) => (v >= 1000 ? `₹${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : `₹${v}`),
+            },
+        },
+    },
+});
+
+const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
+    const canvas = document.getElementById('fa-combined-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (combinedChartInstance) {
+        combinedChartInstance.destroy();
+        combinedChartInstance = null;
+    }
+
+    ensureStackInteractionMode();
 
     combinedChartInstance = new Chart(canvas, {
         type: 'bar',
-        data: { labels, datasets },
+        data: {
+            labels: months.map((m) => m.label),
+            datasets: buildCombinedChartDatasets(months, sheetOnly, pivotDimension),
+        },
+        options: combinedChartOptions(true),
+    });
+};
+
+/** PNG of the on-screen monthly stacks chart for Excel embed (ExcelJS has no native charts). */
+export const captureFinanceReportsChartPng = (width = 1100, height = 480) => {
+    if (typeof Chart === 'undefined' || typeof document === 'undefined') return null;
+
+    const settings = getSettings();
+    const months = buildMonthRange(settings.monthCount);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const chart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: months.map((m) => m.label),
+            datasets: buildCombinedChartDatasets(months, settings.sheetOnly, settings.pivotDimension),
+        },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 10, font: { size: 10 }, padding: 6 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const v = ctx.parsed.y;
-                            return v > 0 ? `${ctx.dataset.label}: ${formatMoney(v)}` : '';
-                        },
-                        footer: (items) => {
-                            const incomeTotal = items
-                                .filter((i) => i.dataset.stack === 'income')
-                                .reduce((s, i) => s + (i.parsed.y || 0), 0);
-                            const expenseTotal = items
-                                .filter((i) => i.dataset.stack === 'expense')
-                                .reduce((s, i) => s + (i.parsed.y || 0), 0);
-                            const parts = [];
-                            if (incomeTotal > 0) parts.push(`Income: ${formatMoney(incomeTotal)}`);
-                            if (expenseTotal > 0) parts.push(`Expenses: ${formatMoney(expenseTotal)}`);
-                            return parts.join(' · ');
-                        },
-                    },
-                },
-            },
-            scales: {
-                x: { stacked: true, grid: { display: false } },
-                y: {
-                    stacked: true,
-                    ticks: {
-                        callback: (v) => `₹${Number(v).toLocaleString('en-IN')}`,
-                    },
-                },
-            },
+            ...combinedChartOptions(false),
+            responsive: false,
+            devicePixelRatio: 2,
         },
     });
+
+    const dataUrl = chart.toBase64Image('image/png', 1);
+    chart.destroy();
+    const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    return base64 ? { base64, width, height } : null;
 };
 
 const renderProjectionSummary = (months, sheetOnly, projectCount) => {
@@ -336,8 +535,6 @@ const renderProjectionSummary = (months, sheetOnly, projectCount) => {
         ).join('')}
       </ul>`;
 };
-
-const getNobrokerState = () => getNoBrokerDump();
 
 const getSettings = () => ({
     monthCount: parseInt(document.getElementById('fa-month-range')?.value || '6', 10),
@@ -406,98 +603,6 @@ const renderBalanceMetrics = () => {
       </div>`;
 };
 
-const ledgerMaintenanceByMonth = (months) => {
-    const income = filterIncome().filter((t) => t.cat === 'Maintenance Collection');
-    return monthlyTotals(income, months);
-};
-
-const nobrokerByMonth = (lines, months) =>
-    months.map(({ y, m }) =>
-        lines
-            .filter((l) => {
-                const d = new Date(`${l.date}T12:00:00`);
-                return d.getFullYear() === y && d.getMonth() === m;
-            })
-            .reduce((s, l) => s + (parseFloat(l.amount) || 0), 0),
-    );
-
-const renderNoBrokerPanel = (months) => {
-    const el = document.getElementById('fa-nobroker-panel');
-    if (!el) return;
-
-    const { lines: nobrokerDumpLines, fileName: nobrokerFileName } = getNobrokerState();
-
-    if (!nobrokerDumpLines.length) {
-        el.innerHTML = `
-          <div class="fa-panel__head">
-            <h3><i class="fa-solid fa-building"></i> NoBroker collections alignment</h3>
-            <p>Upload a NoBroker payment export to compare against maintenance collections recorded in the ledger.</p>
-          </div>
-          <p class="maintenance-dues-empty">No NoBroker dump loaded. Use <strong>Upload NoBroker dump</strong> above.</p>`;
-        return;
-    }
-
-    const ledgerTotals = ledgerMaintenanceByMonth(months);
-    const nbTotals = nobrokerByMonth(nobrokerDumpLines, months);
-    let totalLedger = 0;
-    let totalNb = 0;
-    let totalGap = 0;
-
-    const rows = months
-        .map((mo, i) => {
-            const ledger = ledgerTotals[i];
-            const nb = nbTotals[i];
-            const gap = ledger - nb;
-            if (ledger < 0.001 && nb < 0.001) return '';
-            totalLedger += ledger;
-            totalNb += nb;
-            totalGap += gap;
-            const gapClass = Math.abs(gap) < 1 ? 'fa-gap--ok' : 'fa-gap--warn';
-            return `<tr>
-              <td>${mo.label}</td>
-              <td class="fa-num">${formatMoney(nb)}</td>
-              <td class="fa-num">${formatMoney(ledger)}</td>
-              <td class="fa-num ${gapClass}">${formatMoney(gap)}</td>
-            </tr>`;
-        })
-        .filter(Boolean)
-        .join('');
-
-    el.innerHTML = `
-      <div class="fa-panel__head fa-panel__head--row">
-        <div>
-          <h3><i class="fa-solid fa-building"></i> NoBroker collections alignment</h3>
-          <p>Comparing <strong>${nobrokerFileName}</strong> (${nobrokerDumpLines.length} rows) to ledger maintenance collections.</p>
-        </div>
-        <div class="fa-toolbar__actions">
-          <button type="button" class="btn btn-outline btn--small" id="fa-auto-match-btn"><i class="fa-solid fa-link"></i> Auto-match by date</button>
-          <button type="button" class="btn btn-primary btn--small" id="fa-nobroker-reconcile-btn"><i class="fa-solid fa-building-circle-check"></i> Reconcile bank + NoBroker</button>
-          <button type="button" class="btn btn-outline btn--small" id="fa-auto-create-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Create ledger entries</button>
-        </div>
-      </div>
-      <div class="fa-table-wrap">
-        <table class="fa-pivot-table">
-          <thead>
-            <tr>
-              <th>Month</th>
-              <th class="fa-num">NoBroker dump</th>
-              <th class="fa-num">Ledger collections</th>
-              <th class="fa-num">Gap (ledger − dump)</th>
-            </tr>
-          </thead>
-          <tbody>${rows || '<tr><td colspan="4" class="maintenance-dues-empty">No overlapping months in range</td></tr>'}</tbody>
-          <tfoot>
-            <tr>
-              <td><strong>Total</strong></td>
-              <td class="fa-num"><strong>${formatMoney(totalNb)}</strong></td>
-              <td class="fa-num"><strong>${formatMoney(totalLedger)}</strong></td>
-              <td class="fa-num"><strong>${formatMoney(totalGap)}</strong></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>`;
-};
-
 const renderPivotTable = ({
     el,
     metaEl,
@@ -511,7 +616,10 @@ const renderPivotTable = ({
     if (!el) return;
 
     const dimLabel =
-        dimension === 'sub_category' ? 'Sub-category' : dimension === 'vendor' ? 'Vendor' : 'Category';
+        dimension === 'sub_category' ? 'Sub-category'
+            : dimension === 'vendor' ? 'Vendor'
+                : dimension === 'charge' ? 'Charge head'
+                    : 'Category';
     const amountClass = type === 'IN' ? 'fa-income' : 'fa-expense';
 
     if (!rows.length) {
@@ -762,10 +870,9 @@ export const renderFinanceAnalytics = () => {
 
     renderBalanceMetrics();
     wireBalanceMetricClicks();
-    renderNoBrokerPanel(months);
-    wireNoBrokerActions();
     renderCombinedCategoryChart(months, settings.sheetOnly, settings.pivotDimension);
     renderProjectionSummary(months, settings.sheetOnly, settings.projectMonths);
+    renderRaisedInvoicesPivot(months);
     renderIncomePivot(months);
     renderExpensePivot(months, settings.pivotDimension, settings.sheetOnly);
     wirePivotDrilldown();
@@ -803,61 +910,15 @@ const wireBalanceMetricClicks = () => {
     });
 };
 
-const wireNoBrokerActions = () => {
-    document.getElementById('fa-auto-match-btn')?.addEventListener('click', async () => {
-        const tol = getDateTolerance();
-        if (!confirm(`Auto-match bank statement lines to ledger entries (${tol === 0 ? 'exact date' : `±${tol} days`}, same amount)?`)) return;
-        try {
-            const { matched, errors } = await autoMatchByDateAndAmount();
-            renderFinanceAnalytics();
-            window.renderBankReconciliation?.();
-            window.renderCashLedger?.();
-            alert(`Matched ${matched.length} line(s).${errors.length ? `\n\n${errors.slice(0, 6).join('\n')}` : ''}`);
-        } catch (err) {
-            alert(err?.message || 'Auto-match failed.');
-        }
-    }, { once: true });
-
-    document.getElementById('fa-nobroker-reconcile-btn')?.addEventListener('click', async () => {
-        const tol = getDateTolerance();
-        if (!confirm(`Reconcile bank credits with NoBroker dump (${tol === 0 ? 'exact date' : `±${tol} days`}) and create missing collections?`)) return;
-        try {
-            const { matchedLedger, created, unmatched, errors } = await reconcileBankWithNoBroker({ createMissing: true });
-            renderFinanceAnalytics();
-            window.renderBankReconciliation?.();
-            window.renderCashLedger?.();
-            window.processFinances?.();
-            alert([
-                `Matched ${matchedLedger} to existing ledger.`,
-                created ? `Created ${created} collection(s).` : '',
-                unmatched.length ? `${unmatched.length} bank line(s) without NoBroker match.` : '',
-                errors.length ? `\n${errors.slice(0, 6).join('\n')}` : '',
-            ].filter(Boolean).join('\n'));
-        } catch (err) {
-            alert(err?.message || 'Reconcile failed.');
-        }
-    }, { once: true });
-
-    document.getElementById('fa-auto-create-btn')?.addEventListener('click', async () => {
-        if (!confirm('Create ledger entries for unmatched bank lines (matching existing entries by date/amount first)?')) return;
-        try {
-            const { created, matchedExisting, errors } = await autoCreateFromUnmatchedLines({ includeDebits: true });
-            renderFinanceAnalytics();
-            window.renderBankReconciliation?.();
-            window.renderCashLedger?.();
-            window.processFinances?.();
-            alert(`Created ${created}, linked ${matchedExisting}.${errors.length ? `\n\n${errors.slice(0, 6).join('\n')}` : ''}`);
-        } catch (err) {
-            alert(err?.message || 'Auto-create failed.');
-        }
-    }, { once: true });
-};
-
 export const initFinanceAnalyticsUi = () => {
     const rerender = () => renderFinanceAnalytics();
 
     ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', rerender);
+    });
+
+    void import('./financeReportsExport.js').then(({ initFinanceReportsExport }) => {
+        initFinanceReportsExport();
     });
 
     const projectionToggle = document.getElementById('fa-projection-toggle');
