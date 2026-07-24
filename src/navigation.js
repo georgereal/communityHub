@@ -12,7 +12,7 @@ const OPERATIONS_ROUTES = [
 ];
 
 const TREASURY_ROUTES = [
-    'finance-ledger', 'finance-docs', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-invoices-raised', 'finance-gl',
+    'finance-ledger', 'finance-docs', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-invoices-raised',
 ];
 
 export const ACCOUNTS_SUBVIEW_ROUTES = {
@@ -22,7 +22,6 @@ export const ACCOUNTS_SUBVIEW_ROUTES = {
     'invoices-raised': 'finance-invoices-raised',
     'bank-recon': 'finance-bank-recon',
     activity: 'finance-activity',
-    gl: 'finance-gl',
 };
 
 export const NAV_MODULES = [
@@ -200,7 +199,6 @@ export const NAV_MODULES = [
             { route: 'finance-invoices-raised' },
             { route: 'finance-bank-recon' },
             { route: 'finance-activity' },
-            { route: 'finance-gl' },
         ],
         pages: [
             {
@@ -308,14 +306,6 @@ export const NAV_MODULES = [
                 view: 'accounts',
                 subview: 'invoices-raised',
                 permission: 'accounts.view',
-            },
-            {
-                route: 'finance-gl',
-                label: 'General Ledger',
-                icon: 'fa-book-open',
-                view: 'accounts',
-                subview: 'gl',
-                permission: 'accounts.edit',
             },
         ],
     },

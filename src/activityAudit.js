@@ -155,7 +155,8 @@ export async function fetchActivityLog(
     apartmentId,
     { entityType = '', fromDate = '', toDate = '', actor = '', reviewStatus = '', limit = 200 } = {},
 ) {
-    if (!supabase || !apartmentId) return [];
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!apartmentId) throw new Error('No apartment selected.');
     let q = supabase
         .from('activity_audit_log')
         .select('*')
@@ -169,21 +170,30 @@ export async function fetchActivityLog(
     if (actor) q = q.ilike('actor_label', `%${actor}%`);
     if (reviewStatus) {
         q = q.eq('review_status', reviewStatus);
-    } else if (isOfficeManager()) {
-        q = q.in('review_status', ['APPROVED', 'PENDING']);
-    } else if (!canReviewAudit()) {
-        q = q.eq('review_status', 'APPROVED');
     }
 
     const { data, error } = await q;
     if (error) {
-        if (/activity_audit_log/i.test(error.message)) return [];
+        if (/activity_audit_log/i.test(error.message)) {
+            throw new Error('Activity log table is not set up yet. Run the activity_audit_log SQL migration.');
+        }
         if (/review_status/i.test(error.message)) {
             return fetchActivityLogLegacy(apartmentId, { entityType, fromDate, toDate, actor, limit });
         }
         throw error;
     }
-    return data || [];
+
+    let rows = data || [];
+    // Client-side review filter: custom /api/db query builder has no .or().
+    // Treat legacy null status as approved/visible.
+    if (!reviewStatus) {
+        if (isOfficeManager()) {
+            rows = rows.filter((r) => !r.review_status || r.review_status === 'APPROVED' || r.review_status === 'PENDING');
+        } else if (!canReviewAudit()) {
+            rows = rows.filter((r) => !r.review_status || r.review_status === 'APPROVED');
+        }
+    }
+    return rows;
 }
 
 async function fetchActivityLogLegacy(apartmentId, { entityType, fromDate, toDate, actor, limit }) {
@@ -355,20 +365,34 @@ export const renderInvoiceActivityHistory = async (invoiceId, containerId = 'inv
 };
 
 export const renderActivityLogPage = async () => {
-    const apartmentId = portalState.access?.activeApartmentId;
-    const entityType = document.getElementById('activity-filter-entity')?.value || '';
-    const fromDate = document.getElementById('activity-filter-from')?.value || '';
-    const toDate = document.getElementById('activity-filter-to')?.value || '';
-    const actor = (document.getElementById('activity-filter-actor')?.value || '').trim();
+    const list = document.getElementById('activity-log-list');
+    if (list) list.innerHTML = '<p class="maintenance-dues-empty">Loading activity…</p>';
 
-    await renderPendingAuditQueue();
-    const rows = await fetchActivityLog(apartmentId, { entityType, fromDate, toDate, actor });
-    renderActivityLogList(rows);
+    try {
+        const apartmentId = portalState.access?.activeApartmentId;
+        const entityType = document.getElementById('activity-filter-entity')?.value || '';
+        const fromDate = document.getElementById('activity-filter-from')?.value || '';
+        const toDate = document.getElementById('activity-filter-to')?.value || '';
+        const actor = (document.getElementById('activity-filter-actor')?.value || '').trim();
+
+        await renderPendingAuditQueue();
+        const rows = await fetchActivityLog(apartmentId, { entityType, fromDate, toDate, actor });
+        renderActivityLogList(rows);
+    } catch (err) {
+        console.warn('[activity] load failed', err);
+        if (list) {
+            list.innerHTML = `<p class="maintenance-dues-empty">${err?.message || 'Could not load activity log.'}</p>`;
+        }
+        throw err;
+    }
 };
 
 export const initActivityAuditUi = () => {
+    if (document.body.dataset.activityAuditWired === '1') return;
+    document.body.dataset.activityAuditWired = '1';
+
     document.getElementById('activity-filter-apply')?.addEventListener('click', () => {
-        renderActivityLogPage().catch((err) => alert(err?.message || 'Could not load activity log.'));
+        renderActivityLogPage().catch(() => {});
     });
     document.getElementById('activity-filter-reset')?.addEventListener('click', () => {
         ['activity-filter-entity', 'activity-filter-from', 'activity-filter-to', 'activity-filter-actor']

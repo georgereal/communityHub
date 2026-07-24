@@ -33,7 +33,6 @@
           <button type="button" data-accounts-subview="invoices-raised">Invoices Raised</button>
           <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
           <button type="button" data-accounts-subview="activity">Activity Log</button>
-          <button type="button" data-accounts-subview="gl">General Ledger</button>
         </nav>
 
         <div id="subview-ledger" class="ledger-subview">
@@ -288,7 +287,7 @@
               <h3><i class="fa-solid fa-clipboard-check"></i> Pending review — office manager entries</h3>
               <p class="activity-review-queue__hint">Association office bearers must approve these entries before they appear in the official activity log.</p>
             </div>
-            <div class="registry-list">
+            <div class="registry-list registry-list--flush">
               <div class="registry-header activity-review-header">
                 <span>When</span><span>Type</span><span>Summary</span><span>Actions</span>
               </div>
@@ -323,7 +322,7 @@
             <button type="button" class="btn btn-primary btn--small" id="activity-filter-apply">Apply</button>
             <button type="button" class="btn btn-outline btn--small" id="activity-filter-reset">Reset</button>
           </div>
-          <div class="registry-list">
+          <div class="registry-list registry-list--flush">
             <div class="registry-header activity-log-header">
               <span>When</span><span>Type</span><span>Summary</span>
             </div>
@@ -376,9 +375,6 @@
                 <i class="fa-solid fa-download" aria-hidden="true"></i> Excel
               </button>
               <button type="button" class="btn btn-outline btn--small" id="fa-goto-bank-recon"><i class="fa-solid fa-scale-balanced"></i> Bank reconciliation</button>
-              <button type="button" class="btn btn-outline btn--small" id="fa-nobroker-upload-btn"><i class="fa-solid fa-file-arrow-up"></i> Upload NoBroker dump</button>
-              <button type="button" class="btn btn-outline btn--small" id="fa-clear-nobroker-btn"><i class="fa-solid fa-xmark"></i> Clear dump</button>
-              <input type="file" id="fa-nobroker-file" accept=".xlsx,.xls,.csv" hidden />
             </div>
           </div>
 
@@ -408,6 +404,11 @@
           </div>
 
           <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
+
+          <div class="fa-insight-row">
+            <details class="fa-panel fa-collapsible-panel" id="fa-planned-expenses" aria-label="Planned expenses versus balance"></details>
+            <details class="fa-panel fa-collapsible-panel" id="fa-monthly-summary" aria-label="Monthly raised income expenses summary"></details>
+          </div>
 
           <div class="fa-charts-grid fa-charts-grid--single">
             <div class="metric-card fa-chart-card fa-chart-card--full">
@@ -623,28 +624,4 @@
           </div>
         </div>
 
-        <div id="subview-gl" style="display:none; padding: 0 1.6rem 1.6rem;">
-          <div class="ops-split">
-            <div>
-              <div class="ops-toolbar">
-                <h3>Chart of accounts</h3>
-                <button type="button" class="btn btn-outline btn--small" id="gl-seed-accounts">Seed default chart</button>
-              </div>
-              <div id="gl-accounts-list"></div>
-              <form class="ops-inline-form ops-inline-form--stack" style="margin-top:1rem;" onsubmit="return false">
-                <h3>Post journal entry</h3>
-                <input type="date" id="gl-entry-date" class="expense-combobox" />
-                <input type="text" id="gl-entry-desc" class="expense-combobox" placeholder="Description" />
-                <select id="gl-debit-account" class="expense-combobox"><option value="">Debit account</option></select>
-                <select id="gl-credit-account" class="expense-combobox"><option value="">Credit account</option></select>
-                <input type="number" id="gl-entry-amount" class="expense-combobox" placeholder="Amount" step="0.01" />
-                <button type="button" class="btn btn-primary btn--small" id="gl-post-entry">Post entry</button>
-              </form>
-            </div>
-            <div>
-              <h3>Recent journal entries</h3>
-              <div id="gl-journal-list"></div>
-            </div>
-          </div>
-        </div>
       </section>

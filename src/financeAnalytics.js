@@ -8,8 +8,6 @@ import {
     getMatchedTransactionIds,
     getUnmatchedBankLines,
     getUnmatchedLedgerTxns,
-    loadNoBrokerDumpFile,
-    clearNoBrokerDump,
     isTransactionReconciled,
     getBankBalanceReconciliation,
 } from './bankReconciliation.js';
@@ -24,7 +22,7 @@ import {
     isBankPettyFunding,
     isCashDeskSpend,
 } from './cashFloat.js';
-import { cashBillsAsReportExpenses } from './financeDocuments.js';
+import { cashBillsAsReportExpenses, getOpenExpenseDocuments, getCashWalletLeft } from './financeDocuments.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -61,19 +59,6 @@ const txnInMonths = (txn, months) => {
 };
 
 const filterTxnsInMonthRange = (txns, months) => txns.filter((t) => txnInMonths(t, months));
-
-const computeWalletBalances = () => {
-    let cash = 0;
-    let bank = 0;
-    (portalState.finances.txns || []).forEach((t) => {
-        const amt = parseFloat(t.amount) || 0;
-        const wallet = (t.wallet || 'CASH').toUpperCase();
-        const delta = t.type === 'IN' ? amt : -amt;
-        if (wallet === 'BANK') bank += delta;
-        else cash += delta;
-    });
-    return { cash, bank, total: cash + bank };
-};
 
 const sumUnmatchedStatementNet = () => {
     let net = 0;
@@ -583,7 +568,7 @@ const renderBalanceMetrics = () => {
     const el = document.getElementById('fa-balance-metrics');
     if (!el) return;
 
-    const { cash } = computeWalletBalances();
+    const cash = getCashWalletLeft();
     const recon = getBankBalanceReconciliation();
     const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
     const passbookVariance = recon.diff;
@@ -617,15 +602,15 @@ const renderBalanceMetrics = () => {
         <span class="fa-metric__sub">${bankSub}</span>
       </div>
       ${varianceCard}
-      <div class="metric-card fa-metric">
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-bills-wallet title="Open Bills & receipts cash float">
         <span class="label">Petty cash</span>
         <span class="value">${formatMoney(cash)}</span>
-        <span class="fa-metric__sub">Cash desk</span>
+        <span class="fa-metric__sub">Wallet Left (Bills &amp; receipts)</span>
       </div>
       <div class="metric-card fa-metric">
         <span class="label">Total balance</span>
         <span class="value">${bankBalance != null ? formatMoney(cash + bankBalance) : formatMoney(cash)}</span>
-        <span class="fa-metric__sub">Petty cash + bank</span>
+        <span class="fa-metric__sub">Wallet Left + bank</span>
       </div>
       <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Review unmatched statement lines">
         <span class="label">Unmatched statement</span>
@@ -637,6 +622,182 @@ const renderBalanceMetrics = () => {
         <span class="value" style="color:var(--warning, #d97706);">${unreconciledTxns}</span>
         <span class="fa-metric__sub">Net ${formatMoney(unreconciledNet)} · ${matchedCount} matched · click to act</span>
       </div>`;
+};
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+const monthKeyFromDate = (iso) => {
+    const s = String(iso || '').slice(0, 10);
+    const m = s.match(/^(\d{4})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}` : '';
+};
+
+const summarizePlannedExpenses = () => {
+    const docs = getOpenExpenseDocuments();
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const todayIso = today.toISOString().slice(0, 10);
+    const thisMonthKey = monthKeyFromDate(todayIso);
+
+    let overdue = 0;
+    let thisMonth = 0;
+    let later = 0;
+    const byCat = new Map();
+
+    docs.forEach((d) => {
+        const amt = round2(parseFloat(d.amount) || 0);
+        const dateStr = String(d.doc_date || '').slice(0, 10);
+        if (dateStr && dateStr < todayIso) overdue += amt;
+        else if (monthKeyFromDate(dateStr) === thisMonthKey) thisMonth += amt;
+        else later += amt;
+
+        const key = normalizeCategoryKey(d.cat || 'Other') || 'Other';
+        byCat.set(key, round2((byCat.get(key) || 0) + amt));
+    });
+
+    const topCats = [...byCat.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([key, amount]) => ({ key, label: categoryDisplayLabel(key), amount }));
+
+    return {
+        docs,
+        count: docs.length,
+        total: round2(overdue + thisMonth + later),
+        overdue: round2(overdue),
+        thisMonth: round2(thisMonth),
+        later: round2(later),
+        topCats,
+    };
+};
+
+/** Planned expenses vs balance — collapsed by default. */
+const renderPlannedExpensesCard = () => {
+    const el = document.getElementById('fa-planned-expenses');
+    if (!el) return;
+    const wasOpen = el.open;
+
+    const planned = summarizePlannedExpenses();
+    const cash = getCashWalletLeft();
+    const recon = getBankBalanceReconciliation();
+    const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
+    const hasBank = bankBalance != null;
+    const current = hasBank ? round2(cash + bankBalance) : round2(cash);
+    const after = round2(current - planned.total);
+    const afterClass = after < -0.009 ? 'fa-planned__after--short' : (after < current * 0.15 ? 'fa-planned__after--tight' : 'fa-planned__after--ok');
+
+    const catChips = planned.topCats.length
+        ? planned.topCats.map((c) =>
+            `<span class="fa-planned__chip"><strong>${c.label}</strong> ${formatMoney(c.amount)}</span>`,
+        ).join('')
+        : '<span class="fa-planned__chip fa-planned__chip--muted">No open expense bills yet</span>';
+
+    el.innerHTML = `
+      <summary class="fa-collapsible-panel__summary">
+        <span class="fa-collapsible-panel__title">Planned expenses vs balance</span>
+        <span class="fa-collapsible-panel__meta">Planned ${formatMoney(planned.total)} · After ${formatMoney(after)} · ${planned.count} open</span>
+      </summary>
+      <div class="fa-collapsible-panel__body">
+        <div class="fa-panel__head fa-panel__head--row">
+          <p class="fa-panel__hint" style="margin:0;">
+            Open (unlinked) bills from <strong>Bills &amp; receipts</strong> — proposed spend until you link them to the ledger.
+          </p>
+          <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
+            <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Review open bills
+          </button>
+        </div>
+        <div class="fa-planned__metrics">
+          <div class="fa-planned__metric">
+            <span class="fa-planned__label">Current balance</span>
+            <span class="fa-planned__value">${formatMoney(current)}</span>
+            <span class="fa-planned__sub">${hasBank ? 'Wallet Left + bank' : 'Wallet Left only (set bank opening / passbook)'}</span>
+          </div>
+          <div class="fa-planned__metric">
+            <span class="fa-planned__label">Planned spend</span>
+            <span class="fa-planned__value fa-planned__value--out">${formatMoney(planned.total)}</span>
+            <span class="fa-planned__sub">${planned.count} open bill${planned.count === 1 ? '' : 's'}</span>
+          </div>
+          <div class="fa-planned__metric ${afterClass}">
+            <span class="fa-planned__label">After planned</span>
+            <span class="fa-planned__value">${formatMoney(after)}</span>
+            <span class="fa-planned__sub">${after < -0.009 ? 'Shortfall if all open bills clear' : 'Left if all open bills clear'}</span>
+          </div>
+        </div>
+        <div class="fa-planned__buckets">
+          <span><strong>Overdue</strong> ${formatMoney(planned.overdue)}</span>
+          <span><strong>This month</strong> ${formatMoney(planned.thisMonth)}</span>
+          <span><strong>Later</strong> ${formatMoney(planned.later)}</span>
+        </div>
+        <div class="fa-planned__cats" aria-label="Top planned categories">${catChips}</div>
+      </div>`;
+
+    el.open = wasOpen;
+
+    el.querySelector('#fa-planned-open-bills')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const { focusOpenExpenseBills } = await import('./financeDocuments.js');
+        focusOpenExpenseBills();
+    }, { once: true });
+};
+
+/** Monthly raised / income / expenses / net — same rows as the Excel export summary. */
+const renderMonthlySummaryCard = () => {
+    const el = document.getElementById('fa-monthly-summary');
+    if (!el) return;
+    const wasOpen = el.open;
+
+    const snap = getFinanceReportsExportSnapshot();
+    const { months, monthly } = snap;
+    const sumRaised = monthly.raised.reduce((a, b) => a + b, 0);
+    const sumIncome = monthly.income.reduce((a, b) => a + b, 0);
+    const sumExpense = monthly.expense.reduce((a, b) => a + b, 0);
+    const sumNet = round2(sumIncome - sumExpense);
+    const netClass = (v) => (v < -0.009 ? 'fa-monthly-summary__neg' : (v > 0.009 ? 'fa-monthly-summary__pos' : ''));
+
+    const rows = months.map((mo, i) => {
+        const net = monthly.net[i] || 0;
+        return `<tr>
+          <td>${mo.label}</td>
+          <td class="fa-num">${formatMoney(monthly.raised[i])}</td>
+          <td class="fa-num">${formatMoney(monthly.income[i])}</td>
+          <td class="fa-num">${formatMoney(monthly.expense[i])}</td>
+          <td class="fa-num ${netClass(net)}">${formatMoney(net)}</td>
+        </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <summary class="fa-collapsible-panel__summary">
+        <span class="fa-collapsible-panel__title">Monthly summary</span>
+        <span class="fa-collapsible-panel__meta">Net ${formatMoney(sumNet)}</span>
+      </summary>
+      <div class="fa-collapsible-panel__body">
+        <div class="fa-table-wrap">
+          <table class="fa-pivot-table fa-monthly-summary-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th class="fa-num" title="Raised invoices">Raised</th>
+                <th class="fa-num" title="Ledger income">Income</th>
+                <th class="fa-num" title="Ledger expenses">Expense</th>
+                <th class="fa-num" title="Income − expenses">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+              <tr class="fa-monthly-summary-table__total">
+                <td>Total</td>
+                <td class="fa-num">${formatMoney(sumRaised)}</td>
+                <td class="fa-num">${formatMoney(sumIncome)}</td>
+                <td class="fa-num">${formatMoney(sumExpense)}</td>
+                <td class="fa-num ${netClass(sumNet)}">${formatMoney(sumNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+    el.open = wasOpen;
 };
 
 const renderPivotTable = ({
@@ -905,6 +1066,8 @@ export const renderFinanceAnalytics = () => {
     const months = buildMonthRange(settings.monthCount);
 
     renderBalanceMetrics();
+    renderPlannedExpensesCard();
+    renderMonthlySummaryCard();
     wireBalanceMetricClicks();
     renderCombinedCategoryChart(
         months,
@@ -929,23 +1092,16 @@ export const renderFinanceAnalytics = () => {
     wirePivotDrilldown();
 };
 
-const handleNoBrokerUpload = async (file) => {
-    if (!file) return;
-    try {
-        const count = await loadNoBrokerDumpFile(file);
-        alert(`Loaded ${count} NoBroker payment row(s).`);
-        renderFinanceAnalytics();
-        window.renderBankReconciliation?.();
-    } catch (err) {
-        alert(err.message || 'Could not parse NoBroker file.');
-    }
-};
-
 const wireBalanceMetricClicks = () => {
     const el = document.getElementById('fa-balance-metrics');
     if (!el || el.dataset.wired) return;
     el.dataset.wired = '1';
     el.addEventListener('click', (e) => {
+        const billsCard = e.target.closest('[data-goto-bills-wallet]');
+        if (billsCard) {
+            window.switchView?.('finance-docs');
+            return;
+        }
         const card = e.target.closest('[data-goto-bank-recon]');
         if (!card) return;
         const focusUnmatched = card.hasAttribute('data-focus-unmatched-ledger');
@@ -1010,22 +1166,6 @@ export const initFinanceAnalyticsUi = () => {
             if (e.key === 'Escape' && !projectionPopover.hidden) setOpen(false);
         });
     }
-
-    document.getElementById('fa-nobroker-upload-btn')?.addEventListener('click', () => {
-        document.getElementById('fa-nobroker-file')?.click();
-    });
-
-    document.getElementById('fa-nobroker-file')?.addEventListener('change', (e) => {
-        const file = e.target.files?.[0];
-        if (file) void handleNoBrokerUpload(file);
-        e.target.value = '';
-    });
-
-    document.getElementById('fa-clear-nobroker-btn')?.addEventListener('click', () => {
-        clearNoBrokerDump();
-        renderFinanceAnalytics();
-        window.renderBankReconciliation?.();
-    });
 
     document.getElementById('fa-goto-bank-recon')?.addEventListener('click', () => {
         window.location.hash = '#finance-bank-recon';

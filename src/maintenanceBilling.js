@@ -51,7 +51,8 @@ import {
     openSendInvoicesModal,
 } from './invoicePdf.js';
 import { initBillingBatchesUi, renderBillingRunsList } from './billingBatches.js';
-import { initDuesAgingUi, renderAgingPage } from './duesAging.js';
+import { initDuesAgingUi, renderAgingPage, sendReminderForInvoice } from './duesAging.js';
+import ExcelJS from 'exceljs';
 import {
     initBlockFilterListener,
     invoiceMatchesBlock,
@@ -62,6 +63,7 @@ import {
 import { clearResidentsCache } from './residents.js';
 import { logActivity, renderInvoiceActivityHistory } from './activityAudit.js';
 import { deriveBlockFromFlat } from './parkingImport.js';
+import { withButtonBusy } from './buttonBusy.js';
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -1148,19 +1150,24 @@ export async function createMaintenanceInvoice({ unitNumber, periodLabel, dueDat
     });
 }
 
-export async function deleteMaintenanceInvoice(id) {
-    if (!supabase) return;
+export async function deleteMaintenanceInvoice(id, { confirm: askConfirm = true, silent = false } = {}) {
+    if (!supabase) return { ok: false, reason: 'no_client' };
     const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === id);
-    if (!inv) return;
+    if (!inv) return { ok: false, reason: 'missing' };
     if (parseFloat(inv.amount_paid || 0) > 0.001) {
-        alert('Cannot delete an invoice that has payments applied. Remove allocations first.');
-        return;
+        if (!silent) alert('Cannot delete an invoice that has payments applied. Remove allocations first.');
+        return { ok: false, reason: 'has_payments' };
     }
-    if (!confirm(`Delete invoice ${inv.period_label} for ${getUnitLabel(inv.unit_id)}?`)) return;
+    if (askConfirm && !confirm(`Delete invoice ${inv.period_label} for ${getUnitLabel(inv.unit_id)}?`)) {
+        return { ok: false, reason: 'cancelled' };
+    }
 
     const snapshot = { ...inv };
     const { error } = await supabase.from('maintenance_invoices').delete().eq('id', id);
-    if (error) return alert(error.message);
+    if (error) {
+        if (!silent) alert(error.message);
+        return { ok: false, reason: 'error', error };
+    }
 
     await logActivity({
         entityType: 'INVOICE',
@@ -1170,12 +1177,210 @@ export async function deleteMaintenanceInvoice(id) {
         oldData: snapshot,
     });
 
-    await pullState();
-    renderInvoicesPage();
+    if (!silent) {
+        await pullState();
+        renderInvoicesPage();
+    }
+    return { ok: true };
 }
 
 let activeInvoiceSubView = 'pending-dues';
 let detailInvoiceId = null;
+const selectedPendingUnitIds = new Set();
+const selectedInvoiceIds = new Set();
+
+const escAttr = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;');
+
+const selectedPendingRows = () => {
+    const byId = new Map(getPendingDuesRows({ ignoreFilter: true }).map((r) => [r.unit.id, r]));
+    return [...selectedPendingUnitIds].map((id) => byId.get(id)).filter(Boolean);
+};
+
+const syncPendingDuesBulkBar = () => {
+    const bar = document.getElementById('pending-dues-bulk-bar');
+    const countEl = document.getElementById('pending-dues-bulk-count');
+    const remindBtn = document.getElementById('pending-dues-bulk-remind');
+    const exportBtn = document.getElementById('pending-dues-bulk-export');
+    const clearBtn = document.getElementById('pending-dues-bulk-clear');
+    const selectAll = document.getElementById('pending-dues-select-all');
+    if (!bar) return;
+
+    const visible = getPendingDuesRows();
+    const selected = selectedPendingRows();
+    const total = selected.reduce((s, r) => s + r.displayOutstanding, 0);
+    const n = selected.length;
+
+    bar.hidden = n === 0;
+    if (countEl) {
+        countEl.textContent = n
+            ? `${n} selected · ${formatMoney(total)}`
+            : '0 selected';
+    }
+    if (remindBtn) remindBtn.disabled = n === 0;
+    if (exportBtn) exportBtn.disabled = n === 0;
+    if (clearBtn) clearBtn.disabled = n === 0;
+
+    if (selectAll) {
+        const visibleIds = visible.map((r) => r.unit.id);
+        const allSelected = visibleIds.length > 0
+            && visibleIds.every((id) => selectedPendingUnitIds.has(id));
+        const someSelected = visibleIds.some((id) => selectedPendingUnitIds.has(id));
+        selectAll.checked = allSelected;
+        selectAll.indeterminate = someSelected && !allSelected;
+    }
+};
+
+const openInvoicesForPendingUnit = (unitId) =>
+    getOpenInvoicesForUnit(unitId).filter((inv) => invoiceMatchesBlock(inv) && invoiceBalance(inv) > 0.001);
+
+const exportSelectedPendingDues = async () => {
+    const rows = selectedPendingRows();
+    if (!rows.length) return;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Pending Dues');
+    ws.addRow(['Flat', 'Block', 'Outstanding', 'Open invoices', 'Oldest due', 'Open periods']);
+    rows.forEach((r) => {
+        ws.addRow([
+            r.unit.number,
+            r.block,
+            r.displayOutstanding,
+            r.openCount,
+            r.oldestDue || '',
+            (r.periods || []).join(', '),
+        ]);
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Pending_Dues_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+};
+
+const sendRemindersForSelectedPending = async () => {
+    const rows = selectedPendingRows();
+    if (!rows.length) return;
+    const invoiceIds = [];
+    rows.forEach((r) => {
+        openInvoicesForPendingUnit(r.unit.id).forEach((inv) => {
+            if (!invoiceIds.includes(inv.id)) invoiceIds.push(inv.id);
+        });
+    });
+    if (!invoiceIds.length) {
+        alert('No open invoices for the selected flats.');
+        return;
+    }
+    if (!confirm(`Send reminders for ${invoiceIds.length} open invoice(s) across ${rows.length} flat(s)?`)) return;
+
+    let sent = 0;
+    let skipped = 0;
+    for (const id of invoiceIds) {
+        try {
+            const result = await sendReminderForInvoice(id, { force: true });
+            if (result?.skipped || result?.cancelled) skipped += 1;
+            else sent += 1;
+        } catch (err) {
+            alert(err?.message || `Failed for invoice ${id}`);
+            break;
+        }
+    }
+    alert(`Reminders: ${sent} sent${skipped ? `, ${skipped} skipped` : ''}.`);
+    renderPendingDues();
+};
+
+const syncInvoiceListBulkBar = () => {
+    const bar = document.getElementById('invoice-list-bulk-bar');
+    const countEl = document.getElementById('invoice-list-bulk-count');
+    const deleteBtn = document.getElementById('invoice-list-bulk-delete');
+    const clearBtn = document.getElementById('invoice-list-bulk-clear');
+    const selectAll = document.getElementById('invoice-list-select-all');
+    if (!bar) return;
+
+    const visible = filteredInvoices();
+    const selected = visible.filter((inv) => selectedInvoiceIds.has(inv.id));
+    const deletable = selected.filter((inv) => parseFloat(inv.amount_paid || 0) <= 0.001);
+    const n = selected.length;
+
+    bar.hidden = n === 0;
+    if (countEl) {
+        const blocked = n - deletable.length;
+        countEl.textContent = blocked
+            ? `${n} selected · ${deletable.length} deletable · ${blocked} with payments`
+            : (n ? `${n} selected` : '0 selected');
+    }
+    if (deleteBtn) {
+        deleteBtn.disabled = deletable.length === 0;
+        deleteBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected${deletable.length ? ` (${deletable.length})` : ''}`;
+    }
+    if (clearBtn) clearBtn.disabled = n === 0;
+
+    if (selectAll) {
+        const visibleIds = visible.map((inv) => inv.id);
+        const allSelected = visibleIds.length > 0
+            && visibleIds.every((id) => selectedInvoiceIds.has(id));
+        const someSelected = visibleIds.some((id) => selectedInvoiceIds.has(id));
+        selectAll.checked = allSelected;
+        selectAll.indeterminate = someSelected && !allSelected;
+    }
+};
+
+const deleteSelectedInvoices = async () => {
+    if (!supabase) return;
+    const apartmentId = portalState.access?.activeApartmentId;
+    if (!apartmentId) return;
+
+    const selected = filteredInvoices().filter((inv) => selectedInvoiceIds.has(inv.id));
+    const deletable = selected.filter((inv) => parseFloat(inv.amount_paid || 0) <= 0.001);
+    const blocked = selected.length - deletable.length;
+    if (!deletable.length) {
+        alert(blocked
+            ? 'None of the selected invoices can be deleted — they have payments applied.'
+            : 'Select at least one invoice.');
+        return;
+    }
+    const msg = blocked
+        ? `Delete ${deletable.length} invoice(s)? ${blocked} with payments will be skipped.`
+        : `Delete ${deletable.length} invoice(s)? This cannot be undone.`;
+    if (!confirm(msg)) return;
+
+    const ids = deletable.map((inv) => inv.id);
+    const snapshots = deletable.map((inv) => ({
+        id: inv.id,
+        period_label: inv.period_label,
+        unit_id: inv.unit_id,
+        billing_group_id: inv.billing_group_id,
+        amount: inv.amount,
+        label: getInvoiceDisplayLabel(inv),
+    }));
+
+    const btn = document.getElementById('invoice-list-bulk-delete');
+    await withButtonBusy(btn, 'Deleting…', async () => {
+        const { error } = await supabase
+            .from('maintenance_invoices')
+            .delete()
+            .eq('apartment_id', apartmentId)
+            .in('id', ids);
+        if (error) throw error;
+
+        await logActivity({
+            entityType: 'INVOICE',
+            entityId: ids[0],
+            action: 'DELETE',
+            summary: `Bulk deleted ${ids.length} invoice(s)`,
+            oldData: { count: ids.length, invoices: snapshots },
+        });
+
+        ids.forEach((id) => selectedInvoiceIds.delete(id));
+        await pullState();
+        renderInvoicesPage();
+    }).catch((err) => alert(err?.message || 'Bulk delete failed.'));
+};
 
 const filteredInvoices = () => {
     const filterQ = (document.getElementById('invoice-list-filter')?.value || '').trim().toUpperCase();
@@ -1207,8 +1412,10 @@ const filteredInvoices = () => {
     return invoices;
 };
 
-const getPendingDuesRows = () => {
-    const filterQ = (document.getElementById('pending-dues-filter')?.value || '').trim().toUpperCase();
+const getPendingDuesRows = ({ ignoreFilter = false } = {}) => {
+    const filterQ = ignoreFilter
+        ? ''
+        : (document.getElementById('pending-dues-filter')?.value || '').trim().toUpperCase();
     let rows = [];
 
     portalState.units
@@ -1274,6 +1481,7 @@ export const renderPendingDues = () => {
 
     if (!rows.length) {
         list.innerHTML = '<p class="maintenance-dues-empty">No pending dues — all flats are clear for the selected block.</p>';
+        syncPendingDuesBulkBar();
         return;
     }
 
@@ -1286,10 +1494,17 @@ export const renderPendingDues = () => {
         const sharedNote = isSharedOnly && shared.length
             ? `<span class="invoice-combined-badge">Combined</span> ${getInvoiceDisplayLabel(shared[0].inv)}`
             : '';
+        const checked = selectedPendingUnitIds.has(unit.id) ? 'checked' : '';
+        const flatEsc = escAttr(unit.number);
 
         const el = document.createElement('div');
         el.className = 'apt-row pending-dues-row';
+        el.dataset.unitId = unit.id;
         el.innerHTML = `
+          <div class="pending-dues-check-col">
+            <input type="checkbox" class="pending-dues-row-check" value="${escAttr(unit.id)}"
+              aria-label="Select flat ${flatEsc}" ${checked} />
+          </div>
           <div class="maintenance-dues-flat inv-col-flat">${unit.number}</div>
           <div class="inv-col-block">${block}</div>
           <div class="inv-col-money inv-col-balance" style="color:var(--danger);">
@@ -1299,11 +1514,13 @@ export const renderPendingDues = () => {
           <div class="inv-col-due">${dueLabel}</div>
           <div class="inv-col-periods">${periodLabel || '—'}${sharedNote ? `<div class="pending-dues-combined">${sharedNote}</div>` : ''}</div>
           <div class="inv-col-actions">
-            <button type="button" class="btn btn-primary btn--small" onclick="window.openMaintenanceCollectionForFlat('${unit.number}')">Record payment</button>
-            <button type="button" class="btn btn-outline btn--small" onclick="window.viewPendingDuesInvoices('${unit.number}')">Invoices</button>
+            <button type="button" class="btn btn-primary btn--small" data-pd-action="pay" data-flat="${flatEsc}">Record payment</button>
+            <button type="button" class="btn btn-outline btn--small" data-pd-action="invoices" data-flat="${flatEsc}">Invoices</button>
           </div>`;
         list.appendChild(el);
     });
+
+    syncPendingDuesBulkBar();
 };
 
 export const renderInvoiceMetrics = () => {
@@ -1350,18 +1567,35 @@ export const renderInvoiceList = () => {
     if (!list) return;
 
     const invoices = filteredInvoices();
+    const visibleIds = new Set(invoices.map((inv) => inv.id));
+    [...selectedInvoiceIds].forEach((id) => {
+        if (!visibleIds.has(id)
+            && !(portalState.finances.maintenanceInvoices || []).some((inv) => inv.id === id)) {
+            selectedInvoiceIds.delete(id);
+        }
+    });
+
     list.innerHTML = '';
 
     if (!invoices.length) {
         list.innerHTML = '<p class="maintenance-dues-empty">No invoices match your filters. Raise one to start tracking flat dues.</p>';
+        syncInvoiceListBulkBar();
         return;
     }
 
     invoices.forEach((inv) => {
         const bal = invoiceBalance(inv);
+        const hasPayments = parseFloat(inv.amount_paid || 0) > 0.001;
+        const checked = selectedInvoiceIds.has(inv.id) ? 'checked' : '';
+        const flatLabel = getUnitLabel(inv.unit_id);
         const row = document.createElement('div');
         row.className = 'apt-row maintenance-dues-row';
+        row.dataset.invoiceId = inv.id;
         row.innerHTML = `
+          <div class="invoice-list-check-col">
+            <input type="checkbox" class="invoice-list-row-check" value="${escAttr(inv.id)}"
+              aria-label="Select invoice ${escAttr(getInvoiceDisplayLabel(inv))} ${escAttr(inv.period_label)}" ${checked} />
+          </div>
           <div class="maintenance-dues-flat inv-col-flat">${inv.billing_group_id
             ? `<span class="invoice-combined-badge">Combined</span> ${getInvoiceDisplayLabel(inv)}`
             : getInvoiceDisplayLabel(inv)}</div>
@@ -1373,19 +1607,21 @@ export const renderInvoiceList = () => {
           <div class="inv-col-status">${statusBadge(inv)}</div>
           <div class="inv-col-actions">
             ${bal > 0.001 ? `<button type="button" class="btn btn-primary btn--small" title="Record payment"
-              onclick="window.openMaintenanceCollectionForFlat('${getUnitLabel(inv.unit_id).replace(/'/g, "\\'")}', 'BANK', { invoiceId: '${inv.id}', amount: ${bal}, allocationAmount: ${bal} })">
+              data-inv-action="pay" data-flat="${escAttr(flatLabel)}" data-id="${escAttr(inv.id)}" data-bal="${bal}">
               <i class="fa-solid fa-indian-rupee-sign"></i></button>` : ''}
             <button type="button" class="btn btn-outline btn--small" title="Download PDF"
-              onclick="window.downloadInvoicePdf('${inv.id}')"><i class="fa-solid fa-file-pdf"></i></button>
+              data-inv-action="pdf" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-file-pdf"></i></button>
             <button type="button" class="btn btn-outline btn--small" title="View details"
-              onclick="window.viewInvoiceDetail('${inv.id}')"><i class="fa-solid fa-eye"></i></button>
-            <button type="button" class="btn btn-outline btn--small btn--danger" title="Delete"
-              onclick="window.deleteMaintenanceInvoice('${inv.id}')" ${parseFloat(inv.amount_paid || 0) > 0 ? 'disabled title="Has payments applied"' : ''}>
+              data-inv-action="view" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-eye"></i></button>
+            <button type="button" class="btn btn-outline btn--small btn--danger" title="${hasPayments ? 'Has payments applied' : 'Delete'}"
+              data-inv-action="delete" data-id="${escAttr(inv.id)}" ${hasPayments ? 'disabled' : ''}>
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>`;
         list.appendChild(row);
     });
+
+    syncInvoiceListBulkBar();
 };
 
 export const renderInvoiceCollections = () => {
@@ -1988,6 +2224,84 @@ export const initMaintenanceBilling = () => {
     document.getElementById('invoice-status-filter')?.addEventListener('change', renderInvoiceList);
     document.querySelectorAll('[data-invoice-subview]').forEach((btn) => {
         btn.addEventListener('click', () => switchInvoiceSubView(btn.dataset.invoiceSubview));
+    });
+
+    const pendingItems = document.getElementById('pending-dues-items');
+    pendingItems?.addEventListener('change', (e) => {
+        const check = e.target.closest('.pending-dues-row-check');
+        if (!check) return;
+        if (check.checked) selectedPendingUnitIds.add(check.value);
+        else selectedPendingUnitIds.delete(check.value);
+        syncPendingDuesBulkBar();
+    });
+    pendingItems?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pd-action]');
+        if (!btn) return;
+        const flat = btn.dataset.flat || '';
+        if (btn.dataset.pdAction === 'pay') openMaintenanceCollectionForFlat(flat);
+        else if (btn.dataset.pdAction === 'invoices') viewPendingDuesInvoices(flat);
+    });
+    document.getElementById('pending-dues-select-all')?.addEventListener('change', (e) => {
+        const on = e.target.checked;
+        getPendingDuesRows().forEach((r) => {
+            if (on) selectedPendingUnitIds.add(r.unit.id);
+            else selectedPendingUnitIds.delete(r.unit.id);
+        });
+        renderPendingDues();
+    });
+    document.getElementById('pending-dues-bulk-clear')?.addEventListener('click', () => {
+        selectedPendingUnitIds.clear();
+        renderPendingDues();
+    });
+    document.getElementById('pending-dues-bulk-export')?.addEventListener('click', () => {
+        exportSelectedPendingDues().catch((err) => alert(err?.message || 'Export failed.'));
+    });
+    document.getElementById('pending-dues-bulk-remind')?.addEventListener('click', () => {
+        sendRemindersForSelectedPending().catch((err) => alert(err?.message || 'Could not send reminders.'));
+    });
+
+    const invoiceItems = document.getElementById('invoice-list-items');
+    invoiceItems?.addEventListener('change', (e) => {
+        const check = e.target.closest('.invoice-list-row-check');
+        if (!check) return;
+        if (check.checked) selectedInvoiceIds.add(check.value);
+        else selectedInvoiceIds.delete(check.value);
+        syncInvoiceListBulkBar();
+    });
+    invoiceItems?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-inv-action]');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        const action = btn.dataset.invAction;
+        if (action === 'pay') {
+            const bal = parseFloat(btn.dataset.bal || 0);
+            openMaintenanceCollectionForFlat(btn.dataset.flat || '', 'BANK', {
+                invoiceId: id,
+                amount: bal,
+                allocationAmount: bal,
+            });
+        } else if (action === 'pdf') {
+            window.downloadInvoicePdf?.(id);
+        } else if (action === 'view') {
+            viewInvoiceDetail(id);
+        } else if (action === 'delete') {
+            deleteMaintenanceInvoice(id).catch((err) => alert(err?.message || 'Delete failed.'));
+        }
+    });
+    document.getElementById('invoice-list-select-all')?.addEventListener('change', (e) => {
+        const on = e.target.checked;
+        filteredInvoices().forEach((inv) => {
+            if (on) selectedInvoiceIds.add(inv.id);
+            else selectedInvoiceIds.delete(inv.id);
+        });
+        renderInvoiceList();
+    });
+    document.getElementById('invoice-list-bulk-clear')?.addEventListener('click', () => {
+        selectedInvoiceIds.clear();
+        renderInvoiceList();
+    });
+    document.getElementById('invoice-list-bulk-delete')?.addEventListener('click', () => {
+        deleteSelectedInvoices().catch((err) => alert(err?.message || 'Bulk delete failed.'));
     });
 
     switchInvoiceSubView(activeInvoiceSubView);

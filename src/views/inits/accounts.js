@@ -2,7 +2,6 @@ import { initExpenseModal, initAccountsSubViewTabs, saveCashData, renderCashLedg
 import { initFinanceAnalyticsUi, renderFinanceAnalytics } from '../../financeAnalytics.js';
 import { initBankReconciliationUi } from '../../bankReconciliation.js';
 import { initActivityAuditUi } from '../../activityAudit.js';
-import { initGeneralLedger } from '../../generalLedger.js';
 import { initBulkCollectionImport } from '../../bulkCollectionImport.js';
 import { renderLedgerSyncPanel } from '../../ledgerSpreadsheetSync.js';
 import { processFinances } from '../../finances.js';
@@ -29,7 +28,6 @@ export default async function initAccountsView() {
     initActivityAuditUi();
     initBankReconciliationUi();
     initFinanceAnalyticsUi();
-    initGeneralLedger();
     initCashFloatPage();
 
     window.renderLedgerSyncPanel = renderLedgerSyncPanel;

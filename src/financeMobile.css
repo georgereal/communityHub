@@ -309,12 +309,25 @@
     color: var(--text-dim);
   }
 
-  #pending-dues-items .pending-dues-row > *:nth-child(1)::before { content: 'Flat'; }
-  #pending-dues-items .pending-dues-row > *:nth-child(2)::before { content: 'Block'; }
-  #pending-dues-items .pending-dues-row > *:nth-child(3)::before { content: 'Outstanding'; }
-  #pending-dues-items .pending-dues-row > *:nth-child(4)::before { content: 'Open'; }
-  #pending-dues-items .pending-dues-row > *:nth-child(5)::before { content: 'Oldest due'; }
-  #pending-dues-items .pending-dues-row > *:nth-child(6)::before { content: 'Open periods'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(1)::before { content: ''; }
+  #pending-dues-items .pending-dues-row > *:nth-child(2)::before { content: 'Flat'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(3)::before { content: 'Block'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(4)::before { content: 'Outstanding'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(5)::before { content: 'Open'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(6)::before { content: 'Oldest due'; }
+  #pending-dues-items .pending-dues-row > *:nth-child(7)::before { content: 'Open periods'; }
+
+  #pending-dues-items .pending-dues-row .pending-dues-check-col {
+    display: flex;
+    grid-template-columns: none;
+    justify-content: flex-start;
+    padding: 0 0 0.35rem;
+    border: 0;
+  }
+
+  #pending-dues-items .pending-dues-row .pending-dues-check-col::before {
+    display: none;
+  }
 
   #pending-dues-items .pending-dues-row .inv-col-actions {
     display: flex;

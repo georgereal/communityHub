@@ -69,8 +69,21 @@
               <input type="search" id="pending-dues-filter" placeholder="Search flat or block…" autocomplete="off" />
             </form>
           </div>
+          <div id="pending-dues-bulk-bar" class="pending-dues-bulk-bar" hidden>
+            <span id="pending-dues-bulk-count" class="pending-dues-bulk-bar__status">0 selected</span>
+            <button type="button" class="btn btn-outline btn--small" id="pending-dues-bulk-remind" disabled>
+              <i class="fa-solid fa-envelope" aria-hidden="true"></i> Send reminders
+            </button>
+            <button type="button" class="btn btn-outline btn--small" id="pending-dues-bulk-export" disabled>
+              <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Export selected
+            </button>
+            <button type="button" class="btn btn-outline btn--small" id="pending-dues-bulk-clear" disabled>Clear</button>
+          </div>
           <div class="registry-list pending-dues-table">
             <div class="registry-header pending-dues-header">
+              <span class="pending-dues-check-col">
+                <input type="checkbox" id="pending-dues-select-all" title="Select all visible flats" aria-label="Select all visible flats" />
+              </span>
               <span>Flat</span><span>Block</span><span>Outstanding</span>
               <span>Open</span><span>Oldest due</span><span>Open periods</span><span>Action</span>
             </div>
@@ -93,8 +106,18 @@
               </select>
             </label>
           </div>
+          <div id="invoice-list-bulk-bar" class="pending-dues-bulk-bar" hidden>
+            <span id="invoice-list-bulk-count" class="pending-dues-bulk-bar__status">0 selected</span>
+            <button type="button" class="btn btn-outline btn--small btn--danger" id="invoice-list-bulk-delete" disabled>
+              <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+            </button>
+            <button type="button" class="btn btn-outline btn--small" id="invoice-list-bulk-clear" disabled>Clear</button>
+          </div>
           <div class="registry-list invoice-list-table">
             <div class="registry-header maintenance-dues-header">
+              <span class="invoice-list-check-col">
+                <input type="checkbox" id="invoice-list-select-all" title="Select all visible invoices" aria-label="Select all visible invoices" />
+              </span>
               <span>Flat</span><span>Period</span><span>Due</span>
               <span>Billed</span><span>Paid</span>
               <span>Balance</span><span>Status</span><span>Action</span>

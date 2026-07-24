@@ -2146,6 +2146,11 @@ header {
   margin: 0 1.6rem;
 }
 
+.registry-list--flush {
+  margin-left: 0;
+  margin-right: 0;
+}
+
 .registry-header {
   display: grid;
   grid-template-columns: 80px 1fr 200px 240px 90px 90px 60px;
@@ -6940,15 +6945,16 @@ header {
 
 /* Maintenance billing — invoice list table */
 .invoice-list-table {
+  --inv-w-check: 2.25rem;
   --inv-w-flat: 8%;
-  --inv-w-period: 15%;
+  --inv-w-period: 14%;
   --inv-w-due: 10%;
-  --inv-w-billed: 12%;
-  --inv-w-paid: 12%;
-  --inv-w-balance: 12%;
-  --inv-w-status: 12%;
+  --inv-w-billed: 11%;
+  --inv-w-paid: 11%;
+  --inv-w-balance: 11%;
+  --inv-w-status: 11%;
   --inv-w-actions: 9%;
-  --inv-cols: var(--inv-w-flat) var(--inv-w-period) var(--inv-w-due) var(--inv-w-billed) var(--inv-w-paid) var(--inv-w-balance) var(--inv-w-status) var(--inv-w-actions);
+  --inv-cols: var(--inv-w-check) var(--inv-w-flat) var(--inv-w-period) var(--inv-w-due) var(--inv-w-billed) var(--inv-w-paid) var(--inv-w-balance) var(--inv-w-status) var(--inv-w-actions);
   --inv-cell-pad: 0.5rem 0.55rem;
   --inv-col-line: 1px solid #e9ecef;
   --inv-col-line-header: 1px solid #dfe3e8;
@@ -6981,11 +6987,26 @@ header {
   border-right: none;
 }
 
-.invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(4),
 .invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(5),
 .invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(6),
-.invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(8) {
+.invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(7),
+.invoice-list-table > .registry-header.maintenance-dues-header span:nth-child(9) {
   text-align: right;
+}
+
+.invoice-list-check-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 0.35rem !important;
+  padding-right: 0.35rem !important;
+}
+
+.invoice-list-check-col input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 
 #invoice-list-items .maintenance-dues-row {
@@ -7019,7 +7040,7 @@ header {
   border-right: none;
 }
 
-#invoice-list-items .maintenance-dues-row > *:nth-child(7) {
+#invoice-list-items .maintenance-dues-row > *:nth-child(8) {
   border-right: var(--inv-col-line-header);
 }
 
@@ -7067,14 +7088,15 @@ header {
 
 /* Pending dues — one row per flat with balance */
 .pending-dues-table {
-  --pd-w-flat: 10%;
+  --pd-w-check: 2.25rem;
+  --pd-w-flat: 9%;
   --pd-w-block: 7%;
-  --pd-w-out: 14%;
-  --pd-w-open: 8%;
+  --pd-w-out: 13%;
+  --pd-w-open: 7%;
   --pd-w-due: 11%;
-  --pd-w-periods: 38%;
+  --pd-w-periods: 36%;
   --pd-w-actions: 12%;
-  --pd-cols: var(--pd-w-flat) var(--pd-w-block) var(--pd-w-out) var(--pd-w-open) var(--pd-w-due) var(--pd-w-periods) var(--pd-w-actions);
+  --pd-cols: var(--pd-w-check) var(--pd-w-flat) var(--pd-w-block) var(--pd-w-out) var(--pd-w-open) var(--pd-w-due) var(--pd-w-periods) var(--pd-w-actions);
 }
 
 .pending-dues-table > .registry-header.pending-dues-header {
@@ -7101,9 +7123,47 @@ header {
   border-right: none;
 }
 
-.pending-dues-table > .registry-header.pending-dues-header span:nth-child(3),
-.pending-dues-table > .registry-header.pending-dues-header span:nth-child(7) {
+.pending-dues-table > .registry-header.pending-dues-header span:nth-child(4),
+.pending-dues-table > .registry-header.pending-dues-header span:nth-child(8) {
   text-align: right;
+}
+
+.pending-dues-check-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 0.35rem !important;
+  padding-right: 0.35rem !important;
+}
+
+.pending-dues-check-col input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.pending-dues-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.75rem;
+  background: #eef4ff;
+  border: 1px solid #c7d7f5;
+  border-radius: 8px;
+}
+
+.pending-dues-bulk-bar[hidden] {
+  display: none;
+}
+
+.pending-dues-bulk-bar__status {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text);
+  margin-right: auto;
 }
 
 #pending-dues-items .pending-dues-row {
@@ -7136,7 +7196,7 @@ header {
   border-right: none;
 }
 
-#pending-dues-items .pending-dues-row > *:nth-child(6) {
+#pending-dues-items .pending-dues-row > *:nth-child(7) {
   border-right: var(--inv-col-line-header, 1px solid #dfe3e8);
 }
 
@@ -7223,6 +7283,11 @@ header {
   #invoice-list-items .maintenance-dues-row > * {
     border-right: none;
     padding: 0.15rem 0;
+  }
+
+  #invoice-list-items .maintenance-dues-row .invoice-list-check-col {
+    justify-content: flex-start;
+    padding: 0 0 0.35rem !important;
   }
 
   #invoice-list-items .maintenance-dues-row .inv-col-actions {
@@ -14893,6 +14958,211 @@ textarea.bank-recon-cell-input {
 
 .fa-balance-metrics {
   margin-bottom: 1rem;
+}
+
+.fa-insight-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+@media (min-width: 900px) {
+  .fa-insight-row {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+
+  .fa-insight-row .fa-planned__metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fa-collapsible-panel {
+  margin-bottom: 0;
+  padding: 0.45rem 0.75rem 0.5rem;
+  min-width: 0;
+}
+
+.fa-collapsible-panel__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.65rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.fa-collapsible-panel__summary::-webkit-details-marker {
+  display: none;
+}
+
+.fa-collapsible-panel__summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 0.35rem;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+
+.fa-collapsible-panel[open] > .fa-collapsible-panel__summary::before {
+  transform: rotate(90deg);
+}
+
+.fa-collapsible-panel__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fa-collapsible-panel__meta {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.fa-collapsible-panel__body {
+  margin-top: 0.55rem;
+  padding-top: 0.1rem;
+}
+
+.fa-monthly-summary-table {
+  font-size: 0.78rem;
+}
+
+.fa-monthly-summary-table th,
+.fa-monthly-summary-table td {
+  padding: 0.28rem 0.4rem;
+}
+
+.fa-monthly-summary-table thead th {
+  background: #eef2ff;
+  font-size: 0.68rem;
+}
+
+.fa-monthly-summary-table__total td {
+  font-weight: 800;
+  border-top: 2px solid var(--border);
+}
+
+.fa-monthly-summary__pos {
+  color: var(--success);
+}
+
+.fa-monthly-summary__neg {
+  color: #b91c1c;
+}
+
+.fa-planned__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.55rem 0;
+}
+.fa-planned__metric {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.fa-planned__label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.25rem;
+}
+
+.fa-planned__value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.fa-planned__value--out {
+  color: #b91c1c;
+}
+
+.fa-planned__sub {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.fa-planned__after--ok .fa-planned__value {
+  color: var(--success);
+}
+
+.fa-planned__after--tight .fa-planned__value {
+  color: #d97706;
+}
+
+.fa-planned__after--short .fa-planned__value {
+  color: #b91c1c;
+}
+
+.fa-planned__buckets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1.1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.fa-planned__buckets strong {
+  font-weight: 800;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  margin-right: 0.25rem;
+}
+
+.fa-planned__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.fa-planned__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #1e40af;
+}
+
+.fa-planned__chip strong {
+  font-weight: 800;
+}
+
+.fa-planned__chip--muted {
+  background: #f8fafc;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+@media (max-width: 767px) {
+  .fa-planned__metrics {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fa-metric .fa-metric__sub {

@@ -36,6 +36,30 @@ const esc = (s) => String(s ?? '')
 export const getFinanceDocuments = () =>
   (portalState.finances.financeDocuments || []).filter((d) => d.status !== 'void');
 
+/** Open (unlinked) expense bills — proposed / not yet posted to ledger. */
+export const getOpenExpenseDocuments = () =>
+  getFinanceDocuments().filter((d) => d.kind === 'OUT' && d.status === 'open');
+
+/** Open Bills & receipts filtered to unlinked expenses. */
+export const focusOpenExpenseBills = () => {
+  docsReportFilter = null;
+  filterState.kind = 'OUT';
+  filterState.status = 'open';
+  filterState.pay = 'all';
+  filterState.q = '';
+  const kindEl = document.getElementById('fdoc-filter-kind');
+  const statusEl = document.getElementById('fdoc-filter-status');
+  const payEl = document.getElementById('fdoc-filter-pay');
+  const searchEl = document.getElementById('fdoc-search');
+  if (kindEl) kindEl.value = 'OUT';
+  if (statusEl) statusEl.value = 'open';
+  if (payEl) payEl.value = 'all';
+  if (searchEl) searchEl.value = '';
+  renderFdocReportBanner();
+  window.switchView?.('finance-docs');
+  renderFinanceDocumentsPage();
+};
+
 const applyDocLocally = (doc) => {
   if (!portalState.finances.financeDocuments) portalState.finances.financeDocuments = [];
   const list = portalState.finances.financeDocuments;
@@ -1228,6 +1252,9 @@ const computeBillsCashFloatSummary = () => {
     variance: round2(remaining - store.walletCash),
   };
 };
+
+/** Cash-desk wallet Left (bank float unused + receipts on hand − desk deposits). */
+export const getCashWalletLeft = () => computeBillsCashFloatSummary().unused;
 
 const renderFundingTableHtml = (funding, summary = {}) => {
   if (!funding.length) {

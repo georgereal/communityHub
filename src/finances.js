@@ -1909,7 +1909,6 @@ window.switchSubView = (sv) => {
         'invoices-raised': 'subview-invoices-raised',
         'bank-recon': 'subview-bank-recon',
         activity: 'subview-activity',
-        gl: 'subview-gl',
     };
     Object.entries(views).forEach(([key, id]) => {
         const el = document.getElementById(id);
@@ -1932,8 +1931,17 @@ window.switchSubView = (sv) => {
         });
     }
     if (sv === 'bank-recon') window.renderBankReconciliation?.();
-    if (sv === 'activity') window.renderActivityLogPage?.();
-    if (sv === 'gl') window.renderGeneralLedger?.();
+    if (sv === 'activity') {
+        const run = window.renderActivityLogPage
+            || ((...args) => import('./activityAudit.js').then((m) => m.renderActivityLogPage(...args)));
+        Promise.resolve(run()).catch((err) => {
+            console.warn('[activity] Failed to load activity log', err);
+            const list = document.getElementById('activity-log-list');
+            if (list) {
+                list.innerHTML = `<p class="maintenance-dues-empty">${err?.message || 'Could not load activity log.'}</p>`;
+            }
+        });
+    }
     if (sv === 'ledger') {
         processFinances();
         renderCashLedger();
