@@ -255,27 +255,37 @@ function setPanelOpen(open) {
     }
 }
 
+let refreshNotificationsInflight = null;
+
 export async function refreshStaffNotifications({ showToast = true } = {}) {
-    const anchor = document.getElementById('topbar-notifications-anchor');
-    if (!staffNotificationsEnabled()) {
-        if (anchor) anchor.hidden = true;
-        setPanelOpen(false);
-        return;
-    }
-    if (anchor) anchor.hidden = false;
+    if (refreshNotificationsInflight) return refreshNotificationsInflight;
 
-    const notes = await fetchStaffNotifications({ limit: 40 });
-    const unreadCount = notes.filter((n) => !n.read_at).length;
-    const latestUnread = notes.find((n) => !n.read_at) || null;
+    refreshNotificationsInflight = (async () => {
+        const anchor = document.getElementById('topbar-notifications-anchor');
+        if (!staffNotificationsEnabled()) {
+            if (anchor) anchor.hidden = true;
+            setPanelOpen(false);
+            return;
+        }
+        if (anchor) anchor.hidden = false;
 
-    if (showToast && lastUnreadCount !== null && unreadCount > lastUnreadCount && latestUnread) {
-        showNotificationToast(latestUnread);
-    }
-    lastUnreadCount = unreadCount;
+        const notes = await fetchStaffNotifications({ limit: 40 });
+        const unreadCount = notes.filter((n) => !n.read_at).length;
+        const latestUnread = notes.find((n) => !n.read_at) || null;
 
-    portalState.notifications = { items: notes, unreadCount };
-    renderNotificationBadge();
-    if (panelOpen) renderNotificationPanel();
+        if (showToast && lastUnreadCount !== null && unreadCount > lastUnreadCount && latestUnread) {
+            showNotificationToast(latestUnread);
+        }
+        lastUnreadCount = unreadCount;
+
+        portalState.notifications = { items: notes, unreadCount };
+        renderNotificationBadge();
+        if (panelOpen) renderNotificationPanel();
+    })().finally(() => {
+        refreshNotificationsInflight = null;
+    });
+
+    return refreshNotificationsInflight;
 }
 
 export function initStaffNotificationsUi() {

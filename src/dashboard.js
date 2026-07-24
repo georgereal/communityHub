@@ -2,14 +2,13 @@
  * Staff dashboard — society overview, action items, quick actions.
  */
 import './dashboard.css';
-import { portalState } from './store.js';
-import { hasClientPermission, canReviewAudit } from './rbac.js';
-import { fetchPendingAuditEntries } from './activityAudit.js';
+import { portalState, isDomainLoaded } from './store.js';
+import { hasClientPermission } from './rbac.js';
 import { isModuleEnabled } from './moduleAccess.js';
 import { invoiceBalance, invoiceStatus } from './maintenanceBilling.js';
-import { countPendingVehicleAudit } from './vehicleAudit.js';
 import { effectiveAllocationType } from './registry.js';
 import { getActiveLedgerTxns, getLedgerBankBalance } from './ledgerBalance.js';
+import { readApiJson } from './apiJson.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
@@ -27,6 +26,73 @@ const esc = (s) => String(s ?? '')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+
+/** Cached lightweight finance KPIs from /api/dashboard-summary (not full finance domain). */
+let dashboardSummaryCache = { apartmentId: null, at: 0, summary: null, promise: null };
+let dashboardApartmentDataAt = 0;
+
+export function clearDashboardSummaryCache() {
+    dashboardSummaryCache = { apartmentId: null, at: 0, summary: null, promise: null };
+}
+
+export function seedDashboardSummary(apartmentId, summary) {
+    if (!apartmentId || !summary) return;
+    dashboardSummaryCache = {
+        apartmentId,
+        at: Date.now(),
+        summary,
+        promise: null,
+    };
+}
+
+async function fetchDashboardSummary({ force = false } = {}) {
+    const apartmentId = portalState.access?.activeApartmentId;
+    if (!apartmentId) return null;
+
+    // Prefer in-memory finance domain when already loaded (Accounts / Billing visited).
+    if (!force && isDomainLoaded('finance')) {
+        return {
+            billing: computeBillingStats(),
+            finance: computeFinanceStats(),
+            sync: syncStatusInfo(),
+            meta: { source: 'finance-domain', at: new Date().toISOString() },
+        };
+    }
+
+    const freshEnough = dashboardSummaryCache.apartmentId === apartmentId
+        && dashboardSummaryCache.summary
+        && (Date.now() - dashboardSummaryCache.at) < 60_000;
+    if (!force && freshEnough) return dashboardSummaryCache.summary;
+
+    if (!force && dashboardSummaryCache.promise && dashboardSummaryCache.apartmentId === apartmentId) {
+        return dashboardSummaryCache.promise;
+    }
+
+    dashboardSummaryCache.apartmentId = apartmentId;
+    dashboardSummaryCache.promise = (async () => {
+        const params = new URLSearchParams({ apartment_id: apartmentId });
+        const res = await fetch(`/api/dashboard-summary?${params}`, {
+            method: 'GET',
+            credentials: 'include',
+        });
+        const { ok, json, error } = await readApiJson(res);
+        if (!ok) throw new Error(json?.error || error || 'Dashboard summary failed.');
+        const summary = json.summary || null;
+        dashboardSummaryCache = {
+            apartmentId,
+            at: Date.now(),
+            summary,
+            promise: null,
+        };
+        return summary;
+    })().catch((err) => {
+        dashboardSummaryCache.promise = null;
+        console.warn('[dashboard] summary load failed:', err?.message || err);
+        return null;
+    });
+
+    return dashboardSummaryCache.promise;
+}
 
 function getActiveApartmentName() {
     const id = portalState.access?.activeApartmentId;
@@ -140,7 +206,18 @@ function computeOpsStats() {
     return { openTickets, transitions, draftNotices, pendingEmails };
 }
 
-function syncStatusInfo() {
+function syncStatusInfo(syncFromSummary = null) {
+    if (syncFromSummary) {
+        if (!syncFromSummary.status && !syncFromSummary.at) return null;
+        const at = syncFromSummary.at
+            ? new Date(syncFromSummary.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+            : 'Never';
+        return {
+            status: syncFromSummary.status || '—',
+            at,
+            message: syncFromSummary.message || '',
+        };
+    }
     const s = portalState.finances?.ledgerSyncSettings;
     if (!s?.spreadsheet_url) return null;
     const status = s.last_sync_status || '—';
@@ -154,30 +231,8 @@ async function buildActionItems(parking, billing, ops, syncInfo) {
     const items = [];
     const can = (perm) => hasClientPermission(perm);
 
-    const auditPending = can('vehicle_registry.view') ? await countPendingVehicleAudit() : 0;
-    if (auditPending > 0 && can('vehicle_registry.view')) {
-        items.push({
-            severity: 'warn',
-            icon: 'fa-clock-rotate-left',
-            title: `${auditPending} vehicle change(s) pending sync`,
-            detail: 'Review the parking change log and reconcile with Excel.',
-            route: 'property-vehicles',
-        });
-    }
-
-    if (canReviewAudit()) {
-        const aptId = portalState.access?.activeApartmentId;
-        const pendingAudit = aptId ? (await fetchPendingAuditEntries(aptId, 100)).length : 0;
-        if (pendingAudit > 0) {
-            items.push({
-                severity: 'warn',
-                icon: 'fa-clipboard-check',
-                title: `${pendingAudit} audit entry(ies) awaiting review`,
-                detail: 'Office manager submissions need association office bearer approval.',
-                route: 'property-activity',
-            });
-        }
-    }
+    // Skip extra audit round-trips on first paint — action items stay finance/ops based.
+    // Vehicle/activity audit badges refresh when those pages are opened.
 
     if ((parking.overlimitCars + parking.overlimitBikes) > 0 && can('vehicle_registry.view')) {
         items.push({
@@ -335,16 +390,40 @@ export async function renderDashboard() {
 
     const aptName = getActiveApartmentName();
     const parking = computeParkingStats();
-    const billing = computeBillingStats();
-    const finance = computeFinanceStats();
     const ops = computeOpsStats();
-    const syncInfo = syncStatusInfo();
+    const wantsFinance = hasClientPermission('accounts.view') || hasClientPermission('setup.view');
+
+    if (wantsFinance && !isDomainLoaded('finance') && !dashboardSummaryCache.summary) {
+        root.innerHTML = `
+          <header class="dashboard-header">
+            <div class="dashboard-header__title">
+              <p class="dashboard-header__eyebrow">Dashboard</p>
+              <h2 class="page-title">${esc(aptName)}</h2>
+              <p class="dashboard-header__subtitle">${parking.units} unit(s) in workspace · Loading summary…</p>
+            </div>
+          </header>
+          <p class="dashboard-empty">Fetching dashboard totals…</p>`;
+    }
+
+    const summary = wantsFinance ? await fetchDashboardSummary() : null;
+    const billing = summary?.billing || { outstanding: 0, openCount: 0, flatsWithDues: 0 };
+    const finance = summary?.finance || {
+        monthIn: 0,
+        monthOut: 0,
+        cashBalance: 0,
+        bankBalance: null,
+        bankAsOf: null,
+        bankNeedsOpening: false,
+    };
+    const financeReady = !!summary;
+    const syncInfo = syncStatusInfo(summary?.sync);
     const actions = await buildActionItems(parking, billing, ops, syncInfo);
     const quickActions = buildQuickActions();
 
     const occupancy = parking.occupancyPct == null ? '—' : `${parking.occupancyPct}%`;
-    const lastPull = portalState.lastPullMeta?.at
-        ? new Date(portalState.lastPullMeta.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+    const lastPull = summary?.meta?.at || portalState.lastPullMeta?.at;
+    const lastPullLabel = lastPull
+        ? new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
         : null;
 
     root.innerHTML = `
@@ -354,7 +433,7 @@ export async function renderDashboard() {
           <h2 class="page-title">${esc(aptName)}</h2>
           <p class="dashboard-header__subtitle">
             ${parking.units} unit(s) in workspace
-            ${lastPull ? ` · Data refreshed ${esc(lastPull)}` : ''}
+            ${lastPullLabel ? ` · Data refreshed ${esc(lastPullLabel)}` : ''}
           </p>
         </div>
       </header>
@@ -368,23 +447,27 @@ export async function renderDashboard() {
           ${hasClientPermission('vehicle_registry.view') ? statCard('Parking occupancy', occupancy, {
         tone: parking.occupancyPct != null && parking.occupancyPct > 90 ? 'danger' : 'accent',
     }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Outstanding dues', formatMoney(billing.outstanding), {
-        tone: billing.outstanding > 0 ? 'danger' : 'success',
-        sub: `${billing.openCount} open invoice(s)`,
+          ${hasClientPermission('accounts.view') ? statCard('Outstanding dues', financeReady ? formatMoney(billing.outstanding) : '—', {
+        tone: financeReady && billing.outstanding > 0 ? 'danger' : (financeReady ? 'success' : ''),
+        sub: financeReady ? `${billing.openCount} open invoice(s)` : 'Could not load summary',
     }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('MTD collections', formatMoney(finance.monthIn), {
-        tone: 'success',
-        sub: `Expenses ${formatMoney(finance.monthOut)}`,
+          ${hasClientPermission('accounts.view') ? statCard('MTD collections', financeReady ? formatMoney(finance.monthIn) : '—', {
+        tone: financeReady ? 'success' : '',
+        sub: financeReady ? `Expenses ${formatMoney(finance.monthOut)}` : 'Could not load summary',
     }) : ''}
           ${hasClientPermission('apartment_mgmt.view') ? statCard('Open tickets', String(ops.openTickets), {
         tone: ops.openTickets > 0 ? 'danger' : '',
     }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Bank balance', finance.bankBalance != null ? formatMoney(finance.bankBalance) : '—', {
-        sub: finance.bankNeedsOpening
-            ? 'Set opening balance in Bank Reconciliation'
-            : (finance.bankAsOf ? `Balance as on ${formatAsOn(finance.bankAsOf)}` : ''),
+          ${hasClientPermission('accounts.view') ? statCard('Bank balance', financeReady && finance.bankBalance != null ? formatMoney(finance.bankBalance) : '—', {
+        sub: !financeReady
+            ? 'Could not load summary'
+            : (finance.bankNeedsOpening
+                ? 'Set opening balance in Bank Reconciliation'
+                : (finance.bankAsOf ? `Balance as on ${formatAsOn(finance.bankAsOf)}` : '')),
     }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Petty cash', formatMoney(finance.cashBalance)) : ''}
+          ${hasClientPermission('accounts.view') ? statCard('Petty cash', financeReady ? formatMoney(finance.cashBalance) : '—', {
+        sub: financeReady ? '' : 'Could not load summary',
+    }) : ''}
         </div>
       </section>
 
@@ -435,6 +518,10 @@ export async function renderDashboard() {
 
 export function initDashboard() {
     document.addEventListener('apartment-data-loaded', () => {
+        const now = Date.now();
+        if (now - dashboardApartmentDataAt < 2000) return;
+        dashboardApartmentDataAt = now;
+        clearDashboardSummaryCache();
         if (document.getElementById('view-dashboard')?.classList.contains('active')) {
             void renderDashboard();
         }

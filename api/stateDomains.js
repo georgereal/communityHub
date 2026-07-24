@@ -32,22 +32,19 @@ function hydrateSlots(slots, vehicles, units) {
     });
 }
 
+/**
+ * Boot / shell state — units, vehicles, and society config only.
+ * Finance, operations, portal, etc. load via ensureRouteState when a view needs them.
+ */
 export async function fetchCoreState(service, apartmentId) {
     const queries = [
         service.from('units').select('*').eq('apartment_id', apartmentId).order('number'),
         service.from('vehicles').select('*').eq('apartment_id', apartmentId),
         service.from('society_config').select('*').eq('apartment_id', apartmentId).maybeSingle(),
-        service.from('transactions').select('*').eq('apartment_id', apartmentId).order('date', { ascending: false }),
-        service.from('maintenance_invoices').select('*').eq('apartment_id', apartmentId).order('due_date'),
-        service.from('helpdesk_tickets').select('*').eq('apartment_id', apartmentId).order('created_at', { ascending: false }),
-        service.from('unit_transitions').select('*').eq('apartment_id', apartmentId).order('created_at', { ascending: false }),
-        service.from('society_notices').select('*').eq('apartment_id', apartmentId).order('created_at', { ascending: false }),
-        service.from('email_outbox').select('*').eq('apartment_id', apartmentId).order('created_at', { ascending: false }),
-        service.from('ledger_sync_settings').select('*').eq('apartment_id', apartmentId).maybeSingle(),
     ];
 
     const results = await Promise.all(queries);
-    const [u, v, s, t, mi, hd, ut, sn, em, lss] = results;
+    const [u, v, s] = results;
     const units = emptyArr(u);
     const vehicles = emptyArr(v);
 
@@ -60,21 +57,6 @@ export async function fetchCoreState(service, apartmentId) {
             configId: s.data.id,
         } : { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
         units: hydrateUnitsWithVehicles(units, vehicles),
-        finances: {
-            txns: emptyArr(t),
-            maintenanceInvoices: emptyArr(mi),
-            ledgerSyncSettings: maybeNull(lss),
-        },
-        operations: {
-            helpdeskTickets: emptyArr(hd),
-            unitTransitions: emptyArr(ut),
-        },
-        portal: {
-            notices: emptyArr(sn),
-        },
-        email: {
-            outbox: emptyArr(em),
-        },
         meta: {
             apartmentId,
             unitCount: units.length,

@@ -5,27 +5,34 @@ import { findPage } from './navigation.js';
 
 export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin', 'parking'];
 
+/** Domains loaded when entering each top-level view (via ensureRouteState). */
 const VIEW_DOMAINS = {
-    dashboard: ['core', 'admin'],
+    // Dashboard KPIs: core units + /api/dashboard-summary. Ops counts load lazily.
+    dashboard: ['core'],
     registry: ['property'],
     accounts: ['finance', 'admin'],
     invoices: ['finance'],
-    portal: ['portal', 'finance'],
+    // Portal domain already includes open invoices + allocations for residents.
+    portal: ['portal'],
     security: ['security', 'property'],
+    // Unit move-in/out loads finance on demand when dues are checked.
     operations: ['operations', 'property'],
     units: ['property'],
     apartment: ['property'],
     'parking-fines': ['parking', 'finance', 'property'],
-    portfolio: ['core', 'finance', 'property'],
+    // Portfolio fetches per-apartment snapshots itself.
+    portfolio: ['core'],
     email: ['operations'],
-    setup: ['admin', 'finance'],
+    // Setup shell needs admin (bank/staff/vendors). Full finance only for sync.
+    setup: ['admin'],
     'access-control': [],
 };
 
 const ROUTE_DOMAIN_OVERRIDES = {
     'property-activity': ['operations'],
     'finance-activity': ['operations'],
-    'admin-settings': ['admin', 'finance'],
+    'admin-settings': ['admin'],
+    'admin-sync': ['admin', 'finance'],
 };
 
 export function domainsForRoute(route) {

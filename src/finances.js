@@ -461,7 +461,10 @@ const renderReceiptUI = () => {
     });
     list.querySelectorAll('[data-view-bill-key]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            void viewBillAttachment(decodeURIComponent(btn.dataset.viewBillKey));
+            void viewBillAttachment(
+                decodeURIComponent(btn.dataset.viewBillKey),
+                portalState.billKeepAttachments || [],
+            );
         });
     });
     list.querySelectorAll('[data-view-file]').forEach((btn) => {
@@ -502,22 +505,15 @@ const renderReceiptUI = () => {
     });
 };
 
-const viewBillAttachment = async (key) => {
-    if (!key) return;
-    try {
-        const res = await fetch('/api/storage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ action: 'createSignedUrl', path: key, expiresIn: 120 }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error || 'Could not open attachment.');
-        const url = json.signedUrl || json.url;
-        if (url) window.open(url, '_blank', 'noopener');
-    } catch (err) {
-        alert(err?.message || 'Could not open attachment.');
-    }
+const viewBillAttachment = async (key, allEntries = null) => {
+    const entries = Array.isArray(allEntries) && allEntries.length
+        ? allEntries
+        : (portalState.billKeepAttachments?.length ? portalState.billKeepAttachments : (key ? [key] : []));
+    if (!entries.length) return;
+    const idx = key
+        ? Math.max(0, entries.findIndex((a) => billAttachmentKey(a) === key || a === key))
+        : 0;
+    await window.viewAttachmentGallery?.(entries, idx >= 0 ? idx : 0);
 };
 
 const resetBankProofUI = (existingPaths = []) => {
@@ -857,83 +853,354 @@ async function deleteReceiptPaths(paths) {
 async function resolveReceiptUrl(pathOrUrl) {
     if (!pathOrUrl) return null;
     if (/^https?:\/\//i.test(pathOrUrl) || pathOrUrl.startsWith('blob:')) return pathOrUrl;
+
+    const storagePath = String(pathOrUrl).replace(/^r2:/, '');
+
+    // Bills / finance docs (and newer uploads) use private R2 via /api/storage.
+    try {
+        const res = await fetch('/api/storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ action: 'createSignedUrl', path: storagePath, expiresIn: 300 }),
+        });
+        if (res.ok) {
+            const json = await res.json().catch(() => ({}));
+            const url = json.signedUrl || json.url;
+            if (url) return url;
+        }
+    } catch {
+        /* fall through to Supabase storage */
+    }
+
     if (!supabase) return null;
-    const { data, error } = await supabase.storage.from(RECEIPT_BUCKET).createSignedUrl(pathOrUrl, 3600);
+    const { data, error } = await supabase.storage.from(RECEIPT_BUCKET).createSignedUrl(storagePath, 3600);
     if (error) throw error;
     return data.signedUrl;
 }
 
-let receiptViewerState = { paths: [], index: 0, objectUrls: [] };
+/** Normalize attachment entries (string path, {key, originalName}, File) for the viewer. */
+export const normalizeAttachmentEntries = (entries = []) =>
+    (Array.isArray(entries) ? entries : [])
+        .map((entry, i) => {
+            if (!entry) return null;
+            if (entry instanceof File) {
+                return {
+                    source: entry,
+                    label: entry.name || `File ${i + 1}`,
+                    isPdf: isPdfFile(entry),
+                };
+            }
+            if (typeof entry === 'object' && entry.key) {
+                const key = String(entry.key).replace(/^r2:/, '');
+                const label = entry.originalName || receiptFileName(key) || `File ${i + 1}`;
+                return { source: key, label, isPdf: isPdfPath(label) || isPdfPath(key) };
+            }
+            if (typeof entry === 'string') {
+                const key = entry.replace(/^r2:/, '');
+                return { source: key, label: receiptFileName(key) || `File ${i + 1}`, isPdf: isPdfPath(key) };
+            }
+            return null;
+        })
+        .filter(Boolean);
+
+const friendlyAttachmentLabel = (item, index, total) => {
+    const raw = String(item?.label || '').trim() || `File ${index + 1}`;
+    // Hide opaque storage UUIDs in the UI when possible
+    const looksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{18,}(\.[a-z0-9]+)?$/i.test(raw);
+    if (looksUuid) {
+        const ext = (raw.split('.').pop() || '').toLowerCase();
+        return total > 1 ? `File ${index + 1}${ext ? `.${ext}` : ''}` : (ext ? `Attachment.${ext}` : 'Attachment');
+    }
+    return raw.length > 42 ? `${raw.slice(0, 38)}…` : raw;
+};
+
+/** Open the shared receipt viewer for one or more attachments (R2 or storage paths, or Files). */
+window.viewAttachmentGallery = async (entries, startIndex = 0) => {
+    const items = normalizeAttachmentEntries(entries);
+    if (!items.length) {
+        alert('No attachments to preview.');
+        return;
+    }
+    cleanupReceiptViewer();
+    const idx = Math.max(0, Math.min(parseInt(startIndex, 10) || 0, items.length - 1));
+    receiptViewerState = {
+        items,
+        index: idx,
+        objectUrls: [],
+        zoom: 1,
+        currentUrl: null,
+        currentName: '',
+        isPdf: false,
+    };
+    try {
+        await showReceiptAtIndex(idx);
+        document.getElementById('receipt-modal')?.classList.add('active');
+    } catch (err) {
+        alert(err?.message || 'Could not load attachment preview.');
+    }
+};
+
+let receiptViewerState = {
+    items: [],
+    index: 0,
+    objectUrls: [],
+    zoom: 1,
+    currentUrl: null,
+    currentName: '',
+    isPdf: false,
+};
 
 const cleanupReceiptViewer = () => {
     receiptViewerState.objectUrls.forEach((url) => URL.revokeObjectURL(url));
     receiptViewerState.objectUrls = [];
-};
-
-const showReceiptAtIndex = async (index) => {
-    const paths = receiptViewerState.paths;
-    if (!paths.length) return;
-    const idx = Math.max(0, Math.min(index, paths.length - 1));
-    receiptViewerState.index = idx;
-
-    const path = paths[idx];
+    receiptViewerState.currentUrl = null;
     const img = document.getElementById('receipt-img');
     const pdf = document.getElementById('receipt-pdf');
+    if (img) {
+        img.removeAttribute('src');
+        img.style.transform = '';
+    }
+    if (pdf) pdf.removeAttribute('src');
+};
+
+const applyReceiptZoom = (nextZoom) => {
+    const zoom = Math.max(0.5, Math.min(4, Math.round(nextZoom * 100) / 100));
+    receiptViewerState.zoom = zoom;
+    const img = document.getElementById('receipt-img');
+    const label = document.getElementById('receipt-zoom-label');
+    const resetBtn = document.getElementById('receipt-zoom-reset');
+    const pct = `${Math.round(zoom * 100)}%`;
+    if (img && !img.hidden) img.style.transform = `scale(${zoom})`;
+    if (label) label.textContent = pct;
+    if (resetBtn) resetBtn.textContent = pct;
+    const zoomOut = document.getElementById('receipt-zoom-out');
+    const zoomIn = document.getElementById('receipt-zoom-in');
+    if (zoomOut) zoomOut.disabled = zoom <= 0.5;
+    if (zoomIn) zoomIn.disabled = zoom >= 4;
+};
+
+const renderReceiptFileList = (items, activeIdx) => {
+    const list = document.getElementById('receipt-file-list');
+    if (!list) return;
+    if (items.length <= 1) {
+        list.hidden = true;
+        list.innerHTML = '';
+        return;
+    }
+    list.hidden = false;
+    list.innerHTML = `
+      <p class="receipt-viewer__files-title">${items.length} files</p>
+      <div class="receipt-viewer__files-list">
+        ${items.map((item, i) => {
+            const label = friendlyAttachmentLabel(item, i, items.length);
+            const icon = item.isPdf ? 'fa-file-pdf' : 'fa-file-image';
+            return `<button type="button" class="receipt-viewer__file${i === activeIdx ? ' is-active' : ''}" data-receipt-tab="${i}" title="${escHtml(item.label || label)}">
+              <i class="fa-solid ${icon}" aria-hidden="true"></i>
+              <span class="receipt-viewer__file-label">${escHtml(label)}</span>
+              <span class="receipt-viewer__file-idx">${i + 1}</span>
+            </button>`;
+        }).join('')}
+      </div>`;
+    list.querySelectorAll('[data-receipt-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            cleanupReceiptViewer();
+            showReceiptAtIndex(parseInt(btn.dataset.receiptTab, 10));
+        });
+    });
+};
+
+const escHtml = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const showReceiptAtIndex = async (index) => {
+    const items = receiptViewerState.items || [];
+    // Legacy callers may still set `.paths`
+    if (!items.length && Array.isArray(receiptViewerState.paths)) {
+        receiptViewerState.items = normalizeAttachmentEntries(receiptViewerState.paths);
+    }
+    const list = receiptViewerState.items || [];
+    if (!list.length) return;
+
+    const idx = Math.max(0, Math.min(index, list.length - 1));
+    receiptViewerState.index = idx;
+    receiptViewerState.zoom = 1;
+
+    const item = list[idx];
+    const img = document.getElementById('receipt-img');
+    const pdf = document.getElementById('receipt-pdf');
+    const empty = document.getElementById('receipt-viewer-empty');
     const caption = document.getElementById('receipt-viewer-caption');
-    const nav = document.getElementById('receipt-nav');
     const openTab = document.getElementById('receipt-open-tab');
+    const prevBtn = document.getElementById('receipt-prev-btn');
+    const nextBtn = document.getElementById('receipt-next-btn');
+    const zoomOut = document.getElementById('receipt-zoom-out');
+    const zoomIn = document.getElementById('receipt-zoom-in');
+    const zoomReset = document.getElementById('receipt-zoom-reset');
 
     let url;
-    if (path instanceof File) {
-        url = URL.createObjectURL(path);
+    if (item.source instanceof File) {
+        url = URL.createObjectURL(item.source);
         receiptViewerState.objectUrls.push(url);
     } else {
-        url = await resolveReceiptUrl(path);
+        url = await resolveReceiptUrl(item.source);
     }
 
-    const name = path instanceof File ? path.name : receiptFileName(path);
-    const pdfDoc = path instanceof File ? isPdfFile(path) : isPdfPath(path);
+    const displayName = friendlyAttachmentLabel(item, idx, list.length);
+    const fullName = item.label || displayName;
+    receiptViewerState.currentUrl = url || null;
+    receiptViewerState.currentName = fullName;
+    receiptViewerState.isPdf = !!item.isPdf;
 
-    if (caption) caption.textContent = paths.length > 1 ? `${name} (${idx + 1} of ${paths.length})` : name;
+    if (caption) {
+        caption.textContent = list.length > 1
+            ? `${displayName} · ${idx + 1} of ${list.length}`
+            : displayName;
+    }
 
-    if (nav) {
-        if (paths.length > 1) {
-            nav.hidden = false;
-            nav.innerHTML = paths.map((p, i) => {
-                const label = p instanceof File ? p.name : receiptFileName(p);
-                return `<button type="button" class="receipt-viewer__tab${i === idx ? ' active' : ''}" data-receipt-tab="${i}">${label}</button>`;
-            }).join('');
-            nav.querySelectorAll('[data-receipt-tab]').forEach((btn) => {
-                btn.addEventListener('click', () => {
-                    cleanupReceiptViewer();
-                    showReceiptAtIndex(parseInt(btn.dataset.receiptTab, 10));
-                });
-            });
-        } else {
-            nav.hidden = true;
-            nav.innerHTML = '';
+    renderReceiptFileList(list, idx);
+
+    if (prevBtn) {
+        prevBtn.hidden = list.length <= 1;
+        prevBtn.disabled = idx <= 0;
+    }
+    if (nextBtn) {
+        nextBtn.hidden = list.length <= 1;
+        nextBtn.disabled = idx >= list.length - 1;
+    }
+
+    if (item.isPdf) {
+        if (img) {
+            img.hidden = true;
+            img.removeAttribute('src');
+            img.style.transform = '';
         }
-    }
-
-    if (pdfDoc) {
-        if (img) img.hidden = true;
+        if (empty) empty.hidden = true;
         if (pdf) {
             pdf.hidden = false;
             pdf.src = url;
         }
+        if (zoomOut) zoomOut.disabled = true;
+        if (zoomIn) zoomIn.disabled = true;
+        if (zoomReset) zoomReset.disabled = true;
     } else {
-        if (pdf) { pdf.hidden = true; pdf.removeAttribute('src'); }
-        if (img) {
-            img.hidden = false;
-            img.src = url;
+        if (pdf) {
+            pdf.hidden = true;
+            pdf.removeAttribute('src');
         }
+        if (empty) empty.hidden = !!url;
+        if (img) {
+            img.hidden = !url;
+            if (url) img.src = url;
+            img.style.transform = 'scale(1)';
+        }
+        if (zoomOut) zoomOut.disabled = false;
+        if (zoomIn) zoomIn.disabled = false;
+        if (zoomReset) zoomReset.disabled = false;
+        applyReceiptZoom(1);
     }
 
     if (openTab) {
-        openTab.href = url;
-        openTab.hidden = !url;
+        if (url) {
+            openTab.href = url;
+            openTab.hidden = false;
+        } else {
+            openTab.hidden = true;
+        }
     }
 };
+
+const downloadCurrentReceipt = async () => {
+    const url = receiptViewerState.currentUrl;
+    const name = receiptViewerState.currentName || 'attachment';
+    if (!url) return;
+    try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = name.includes('.') ? name : `${name}${receiptViewerState.isPdf ? '.pdf' : '.jpg'}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+    } catch {
+        // Fallback: open in new tab if download fetch is blocked
+        window.open(url, '_blank', 'noopener');
+    }
+};
+
+const wireReceiptViewerControls = () => {
+    const modal = document.getElementById('receipt-modal');
+    if (!modal || modal.dataset.viewerWired === '1') return;
+    modal.dataset.viewerWired = '1';
+
+    document.getElementById('receipt-zoom-in')?.addEventListener('click', () => {
+        if (receiptViewerState.isPdf) return;
+        applyReceiptZoom(receiptViewerState.zoom + 0.25);
+    });
+    document.getElementById('receipt-zoom-out')?.addEventListener('click', () => {
+        if (receiptViewerState.isPdf) return;
+        applyReceiptZoom(receiptViewerState.zoom - 0.25);
+    });
+    document.getElementById('receipt-zoom-reset')?.addEventListener('click', () => {
+        if (receiptViewerState.isPdf) return;
+        applyReceiptZoom(1);
+    });
+    document.getElementById('receipt-download-btn')?.addEventListener('click', () => {
+        void downloadCurrentReceipt();
+    });
+    document.getElementById('receipt-prev-btn')?.addEventListener('click', () => {
+        if (receiptViewerState.index <= 0) return;
+        cleanupReceiptViewer();
+        void showReceiptAtIndex(receiptViewerState.index - 1);
+    });
+    document.getElementById('receipt-next-btn')?.addEventListener('click', () => {
+        const max = (receiptViewerState.items || []).length - 1;
+        if (receiptViewerState.index >= max) return;
+        cleanupReceiptViewer();
+        void showReceiptAtIndex(receiptViewerState.index + 1);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!document.getElementById('receipt-modal')?.classList.contains('active')) return;
+        if (e.key === 'Escape') {
+            window.closeReceiptViewer();
+            return;
+        }
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            document.getElementById('receipt-prev-btn')?.click();
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            document.getElementById('receipt-next-btn')?.click();
+        } else if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            document.getElementById('receipt-zoom-in')?.click();
+        } else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            document.getElementById('receipt-zoom-out')?.click();
+        }
+    });
+
+    // Scroll-wheel zoom when over the image stage
+    document.getElementById('receipt-viewer-body')?.addEventListener('wheel', (e) => {
+        if (receiptViewerState.isPdf) return;
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        applyReceiptZoom(receiptViewerState.zoom + (e.deltaY < 0 ? 0.1 : -0.1));
+    }, { passive: false });
+};
+
+wireReceiptViewerControls();
+
+// Re-wire if HTML was mounted after module init (view HTML shells).
+document.addEventListener('DOMContentLoaded', () => wireReceiptViewerControls());
+if (document.readyState !== 'loading') wireReceiptViewerControls();
 
 export const saveCashData = async () => {
     const isIncome = portalState.cashModalMode === 'income';
@@ -1156,40 +1423,19 @@ window.saveCashData = saveCashData;
 
 window.previewReceiptFile = async (file) => {
     if (!file) return;
-    cleanupReceiptViewer();
-    receiptViewerState = { paths: [file], index: 0, objectUrls: [] };
-    try {
-        await showReceiptAtIndex(0);
-        document.getElementById('receipt-modal')?.classList.add('active');
-    } catch (err) {
-        alert(err?.message || 'Could not preview file.');
-    }
+    await window.viewAttachmentGallery([file], 0);
 };
 
 window.viewReceipt = async (pathOrUrl, index = 0) => {
     if (!pathOrUrl) return;
-    cleanupReceiptViewer();
-    receiptViewerState = { paths: [pathOrUrl], index: 0, objectUrls: [] };
-    try {
-        await showReceiptAtIndex(index);
-        document.getElementById('receipt-modal')?.classList.add('active');
-    } catch (err) {
-        alert(err?.message || 'Could not load receipt.');
-    }
+    await window.viewAttachmentGallery([pathOrUrl], index);
 };
 
 window.viewReceipts = async (txnId, index = 0) => {
     const t = portalState.finances.txns.find((x) => x.id == txnId);
     const paths = getAllAttachmentPaths(t);
     if (!paths.length) return alert('No attachments for this expense.');
-    cleanupReceiptViewer();
-    receiptViewerState = { paths, index: 0, objectUrls: [] };
-    try {
-        await showReceiptAtIndex(index);
-        document.getElementById('receipt-modal')?.classList.add('active');
-    } catch (err) {
-        alert(err?.message || 'Could not load receipts.');
-    }
+    await window.viewAttachmentGallery(paths, index);
 };
 
 window.closeReceiptViewer = () => {

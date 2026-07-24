@@ -15,7 +15,7 @@ import {
   saveMdlData,
   addVehicleToUnit,
 } from './registry.js';
-import { processFinances, renderCashLedger } from './finances.js';
+import { processFinances } from './finances.js';
 import {
   getEnabledSocialProviders,
   NO_SOCIETY_ACCESS_MESSAGE,
@@ -25,7 +25,6 @@ import {
 import { ensureViewMounted, showView } from './views/viewShell.js';
 import { activateView } from './views/controllers.js';
 import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
-import { renderResidentLinksAdmin, autoLinkResidentByEmail, acceptPendingInvites } from './residentLinks.js';
 import { ensureAuthInitialized } from './authClient.js';
 import { openTransitionWizard } from './unitTransitions.js';
 import { renderDashboard } from './dashboard.js';
@@ -73,6 +72,7 @@ import {
   setActiveApartment,
   syncAccessFromSupabase,
 } from './accessSync.js';
+import { isApartmentSelectSuppressed, invalidateWorkspaceAccess, withApartmentSelectSuppressed, withApartmentSelectSuppressedAsync } from './accessLocks.js';
 
 const loadAccessRequestGate = () => import('./accessRequests.js').then((m) => m.initAccessRequestWorkspaceGate());
 
@@ -100,6 +100,11 @@ const hideAuth = () => {
 
 let authApplyInflight = null;
 let bootAuthHandled = false;
+/** True from module load until boot() finishes — blocks parallel auth→society sync. */
+let bootInProgress = true;
+let finishAuthInflight = null;
+let applyingRouteHash = false;
+let switchViewChain = Promise.resolve();
 
 const can = (perm) => hasClientPermission(perm, resolveEffectivePermissions());
 
@@ -151,21 +156,30 @@ const applyAuthToUIInner = async (session, options = {}) => {
   let isSystemAdmin = false;
   const aptId = portalState.access?.activeApartmentId;
   let roleAssignments = roleAssignmentsOverride;
-  if (supabase && (refreshPermissions || !portalState.auth?.id)) {
-    roleAssignments = roleAssignments ?? await loadAllUserRoleAssignmentsCached(user.id);
-    isSystemAdmin = roleAssignments.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
-    if (isSystemAdmin) {
-      effectiveRoleKey = 'system_admin';
-      role = 'admin';
-    } else if (aptId && !isPlaceholderApartmentId(aptId)) {
-      const aptAssignment = roleAssignments.find((a) => a.scope === 'apartment' && a.apartment_id === aptId);
-      if (aptAssignment?.role_key) {
-        effectiveRoleKey = aptAssignment.role_key;
-        role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+  if (supabase && refreshPermissions) {
+    // During workspace-boot, permissions arrive in the boot payload — do not re-query roles.
+    const { isSocietyHydrating } = await import('./accessLocks.js');
+    if (isSocietyHydrating() && portalState.authPermissions?.length) {
+      roleAssignments = roleAssignmentsOverride || [];
+      isSystemAdmin = !!portalState.auth?.isSystemAdmin;
+      effectiveRoleKey = portalState.auth?.effectiveRoleKey || effectiveRoleKey;
+      role = portalState.auth?.role || role;
+    } else {
+      roleAssignments = roleAssignments ?? await loadAllUserRoleAssignmentsCached(user.id);
+      isSystemAdmin = roleAssignments.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
+      if (isSystemAdmin) {
+        effectiveRoleKey = 'system_admin';
+        role = 'admin';
+      } else if (aptId && !isPlaceholderApartmentId(aptId)) {
+        const aptAssignment = roleAssignments.find((a) => a.scope === 'apartment' && a.apartment_id === aptId);
+        if (aptAssignment?.role_key) {
+          effectiveRoleKey = aptAssignment.role_key;
+          role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+        }
       }
     }
-  } else if (portalState.auth?.isSystemAdmin) {
-    isSystemAdmin = true;
+  } else if (portalState.auth?.isSystemAdmin || portalState.auth?.effectiveRoleKey) {
+    isSystemAdmin = !!portalState.auth.isSystemAdmin;
     effectiveRoleKey = portalState.auth.effectiveRoleKey || effectiveRoleKey;
     role = portalState.auth.role || role;
   }
@@ -194,18 +208,25 @@ const applyAuthToUIInner = async (session, options = {}) => {
   if (topbarRoleNode) topbarRoleNode.textContent = roleLabel;
   if (sidebarRole) sidebarRole.textContent = roleLabel;
 
-  portalState.authPermissions = null;
+  const existingPerms = portalState.authPermissions;
   if (refreshPermissions && aptId && supabase && !isPlaceholderApartmentId(aptId)) {
-    console.log('Refreshing permissions for:', aptId);
-    await refreshAuthPermissions(aptId, roleAssignments);
-    const pageAccessReady = getLoadedDomains().includes('core');
-    if (!pageAccessReady) {
-      try {
-        const { loadUserPageAccess } = await import('./pageAccess.js');
-        await loadUserPageAccess(aptId, user.id, effectiveRoleKey);
-      } catch { /* tables may not exist yet */ }
+    const { isSocietyHydrating } = await import('./accessLocks.js');
+    if (isSocietyHydrating() && existingPerms?.length) {
+      portalState.authPermissions = existingPerms;
+    } else {
+      console.log('Refreshing permissions for:', aptId);
+      await refreshAuthPermissions(aptId, roleAssignments);
+      const pageAccessReady = getLoadedDomains().includes('core');
+      if (!pageAccessReady) {
+        try {
+          const { loadUserPageAccess } = await import('./pageAccess.js');
+          await loadUserPageAccess(aptId, user.id, effectiveRoleKey);
+        } catch { /* tables may not exist yet */ }
+      }
     }
-  } else if (!portalState.authPermissions?.length) {
+  } else if (existingPerms?.length) {
+    portalState.authPermissions = existingPerms;
+  } else {
     portalState.authPermissions = permissionsFromV1Role(role);
   }
 
@@ -214,7 +235,11 @@ const applyAuthToUIInner = async (session, options = {}) => {
   if (manageBtn) manageBtn.style.display = (isApartmentAdminUser() || can('rbac.view')) ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
   if (notifications && aptId && !isPlaceholderApartmentId(aptId)) {
-    deferAfterFirstPaint(() => refreshStaffNotifications().catch(() => {}));
+    const { accessLocks } = await import('./accessLocks.js');
+    if (accessLocks.notificationsForApt !== aptId) {
+      accessLocks.notificationsForApt = aptId;
+      deferAfterFirstPaint(() => refreshStaffNotifications().catch(() => {}));
+    }
   }
 
   // Show "Make me admin" only if no admin exists yet and user isn't already an office bearer.
@@ -385,22 +410,30 @@ const removeBootLoader = () => document.getElementById('sentry-boot-loader')?.re
 
 const finishAuthSession = async (session) => {
   if (!session?.user?.id) return false;
-  await syncBackendSession(session);
-  await applyAuthToUI(session);
-  hideAuth();
-  hideWorkspaceGate();
-  portalState.access = portalState.access || { users: [], apartments: [] };
-  portalState.access.activeUserId = session.user.id;
-  const profile = await getProfile(session.user.id);
-  const synced = await syncAccessFromSupabase(profile);
-  if (!synced) showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
-  else {
-    processAnalytics();
-    processFinances();
-    renderRegistry();
-  }
-  window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
-  return synced;
+  if (finishAuthInflight) return finishAuthInflight;
+
+  finishAuthInflight = (async () => {
+    await syncBackendSession(session);
+    hideAuth();
+    hideWorkspaceGate();
+    portalState.access = portalState.access || { users: [], apartments: [] };
+    portalState.access.activeUserId = session.user.id;
+    const profile = await getProfile(session.user.id);
+    const synced = await syncAccessFromSupabase(profile);
+    await applyAuthToUI(session, {
+      profile,
+      refreshPermissions: false,
+      notifications: false,
+      adminRpc: false,
+    });
+    if (!synced) showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
+    window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
+    return synced;
+  })().finally(() => {
+    finishAuthInflight = null;
+  });
+
+  return finishAuthInflight;
 };
 
 const renderSocialAuthButtons = () => {
@@ -444,6 +477,7 @@ const boot = async () => {
   let bootHasSupabaseSession = false;
   let bootSession = null;
   let accessSynced = false;
+  let enterAppAfterBoot = false;
 
   try {
     if (supabase) {
@@ -469,16 +503,31 @@ const boot = async () => {
       bootAuthHandled = true;
       repairLocalCache();
       await syncBackendSession(bootSession);
-      setBootLoaderMessage('Loading profile…');
-      const bootProfile = await getProfile(bootSession.user.id);
+      setBootLoaderMessage('Loading society data…');
+      // Minimal auth shell so UI has a user id before workspace-boot returns.
+      portalState.auth = portalState.auth || {
+        id: bootSession.user.id,
+        email: bootSession.user.email || '',
+        name: bootSession.user.email || 'User',
+        role: 'resident_viewer',
+        effectiveRoleKey: 'resident_viewer',
+        isSystemAdmin: false,
+      };
+      portalState.auth.id = bootSession.user.id;
+      accessSynced = await withTimeout(syncAccessFromSupabase(), 120000, 'Society sync');
       await applyAuthToUI(bootSession, {
-        profile: bootProfile,
+        profile: portalState.access?.users?.[0]
+          ? {
+            id: portalState.access.users[0].id,
+            full_name: portalState.access.users[0].name,
+            email: portalState.access.users[0].email,
+            role: portalState.access.users[0].role,
+          }
+          : null,
         refreshPermissions: false,
         notifications: false,
         adminRpc: false,
       });
-      setBootLoaderMessage('Loading society data…');
-      accessSynced = await withTimeout(syncAccessFromSupabase(bootProfile), 120000, 'Society sync');
     }
 
     if (!accessSynced && bootHasSupabaseSession && bootSession?.user?.id) {
@@ -503,6 +552,7 @@ const boot = async () => {
       if (!isPlaceholderApartmentId(portalState.access?.activeApartmentId)) {
         await setActiveApartment(portalState.access.activeApartmentId);
       }
+      enterAppAfterBoot = true;
     } else if (!accessSynced && bootHasSupabaseSession) {
       hideAuth();
       refreshAuthUiShell();
@@ -511,11 +561,10 @@ const boot = async () => {
     } else if (bootSession && accessSynced) {
       hideAuth();
       refreshAuthUiShell();
+      enterAppAfterBoot = true;
     }
 
     renderAccessMappings();
-    const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
-    window.switchView(route);
   } catch (err) {
     console.error('[boot] failed:', err);
     if (bootHasSupabaseSession) {
@@ -526,7 +575,18 @@ const boot = async () => {
       showAuth(err?.message || 'Startup failed. Please refresh and try again.');
     }
   } finally {
+    bootInProgress = false;
+    try {
+      const { accessLocks } = await import('./accessLocks.js');
+      accessLocks.allowHeavyDomains = true;
+    } catch { /* ignore */ }
     removeBootLoader();
+  }
+
+  // Navigate only after heavy domains are allowed so finance/admin load before first paint.
+  if (enterAppAfterBoot) {
+    const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
+    await withApartmentSelectSuppressedAsync(() => window.switchView(route));
   }
 };
 
@@ -542,7 +602,7 @@ window.initializeSeedData = initializeSeedData;
  */
 let routingGuard = false;
 
-window.switchView = async (v) => {
+const switchViewInner = async (v) => {
   if (routingGuard) return;
   const route = resolveRoute(v, portalState.auth?.role);
   const fallback = findFirstAllowedRoute(portalState.auth?.role);
@@ -576,7 +636,12 @@ window.switchView = async (v) => {
     await ensureViewMounted(page.view);
     showView(page.view);
     if (window.location.hash.slice(1) !== route) {
+      applyingRouteHash = true;
       window.location.hash = `#${route}`;
+      // hashchange is async — keep the guard until after it would fire.
+      queueMicrotask(() => {
+        setTimeout(() => { applyingRouteHash = false; }, 0);
+      });
     }
     updateNavActiveState(route);
     updateNavBreadcrumb(route);
@@ -586,6 +651,11 @@ window.switchView = async (v) => {
   } finally {
     document.body.classList.remove('route-loading');
   }
+};
+
+window.switchView = (v) => {
+  switchViewChain = switchViewChain.then(() => switchViewInner(v), () => switchViewInner(v));
+  return switchViewChain;
 };
 
 
@@ -660,33 +730,39 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (supabase) {
     supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'INITIAL_SESSION' && !bootAuthHandled) {
-        if (session) {
-          bootAuthHandled = true;
-          await finishAuthSession(session);
-        }
+      // boot() owns the first hydrate. Never re-run finishAuthSession for the same session.
+      if (bootInProgress && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN')) {
         return;
       }
-      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        await syncBackendSession(session);
-        if (event === 'TOKEN_REFRESHED') {
-          await applyAuthToUI(session, { refreshPermissions: false, notifications: false, adminRpc: false });
-        } else if (event === 'SIGNED_IN') {
-          bootAuthHandled = true;
-          await finishAuthSession(session);
-        } else {
-          await applyAuthToUI(session);
-        }
-      }
       if (event === 'SIGNED_OUT') {
+        bootAuthHandled = false;
+        invalidateWorkspaceAccess();
         await clearBackendSession();
         showAuth();
+        return;
+      }
+      if (!session) return;
+
+      if (event === 'TOKEN_REFRESHED') {
+        await syncBackendSession(session);
+        await applyAuthToUI(session, { refreshPermissions: false, notifications: false, adminRpc: false });
+        return;
+      }
+
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        if (bootAuthHandled) {
+          await syncBackendSession(session);
+          return;
+        }
+        bootAuthHandled = true;
+        await finishAuthSession(session);
       }
     });
   }
 
   // Global View Router
   window.addEventListener('hashchange', () => {
+    if (applyingRouteHash) return;
     window.switchView(window.location.hash.slice(1));
   });
 
@@ -844,16 +920,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 🏢 Apartment Switching (Global)
   const apartmentSelectors = ['access-active-apartment', 'nav-apartment-switch', 'sidebar-apartment-switch', 'header-apartment-switch', 'user-menu-apartment-switch'];
-  apartmentSelectors.forEach(id => {
+  apartmentSelectors.forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.onchange = async (e) => {
+        if (isApartmentSelectSuppressed()) return;
         const aptId = e.target.value;
         if (!aptId || isPlaceholderApartmentId(aptId)) return;
-        await setActiveApartment(aptId);
-        apartmentSelectors.forEach(sid => {
-          const sel = document.getElementById(sid);
-          if (sel) sel.value = aptId;
+        // Never force-reload the same society — that clears core and retriggers every select.
+        if (aptId === portalState.access?.activeApartmentId && getLoadedDomains().includes('core')) return;
+        await withApartmentSelectSuppressedAsync(async () => {
+          apartmentSelectors.forEach((sid) => {
+            const sel = document.getElementById(sid);
+            if (sel) sel.value = aptId;
+          });
+          await setActiveApartment(aptId);
         });
       };
     }

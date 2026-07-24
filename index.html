@@ -986,22 +986,55 @@
   </div>
 
   <div class="modal-backdrop" id="receipt-modal">
-    <div class="modal-content receipt-viewer">
+    <div class="modal-content receipt-viewer" role="dialog" aria-labelledby="receipt-viewer-title">
       <div class="receipt-viewer__header">
-        <div>
-          <h3 class="receipt-viewer__title">Digital Proof</h3>
+        <div class="receipt-viewer__heading">
+          <h3 id="receipt-viewer-title" class="receipt-viewer__title">Attachments</h3>
           <p id="receipt-viewer-caption" class="receipt-viewer__caption"></p>
         </div>
-        <button type="button" class="btn btn-outline receipt-viewer__close" aria-label="Close"
-          onclick="window.closeReceiptViewer()">&times;</button>
+        <div class="receipt-viewer__toolbar">
+          <button type="button" class="btn btn-outline btn--small btn--icon" id="receipt-zoom-out" title="Zoom out" aria-label="Zoom out">
+            <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-outline btn--small" id="receipt-zoom-reset" title="Reset zoom">100%</button>
+          <button type="button" class="btn btn-outline btn--small btn--icon" id="receipt-zoom-in" title="Zoom in" aria-label="Zoom in">
+            <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-outline btn--small btn--icon" id="receipt-download-btn" title="Download" aria-label="Download">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
+          </button>
+          <a id="receipt-open-tab" class="btn btn-outline btn--small" href="#" target="_blank" rel="noopener">
+            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> New tab
+          </a>
+          <button type="button" class="btn btn-outline btn--small btn--icon receipt-viewer__close" aria-label="Close"
+            onclick="window.closeReceiptViewer()">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
-      <div id="receipt-nav" class="receipt-viewer__nav" hidden></div>
-      <div id="receipt-viewer-body" class="receipt-viewer__body">
-        <img id="receipt-img" class="receipt-viewer__img" alt="Receipt" hidden />
-        <iframe id="receipt-pdf" class="receipt-viewer__pdf" title="Receipt PDF" hidden></iframe>
+
+      <div class="receipt-viewer__layout">
+        <aside id="receipt-file-list" class="receipt-viewer__files" aria-label="All files" hidden></aside>
+        <div class="receipt-viewer__stage">
+          <button type="button" class="receipt-viewer__navbtn receipt-viewer__navbtn--prev" id="receipt-prev-btn" title="Previous file" aria-label="Previous file" hidden>
+            <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+          </button>
+          <div id="receipt-viewer-body" class="receipt-viewer__body">
+            <div id="receipt-zoom-wrap" class="receipt-viewer__zoom-wrap">
+              <img id="receipt-img" class="receipt-viewer__img" alt="Attachment preview" hidden />
+            </div>
+            <iframe id="receipt-pdf" class="receipt-viewer__pdf" title="PDF preview" hidden></iframe>
+            <p id="receipt-viewer-empty" class="receipt-viewer__empty" hidden>No preview available</p>
+          </div>
+          <button type="button" class="receipt-viewer__navbtn receipt-viewer__navbtn--next" id="receipt-next-btn" title="Next file" aria-label="Next file" hidden>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
+
       <div class="receipt-viewer__footer">
-        <a id="receipt-open-tab" class="receipt-viewer__open" href="#" target="_blank" rel="noopener">Open in new tab</a>
+        <span id="receipt-viewer-hint" class="receipt-viewer__hint">← → to switch files · + / − to zoom · Esc to close</span>
+        <span id="receipt-zoom-label" class="receipt-viewer__zoom-label">100%</span>
       </div>
     </div>
   </div>

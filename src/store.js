@@ -11,8 +11,15 @@ const authClientRef = authClient;
 export const supabase = createApiSupabaseClient(authClientRef);
 
 let pullStateChain = Promise.resolve(true);
-const loadedDomains = new Set();
-const domainLoadPromises = new Map();
+
+/** Domain load bookkeeping on globalThis — survives Vite HMR with accessLocks. */
+const domainBook = globalThis.__sentryDomainBook || (globalThis.__sentryDomainBook = {
+    loaded: new Set(),
+    promises: new Map(),
+    accessLoadedKey: null,
+});
+const loadedDomains = domainBook.loaded;
+const domainLoadPromises = domainBook.promises;
 
 /** Reject hung Supabase calls so boot UI does not spin forever. */
 export const withTimeout = (promise, ms, label = 'Request') => Promise.race([
@@ -82,26 +89,78 @@ export let portalState = {
 export function resetLoadedDomains() {
     loadedDomains.clear();
     domainLoadPromises.clear();
+    domainBook.accessLoadedKey = null;
+}
+
+export function markDomainLoaded(domain) {
+    if (domain) loadedDomains.add(domain);
+}
+
+/**
+ * Apply /api/workspace-boot payload: core state + module/page access maps.
+ */
+export function applyBootPayload(boot = {}) {
+    if (boot.core) {
+        applyStatePatch(boot.core);
+        loadedDomains.add('core');
+        domainBook.accessLoadedKey = `${boot.activeApartmentId}:${boot.profile?.id || portalState.auth?.id || ''}`;
+    }
+    if (boot.moduleAccess) {
+        portalState.moduleAccess = {
+            apartment: boot.moduleAccess.apartment || {},
+            user: boot.moduleAccess.user || {},
+        };
+    }
+    if (boot.pageAccess) {
+        portalState.pageAccess = {
+            user: boot.pageAccess.user || {},
+            societyRole: boot.pageAccess.societyRole || {},
+        };
+    }
+    if (boot.activeApartmentId) {
+        setActiveApartmentIdForApi(boot.activeApartmentId);
+    }
 }
 
 export function getLoadedDomains() {
     return [...loadedDomains];
 }
 
+export function isDomainLoaded(domain) {
+    return loadedDomains.has(domain);
+}
+
+/** Ensure finance domain is in memory (Accounts / Billing / dues-dependent flows). */
+export async function ensureFinanceState(opts = {}) {
+    return loadStateDomain('finance', opts);
+}
+
 async function afterDomainAccessLoads(activeApartmentId, uid) {
+    // Prefer auth shell id so a slow/failed getUser() cannot change the cache key
+    // and re-trigger module/page fetches after workspace-boot already seeded them.
+    const resolvedUid = uid || portalState.auth?.id || '';
+    const key = `${activeApartmentId}:${resolvedUid}`;
+    if (domainBook.accessLoadedKey === key) return;
+    // Same apartment already hydrated (possibly under a slightly different uid key).
+    if (domainBook.accessLoadedKey?.startsWith(`${activeApartmentId}:`)) return;
+    if (globalThis.__sentryAccessLocks?.societyHydrating) return;
+
+    domainBook.accessLoadedKey = key;
+
     try {
         const { loadModuleAccess } = await import('./moduleAccess.js');
-        await loadModuleAccess(activeApartmentId, uid);
+        await loadModuleAccess(activeApartmentId, resolvedUid || null);
         document.dispatchEvent(new CustomEvent('module-access-loaded'));
     } catch (modErr) {
         console.warn('[store] module access load skipped:', modErr?.message);
+        domainBook.accessLoadedKey = null;
     }
 
     try {
         const { loadUserPageAccess } = await import('./pageAccess.js');
         const roleKey = portalState.auth?.effectiveRoleKey
             || (await import('./rbac.js')).v1RoleToV2Key(portalState.auth?.role);
-        await loadUserPageAccess(activeApartmentId, uid, roleKey);
+        await loadUserPageAccess(activeApartmentId, resolvedUid, roleKey);
     } catch (pageErr) {
         console.warn('[store] page access load skipped:', pageErr?.message);
     }
@@ -135,7 +194,6 @@ export async function loadStateDomain(domain, { force = false } = {}) {
 
     const run = async () => {
         setActiveApartmentIdForApi(activeApartmentId);
-        const { data: { user } } = await supabase.auth.getUser();
         const partial = await withTimeout(
             fetchApartmentState(activeApartmentId, domain),
             domain === 'finance' ? 90000 : 45000,
@@ -145,7 +203,11 @@ export async function loadStateDomain(domain, { force = false } = {}) {
         applyStatePatch(partial);
         loadedDomains.add(domain);
         if (domain === 'core') {
-            await afterDomainAccessLoads(activeApartmentId, user?.id);
+            // Avoid auth.getUser() here — it races workspace-boot and times out to Supabase directly.
+            await afterDomainAccessLoads(activeApartmentId, portalState.auth?.id);
+        }
+        if (domain === 'finance' || domain === 'admin') {
+            document.dispatchEvent(new CustomEvent('domain-data-loaded', { detail: { domain } }));
         }
         return true;
     };
@@ -167,9 +229,20 @@ export async function loadStateDomains(domains, opts = {}) {
 }
 
 export async function ensureRouteState(route) {
-    const domains = domainsForRoute(route).filter((d) => !loadedDomains.has(d));
+    let domains = domainsForRoute(route).filter((d) => !loadedDomains.has(d));
+    if (!accessLocksAllowHeavy()) {
+        domains = domains.filter((d) => d === 'core');
+    }
     if (!domains.length) return true;
     return loadStateDomains(domains);
+}
+
+function accessLocksAllowHeavy() {
+    try {
+        return !!globalThis.__sentryAccessLocks?.allowHeavyDomains;
+    } catch {
+        return true;
+    }
 }
 
 /**
@@ -201,7 +274,7 @@ export const pullState = async (options) => {
             }
 
             if (opts.domain) {
-                return loadStateDomain(opts.domain, { force: opts.force !== false });
+                return loadStateDomain(opts.domain, { force: !!opts.force });
             }
 
             if (loadedDomains.size) {

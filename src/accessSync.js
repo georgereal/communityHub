@@ -8,6 +8,8 @@ import {
     isPlaceholderApartmentId,
     withTimeout,
     resetLoadedDomains,
+    getLoadedDomains,
+    applyBootPayload,
 } from './store.js';
 import { renderAccessMappings, ensureAccessState } from './mainBoot.js';
 import {
@@ -15,283 +17,450 @@ import {
     refreshAuthPermissions,
     loadAllUserRoleAssignmentsCached,
     clearRoleAssignmentsCache,
+    seedRoleAssignmentsCache,
+    rolePermissionFloor,
 } from './rbac.js';
 import { applyNavPermissions } from './navigation.js';
-import { autoLinkResidentByEmail, acceptPendingInvites } from './residentLinks.js';
 import { refreshStaffNotifications } from './staffNotifications.js';
-import { renderDashboard } from './dashboard.js';
-import { renderApartmentModulePanel } from './moduleAccessAdmin.js';
+import { renderDashboard, seedDashboardSummary } from './dashboard.js';
 import { deferAfterFirstPaint, getProfile, refreshAuthUiShell } from './authShell.js';
+import {
+    accessLocks,
+    withApartmentSelectSuppressed,
+    invalidateWorkspaceAccess,
+    beginApartmentSwitch,
+} from './accessLocks.js';
+import { readApiJson } from './apiJson.js';
 
+export {
+    isApartmentSelectSuppressed,
+    invalidateWorkspaceAccess,
+    withApartmentSelectSuppressedAsync,
+    isSocietyHydrating,
+} from './accessLocks.js';
+
+async function fetchWorkspaceBoot(apartmentHint = null) {
+    const hint = apartmentHint && !isPlaceholderApartmentId(apartmentHint) ? apartmentHint : '';
+    const key = hint || '__auto__';
+    if (accessLocks.workspaceBootInflight && accessLocks.workspaceBootInflightKey === key) {
+        return accessLocks.workspaceBootInflight;
+    }
+    // Reuse any in-flight boot for the same auto-resolve (null hint) or exact apt.
+    if (accessLocks.workspaceBootInflight && !hint && accessLocks.workspaceBootInflightKey === '__auto__') {
+        return accessLocks.workspaceBootInflight;
+    }
+
+    accessLocks.workspaceBootInflightKey = key;
+    accessLocks.workspaceBootInflight = (async () => {
+        const params = new URLSearchParams();
+        if (hint) params.set('apartment_id', hint);
+        const qs = params.toString();
+        const headers = {};
+        try {
+            const { data } = await supabase.auth.getSession();
+            const token = data?.session?.access_token;
+            if (token) headers.Authorization = `Bearer ${token}`;
+        } catch { /* cookie-only fallback */ }
+        const res = await fetch(`/api/workspace-boot${qs ? `?${qs}` : ''}`, {
+            method: 'GET',
+            credentials: 'include',
+            headers,
+        });
+        const { ok, json, error } = await readApiJson(res);
+        if (!ok) throw new Error(json?.error || error || 'Workspace boot failed.');
+        return json;
+    })().finally(() => {
+        if (accessLocks.workspaceBootInflightKey === key) {
+            accessLocks.workspaceBootInflight = null;
+            accessLocks.workspaceBootInflightKey = null;
+        }
+    });
+
+    return accessLocks.workspaceBootInflight;
+}
+
+function scheduleOnceNotifications(apartmentId) {
+    if (!apartmentId || isPlaceholderApartmentId(apartmentId)) return;
+    if (accessLocks.notificationsForApt === apartmentId) return;
+    accessLocks.notificationsForApt = apartmentId;
+    deferAfterFirstPaint(() => {
+        refreshStaffNotifications().catch(() => {});
+    });
+}
+
+function applyAuthFromBoot(boot) {
+    const profile = boot.profile;
+    const roleKey = boot.effectiveRoleKey
+        || (boot.isSystemAdmin ? 'system_admin' : null)
+        || ROLE_OPTIONS.find((r) => r.v1Key === (profile?.role || 'resident_viewer'))?.key
+        || 'resident_viewer';
+    const v1Role = ROLE_OPTIONS.find((r) => r.key === roleKey)?.v1Key || profile?.role || 'resident_viewer';
+
+    if (portalState.auth) {
+        portalState.auth.effectiveRoleKey = roleKey;
+        portalState.auth.role = v1Role;
+        portalState.auth.isSystemAdmin = !!boot.isSystemAdmin;
+        if (profile?.full_name) portalState.auth.name = profile.full_name;
+        if (profile?.email) portalState.auth.email = profile.email;
+    }
+
+    const floor = rolePermissionFloor(roleKey);
+    portalState.authPermissions = [...new Set([...floor, ...(boot.permissions || [])])];
+}
+
+/** Legacy resolver kept for workspace-gate fallback paths. */
 export const resolveActiveApartment = async (uid, profile) => {
     if (!supabase || !uid) return { apartments: [], activeId: null, apartmentIds: [] };
-    console.group('[Access] Resolving active apartment');
 
-    const { data: mappings, error: mapError } = await withTimeout(
-        supabase
-            .from('user_apartments')
-            .select('apartment_id')
-            .eq('user_id', uid),
-        15000,
-        'Apartment access',
-    );
-    if (mapError) console.error('[access] user_apartments query failed:', mapError.message);
+    const key = `${uid}:${profile?.last_apartment_id || ''}:${portalState.access?.activeApartmentId || ''}`;
+    if (accessLocks.resolveInflight && accessLocks.resolveInflightKey === key) {
+        return accessLocks.resolveInflight;
+    }
 
-    let pool = [];
-    const mappedIds = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
-    if (mappedIds.length) {
-        const { data: apartmentsRaw, error: aptListErr } = await withTimeout(
-            supabase.from('apartments').select('id, name').in('id', mappedIds),
+    accessLocks.resolveInflightKey = key;
+    accessLocks.resolveInflight = (async () => {
+        const { data: mappings, error: mapError } = await withTimeout(
+            supabase.from('user_apartments').select('apartment_id').eq('user_id', uid),
             15000,
-            'Apartments list',
+            'Apartment access',
         );
-        if (aptListErr) console.error('[access] apartments query failed:', aptListErr.message);
-        pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
-    }
+        if (mapError) console.error('[access] user_apartments query failed:', mapError.message);
 
-    if (!pool.length && (profile?.role === 'admin' || portalState.auth?.role === 'admin')) {
-        const { data: apartmentsRaw, error: aptError } = await withTimeout(
-            supabase.from('apartments').select('id, name').order('name'),
-            15000,
-            'Apartments list',
-        );
-        if (aptError) console.error('[access] apartments query failed:', aptError.message);
-        pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
-    }
-
-    console.log('Pool:', pool);
-
-    if (!pool.length) {
-        console.error('[access] No apartments in pool for user', uid);
-        console.groupEnd();
-        return { apartments: [], activeId: null, apartmentIds: [] };
-    }
-
-    const cur = portalState.access?.activeApartmentId;
-    if (cur && !isPlaceholderApartmentId(cur) && pool.some((a) => a.id === cur)) {
-        console.log('Using current:', cur);
-        console.groupEnd();
-        return { apartments: pool, activeId: cur, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
-    }
-
-    const last = profile?.last_apartment_id;
-    if (last && pool.some((a) => a.id === last)) {
-        console.log('Using last profile apt:', last);
-        console.groupEnd();
-        return { apartments: pool, activeId: last, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
-    }
-
-    const preferred = pool.find((a) => /elixir/i.test(a.name || ''));
-    if (preferred) {
-        console.log('Using preferred (Elixir):', preferred.id);
-        console.groupEnd();
-        return { apartments: pool, activeId: preferred.id, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
-    }
-
-    const cachedName = (portalState.community?.name || '').trim().toLowerCase();
-    if (cachedName && cachedName !== 'communityhub' && cachedName !== 'offline') {
-        const byName = pool.find((a) => (a.name || '').trim().toLowerCase() === cachedName);
-        if (byName) {
-            console.log('Using cached name match:', byName.id);
-            console.groupEnd();
-            return { apartments: pool, activeId: byName.id, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
+        let pool = [];
+        const mappedIds = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
+        if (mappedIds.length) {
+            const { data: apartmentsRaw, error: aptListErr } = await withTimeout(
+                supabase.from('apartments').select('id, name').in('id', mappedIds),
+                15000,
+                'Apartments list',
+            );
+            if (aptListErr) console.error('[access] apartments query failed:', aptListErr.message);
+            pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
         }
-    }
 
-    console.log('Using first in pool:', pool[0].id);
-    console.groupEnd();
-    return { apartments: pool, activeId: pool[0].id, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
+        if (!pool.length && (profile?.role === 'admin' || portalState.auth?.role === 'admin')) {
+            const { data: apartmentsRaw, error: aptError } = await withTimeout(
+                supabase.from('apartments').select('id, name').order('name'),
+                15000,
+                'Apartments list',
+            );
+            if (aptError) console.error('[access] apartments query failed:', aptError.message);
+            pool = (apartmentsRaw || []).filter((a) => a.name !== '__SYSTEM__');
+        }
+
+        if (!pool.length) {
+            return { apartments: [], activeId: null, apartmentIds: [] };
+        }
+
+        const cur = portalState.access?.activeApartmentId;
+        if (cur && !isPlaceholderApartmentId(cur) && pool.some((a) => a.id === cur)) {
+            return { apartments: pool, activeId: cur, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
+        }
+        const last = profile?.last_apartment_id;
+        if (last && pool.some((a) => a.id === last)) {
+            return { apartments: pool, activeId: last, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
+        }
+        return { apartments: pool, activeId: pool[0].id, apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id) };
+    })().finally(() => {
+        if (accessLocks.resolveInflightKey === key) {
+            accessLocks.resolveInflight = null;
+            accessLocks.resolveInflightKey = null;
+        }
+    });
+
+    return accessLocks.resolveInflight;
 };
 
-const loadAccessUserDirectory = async (activeId, uid) => {
+/** Staff directory for Setup / Access Control only — never on dashboard boot. */
+export const loadAccessUserDirectory = async (activeId, uid, { force = false } = {}) => {
     if (!supabase || !activeId) return;
-    try {
-        const [{ data: aptMappings, error: mapErr }, { data: roleRows, error: roleErr }] = await Promise.all([
-            withTimeout(
-                supabase.from('user_apartments').select('user_id, apartment_id').eq('apartment_id', activeId),
+    if (!force && accessLocks.directoryForApt === activeId) return;
+    if (accessLocks.directoryInflight) return accessLocks.directoryInflight;
+
+    accessLocks.directoryInflight = (async () => {
+        try {
+            const [{ data: aptMappings, error: mapErr }, { data: roleRows, error: roleErr }] = await Promise.all([
+                withTimeout(
+                    supabase.from('user_apartments').select('user_id, apartment_id').eq('apartment_id', activeId),
+                    15000,
+                    'User mappings',
+                ),
+                withTimeout(
+                    supabase.from('user_role_assignments').select('user_id, apartment_id, role_key').eq('scope', 'apartment').eq('apartment_id', activeId),
+                    15000,
+                    'Role assignments',
+                ),
+            ]);
+            if (mapErr) console.error('[access] user_apartments query failed:', mapErr.message);
+            if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
+                console.error('[access] user_role_assignments query failed:', roleErr.message);
+            }
+
+            const userIds = [...new Set((aptMappings || []).map((m) => m.user_id))];
+            if (!userIds.length) {
+                accessLocks.directoryForApt = activeId;
+                return;
+            }
+
+            const { data: profiles, error: profilesErr } = await withTimeout(
+                supabase.from('profiles').select('id, full_name, email, role').in('id', userIds).order('full_name'),
                 15000,
-                'User mappings',
-            ),
-            withTimeout(
-                supabase.from('user_role_assignments').select('user_id, apartment_id, role_key').eq('scope', 'apartment').eq('apartment_id', activeId),
-                15000,
-                'Role assignments',
-            ),
-        ]);
-        if (mapErr) console.error('[access] user_apartments query failed:', mapErr.message);
-        if (roleErr && !/user_role_assignments/i.test(roleErr.message)) {
-            console.error('[access] user_role_assignments query failed:', roleErr.message);
+                'User directory',
+            );
+            if (profilesErr) console.error('[access] profiles query failed:', profilesErr.message);
+            if (!profiles?.length) {
+                accessLocks.directoryForApt = activeId;
+                return;
+            }
+
+            const map = new Map();
+            (aptMappings || []).forEach((m) => {
+                if (!map.has(m.user_id)) map.set(m.user_id, []);
+                map.get(m.user_id).push(m.apartment_id);
+            });
+            const rolesByUser = new Map();
+            (roleRows || []).forEach((r) => {
+                if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
+                rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
+            });
+
+            portalState.access.users = profiles.map((p) => ({
+                id: p.id,
+                name: p.full_name || p.email || p.id,
+                email: p.email || '',
+                role: p.role || 'resident_viewer',
+                apartment_ids: map.get(p.id) || [],
+                apartment_roles: rolesByUser.get(p.id) || {},
+            }));
+
+            if (!portalState.access.activeUserId || !portalState.access.users.some((u) => u.id === portalState.access.activeUserId)) {
+                portalState.access.activeUserId = uid;
+            }
+            accessLocks.directoryForApt = activeId;
+            persist();
+            withApartmentSelectSuppressed(() => renderAccessMappings());
+        } catch (err) {
+            console.warn('[access] User directory load skipped:', err.message);
+        } finally {
+            accessLocks.directoryInflight = null;
         }
+    })();
 
-        const userIds = [...new Set((aptMappings || []).map((m) => m.user_id))];
-        if (!userIds.length) return;
-
-        const { data: profiles, error: profilesErr } = await withTimeout(
-            supabase.from('profiles').select('id, full_name, email, role').in('id', userIds).order('full_name'),
-            15000,
-            'User directory',
-        );
-        if (profilesErr) console.error('[access] profiles query failed:', profilesErr.message);
-        if (!profiles?.length) return;
-
-        const map = new Map();
-        (aptMappings || []).forEach((m) => {
-            if (!map.has(m.user_id)) map.set(m.user_id, []);
-            map.get(m.user_id).push(m.apartment_id);
-        });
-        const rolesByUser = new Map();
-        (roleRows || []).forEach((r) => {
-            if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
-            rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
-        });
-
-        portalState.access.users = profiles.map((p) => ({
-            id: p.id,
-            name: p.full_name || p.email || p.id,
-            email: p.email || '',
-            role: p.role || 'resident_viewer',
-            apartment_ids: map.get(p.id) || [],
-            apartment_roles: rolesByUser.get(p.id) || {},
-        }));
-
-        if (!portalState.access.activeUserId || !portalState.access.users.some((u) => u.id === portalState.access.activeUserId)) {
-            portalState.access.activeUserId = uid;
-        }
-        persist();
-        renderAccessMappings();
-    } catch (err) {
-        console.warn('[access] User directory load skipped:', err.message);
-    }
+    return accessLocks.directoryInflight;
 };
 
-export const setActiveApartment = async (apartmentId) => {
+/**
+ * Apply a /api/workspace-boot payload into portal state (one network round-trip).
+ */
+async function hydrateFromWorkspaceBoot(boot) {
+    ensureAccessState();
+    portalState.access.apartments = boot.apartments || [];
+    portalState.access.activeApartmentId = boot.activeApartmentId;
+    if (portalState.access.users?.length && boot.apartmentIds?.length) {
+        portalState.access.users[0].apartment_ids = boot.apartmentIds;
+    }
+    if (boot.profile) {
+        portalState.access.users = [{
+            id: boot.profile.id,
+            name: boot.profile.full_name || boot.profile.email || 'User',
+            email: boot.profile.email || '',
+            role: boot.profile.role || 'resident_viewer',
+            apartment_ids: boot.apartmentIds || [],
+        }];
+        portalState.access.activeUserId = boot.profile.id;
+    }
+
+    applyAuthFromBoot(boot);
+    seedRoleAssignmentsCache(boot.profile?.id || portalState.auth?.id, boot.roleAssignments || []);
+    applyBootPayload(boot);
+
+    if (boot.summary) seedDashboardSummary(boot.activeApartmentId, boot.summary);
+
+    accessLocks.readyApartmentId = boot.activeApartmentId;
+    accessLocks.workspaceReady = true;
+    accessLocks.lastWrittenLastApartmentId = boot.activeApartmentId;
+
+    persist();
+    refreshAuthUiShell();
+    applyNavPermissions(new Set(portalState.authPermissions || []));
+    withApartmentSelectSuppressed(() => renderAccessMappings());
+
+    document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
+    document.dispatchEvent(new CustomEvent('module-access-loaded'));
+
+    scheduleOnceNotifications(boot.activeApartmentId);
+
+    if (document.getElementById('view-dashboard')?.classList.contains('active')) {
+        void renderDashboard();
+    }
+}
+
+export const setActiveApartment = async (apartmentId, { force = false } = {}) => {
     if (isPlaceholderApartmentId(apartmentId)) {
         console.warn('[access] Ignoring placeholder apartment id');
         return false;
     }
-    console.group('[Access] Setting active apartment:', apartmentId);
 
-    let apt = portalState.access?.apartments?.find((a) => a.id === apartmentId);
-    if (!apt && supabase) {
-        console.log('Apartment not in state, fetching from DB...');
-        const { data } = await supabase.from('apartments').select('id, name').eq('id', apartmentId).maybeSingle();
-        if (data) {
-            apt = data;
-            if (!portalState.access.apartments.some((a) => a.id === data.id)) {
-                portalState.access.apartments.push(data);
+    // If society sync is already hydrating, wait for it instead of starting a second boot.
+    if (accessLocks.syncAccessInflight) {
+        try { await accessLocks.syncAccessInflight; } catch { /* ignore */ }
+        if (accessLocks.readyApartmentId === apartmentId && getLoadedDomains().includes('core')) {
+            return true;
+        }
+    }
+
+    const alreadyReady = accessLocks.readyApartmentId === apartmentId
+        && getLoadedDomains().includes('core');
+    // Same-apartment "force" from select churn is a no-op once core is loaded.
+    if (alreadyReady && (!force || apartmentId === portalState.access?.activeApartmentId)) {
+        return true;
+    }
+
+    if (accessLocks.setActiveInflight && accessLocks.setActiveInflightId === apartmentId) {
+        return accessLocks.setActiveInflight;
+    }
+    if (accessLocks.setActiveInflight) {
+        try { await accessLocks.setActiveInflight; } catch { /* ignore */ }
+        if (accessLocks.readyApartmentId === apartmentId && getLoadedDomains().includes('core')) {
+            return true;
+        }
+    }
+
+    accessLocks.setActiveInflightId = apartmentId;
+    accessLocks.setActiveInflight = (async () => {
+        console.group('[Access] Setting active apartment:', apartmentId);
+        accessLocks.societyHydrating = true;
+        try {
+            if (accessLocks.readyApartmentId && accessLocks.readyApartmentId !== apartmentId) {
+                beginApartmentSwitch(apartmentId);
+            } else if (force) {
+                beginApartmentSwitch(apartmentId);
+            }
+
+            const boot = await withTimeout(
+                fetchWorkspaceBoot(apartmentId),
+                120000,
+                'Workspace boot',
+            );
+            if (!boot.activeApartmentId) return false;
+
+            if (boot.activeApartmentId !== apartmentId
+                && !(boot.apartments || []).some((a) => a.id === apartmentId)) {
+                console.error('[access] No access to apartment', apartmentId);
+                return false;
+            }
+
+            if ((boot.apartments || []).some((a) => a.id === apartmentId)) {
+                boot.activeApartmentId = apartmentId;
+            }
+
+            resetLoadedDomains();
+            await hydrateFromWorkspaceBoot(boot);
+            return true;
+        } catch (err) {
+            console.error('[access] setActiveApartment failed:', err?.message || err);
+            portalState.access.activeApartmentId = apartmentId;
+            resetLoadedDomains();
+            const success = await pullState({ domain: 'core', force: true });
+            if (success) {
+                accessLocks.readyApartmentId = apartmentId;
+                accessLocks.workspaceReady = true;
+                const roleAssignments = await loadAllUserRoleAssignmentsCached(portalState.auth?.id);
+                await refreshAuthPermissions(apartmentId, roleAssignments);
+                applyNavPermissions(new Set(portalState.authPermissions || []));
+                document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
+                withApartmentSelectSuppressed(() => renderAccessMappings());
+            }
+            return success;
+        } finally {
+            accessLocks.societyHydrating = false;
+            console.groupEnd();
+            if (accessLocks.setActiveInflightId === apartmentId) {
+                accessLocks.setActiveInflight = null;
+                accessLocks.setActiveInflightId = null;
             }
         }
-    }
-    if (!apt) {
-        console.error('[access] Unknown apartment id:', apartmentId);
-        console.groupEnd();
-        return false;
-    }
+    })();
 
-    portalState.access.activeApartmentId = apartmentId;
-    portalState.community.name = apt.name;
-    resetLoadedDomains();
-
-    const headerSelect = document.getElementById('header-apartment-switch');
-    if (headerSelect) headerSelect.value = apartmentId;
-
-    persist();
-
-    if (supabase) {
-        const { data: s } = await supabase.auth.getSession();
-        if (s?.session?.user?.id) {
-            await supabase.from('profiles').update({ last_apartment_id: apartmentId }).eq('id', s.session.user.id);
-        }
-    }
-
-    console.log('Pulling core state for apartment...');
-    const success = await pullState({ domain: 'core' });
-    console.log('Pull State Success:', success);
-    if (success) {
-        const roleAssignments = await loadAllUserRoleAssignmentsCached(portalState.auth?.id);
-        await refreshAuthPermissions(apartmentId, roleAssignments);
-        applyNavPermissions(new Set(portalState.authPermissions || []));
-        deferAfterFirstPaint(async () => {
-            try {
-                await autoLinkResidentByEmail();
-                await acceptPendingInvites();
-            } catch { /* non-blocking */ }
-            refreshStaffNotifications().catch(() => {});
-        });
-        document.dispatchEvent(new CustomEvent('apartment-data-loaded'));
-        renderAccessMappings();
-        if (document.getElementById('view-dashboard')?.classList.contains('active')) {
-            void renderDashboard();
-        }
-        if (document.getElementById('view-setup')?.classList.contains('active')) {
-            void renderApartmentModulePanel();
-        }
-        if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
-        if (typeof window.renderFinanceAnalytics === 'function') window.renderFinanceAnalytics();
-        if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
-    }
-    console.groupEnd();
-    return success;
+    return accessLocks.setActiveInflight;
 };
 
 export const syncAccessFromSupabase = async (profileOverride = null) => {
     if (!supabase) return false;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const uid = sessionData?.session?.user?.id;
-    if (!uid) return false;
 
-    ensureAccessState();
-    clearRoleAssignmentsCache();
-
-    const selfProfile = profileOverride || await getProfile(uid);
-    if (selfProfile) {
-        portalState.access.users = [{
-            id: selfProfile.id,
-            name: selfProfile.full_name || selfProfile.email || 'User',
-            email: selfProfile.email || '',
-            role: selfProfile.role || 'resident_viewer',
-            apartment_ids: [],
-        }];
-        portalState.access.activeUserId = uid;
+    // Sticky only when core is actually in memory (HMR can leave ready flags without domains).
+    if (
+        accessLocks.workspaceReady
+        && accessLocks.readyApartmentId
+        && getLoadedDomains().includes('core')
+        && !profileOverride?.__force
+    ) {
+        return true;
     }
+    if (accessLocks.syncAccessInflight) return accessLocks.syncAccessInflight;
 
-    const { apartments, activeId, apartmentIds } = await resolveActiveApartment(uid, selfProfile);
-    if (!apartments.length || !activeId) {
-        console.error('[access] No apartments available for this user', { apartments: apartments.length, activeId, uid });
-        renderAccessMappings();
-        return false;
-    }
+    accessLocks.societyHydrating = true;
+    accessLocks.syncAccessInflight = (async () => {
+        try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const uid = sessionData?.session?.user?.id;
+            if (!uid) return false;
 
-    portalState.access.apartments = apartments;
-    portalState.access.activeApartmentId = activeId;
-    if (portalState.access.users?.length && apartmentIds?.length) {
-        portalState.access.users[0].apartment_ids = apartmentIds;
-    }
-
-    const loaded = await setActiveApartment(activeId);
-    if (!loaded) {
-        console.error('[access] setActiveApartment failed for', activeId, portalState.lastPullMeta);
-        renderAccessMappings();
-        return false;
-    }
-
-    const roleAssignments = await loadAllUserRoleAssignmentsCached(uid);
-    if (portalState.auth) {
-        if (portalState.auth.isSystemAdmin) {
-            portalState.auth.effectiveRoleKey = 'system_admin';
-            portalState.auth.role = 'admin';
-        } else {
-            const aptAssignment = roleAssignments.find((a) => a.scope === 'apartment' && a.apartment_id === activeId);
-            if (aptAssignment?.role_key) {
-                portalState.auth.effectiveRoleKey = aptAssignment.role_key;
-                portalState.auth.role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || portalState.auth.role;
+            ensureAccessState();
+            if (portalState.auth?.id && portalState.auth.id !== uid) {
+                clearRoleAssignmentsCache();
+                invalidateWorkspaceAccess();
             }
-        }
-    }
-    refreshAuthUiShell();
 
-    persist();
-    renderAccessMappings();
-    deferAfterFirstPaint(() => loadAccessUserDirectory(activeId, uid));
-    return true;
+            const hint = portalState.access?.activeApartmentId
+                || profileOverride?.last_apartment_id
+                || null;
+
+            const boot = await withTimeout(
+                fetchWorkspaceBoot(hint),
+                120000,
+                'Workspace boot',
+            );
+
+            if (!boot.apartments?.length || !boot.activeApartmentId) {
+                console.error('[access] No apartments available for this user', { uid });
+                withApartmentSelectSuppressed(() => renderAccessMappings());
+                return false;
+            }
+
+            if (!portalState.auth?.id) {
+                // Minimal auth shell if applyAuthToUI has not run yet
+                portalState.auth = {
+                    id: uid,
+                    email: boot.profile?.email || '',
+                    name: boot.profile?.full_name || boot.profile?.email || 'User',
+                    role: boot.profile?.role || 'resident_viewer',
+                    effectiveRoleKey: boot.effectiveRoleKey || 'resident_viewer',
+                    isSystemAdmin: !!boot.isSystemAdmin,
+                };
+            }
+
+            resetLoadedDomains();
+            await hydrateFromWorkspaceBoot(boot);
+            return true;
+        } catch (err) {
+            console.error('[access] workspace boot failed, falling back:', err?.message || err);
+            const uid = portalState.auth?.id;
+            const selfProfile = profileOverride || await getProfile(uid);
+            const { apartments, activeId, apartmentIds } = await resolveActiveApartment(uid, selfProfile);
+            if (!apartments.length || !activeId) return false;
+            portalState.access.apartments = apartments;
+            if (portalState.access.users?.length && apartmentIds?.length) {
+                portalState.access.users[0].apartment_ids = apartmentIds;
+            }
+            // Clear sync inflight before setActive — otherwise setActive waits on this same promise (deadlock).
+            accessLocks.syncAccessInflight = null;
+            return setActiveApartment(activeId);
+        } finally {
+            accessLocks.societyHydrating = false;
+            accessLocks.syncAccessInflight = null;
+        }
+    })();
+
+    return accessLocks.syncAccessInflight;
 };

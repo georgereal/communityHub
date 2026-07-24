@@ -77,14 +77,25 @@ export async function loadUserPageAccess(apartmentId, userId, roleKey) {
         return portalState.pageAccess;
     }
 
-    const [userOverrides, societyMap] = await Promise.all([
-        fetchUserPageOverrides(userId, apartmentId),
-        roleKey ? fetchSocietyRolePageMap(apartmentId, roleKey) : Promise.resolve({}),
-    ]);
+    const book = globalThis.__sentryPageAccessBook || (globalThis.__sentryPageAccessBook = { inflight: new Map() });
+    const key = `${apartmentId}:${userId}:${roleKey || ''}`;
+    if (book.inflight.has(key)) return book.inflight.get(key);
 
-    portalState.pageAccess.user = userOverrides;
-    portalState.pageAccess.societyRole = roleKey ? { [roleKey]: societyMap } : {};
-    return portalState.pageAccess;
+    const run = (async () => {
+        const [userOverrides, societyMap] = await Promise.all([
+            fetchUserPageOverrides(userId, apartmentId),
+            roleKey ? fetchSocietyRolePageMap(apartmentId, roleKey) : Promise.resolve({}),
+        ]);
+
+        portalState.pageAccess.user = userOverrides;
+        portalState.pageAccess.societyRole = roleKey ? { [roleKey]: societyMap } : {};
+        return portalState.pageAccess;
+    })().finally(() => {
+        book.inflight.delete(key);
+    });
+
+    book.inflight.set(key, run);
+    return run;
 }
 
 /**

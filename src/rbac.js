@@ -64,45 +64,73 @@ export function rolePermissionFloor(roleKey = portalState.auth?.effectiveRoleKey
     return permissionsFromV1Role(v1);
 }
 
-let roleAssignmentsCache = { userId: null, rows: [] };
+const roleBook = globalThis.__sentryRoleBook || (globalThis.__sentryRoleBook = {
+    cache: { userId: null, rows: [] },
+    inflight: null,
+    inflightUserId: null,
+    allPermissionKeys: null,
+    allPermissionKeysInflight: null,
+});
 
 export function clearRoleAssignmentsCache() {
-    roleAssignmentsCache = { userId: null, rows: [] };
+    roleBook.cache = { userId: null, rows: [] };
+    roleBook.inflight = null;
+    roleBook.inflightUserId = null;
+}
+
+export function seedRoleAssignmentsCache(userId, rows = []) {
+    if (!userId) return;
+    roleBook.cache = { userId, rows: rows || [] };
 }
 
 export async function loadAllUserRoleAssignmentsCached(userId, { force = false } = {}) {
     if (!supabase || !userId) return [];
-    if (!force && roleAssignmentsCache.userId === userId) return roleAssignmentsCache.rows;
-    const rows = await loadAllUserRoleAssignments(userId);
-    roleAssignmentsCache = { userId, rows };
-    return rows;
+    if (!force && roleBook.cache.userId === userId) return roleBook.cache.rows;
+    if (!force && roleBook.inflight && roleBook.inflightUserId === userId) return roleBook.inflight;
+
+    roleBook.inflightUserId = userId;
+    roleBook.inflight = (async () => {
+        const rows = await loadAllUserRoleAssignments(userId);
+        roleBook.cache = { userId, rows };
+        return rows;
+    })().finally(() => {
+        if (roleBook.inflightUserId === userId) {
+            roleBook.inflight = null;
+            roleBook.inflightUserId = null;
+        }
+    });
+    return roleBook.inflight;
+}
+
+async function loadAllPermissionKeys() {
+    if (roleBook.allPermissionKeys) return roleBook.allPermissionKeys;
+    if (roleBook.allPermissionKeysInflight) return roleBook.allPermissionKeysInflight;
+    roleBook.allPermissionKeysInflight = (async () => {
+        const { data: perms } = await supabase.from('permissions').select('key');
+        roleBook.allPermissionKeys = (perms || []).map((p) => p.key);
+        return roleBook.allPermissionKeys;
+    })().finally(() => {
+        roleBook.allPermissionKeysInflight = null;
+    });
+    return roleBook.allPermissionKeysInflight;
 }
 
 export async function fetchEffectivePermissions(apartmentId, rolesOverride = null) {
     if (!supabase || !apartmentId) return null;
-    const { data: s } = await supabase.auth.getSession();
-    const uid = s?.session?.user?.id;
-    if (!uid) return null;
-
-    let roles = rolesOverride;
-    if (!roles) {
-        const { data, error } = await supabase
-            .from('user_role_assignments')
-            .select('role_key, scope, apartment_id')
-            .eq('user_id', uid);
-
-        if (error) {
-            if (/user_role_assignments/i.test(error.message)) return null;
-            throw error;
-        }
-        roles = data;
+    let userId = portalState.auth?.id;
+    if (!userId) {
+        const { data: s } = await supabase.auth.getSession();
+        userId = s?.session?.user?.id;
     }
+    if (!userId) return null;
+
+    // Always go through the coalesced cache — never issue parallel role selects.
+    const roles = rolesOverride || await loadAllUserRoleAssignmentsCached(userId);
     if (!roles?.length) return null;
 
     const isSystemAdmin = roles.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
     if (isSystemAdmin) {
-        const { data: perms } = await supabase.from('permissions').select('key');
-        return (perms || []).map((p) => p.key);
+        return loadAllPermissionKeys();
     }
 
     const aptRoleKeys = roles

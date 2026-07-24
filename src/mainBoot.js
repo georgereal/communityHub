@@ -2,6 +2,7 @@
 
 import { portalState, isPlaceholderApartmentId } from './store.js';
 import { ROLE_OPTIONS, v2KeyToLabel } from './rbac.js';
+import { withApartmentSelectSuppressed } from './accessLocks.js';
 
 export { renderResidents } from './residentView.js';
 
@@ -71,6 +72,10 @@ export const ensureAccessState = () => {
 };
 
 export const renderAccessMappings = () => {
+    withApartmentSelectSuppressed(() => renderAccessMappingsInner());
+};
+
+const renderAccessMappingsInner = () => {
     ensureAccessState();
     const apartments = apartmentOptionsForUi();
     const users = portalState.access.users;

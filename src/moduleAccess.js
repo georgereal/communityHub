@@ -46,27 +46,38 @@ export async function loadModuleAccess(apartmentId, userId = null) {
     }
 
     const uid = userId || portalState.auth?.id;
-    const queries = [
-        supabase.from('apartment_module_settings').select('module_key, enabled').eq('apartment_id', apartmentId),
-    ];
-    if (uid) {
-        queries.push(
-            supabase.from('user_module_access').select('module_key, enabled').eq('apartment_id', apartmentId).eq('user_id', uid),
-        );
-    }
+    const book = globalThis.__sentryModuleAccessBook || (globalThis.__sentryModuleAccessBook = { inflight: new Map() });
+    const key = `${apartmentId}:${uid || ''}`;
+    if (book.inflight.has(key)) return book.inflight.get(key);
 
-    const [aptRes, userRes] = await Promise.all(queries);
+    const run = (async () => {
+        const queries = [
+            supabase.from('apartment_module_settings').select('module_key, enabled').eq('apartment_id', apartmentId),
+        ];
+        if (uid) {
+            queries.push(
+                supabase.from('user_module_access').select('module_key, enabled').eq('apartment_id', apartmentId).eq('user_id', uid),
+            );
+        }
 
-    if (aptRes.error && !/apartment_module_settings/i.test(aptRes.error.message)) {
-        console.warn('[moduleAccess] apartment load failed:', aptRes.error.message);
-    }
-    if (userRes?.error && !/user_module_access/i.test(userRes.error.message)) {
-        console.warn('[moduleAccess] user load failed:', userRes.error.message);
-    }
+        const [aptRes, userRes] = await Promise.all(queries);
 
-    portalState.moduleAccess.apartment = aptRes.error ? {} : normalizeSettingsMap(aptRes.data);
-    portalState.moduleAccess.user = userRes?.error ? {} : normalizeSettingsMap(userRes?.data);
-    return portalState.moduleAccess;
+        if (aptRes.error && !/apartment_module_settings/i.test(aptRes.error.message)) {
+            console.warn('[moduleAccess] apartment load failed:', aptRes.error.message);
+        }
+        if (userRes?.error && !/user_module_access/i.test(userRes.error.message)) {
+            console.warn('[moduleAccess] user load failed:', userRes.error.message);
+        }
+
+        portalState.moduleAccess.apartment = aptRes.error ? {} : normalizeSettingsMap(aptRes.data);
+        portalState.moduleAccess.user = userRes?.error ? {} : normalizeSettingsMap(userRes?.data);
+        return portalState.moduleAccess;
+    })().finally(() => {
+        book.inflight.delete(key);
+    });
+
+    book.inflight.set(key, run);
+    return run;
 }
 
 export async function fetchApartmentModuleSettings(apartmentId) {

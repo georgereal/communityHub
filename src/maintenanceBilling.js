@@ -1178,7 +1178,7 @@ export async function deleteMaintenanceInvoice(id, { confirm: askConfirm = true,
     });
 
     if (!silent) {
-        await pullState();
+        await pullState({ domain: 'finance' });
         renderInvoicesPage();
     }
     return { ok: true };
@@ -1377,7 +1377,7 @@ const deleteSelectedInvoices = async () => {
         });
 
         ids.forEach((id) => selectedInvoiceIds.delete(id));
-        await pullState();
+        await pullState({ domain: 'finance' });
         renderInvoicesPage();
     }).catch((err) => alert(err?.message || 'Bulk delete failed.'));
 };

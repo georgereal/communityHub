@@ -1560,6 +1560,16 @@ const txnLabel = (txnId) => {
   return `${d} · ${formatMoney(t.amount)} · ${categoryDisplayLabel(t.cat)}`;
 };
 
+const renderFdocAttachmentIcons = (doc) => {
+  const atts = Array.isArray(doc.attachment_urls) ? doc.attachment_urls : [];
+  if (!atts.length) return '';
+  const n = atts.length;
+  return `<button type="button" class="fdoc-attach-icon fdoc-attach-icon--count" data-fdoc-preview="${esc(doc.id)}" data-preview-idx="0" title="${n} file(s) — click to preview" aria-label="Preview ${n} file(s)">
+    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+    <span class="fdoc-attach-count">${n}</span>
+  </button>`;
+};
+
 export function renderFinanceDocumentsPage() {
   const body = document.getElementById('fdoc-table-body');
   const meta = document.getElementById('fdoc-meta');
@@ -1593,7 +1603,6 @@ export function renderFinanceDocumentsPage() {
         day: '2-digit', month: 'short', year: '2-digit',
       })
       : '—';
-    const attachCount = Array.isArray(d.attachment_urls) ? d.attachment_urls.length : 0;
     const linkLabel = d.transaction_id
       ? `<span class="fdoc-status fdoc-status--linked" title="${esc(txnLabel(d.transaction_id))}">Linked</span>`
       : `<span class="fdoc-status fdoc-status--open">Open</span>`;
@@ -1603,19 +1612,20 @@ export function renderFinanceDocumentsPage() {
     const pay = paymentInfo(d);
     const payClass = pay.mode === 'cash' ? 'fdoc-pay fdoc-pay--cash' : (pay.mode === 'cheque' ? 'fdoc-pay fdoc-pay--cheque' : 'fdoc-pay');
     const isIncome = d.kind === 'IN';
-    return `<tr class="fdoc-row" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}">
+    return `<tr class="fdoc-row fdoc-row--clickable" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}" title="Click row to view details">
       <td class="fdoc-check-col">
         <input type="checkbox" class="fdoc-row-check" value="${esc(d.id)}" aria-label="Select bill" />
       </td>
-      <td>${esc(date)}</td>
-      <td>${isIncome ? 'Income' : 'Expense'}</td>
+      <td class="fdoc-cell-open">${esc(date)}</td>
+      <td class="fdoc-cell-open">${isIncome ? 'Income' : 'Expense'}</td>
       <td class="fdoc-cat-col">${renderFdocClassifyCell(d, isIncome)}</td>
-      <td>${esc(d.vendor_name || d.description || '—')}</td>
-      <td><span class="${payClass}">${esc(pay.label)}</span></td>
-      <td class="cash-float-amt">${formatMoney(d.amount)}</td>
-      <td>${linkLabel}${attachCount ? ` · ${attachCount} file(s)` : ''}</td>
+      <td class="fdoc-cell-open">${esc(d.vendor_name || d.description || '—')}</td>
+      <td class="fdoc-cell-open"><span class="${payClass}">${esc(pay.label)}</span></td>
+      <td class="cash-float-amt fdoc-cell-open">${formatMoney(d.amount)}</td>
+      <td class="fdoc-status-cell">${linkLabel}${renderFdocAttachmentIcons(d)}</td>
       <td class="fdoc-actions">
         ${linkBtn}
+        <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-view="${esc(d.id)}" title="View details" aria-label="View details"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-edit="${esc(d.id)}" title="Edit" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
         <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
       </td>
@@ -1970,6 +1980,26 @@ export function initFinanceDocumentsPage() {
         .catch((err) => alert(err?.message || 'Unlink failed.'));
       return;
     }
+
+    const previewBtn = e.target.closest('[data-fdoc-preview]');
+    if (previewBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const docId = previewBtn.dataset.fdocPreview;
+      const startIdx = parseInt(previewBtn.dataset.previewIdx || '0', 10) || 0;
+      const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === docId);
+      const atts = Array.isArray(doc?.attachment_urls) ? doc.attachment_urls : [];
+      if (!atts.length) return;
+      void window.viewAttachmentGallery?.(atts, startIdx);
+      return;
+    }
+
+    const viewId = e.target.closest('[data-fdoc-view]')?.dataset?.fdocView;
+    if (viewId) {
+      const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === viewId);
+      if (doc) window.openFinanceDocumentView?.(doc);
+      return;
+    }
     const editId = e.target.closest('[data-fdoc-edit]')?.dataset?.fdocEdit;
     if (editId) {
       const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === editId);
@@ -1985,6 +2015,15 @@ export function initFinanceDocumentsPage() {
           renderFinanceDocumentsPage();
         })
         .catch((err) => alert(err?.message || 'Delete failed.'));
+      return;
+    }
+
+    // Click empty row area → open full detail (read-only).
+    const row = e.target.closest('tr.fdoc-row[data-doc-id]');
+    if (row && e.target.closest('.fdoc-cell-open, .fdoc-status-cell')) {
+      if (e.target.closest('[data-fdoc-preview], .fdoc-attach-icons')) return;
+      const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === row.dataset.docId);
+      if (doc) window.openFinanceDocumentView?.(doc);
     }
   });
 
@@ -2019,4 +2058,59 @@ export async function markLedgerAsCashFloat(txnId, isCashFloat = true) {
   });
   if (result.transaction) applySavedTransactionLocally(result.transaction);
   return result.transaction;
+}
+
+const paymentNotesFromTxn = (txn) => {
+  const wallet = String(txn?.wallet || '').toUpperCase();
+  const ref = String(txn?.bank_reference || '').trim();
+  if (wallet === 'BANK' && ref) return `Cheque: ${ref}`;
+  if (wallet === 'CASH') return 'Payment: Cash';
+  return null;
+};
+
+/**
+ * Create a linked bill (OUT) or receipt (IN) from a ledger transaction,
+ * then open it for editing so attachments can be uploaded.
+ */
+export async function createFinanceDocumentFromLedgerTxn(txnId, { openEditor = true } = {}) {
+  const txn = (portalState.finances.txns || []).find((t) => t.id === txnId);
+  if (!txn) throw new Error('Ledger entry not found.');
+
+  const amount = Math.abs(parseFloat(txn.amount) || 0);
+  if (!(amount > 0)) throw new Error('Ledger entry has no amount.');
+
+  const kind = txn.type === 'IN' ? 'IN' : 'OUT';
+  const doc_date = String(txn.date || '').slice(0, 10) || todayISO();
+  const result = await postFinanceMutation('saveFinanceDocument', {
+    document: {
+      kind,
+      doc_date,
+      amount,
+      cat: txn.cat || (kind === 'IN' ? 'Other Income' : 'Other'),
+      sub_category: txn.sub_category || null,
+      vendor_name: txn.vendor_name || null,
+      description: txn.description || null,
+      notes: paymentNotesFromTxn(txn),
+      transaction_id: txn.id,
+      source: 'manual',
+    },
+    keepAttachments: [],
+    removeAttachments: [],
+    newAttachmentFiles: [],
+  });
+
+  const doc = result.document;
+  if (!doc?.id) throw new Error('Could not create bill/receipt.');
+  applyDocLocally(doc);
+
+  if (openEditor) {
+    // Prefer the shared bill/receipt modal so attachments can be uploaded immediately.
+    if (typeof window.openFinanceDocumentEdit === 'function') {
+      window.openFinanceDocumentEdit(doc, { readOnly: false });
+    } else {
+      await focusFinanceDocument(doc.id);
+    }
+  }
+
+  return doc;
 }

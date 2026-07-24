@@ -50,6 +50,19 @@ export async function activateView(route, page) {
                 renderCashLedger();
                 renderLedgerSyncPanel();
             }
+
+            // Finance/admin may finish after first paint (boot gate / parallel loads).
+            if (!window.__accountsDomainRefreshWired) {
+                window.__accountsDomainRefreshWired = true;
+                document.addEventListener('domain-data-loaded', (e) => {
+                    if (!document.getElementById('view-accounts')?.classList.contains('active')) return;
+                    const d = e.detail?.domain;
+                    if (d !== 'finance' && d !== 'admin') return;
+                    processFinances();
+                    if (document.getElementById('cash-ledger-items')) renderCashLedger();
+                    renderLedgerSyncPanel();
+                });
+            }
             break;
         }
         case 'parking-fines': {
@@ -68,14 +81,47 @@ export async function activateView(route, page) {
             renderEmailOutbox();
             break;
         }
+        case 'setup': {
+            const { portalState } = await import('../store.js');
+            const { renderAccessMappings } = await import('../mainBoot.js');
+            const { renderResidentLinksAdmin } = await import('../residentLinks.js');
+            const { renderApartmentModulePanel } = await import('../moduleAccessAdmin.js');
+            const { switchSetupSubView } = await import('../admin.js');
+            const { loadAccessUserDirectory } = await import('../accessSync.js');
+
+            const nameEl = document.getElementById('setup-name');
+            const carEl = document.getElementById('setup-car');
+            const bikeEl = document.getElementById('setup-bike');
+            if (nameEl) nameEl.value = portalState.community.name;
+            if (carEl) carEl.value = portalState.community.defaults.cars;
+            if (bikeEl) bikeEl.value = portalState.community.defaults.bikes;
+            const aptId = portalState.access?.activeApartmentId;
+            const uid = portalState.auth?.id;
+            if (aptId && uid) void loadAccessUserDirectory(aptId, uid);
+            renderAccessMappings();
+            void renderResidentLinksAdmin();
+            void renderApartmentModulePanel();
+            const { renderAccessRequestsAdmin } = await import('../accessRequests.js');
+            void renderAccessRequestsAdmin();
+            switchSetupSubView(sub || 'society');
+            break;
+        }
         case 'access-control': {
+            const { portalState } = await import('../store.js');
+            const { loadAccessUserDirectory } = await import('../accessSync.js');
             const { renderPageAccessAdmin } = await import('../pageAccessAdmin.js');
+            const aptId = portalState.access?.activeApartmentId;
+            const uid = portalState.auth?.id;
+            if (aptId && uid) await loadAccessUserDirectory(aptId, uid);
             await renderPageAccessAdmin();
             break;
         }
         case 'invoices': {
+            const { renderInvoicesPage } = await import('../maintenanceBilling.js');
             if (typeof window.switchInvoiceSubView === 'function') {
                 window.switchInvoiceSubView(sub || 'pending-dues');
+            } else {
+                renderInvoicesPage();
             }
             break;
         }
@@ -99,27 +145,6 @@ export async function activateView(route, page) {
             if (typeof window.switchOperationsSubView === 'function') {
                 window.switchOperationsSubView(sub || 'helpdesk');
             }
-            break;
-        }
-        case 'setup': {
-            const { portalState } = await import('../store.js');
-            const { renderAccessMappings } = await import('../mainBoot.js');
-            const { renderResidentLinksAdmin } = await import('../residentLinks.js');
-            const { renderApartmentModulePanel } = await import('../moduleAccessAdmin.js');
-            const { switchSetupSubView } = await import('../admin.js');
-
-            const nameEl = document.getElementById('setup-name');
-            const carEl = document.getElementById('setup-car');
-            const bikeEl = document.getElementById('setup-bike');
-            if (nameEl) nameEl.value = portalState.community.name;
-            if (carEl) carEl.value = portalState.community.defaults.cars;
-            if (bikeEl) bikeEl.value = portalState.community.defaults.bikes;
-            renderAccessMappings();
-            void renderResidentLinksAdmin();
-            void renderApartmentModulePanel();
-            const { renderAccessRequestsAdmin } = await import('../accessRequests.js');
-            void renderAccessRequestsAdmin();
-            switchSetupSubView(sub || 'society');
             break;
         }
         case 'apartment': {

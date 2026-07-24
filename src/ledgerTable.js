@@ -425,6 +425,8 @@ const renderLedgerRow = (raw, {
             <span class="ledger-linked-bills-btn__count">${linkedDocs.length}</span>
           </button>`
         : '<span class="ledger-linked-bills-empty">—</span>';
+    const createBillLabel = isIncome ? 'Create receipt for attachments' : 'Create bill for attachments';
+    const createBillBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-create-fdoc-btn" data-txn="${t.id}" title="${createBillLabel}" aria-label="${createBillLabel}"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i></button>`;
     const detail = formatTxnDetail(t);
     const descPlaceholder = !t.description && detail ? ` placeholder="${esc(detail)}"` : ' placeholder="Description"';
     const dr = !isIncome ? formatMoney(t.amount) : '—';
@@ -482,6 +484,7 @@ const renderLedgerRow = (raw, {
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
           ${receiptBtn}
+          ${createBillBtn}
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-txn="${t.id}" title="${t.is_cash_float ? 'Clear cash float mark' : 'Mark as cash float (Petty Cash funding)'}" aria-label="Cash float">${t.is_cash_float ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-row-save" data-txn="${t.id}" title="Save this row" aria-label="Save row" ${isDirty(t.id) ? '' : 'disabled'}><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
@@ -990,6 +993,27 @@ export const wireLedgerTableEvents = () => {
         if (linkedBillsBtn) {
             e.preventDefault();
             openLinkedBillsForLedgerTxn(linkedBillsBtn.dataset.txn);
+            return;
+        }
+
+        const createFdocBtn = e.target.closest('.ledger-create-fdoc-btn');
+        if (createFdocBtn && createFdocBtn.dataset.busy !== '1') {
+            e.preventDefault();
+            const txnId = createFdocBtn.dataset.txn;
+            if (!txnId) return;
+            const raw = portalState.finances.txns.find((txn) => txn.id === txnId);
+            const kindLabel = raw?.type === 'IN' ? 'receipt' : 'bill';
+            if (!confirm(`Create a linked ${kindLabel} from this ledger entry?\n\nYou can upload supporting documents on the next screen.`)) return;
+            try {
+                await withButtonBusy(createFdocBtn, '…', async () => {
+                    const { createFinanceDocumentFromLedgerTxn } = await import('./financeDocuments.js');
+                    await createFinanceDocumentFromLedgerTxn(txnId);
+                    window.renderCashLedger?.();
+                    window.renderFinanceDocumentsPage?.();
+                });
+            } catch (err) {
+                alert(err?.message || `Could not create ${kindLabel}.`);
+            }
             return;
         }
 

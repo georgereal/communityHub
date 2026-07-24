@@ -1,7 +1,7 @@
 /**
  * Move-in / move-out — flat-centric occupancy changes with enforced rules
  */
-import { portalState, supabase, pullState } from './store.js';
+import { portalState, supabase, pullState, ensureFinanceState } from './store.js';
 import { invoiceBalance, getOpenInvoicesForUnit, openMaintenanceCollectionForFlat } from './maintenanceBilling.js';
 import { loadResidents, getResidentsForUnit, clearResidentsCache } from './residents.js';
 import { logActivity } from './activityAudit.js';
@@ -888,6 +888,7 @@ export const renderTransitions = async () => {
     if (!panel) return;
 
     await loadResidents(true);
+    await ensureFinanceState();
 
     const unitId = getFlatPickerUnitId();
     if (!unitId) {

@@ -3568,12 +3568,254 @@ header {
 }
 
 #receipt-modal .modal-content.receipt-viewer {
-  width: min(760px, 94vw);
-  max-height: 92vh;
-  padding: 1rem 1.1rem 1.1rem !important;
+  width: min(1100px, 96vw);
+  max-height: 94vh;
+  padding: 0.85rem 1rem 0.9rem !important;
   display: flex;
   flex-direction: column;
+  gap: 0.65rem;
+}
+
+.receipt-viewer__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 0.75rem;
+}
+
+.receipt-viewer__heading {
+  min-width: 0;
+}
+
+.receipt-viewer__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.receipt-viewer__caption {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.receipt-viewer__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.receipt-viewer__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.65rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.receipt-viewer__layout:has(.receipt-viewer__files:not([hidden])) {
+  grid-template-columns: 11.5rem minmax(0, 1fr);
+}
+
+.receipt-viewer__files {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 0.55rem;
+  overflow: auto;
+  max-height: min(72vh, 780px);
+}
+
+.receipt-viewer__files-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.receipt-viewer__files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.receipt-viewer__file {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.4rem 0.45rem;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.receipt-viewer__file:hover {
+  border-color: #c7d7f5;
+  background: #eef4ff;
+}
+
+.receipt-viewer__file.is-active {
+  border-color: var(--primary, #1d4ed8);
+  background: #e8effc;
+  color: var(--primary, #1d4ed8);
+}
+
+.receipt-viewer__file .fa-file-pdf {
+  color: #b91c1c;
+}
+
+.receipt-viewer__file .fa-file-image {
+  color: #0369a1;
+}
+
+.receipt-viewer__file-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receipt-viewer__file-idx {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  font-weight: 800;
+}
+
+.receipt-viewer__stage {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.receipt-viewer__navbtn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.receipt-viewer__navbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.receipt-viewer__navbtn--prev {
+  left: 0.45rem;
+}
+
+.receipt-viewer__navbtn--next {
+  right: 0.45rem;
+}
+
+.receipt-viewer__body {
+  flex: 1;
+  min-height: 320px;
+  max-height: min(72vh, 780px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f172a0a;
+}
+
+.receipt-viewer__zoom-wrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100%;
+  padding: 0.75rem;
+  transform-origin: center top;
+}
+
+.receipt-viewer__img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  transform-origin: center top;
+  transition: transform 0.12s ease;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.12);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.receipt-viewer__pdf {
+  display: block;
+  width: 100%;
+  height: min(72vh, 780px);
+  border: 0;
+  background: #fff;
+}
+
+.receipt-viewer__empty {
+  margin: 2rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+.receipt-viewer__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.receipt-viewer__hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.receipt-viewer__zoom-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-dim);
+}
+
+@media (max-width: 800px) {
+  .receipt-viewer__layout:has(.receipt-viewer__files:not([hidden])) {
+    grid-template-columns: 1fr;
+  }
+
+  .receipt-viewer__files {
+    max-height: 7.5rem;
+  }
+
+  .receipt-viewer__files-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .receipt-viewer__file {
+    min-width: 8.5rem;
+  }
+
+  .receipt-viewer__hint {
+    display: none;
+  }
 }
 
 .auth-card {
@@ -6109,96 +6351,6 @@ header {
   display: flex;
   gap: 0.35rem;
   flex-shrink: 0;
-}
-
-.receipt-viewer__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
-
-.receipt-viewer__title {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
-.receipt-viewer__caption {
-  margin: 0.2rem 0 0;
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  font-weight: 600;
-}
-
-.receipt-viewer__close {
-  flex-shrink: 0;
-}
-
-.receipt-viewer__nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.receipt-viewer__tab {
-  border: 1px solid var(--border);
-  background: #fff;
-  border-radius: 999px;
-  padding: 0.28rem 0.65rem;
-  font-size: 0.68rem;
-  font-weight: 800;
-  cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.receipt-viewer__tab.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.receipt-viewer__body {
-  flex: 1;
-  min-height: 280px;
-  max-height: min(68vh, 720px);
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #f8fafc;
-}
-
-.receipt-viewer__img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.receipt-viewer__pdf {
-  display: block;
-  width: 100%;
-  height: min(68vh, 720px);
-  border: 0;
-  background: #fff;
-}
-
-.receipt-viewer__footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.receipt-viewer__open {
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.receipt-viewer__open:hover {
-  text-decoration: underline;
 }
 
 .expense-link-btn {
@@ -15826,6 +15978,61 @@ textarea.bank-recon-cell-input {
 .fdoc-status--linked {
   color: #15803d;
   font-weight: 600;
+}
+
+.fdoc-status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.fdoc-attach-icons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.fdoc-attach-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 1.7rem;
+  height: 1.7rem;
+  padding: 0 0.4rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.fdoc-attach-icon:hover {
+  background: #eef4ff;
+  border-color: #93b4f0;
+  color: var(--primary, #1d4ed8);
+}
+
+.fdoc-attach-icon--count {
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.fdoc-attach-count {
+  line-height: 1;
+  min-width: 0.75rem;
+  text-align: center;
+}
+
+.fdoc-row--clickable .fdoc-cell-open {
+  cursor: pointer;
+}
+
+.fdoc-row--clickable:hover {
+  background: #f3f6fa;
 }
 
 .fdoc-status--held {
