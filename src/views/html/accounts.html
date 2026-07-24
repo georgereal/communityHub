@@ -3,13 +3,23 @@
           <div class="header-title ledger-page-header__title">
             <h2>Income & Expenses</h2>
           </div>
-          <div class="ledger-page-header__actions">
-            <button class="btn btn-primary" type="button" onclick="window.openExpense('CASH')">
-              <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add Expense</span>
-            </button>
-            <button class="btn btn-outline" type="button" onclick="window.openIncome('CASH')">
-              <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record Income</span>
-            </button>
+          <div class="ledger-page-header__actions" id="accounts-header-actions">
+            <div class="accounts-header-actions-group" data-accounts-actions="ledger">
+              <button class="btn btn-primary" type="button" id="btn-ledger-add-expense">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add ledger expense</span>
+              </button>
+              <button class="btn btn-outline" type="button" id="btn-ledger-add-income">
+                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record ledger income</span>
+              </button>
+            </div>
+            <div class="accounts-header-actions-group" data-accounts-actions="bills" hidden>
+              <button class="btn btn-primary" type="button" id="btn-bill-add-expense">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add bill</span>
+              </button>
+              <button class="btn btn-outline" type="button" id="btn-bill-add-income">
+                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Add receipt</span>
+              </button>
+            </div>
             <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
               <i class="fa-solid fa-building-columns" aria-hidden="true"></i> <span>Bank Sync</span>
             </button>
@@ -18,6 +28,7 @@
 
         <nav class="accounts-subview-tabs accounts-subview-tabs--compact" aria-label="Income and expenses views">
           <button type="button" class="active" data-accounts-subview="ledger">Ledger</button>
+          <button type="button" data-accounts-subview="finance-docs">Bills &amp; receipts</button>
           <button type="button" data-accounts-subview="reports">Financial Reports</button>
           <button type="button" data-accounts-subview="invoices-raised">Invoices Raised</button>
           <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
@@ -371,6 +382,31 @@
             </div>
           </div>
 
+          <div
+            class="fa-cash-mode"
+            id="fa-cash-expense-reporting"
+            role="group"
+            aria-label="Cash expense reporting mode"
+            data-mode="petty_bank"
+          >
+            <span class="fa-cash-mode__side" data-side="petty_bank">Bank Petty Cash</span>
+            <button
+              type="button"
+              class="fa-cash-mode__toggle"
+              id="fa-cash-expense-toggle"
+              role="switch"
+              aria-checked="false"
+              aria-label="Include cash bills by category in reports"
+              title="Toggle between bank Petty Cash lump sum and cash bills by category"
+            >
+              <span class="fa-cash-mode__knob" aria-hidden="true"></span>
+            </button>
+            <span class="fa-cash-mode__side" data-side="cash_detail">Cash bills by category</span>
+            <p class="fa-cash-mode__hint">
+              Off = bank Petty Cash as one lump. On = bank ledger plus cash bills broken out by category.
+            </p>
+          </div>
+
           <section class="dashboard-metrics fa-balance-metrics" id="fa-balance-metrics" aria-label="Balance reconciliation"></section>
 
           <div class="fa-charts-grid fa-charts-grid--single">
@@ -421,12 +457,142 @@
             <div class="fa-panel__head fa-panel__head--row">
               <div>
                 <h3 class="fa-panel__title">Expense pivot</h3>
-                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries.</p>
+                <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. For cash detail, set category/subcategory on each bill under Bills &amp; receipts.</p>
               </div>
               <div id="fa-expense-pivot-meta" class="fa-pivot-meta"></div>
             </div>
             <div class="fa-table-wrap" id="fa-expense-pivot"></div>
           </section>
+        </div>
+
+        <div id="subview-finance-docs" class="fdoc-subview" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="raised-page-toolbar">
+            <div class="raised-page-toolbar__left">
+              <div>
+                <h3 class="fa-panel__title" style="margin:0;">Bills &amp; receipts</h3>
+                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">
+                  Supporting vouchers with uploads — not the passbook ledger.
+                  Link cash spends to a Petty Cash funding line (1 ledger → many bills). Cash float store lives here.
+                </p>
+              </div>
+              <p id="fdoc-meta" class="raised-page-meta"></p>
+            </div>
+            <div class="raised-page-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-template-btn">
+                <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Template
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="fdoc-upload-btn">
+                <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Import Excel
+              </button>
+              <input type="file" id="fdoc-file" accept=".xlsx,.xls" hidden />
+            </div>
+          </div>
+
+          <section id="fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" aria-label="Cash float store"></section>
+
+          <details class="fdoc-funding-details" id="fdoc-funding-details">
+            <summary class="fdoc-funding-details__summary">
+              <span>Funding — bank Petty Cash</span>
+              <span id="fdoc-funding-summary-meta" class="fdoc-funding-details__meta"></span>
+            </summary>
+            <p class="fa-panel__hint" style="margin:0.5rem 0 0.75rem;">
+              <strong>1.</strong> Select cash receipts in the table below → <strong>Deposit to bank</strong> → pick the bank credit.
+              Amounts need not match; shortfall comes from wallet float.
+              <strong>2.</strong> Petty Cash rows below are money <em>into</em> the desk; deposits to bank appear under
+              <strong>Cash to bank</strong> (that is where Left is reduced).
+            </p>
+            <h4 class="fdoc-funding-section-title">Petty Cash buckets (in)</h4>
+            <div id="fdoc-funding-table" class="fa-table-wrap"></div>
+            <h4 class="fdoc-funding-section-title">Cash to bank (out of desk)</h4>
+            <div id="fdoc-cash-to-bank-table" class="fa-table-wrap"></div>
+          </details>
+
+          <div id="fdoc-report-banner" class="ledger-pivot-banner" hidden></div>
+
+          <div class="fdoc-filters" role="search">
+            <form class="search-container fdoc-filters__search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+              <input
+                type="search"
+                id="fdoc-search"
+                class="expense-combobox fdoc-filters__search-input"
+                placeholder="Search vendor, category…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </form>
+            <select id="fdoc-filter-kind" class="expense-combobox fdoc-filters__select" aria-label="Filter by kind">
+              <option value="all">All kinds</option>
+              <option value="OUT">Expenses</option>
+              <option value="IN">Income</option>
+            </select>
+            <select id="fdoc-filter-status" class="expense-combobox fdoc-filters__select" aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              <option value="open">Open (unlinked)</option>
+              <option value="linked">Linked to ledger</option>
+            </select>
+            <select id="fdoc-filter-pay" class="expense-combobox fdoc-filters__select" aria-label="Filter by payment">
+              <option value="all">Cash + cheque</option>
+              <option value="cash">Cash only</option>
+              <option value="cheque">Cheque only</option>
+            </select>
+            <div class="fdoc-filters__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-bulk-link" disabled>
+                <i class="fa-solid fa-link" aria-hidden="true"></i> Link selected
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-deposit-wallet">
+                <i class="fa-solid fa-building-columns" aria-hidden="true"></i> Deposit to bank
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-sync-cats" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
+                <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Sync categories
+              </button>
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="fdoc-bulk-delete" disabled>
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+              </button>
+            </div>
+          </div>
+
+          <div class="fa-table-wrap" style="margin-bottom:1.25rem;">
+            <table class="fa-pivot-table cash-float-table">
+              <thead>
+                <tr>
+                  <th class="fdoc-check-col">
+                    <input type="checkbox" id="fdoc-select-all" title="Select all rows" aria-label="Select all bills" />
+                  </th>
+                  <th>Date</th>
+                  <th>Kind</th>
+                  <th>Category / sub</th>
+                  <th>Vendor / note</th>
+                  <th>Payment</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="fdoc-table-body"></tbody>
+            </table>
+          </div>
+
+          <!-- Inline edit form removed: Add/Edit bill & receipt use the shared cash modal. -->
+
+          <div id="fdoc-link-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="fdoc-link-backdrop"></div>
+            <div class="fdoc-link-modal__panel" role="dialog" aria-labelledby="fdoc-link-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="fdoc-link-title" class="fa-panel__title" style="margin:0;">Link to ledger row</h3>
+                <button type="button" class="btn btn-outline btn--small" id="fdoc-link-close">Close</button>
+              </div>
+              <p id="fdoc-link-hint" class="fa-panel__hint"></p>
+              <div id="fdoc-link-search-wrap" class="fdoc-link-search-wrap" hidden>
+                <input type="search" id="fdoc-link-search" class="expense-combobox" placeholder="Search cheque #, vendor, narration, amount…" autocomplete="off" />
+              </div>
+              <label id="fdoc-link-wallet-wrap" class="fdoc-link-wallet-wrap" hidden>
+                <input type="checkbox" id="fdoc-link-wallet-float" checked />
+                <span>Use wallet float when bank deposit ≠ selected receipts</span>
+              </label>
+              <div id="fdoc-link-list" class="fdoc-link-list"></div>
+            </div>
+          </div>
         </div>
 
         <div id="subview-invoices-raised" class="raised-subview" style="display:none; padding: 0 1.6rem 1.6rem;">

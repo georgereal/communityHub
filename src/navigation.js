@@ -12,11 +12,12 @@ const OPERATIONS_ROUTES = [
 ];
 
 const TREASURY_ROUTES = [
-    'finance-ledger', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-invoices-raised', 'finance-gl',
+    'finance-ledger', 'finance-docs', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-invoices-raised', 'finance-gl',
 ];
 
 export const ACCOUNTS_SUBVIEW_ROUTES = {
     ledger: 'finance-ledger',
+    'finance-docs': 'finance-docs',
     reports: 'finance-reports',
     'invoices-raised': 'finance-invoices-raised',
     'bank-recon': 'finance-bank-recon',
@@ -194,6 +195,7 @@ export const NAV_MODULES = [
             },
             { route: 'finance-parking-fines' },
             { route: 'finance-ledger' },
+            { route: 'finance-docs' },
             { route: 'finance-reports' },
             { route: 'finance-invoices-raised' },
             { route: 'finance-bank-recon' },
@@ -209,6 +211,15 @@ export const NAV_MODULES = [
                 subview: 'ledger',
                 permission: 'accounts.view',
                 legacy: ['accounts', 'treasury-ledger'],
+            },
+            {
+                route: 'finance-docs',
+                label: 'Bills & receipts',
+                icon: 'fa-file-invoice',
+                view: 'accounts',
+                subview: 'finance-docs',
+                permission: 'accounts.view',
+                legacy: ['finance-cash-float'],
             },
             {
                 route: 'finance-billing-pending',

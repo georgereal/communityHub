@@ -25,7 +25,7 @@ export const withTimeout = (promise, ms, label = 'Request') => Promise.race([
 export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
-    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], bankClassificationRules: [], nobrokerInvoicesRaised: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
+    finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], bankClassificationRules: [], nobrokerInvoicesRaised: [], financeDocuments: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],
@@ -75,6 +75,7 @@ export let portalState = {
     },
     activeUnitId: null,
     editingTxnId: null,
+    editingFinanceDocId: null,
     notifications: { items: [], unreadCount: 0 },
 };
 

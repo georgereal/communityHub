@@ -8,6 +8,7 @@ import { renderLedgerSyncPanel } from '../../ledgerSpreadsheetSync.js';
 import { processFinances } from '../../finances.js';
 import { setLedgerViewRefresh } from '../../ledgerTable.js';
 import { withButtonBusy } from '../../buttonBusy.js';
+import { initCashFloatPage, renderCashFloatPage } from '../../cashFloat.js';
 
 let wired = false;
 
@@ -16,7 +17,10 @@ export default async function initAccountsView() {
     wired = true;
 
     document.getElementById('save-cash-btn')?.addEventListener('click', () => {
-        void withButtonBusy(document.getElementById('save-cash-btn'), 'Saving…', saveCashData);
+        void withButtonBusy(document.getElementById('save-cash-btn'), 'Saving…', async () => {
+            await saveCashData();
+            renderCashFloatPage();
+        });
     });
 
     initExpenseModal();
@@ -26,10 +30,12 @@ export default async function initAccountsView() {
     initBankReconciliationUi();
     initFinanceAnalyticsUi();
     initGeneralLedger();
+    initCashFloatPage();
 
     window.renderLedgerSyncPanel = renderLedgerSyncPanel;
     window.renderFinanceAnalytics = renderFinanceAnalytics;
     window.renderCashLedger = renderCashLedger;
     window.processFinances = processFinances;
+    window.renderCashFloatPage = renderCashFloatPage;
     setLedgerViewRefresh(renderCashLedger);
 }

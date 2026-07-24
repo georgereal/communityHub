@@ -18,6 +18,13 @@ import {
     getNoBrokerInvoicesRaised,
     buildRaisedInvoicesStack,
 } from './nobrokerInvoicesRaised.js';
+import {
+    getCashExpenseReportingMode,
+    setCashExpenseReportingMode,
+    isBankPettyFunding,
+    isCashDeskSpend,
+} from './cashFloat.js';
+import { cashBillsAsReportExpenses } from './financeDocuments.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -103,7 +110,10 @@ export const getFinanceReportsExportSnapshot = () => {
   const incomeTxns = filterTxnsInMonthRange(filterIncome(), months);
   const incomePivot = buildIncomePivot(months, 'cat', incomeTxns);
 
-  const expenseTxns = filterTxnsInMonthRange(filterExpenses(settings.sheetOnly), months);
+  const expenseTxns = filterTxnsInMonthRange(
+    filterExpenses(settings.sheetOnly, settings.cashExpenseReporting),
+    months,
+  );
   const expensePivot = buildExpensePivot(expenseTxns, months, settings.pivotDimension);
 
   const incomeMonthTotals = monthlyTotals(incomeTxns, months).map((v) => Math.round(v * 100) / 100);
@@ -134,13 +144,29 @@ export const getFinanceReportsExportSnapshot = () => {
   };
 };
 
-const filterExpenses = (structuredOnly) => {
+const filterExpenses = (structuredOnly, cashExpenseReporting = 'petty_bank') => {
     const txns = portalState.finances.txns || [];
-    return txns.filter((t) =>
-        t.type === 'OUT'
-        && isReportableTxn(t)
-        && (!structuredOnly || isStructuredExpense(t)),
-    );
+
+    if (cashExpenseReporting === 'cash_detail') {
+        // Bank Petty Cash = float transfer (not an expense). Cash desk ledger spends are
+        // replaced by Bills & receipts categories for reporting.
+        const ledger = txns.filter((t) => {
+            if (t.type !== 'OUT' || !isReportableTxn(t)) return false;
+            if (isBankPettyFunding(t)) return false;
+            if (isCashDeskSpend(t)) return false;
+            if (structuredOnly && !isStructuredExpense(t)) return false;
+            return true;
+        });
+        const bills = cashBillsAsReportExpenses().filter(isReportableTxn);
+        return [...ledger, ...bills];
+    }
+
+    // Default: bank Petty Cash stays in expense reports (lump-sum behaviour).
+    return txns.filter((t) => {
+        if (t.type !== 'OUT' || !isReportableTxn(t)) return false;
+        if (structuredOnly && !isStructuredExpense(t)) return false;
+        return true;
+    });
 };
 
 const filterIncome = () =>
@@ -351,10 +377,14 @@ const renderRaisedInvoicesPivot = (months) => {
   });
 };
 
-const buildCombinedChartDatasets = (months, sheetOnly, pivotDimension) => {
+const buildCombinedChartDatasets = (months, sheetOnly, pivotDimension, cashExpenseReporting = 'petty_bank') => {
     const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat', filterTxnsInMonthRange(filterIncome(), months)).rows, 6);
     const expenseRows = topCategoryRows(
-        buildExpensePivot(filterTxnsInMonthRange(filterExpenses(sheetOnly), months), months, pivotDimension).rows,
+        buildExpensePivot(
+            filterTxnsInMonthRange(filterExpenses(sheetOnly, cashExpenseReporting), months),
+            months,
+            pivotDimension,
+        ).rows,
         6,
     );
     const { heads: raisedHeads, series: raisedSeries } = buildRaisedInvoicesStack(months);
@@ -440,7 +470,7 @@ const combinedChartOptions = (interactive) => ({
     },
 });
 
-const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
+const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension, cashExpenseReporting = 'petty_bank') => {
     const canvas = document.getElementById('fa-combined-chart');
     if (!canvas || typeof Chart === 'undefined') return;
 
@@ -455,7 +485,7 @@ const renderCombinedCategoryChart = (months, sheetOnly, pivotDimension) => {
         type: 'bar',
         data: {
             labels: months.map((m) => m.label),
-            datasets: buildCombinedChartDatasets(months, sheetOnly, pivotDimension),
+            datasets: buildCombinedChartDatasets(months, sheetOnly, pivotDimension, cashExpenseReporting),
         },
         options: combinedChartOptions(true),
     });
@@ -475,7 +505,12 @@ export const captureFinanceReportsChartPng = (width = 1100, height = 480) => {
         type: 'bar',
         data: {
             labels: months.map((m) => m.label),
-            datasets: buildCombinedChartDatasets(months, settings.sheetOnly, settings.pivotDimension),
+            datasets: buildCombinedChartDatasets(
+                months,
+                settings.sheetOnly,
+                settings.pivotDimension,
+                settings.cashExpenseReporting,
+            ),
         },
         options: {
             ...combinedChartOptions(false),
@@ -490,12 +525,12 @@ export const captureFinanceReportsChartPng = (width = 1100, height = 480) => {
     return base64 ? { base64, width, height } : null;
 };
 
-const renderProjectionSummary = (months, sheetOnly, projectCount) => {
+const renderProjectionSummary = (months, sheetOnly, projectCount, cashExpenseReporting = 'petty_bank') => {
     const summaryEl = document.getElementById('fa-projection-summary');
     const badgeEl = document.getElementById('fa-projection-badge');
     if (!summaryEl) return;
 
-    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly), months);
+    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly, cashExpenseReporting), months);
     const income = filterTxnsInMonthRange(filterIncome(), months);
     const expenseTotals = monthlyTotals(expenses, months);
     const incomeTotals = monthlyTotals(income, months);
@@ -541,6 +576,7 @@ const getSettings = () => ({
     pivotDimension: document.getElementById('fa-pivot-dimension')?.value || 'cat',
     sheetOnly: document.getElementById('fa-sheet-only')?.checked !== false,
     projectMonths: parseInt(document.getElementById('fa-project-months')?.value || '3', 10),
+    cashExpenseReporting: getCashExpenseReportingMode(),
 });
 
 const renderBalanceMetrics = () => {
@@ -762,11 +798,11 @@ const renderIncomePivot = (months) => {
     });
 };
 
-const renderExpensePivot = (months, dimension, sheetOnly) => {
+const renderExpensePivot = (months, dimension, sheetOnly, cashExpenseReporting = 'petty_bank') => {
     const el = document.getElementById('fa-expense-pivot');
     const metaEl = document.getElementById('fa-expense-pivot-meta');
 
-    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly), months);
+    const expenses = filterTxnsInMonthRange(filterExpenses(sheetOnly, cashExpenseReporting), months);
     const { fromSheet, fromBank, excludedFromReports, manualOmitted } = expenseSourceCounts(months, sheetOnly);
 
     if (metaEl) {
@@ -870,11 +906,26 @@ export const renderFinanceAnalytics = () => {
 
     renderBalanceMetrics();
     wireBalanceMetricClicks();
-    renderCombinedCategoryChart(months, settings.sheetOnly, settings.pivotDimension);
-    renderProjectionSummary(months, settings.sheetOnly, settings.projectMonths);
+    renderCombinedCategoryChart(
+        months,
+        settings.sheetOnly,
+        settings.pivotDimension,
+        settings.cashExpenseReporting,
+    );
+    renderProjectionSummary(
+        months,
+        settings.sheetOnly,
+        settings.projectMonths,
+        settings.cashExpenseReporting,
+    );
     renderRaisedInvoicesPivot(months);
     renderIncomePivot(months);
-    renderExpensePivot(months, settings.pivotDimension, settings.sheetOnly);
+    renderExpensePivot(
+        months,
+        settings.pivotDimension,
+        settings.sheetOnly,
+        settings.cashExpenseReporting,
+    );
     wirePivotDrilldown();
 };
 
@@ -916,6 +967,22 @@ export const initFinanceAnalyticsUi = () => {
     ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', rerender);
     });
+
+    const cashModeEl = document.getElementById('fa-cash-expense-reporting');
+    if (cashModeEl && !cashModeEl.dataset.wired) {
+        cashModeEl.dataset.wired = '1';
+        setCashExpenseReportingMode(getCashExpenseReportingMode());
+        const applyMode = (mode) => {
+            setCashExpenseReportingMode(mode);
+            rerender();
+        };
+        cashModeEl.querySelector('.fa-cash-mode__toggle')?.addEventListener('click', () => {
+            applyMode(getCashExpenseReportingMode() === 'cash_detail' ? 'petty_bank' : 'cash_detail');
+        });
+        cashModeEl.querySelectorAll('.fa-cash-mode__side').forEach((side) => {
+            side.addEventListener('click', () => applyMode(side.dataset.side));
+        });
+    }
 
     void import('./financeReportsExport.js').then(({ initFinanceReportsExport }) => {
         initFinanceReportsExport();

@@ -1817,7 +1817,7 @@ export const closeRaiseInvoiceModal = () => {
 };
 
 export const openMaintenanceCollection = (wallet = 'BANK') => {
-    if (typeof window.openIncome === 'function') window.openIncome(wallet);
+    if (typeof window.openIncome === 'function') window.openIncome(wallet, { asBill: false });
 };
 
 export const openMaintenanceCollectionForFlat = (flatNumber, wallet = 'BANK', options = {}) => {

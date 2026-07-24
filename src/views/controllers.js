@@ -34,6 +34,11 @@ export async function activateView(route, page) {
                 window.switchSubView(sub || 'ledger');
             }
             if (sub === 'reports') renderFinanceAnalytics();
+            else if (sub === 'finance-docs') {
+                const { initFinanceDocumentsPage, renderFinanceDocumentsPage } = await import('../financeDocuments.js');
+                initFinanceDocumentsPage();
+                renderFinanceDocumentsPage();
+            }
             else if (sub === 'invoices-raised') {
                 const { initInvoicesRaisedPage, renderInvoicesRaisedPage } = await import('../invoicesRaisedPage.js');
                 initInvoicesRaisedPage();

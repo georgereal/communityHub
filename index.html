@@ -255,6 +255,24 @@
           onclick="document.getElementById('cash-modal').classList.remove('active')">&times;</button>
       </div>
 
+      <div id="bill-payment-section" class="expense-form" hidden style="display:none; padding: 0 1.15rem 0.25rem; gap: 0.65rem;">
+        <div class="expense-form__section">
+          <span class="expense-label">Payment</span>
+          <div class="expense-wallet-pills expense-wallet-pills--compact" id="bill-payment-pills" role="group" aria-label="Payment mode">
+            <button type="button" class="expense-wallet-pill active" data-bill-pay="cash">
+              <i class="fa-solid fa-money-bill-wave"></i> Cash
+            </button>
+            <button type="button" class="expense-wallet-pill" data-bill-pay="cheque">
+              <i class="fa-solid fa-money-check"></i> Cheque
+            </button>
+          </div>
+        </div>
+        <div id="bill-cheque-wrap" class="expense-form__section" hidden>
+          <label class="expense-label" for="bill-cheque-no">Cheque number</label>
+          <input type="text" id="bill-cheque-no" class="expense-combobox" placeholder="e.g. 27108" autocomplete="off" />
+        </div>
+      </div>
+
       <div id="expense-form-view" class="expense-form">
         <div class="expense-form__section expense-form__section--wallet">
           <div class="expense-wallet-row">
@@ -338,7 +356,7 @@
           <label class="expense-label">Receipt <span class="expense-optional">(optional)</span></label>
           <div class="expense-receipt-box">
             <input type="file" id="cash-bill" accept="image/*,.pdf,application/pdf" multiple />
-            <p class="expense-receipt-hint">Upload one or more images or PDFs. Stored in Supabase and linked to this expense.</p>
+            <p class="expense-receipt-hint" id="cash-receipt-hint">Upload one or more images or PDFs. Stored in Supabase and linked to this expense.</p>
             <ul id="cash-receipt-list" class="expense-receipt-list" hidden></ul>
           </div>
         </div>
@@ -473,7 +491,63 @@
         <div class="expense-modal__footer-actions">
         <button class="btn btn-outline" type="button"
           onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button>
+        <button class="btn btn-outline" type="button" id="cash-modal-unlock-btn" hidden>Edit</button>
         <button class="btn btn-primary" type="button" id="save-cash-btn">Save Expense</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lean passbook / ledger line entry (fewer fields than Bills & receipts) -->
+  <div class="modal-backdrop" id="ledger-line-modal">
+    <div class="modal-content expense-modal" style="max-width: 440px;">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="ledger-line-title">Add ledger expense</h2>
+          <p id="ledger-line-desc">Correct or add a passbook ledger line. Bills and receipts belong under Bills &amp; receipts.</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="document.getElementById('ledger-line-modal').classList.remove('active')">&times;</button>
+      </div>
+      <div class="expense-form" style="display:grid; gap:0.75rem; padding: 0 1.15rem 0.5rem;">
+        <div>
+          <span class="expense-label">Wallet</span>
+          <div class="expense-wallet-pills expense-wallet-pills--compact" id="ledger-line-wallet-pills" role="group">
+            <button type="button" class="expense-wallet-pill" data-wallet="CASH"><i class="fa-solid fa-wallet"></i> Petty Cash</button>
+            <button type="button" class="expense-wallet-pill active" data-wallet="BANK"><i class="fa-solid fa-building-columns"></i> Bank</button>
+          </div>
+        </div>
+        <div>
+          <label class="expense-label" for="ledger-line-amt">Amount (₹)</label>
+          <input type="number" id="ledger-line-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+        </div>
+        <div>
+          <label class="expense-label" for="ledger-line-date">Date</label>
+          <input type="date" id="ledger-line-date" class="expense-date" />
+        </div>
+        <div>
+          <label class="expense-label" for="ledger-line-cat">Category</label>
+          <input type="text" id="ledger-line-cat" class="expense-combobox" list="ledger-line-cat-datalist" placeholder="Type to search…" autocomplete="off" />
+          <datalist id="ledger-line-cat-datalist"></datalist>
+        </div>
+        <div>
+          <label class="expense-label" for="ledger-line-desc-input">Narration <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="ledger-line-desc-input" class="expense-combobox" placeholder="Passbook narration" />
+        </div>
+        <div id="ledger-line-bank-ref-wrap">
+          <label class="expense-label" for="ledger-line-bank-ref">Bank reference <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="ledger-line-bank-ref" class="expense-combobox" placeholder="Cheque / UPI / NEFT ref" />
+        </div>
+        <label class="expense-form__exclude-reports" style="margin:0;">
+          <input type="checkbox" id="ledger-line-exclude-reports" />
+          <span>Exclude from income/expense reports</span>
+        </label>
+      </div>
+      <div class="expense-modal__footer">
+        <div class="expense-modal__footer-actions">
+          <button class="btn btn-outline" type="button"
+            onclick="document.getElementById('ledger-line-modal').classList.remove('active')">Cancel</button>
+          <button class="btn btn-primary" type="button" id="ledger-line-save-btn">Save ledger line</button>
         </div>
       </div>
     </div>

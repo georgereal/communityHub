@@ -12,6 +12,17 @@
   justify-content: flex-end;
 }
 
+.accounts-header-actions-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.accounts-header-actions-group[hidden] {
+  display: none !important;
+}
+
 /* --- Compact ledger shell (Income & Expenses → Ledger) --- */
 .ledger-page-header--compact {
   padding: 0.55rem 1rem 0.45rem;
@@ -207,6 +218,30 @@
 .ledger-pivot-banner__label {
   font-weight: 600;
   color: #1e40af;
+}
+
+.ledger-pivot-banner__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.ledger-recon-badge--cash-bill {
+  background: #ecfdf5;
+  color: #0f766e;
+  border: 1px solid #99f6e4;
+}
+
+.ledger-txn-row--cash-bill {
+  background: #f8fffc;
+}
+
+.fdoc-row--highlight {
+  outline: 2px solid #0d9488;
+  outline-offset: -2px;
+  background: #ecfdf5;
 }
 
 .ledger-bulk-bar {

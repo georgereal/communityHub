@@ -2,6 +2,15 @@ import { requireApartmentPermission } from './serverAuth.js';
 import { prepareImportedStatementLines, computeRunningBalances } from '../src/bankStatementOrdering.js';
 import { inferExpenseCategory, BANK_REJECT_CAT } from '../src/expenseCategories.js';
 import { findMatchingRule } from '../src/bankClassificationRules.js';
+import {
+    isR2Configured,
+    r2PutObject,
+    r2DeleteObjects,
+    buildFinanceDocObjectKey,
+    extForRecordMime,
+    attachmentObjectKey,
+    isAllowedFinanceDocObjectKey,
+} from './r2Storage.js';
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 
@@ -51,6 +60,108 @@ async function maybeDeletePaths(service, paths = []) {
     await service.storage.from(RECEIPT_BUCKET).remove(paths);
 }
 
+async function maybeDeleteAttachmentEntries(service, entries = []) {
+    if (!entries.length) return;
+    const r2Keys = [];
+    const supabasePaths = [];
+    for (const entry of entries) {
+        const key = attachmentObjectKey(entry);
+        if (key && isAllowedFinanceDocObjectKey(key)) {
+            r2Keys.push(key);
+        } else if (typeof entry === 'string' && entry.startsWith('r2:') && key) {
+            r2Keys.push(key);
+        } else if (typeof entry === 'string' && entry) {
+            supabasePaths.push(entry);
+        }
+    }
+    if (r2Keys.length && isR2Configured()) await r2DeleteObjects(r2Keys);
+    if (supabasePaths.length) await maybeDeletePaths(service, supabasePaths);
+}
+
+/** Upload finance-doc files to private R2; returns attachment metadata objects (notebook-style). */
+async function uploadFinanceDocFilesToR2(apartmentId, files = [], { orgName, kind } = {}) {
+    if (!files.length) return [];
+    if (!isR2Configured()) {
+        throw Object.assign(
+            new Error(
+                'Object storage is not configured (set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET or R2_BUCKET_NAME).',
+            ),
+            { status: 503 },
+        );
+    }
+    const uploaded = [];
+    for (const file of files) {
+        const mime = String(file.mimeType || 'application/octet-stream').toLowerCase();
+        const ext = extForRecordMime(mime);
+        if (!ext) {
+            throw Object.assign(
+                new Error('Only images (JPEG, PNG, WebP, GIF) or PDF files are supported for document attachments.'),
+                { status: 400 },
+            );
+        }
+        const body = Buffer.from(String(file.base64 || ''), 'base64');
+        const key = buildFinanceDocObjectKey({
+            orgName: orgName || apartmentId,
+            kind: kind === 'IN' ? 'IN' : 'OUT',
+            mimeOrExt: mime,
+        });
+        await r2PutObject({ key, body, contentType: mime });
+        uploaded.push({
+            key,
+            contentType: mime,
+            originalName: String(file.name || '').slice(0, 512),
+            bytes: body.length,
+            uploadedAt: new Date().toISOString(),
+        });
+    }
+    return uploaded;
+}
+
+async function resolveApartmentOrgName(service, apartmentId) {
+    const { data: apt } = await service
+        .from('apartments')
+        .select('name')
+        .eq('id', apartmentId)
+        .maybeSingle();
+    if (apt?.name?.trim()) return apt.name.trim();
+
+    const { data: cfg } = await service
+        .from('society_config')
+        .select('name')
+        .eq('apartment_id', apartmentId)
+        .maybeSingle();
+    if (cfg?.name?.trim()) return cfg.name.trim();
+
+    return apartmentId;
+}
+
+function normalizeKeptAttachments(kept = []) {
+    return kept
+        .map((entry) => {
+            if (entry && typeof entry === 'object' && entry.key) {
+                const key = String(entry.key).trim();
+                if (!isAllowedFinanceDocObjectKey(key)) return null;
+                return {
+                    key,
+                    contentType: String(entry.contentType || 'application/octet-stream'),
+                    originalName: String(entry.originalName || '').slice(0, 512),
+                    bytes: Number(entry.bytes) || 0,
+                    uploadedAt: entry.uploadedAt || new Date().toISOString(),
+                };
+            }
+            const key = attachmentObjectKey(entry);
+            if (!key || !isAllowedFinanceDocObjectKey(key)) return null;
+            return {
+                key,
+                contentType: 'application/octet-stream',
+                originalName: key.split('/').pop() || key,
+                bytes: 0,
+                uploadedAt: new Date().toISOString(),
+            };
+        })
+        .filter(Boolean);
+}
+
 function buildStoragePath(apartmentId, txnId, file, index, subfolder = '') {
     const stem = String(file.name || 'file')
         .replace(/\.[^.]+$/, '')
@@ -88,6 +199,355 @@ async function referenceExists(service, apartmentId, reference) {
         .limit(1);
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
     return !!data?.length;
+}
+
+async function saveFinanceDocumentMutation(service, apartmentId, userId, body) {
+    const doc = body.document || {};
+    const docId = doc.id || crypto.randomUUID();
+    const kind = doc.kind === 'IN' ? 'IN' : 'OUT';
+    const kept = normalizeKeptAttachments(body.keepAttachments || body.keepAttachmentPaths || []);
+    let uploaded = [];
+    if (body.newAttachmentFiles?.length) {
+        const orgName = await resolveApartmentOrgName(service, apartmentId);
+        uploaded = await uploadFinanceDocFilesToR2(apartmentId, body.newAttachmentFiles, { orgName, kind });
+    }
+    const attachmentUrls = [...kept, ...uploaded];
+
+    const amount = roundMoney(doc.amount);
+    if (!(amount > 0)) throw Object.assign(new Error('Enter a valid amount.'), { status: 400 });
+    if (!doc.doc_date) throw Object.assign(new Error('Date is required.'), { status: 400 });
+
+    const transactionId = doc.transaction_id || null;
+    let status = doc.status || 'open';
+    if (status === 'void') {
+        // keep void
+    } else if (transactionId) {
+        status = 'linked';
+    } else {
+        status = 'open';
+    }
+
+    const isNew = !doc.id;
+    const payload = {
+        id: docId,
+        apartment_id: apartmentId,
+        kind,
+        doc_date: String(doc.doc_date).slice(0, 10),
+        amount,
+        cat: doc.cat || null,
+        sub_category: doc.sub_category || null,
+        vendor_name: doc.vendor_name || null,
+        description: doc.description || null,
+        attachment_urls: attachmentUrls,
+        transaction_id: transactionId,
+        status,
+        source: doc.source === 'excel' ? 'excel' : 'manual',
+        source_file: doc.source_file || null,
+        notes: doc.notes || null,
+        updated_at: new Date().toISOString(),
+    };
+    if (isNew) payload.created_by = userId || null;
+
+    const { error } = await service.from('finance_documents').upsert(payload);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    if (payload.vendor_name) {
+        await service.from('expense_vendors').upsert(
+            {
+                apartment_id: apartmentId,
+                name: payload.vendor_name,
+                last_used_at: new Date().toISOString(),
+            },
+            { onConflict: 'apartment_id,name' },
+        );
+    }
+
+    if (payload.sub_category && payload.cat && kind === 'OUT') {
+        await service.from('expense_sub_categories').upsert(
+            {
+                apartment_id: apartmentId,
+                category: payload.cat,
+                name: payload.sub_category,
+            },
+            { onConflict: 'apartment_id,category,name' },
+        );
+    }
+
+    await maybeDeleteAttachmentEntries(service, body.removeAttachments || body.removeAttachmentPaths || []);
+
+    const { data: saved, error: readErr } = await service
+        .from('finance_documents')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .eq('id', docId)
+        .maybeSingle();
+    if (readErr) throw Object.assign(new Error(readErr.message), { status: 500 });
+
+    return {
+        ok: true,
+        document: saved || payload,
+        sub_category_saved: Boolean(payload.sub_category && payload.cat && kind === 'OUT'),
+    };
+}
+
+async function syncCategoriesBetweenTxnAndDocs(service, apartmentId, txn, documents) {
+    const catSet = (c) => Boolean(String(c || '').trim());
+    let nextDocs = documents || [];
+    let nextTxn = null;
+    if (!txn || !nextDocs.length) return { documents: nextDocs, transaction: nextTxn };
+
+    if (catSet(txn.cat)) {
+        const patch = {
+            cat: txn.cat,
+            updated_at: new Date().toISOString(),
+        };
+        if (catSet(txn.sub_category)) patch.sub_category = txn.sub_category;
+        const { data: synced, error: syncErr } = await service
+            .from('finance_documents')
+            .update(patch)
+            .eq('apartment_id', apartmentId)
+            .in('id', nextDocs.map((d) => d.id))
+            .select('*');
+        if (syncErr) throw Object.assign(new Error(syncErr.message), { status: 500 });
+        nextDocs = synced || nextDocs;
+    } else {
+        const donor = nextDocs.find((d) => catSet(d.cat));
+        if (donor) {
+            const txnPatch = {
+                cat: donor.cat,
+                sub_category: catSet(donor.sub_category) ? donor.sub_category : null,
+            };
+            const { data: updatedTxn, error: txnUpErr } = await service
+                .from('transactions')
+                .update(txnPatch)
+                .eq('apartment_id', apartmentId)
+                .eq('id', txn.id)
+                .select('*')
+                .maybeSingle();
+            if (txnUpErr) throw Object.assign(new Error(txnUpErr.message), { status: 500 });
+            nextTxn = updatedTxn;
+        }
+    }
+    return { documents: nextDocs, transaction: nextTxn };
+}
+
+async function syncFinanceDocumentCategoriesMutation(service, apartmentId, body) {
+    const docIds = [...new Set((body.document_ids || []).filter(Boolean))];
+    if (!docIds.length) {
+        throw Object.assign(new Error('Select linked cheque bill(s) to sync categories.'), { status: 400 });
+    }
+
+    const { data: docs, error } = await service
+        .from('finance_documents')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .in('id', docIds);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    const linked = (docs || []).filter((d) => d.transaction_id && d.status === 'linked');
+    if (!linked.length) {
+        throw Object.assign(new Error('No linked cheque bills in the selection. Cash links are not synced.'), { status: 400 });
+    }
+
+    const byTxn = new Map();
+    linked.forEach((d) => {
+        const list = byTxn.get(d.transaction_id) || [];
+        list.push(d);
+        byTxn.set(d.transaction_id, list);
+    });
+
+    const outDocs = [];
+    const outTxns = [];
+    for (const [txnId, group] of byTxn.entries()) {
+        const { data: txn, error: txnErr } = await service
+            .from('transactions')
+            .select('id, cat, sub_category, type, wallet')
+            .eq('apartment_id', apartmentId)
+            .eq('id', txnId)
+            .maybeSingle();
+        if (txnErr) throw Object.assign(new Error(txnErr.message), { status: 500 });
+        if (!txn) continue;
+        const { documents: syncedDocs, transaction } = await syncCategoriesBetweenTxnAndDocs(
+            service,
+            apartmentId,
+            txn,
+            group,
+        );
+        outDocs.push(...syncedDocs);
+        if (transaction) outTxns.push(transaction);
+    }
+
+    return {
+        ok: true,
+        documents: outDocs,
+        transactions: outTxns,
+        count: outDocs.length,
+        ledger_updated: outTxns.length,
+    };
+}
+
+async function linkFinanceDocumentsMutation(service, apartmentId, body) {
+    const txnId = body.transaction_id;
+    const docIds = [...new Set((body.document_ids || []).filter(Boolean))];
+    const cashDeskDepositRaw = body.cash_desk_deposit;
+    const cashDeskDeposit = cashDeskDepositRaw == null || cashDeskDepositRaw === ''
+        ? null
+        : Math.max(0, Number(cashDeskDepositRaw) || 0);
+    if (!txnId) throw Object.assign(new Error('transaction_id required.'), { status: 400 });
+    if (!docIds.length && !(cashDeskDeposit > 0)) {
+        throw Object.assign(new Error('Select cash receipts and/or deposit wallet cash toward this bank credit.'), { status: 400 });
+    }
+
+    const { data: txn, error: txnErr } = await service
+        .from('transactions')
+        .select('id, cat, sub_category, type, wallet')
+        .eq('apartment_id', apartmentId)
+        .eq('id', txnId)
+        .maybeSingle();
+    if (txnErr) throw Object.assign(new Error(txnErr.message), { status: 500 });
+    if (!txn) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+
+    let documents = [];
+    if (docIds.length) {
+        const { data, error } = await service
+            .from('finance_documents')
+            .update({
+                transaction_id: txnId,
+                status: 'linked',
+                updated_at: new Date().toISOString(),
+            })
+            .eq('apartment_id', apartmentId)
+            .in('id', docIds)
+            .select('*');
+        if (error) throw Object.assign(new Error(error.message), { status: 500 });
+        documents = data || [];
+    }
+
+    let transaction = null;
+
+    // Cheque ↔ bank only: sync categories. Cash is 1→many so we never sync there.
+    if (body.sync_categories === true && documents.length) {
+        const synced = await syncCategoriesBetweenTxnAndDocs(service, apartmentId, txn, documents);
+        documents = synced.documents;
+        transaction = synced.transaction;
+    }
+
+    if (cashDeskDeposit != null) {
+        const { data: updated, error: depErr } = await service
+            .from('transactions')
+            .update({ cash_desk_deposit: cashDeskDeposit })
+            .eq('apartment_id', apartmentId)
+            .eq('id', txnId)
+            .select('*')
+            .maybeSingle();
+        if (depErr && /cash_desk_deposit/i.test(depErr.message)) {
+            throw Object.assign(
+                new Error('Run the latest finance SQL migration to enable cash desk deposits (cash_desk_deposit column).'),
+                { status: 500 },
+            );
+        }
+        if (depErr) throw Object.assign(new Error(depErr.message), { status: 500 });
+        transaction = updated || transaction;
+    }
+
+    return {
+        ok: true,
+        documents,
+        count: documents.length,
+        transaction,
+        cash_desk_deposit: cashDeskDeposit,
+    };
+}
+
+async function unlinkFinanceDocumentsMutation(service, apartmentId, body) {
+    const docIds = [...new Set((body.document_ids || []).filter(Boolean))];
+    if (!docIds.length) throw Object.assign(new Error('document_ids required.'), { status: 400 });
+
+    const { data, error } = await service
+        .from('finance_documents')
+        .update({
+            transaction_id: null,
+            status: 'open',
+            updated_at: new Date().toISOString(),
+        })
+        .eq('apartment_id', apartmentId)
+        .in('id', docIds)
+        .select('*');
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    return { ok: true, documents: data || [], count: (data || []).length };
+}
+
+async function deleteFinanceDocumentMutation(service, apartmentId, body) {
+    const docId = body.document_id;
+    if (!docId) throw Object.assign(new Error('document_id required.'), { status: 400 });
+
+    const { data: existing } = await service
+        .from('finance_documents')
+        .select('id, attachment_urls')
+        .eq('apartment_id', apartmentId)
+        .eq('id', docId)
+        .maybeSingle();
+
+    const { error } = await service
+        .from('finance_documents')
+        .delete()
+        .eq('apartment_id', apartmentId)
+        .eq('id', docId);
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    const paths = Array.isArray(existing?.attachment_urls) ? existing.attachment_urls.filter(Boolean) : [];
+    await maybeDeleteAttachmentEntries(service, paths);
+    return { ok: true };
+}
+
+async function importFinanceDocumentsMutation(service, apartmentId, userId, body) {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!rows.length) throw Object.assign(new Error('No rows to import.'), { status: 400 });
+
+    const sourceFile = body.source_file || null;
+    const saved = [];
+    for (const row of rows) {
+        const result = await saveFinanceDocumentMutation(service, apartmentId, userId, {
+            document: {
+                kind: row.kind === 'IN' ? 'IN' : 'OUT',
+                doc_date: row.doc_date || row.date,
+                amount: row.amount,
+                cat: row.cat,
+                sub_category: row.sub_category,
+                vendor_name: row.vendor_name,
+                description: row.description,
+                notes: row.notes || null,
+                source: 'excel',
+                source_file: sourceFile,
+                status: 'open',
+            },
+            keepAttachmentPaths: [],
+            newAttachmentFiles: [],
+            removeAttachmentPaths: [],
+        });
+        saved.push(result.document);
+    }
+    return { ok: true, count: saved.length, documents: saved };
+}
+
+async function setCashFloatFlagMutation(service, apartmentId, body) {
+    const txnId = body.transaction_id;
+    if (!txnId) throw Object.assign(new Error('transaction_id required.'), { status: 400 });
+    const isCashFloat = body.is_cash_float === true;
+    const patch = { is_cash_float: isCashFloat };
+    if (isCashFloat && body.set_petty_cash_cat !== false) {
+        patch.cat = 'Petty Cash';
+    }
+    const { data, error } = await service
+        .from('transactions')
+        .update(patch)
+        .eq('apartment_id', apartmentId)
+        .eq('id', txnId)
+        .select('*')
+        .maybeSingle();
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    return { ok: true, transaction: data };
 }
 
 async function saveTransactionMutation(service, apartmentId, body) {
@@ -1089,6 +1549,27 @@ export default async function handler(req, res) {
         switch (action) {
             case 'saveTransaction':
                 result = await saveTransactionMutation(service, apartmentId, body);
+                break;
+            case 'saveFinanceDocument':
+                result = await saveFinanceDocumentMutation(service, apartmentId, user?.id, body);
+                break;
+            case 'deleteFinanceDocument':
+                result = await deleteFinanceDocumentMutation(service, apartmentId, body);
+                break;
+            case 'importFinanceDocuments':
+                result = await importFinanceDocumentsMutation(service, apartmentId, user?.id, body);
+                break;
+            case 'linkFinanceDocuments':
+                result = await linkFinanceDocumentsMutation(service, apartmentId, body);
+                break;
+            case 'syncFinanceDocumentCategories':
+                result = await syncFinanceDocumentCategoriesMutation(service, apartmentId, body);
+                break;
+            case 'unlinkFinanceDocuments':
+                result = await unlinkFinanceDocumentsMutation(service, apartmentId, body);
+                break;
+            case 'setCashFloatFlag':
+                result = await setCashFloatFlagMutation(service, apartmentId, body);
                 break;
             case 'deleteTransaction':
                 result = await deleteTransactionMutation(service, apartmentId, body);

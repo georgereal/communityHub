@@ -182,13 +182,14 @@ async function fetchFinanceStateParallel(service, apartmentId) {
         service.from('bank_statement_lines').select('*').eq('apartment_id', apartmentId).order('line_date', { ascending: true }).order('line_order', { ascending: true }).order('source_row_index', { ascending: true }),
         service.from('bank_classification_rules').select('*').eq('apartment_id', apartmentId).order('priority', { ascending: false }).order('created_at', { ascending: true }),
         service.from('nobroker_invoices_raised').select('*').eq('apartment_id', apartmentId).order('billing_month', { ascending: false }),
+        service.from('finance_documents').select('*').eq('apartment_id', apartmentId).order('doc_date', { ascending: false }),
         service.from('chart_of_accounts').select('*').eq('apartment_id', apartmentId).order('code'),
         service.from('journal_entries').select('*').eq('apartment_id', apartmentId).order('entry_date', { ascending: false }),
         service.from('journal_lines').select('*').eq('apartment_id', apartmentId),
     ];
     const results = await Promise.all(queries);
     const [
-        t, ev, esc, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr, nbir, coa, je, jl,
+        t, ev, esc, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr, nbir, fdocs, coa, je, jl,
     ] = results;
 
     return {
@@ -212,6 +213,7 @@ async function fetchFinanceStateParallel(service, apartmentId) {
             bankStatementLines: emptyArr(bsl),
             bankClassificationRules: emptyArr(bcr),
             nobrokerInvoicesRaised: emptyArr(nbir),
+            financeDocuments: emptyArr(fdocs),
         },
         ledger: {
             accounts: emptyArr(coa),
@@ -253,6 +255,23 @@ export async function fetchFinanceState(service, apartmentId, userId) {
                 nobrokerInvoicesRaised: emptyArr(nbir),
             },
             errors: [...(financeChunk.errors || []), ...collectErrors([nbir])],
+        };
+    }
+
+    const docsFromChunk = financeChunk.finances?.financeDocuments;
+    if (!Array.isArray(docsFromChunk)) {
+        const fdocs = await service
+            .from('finance_documents')
+            .select('*')
+            .eq('apartment_id', apartmentId)
+            .order('doc_date', { ascending: false });
+        financeChunk = {
+            ...financeChunk,
+            finances: {
+                ...(financeChunk.finances || {}),
+                financeDocuments: emptyArr(fdocs),
+            },
+            errors: [...(financeChunk.errors || []), ...collectErrors([fdocs])],
         };
     }
 

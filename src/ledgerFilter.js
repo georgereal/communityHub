@@ -1,6 +1,9 @@
 /**
  * Drill-down filter from Financial Reports pivot → Financial Ledger.
  * Sort state and context bar for the Financial Ledger table.
+ *
+ * In “Cash bills by category” report mode, matching cash bills are merged into
+ * the filtered ledger so drill-down matches the pivot (bank + Bills & receipts).
  */
 import { normalizeCategoryKey, categoryDisplayLabel } from './expenseCategories.js';
 import { getActiveLedgerTxns, ledgerTxnDayKey } from './ledgerBalance.js';
@@ -9,6 +12,12 @@ import {
     buildLedgerStatementContext,
     compareLedgerTxnStatementOrder,
 } from './ledgerStatementContext.js';
+import {
+    getCashExpenseReportingMode,
+    isBankPettyFunding,
+    isCashDeskSpend,
+} from './cashFloat.js';
+import { cashBillsAsReportExpenses } from './financeDocuments.js';
 
 const isExpenseFromSheet = (txn) =>
     txn?.type === 'OUT' && Boolean(txn.external_sync_key || txn.sync_hash);
@@ -97,13 +106,31 @@ export const setLedgerActivity = (message, { busy = false, flashMs = 0 } = {}) =
     }
 };
 
-export const applyLedgerTableFilters = (txns) => {
+/** Cash bills that belong in the current report drill-down (cash_detail mode). */
+export const pivotMatchingCashBills = () => {
+    if (!ledgerPivotFilter) return [];
+    if (ledgerPivotFilter.cashExpenseReporting !== 'cash_detail') return [];
+    if (ledgerPivotFilter.type === 'IN') return [];
+    if (ledgerPivotFilter.sourceScope) return [];
     const q = (document.getElementById('cash-search')?.value || '').trim();
-    return getActiveLedgerTxns(txns).filter((t) =>
+    return cashBillsAsReportExpenses().filter((t) =>
         txnMatchesLedgerPivotFilter(t)
         && txnMatchesLedgerSearch(t, q)
         && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
     );
+};
+
+export const applyLedgerTableFilters = (txns) => {
+    const q = (document.getElementById('cash-search')?.value || '').trim();
+    const ledgerRows = getActiveLedgerTxns(txns).filter((t) =>
+        txnMatchesLedgerPivotFilter(t)
+        && txnMatchesLedgerSearch(t, q)
+        && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
+    );
+    const bills = pivotMatchingCashBills();
+    if (!bills.length) return ledgerRows;
+    const seen = new Set(ledgerRows.map((t) => t.id));
+    return [...ledgerRows, ...bills.filter((b) => !seen.has(b.id))];
 };
 
 export const ledgerHasActiveFilters = () => {
@@ -174,9 +201,21 @@ export const applyLedgerPivotFilter = (filter) => {
 };
 
 export const navigateToLedgerFromPivot = (filter) => {
-    applyLedgerPivotFilter(filter);
+    const stamped = {
+        ...filter,
+        cashExpenseReporting: filter?.cashExpenseReporting || getCashExpenseReportingMode(),
+    };
+    applyLedgerPivotFilter(stamped);
     window.switchView?.('finance-ledger');
     window.renderCashLedger?.();
+};
+
+/** Jump to Bills & receipts with the same report drill-down (cash expenses). */
+export const navigateToFinanceDocsFromPivot = async (filter = ledgerPivotFilter) => {
+    if (!filter) return;
+    const { applyFinanceDocsReportFilter } = await import('./financeDocuments.js');
+    applyFinanceDocsReportFilter(filter);
+    window.switchView?.('finance-docs');
 };
 
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -221,6 +260,11 @@ export const txnMatchesLedgerPivotFilter = (txn) => {
     const f = ledgerPivotFilter;
     if (f.type && txn.type !== f.type) return false;
     if (f.sourceScope && !txnMatchesExpenseSourceScope(txn, f.sourceScope)) return false;
+    // Match expense pivot in cash_detail: bank Petty funding + cash-desk ledger
+    // spends are replaced by cash bills — hide those ledger rows from drill-down.
+    if (f.cashExpenseReporting === 'cash_detail' && !txn._fromFinanceDocument) {
+        if (isBankPettyFunding(txn) || isCashDeskSpend(txn)) return false;
+    }
     if (f.key && f.key !== '__other__' && pivotKeyOnTxn(txn, f.dimension) !== f.key) return false;
     const d = new Date(txn.date);
     if (f.year != null && f.month != null) {
@@ -262,6 +306,10 @@ const describeLedgerPivotFilter = (f) => {
         parts.push(formatMonthRangeLabel(f.rangeStart, f.rangeEnd));
     }
 
+    if (f.cashExpenseReporting === 'cash_detail' && f.type !== 'IN' && !f.sourceScope) {
+        parts.push('bank + cash bills');
+    }
+
     return parts.join(' · ');
 };
 
@@ -290,14 +338,25 @@ export const renderLedgerPivotBanner = () => {
         return;
     }
 
+    const showBillsJump = ledgerPivotFilter.cashExpenseReporting === 'cash_detail'
+        && ledgerPivotFilter.type !== 'IN'
+        && !ledgerPivotFilter.sourceScope;
+
     el.hidden = false;
     el.innerHTML = `
       <span class="ledger-pivot-banner__label"><i class="fa-solid fa-filter" aria-hidden="true"></i> ${describeLedgerPivotFilter(ledgerPivotFilter)}</span>
-      <button type="button" class="btn btn-outline btn--small" id="ledger-pivot-clear">Clear report filter</button>`;
+      <span class="ledger-pivot-banner__actions">
+        ${showBillsJump ? '<button type="button" class="btn btn-outline btn--small" id="ledger-pivot-open-bills">Open matching bills</button>' : ''}
+        <button type="button" class="btn btn-outline btn--small" id="ledger-pivot-clear">Clear report filter</button>
+      </span>`;
 
     el.querySelector('#ledger-pivot-clear')?.addEventListener('click', () => {
         clearLedgerPivotFilter();
         window.renderCashLedger?.();
+    }, { once: true });
+
+    el.querySelector('#ledger-pivot-open-bills')?.addEventListener('click', () => {
+        navigateToFinanceDocsFromPivot();
     }, { once: true });
 
     updateLedgerSortIndicators();
