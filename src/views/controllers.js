@@ -65,12 +65,6 @@ export async function activateView(route, page) {
             }
             break;
         }
-        case 'parking-fines': {
-            const { renderParkingViolations, refreshParkingUi } = await import('../parkingOps.js');
-            renderParkingViolations();
-            refreshParkingUi();
-            break;
-        }
         case 'portfolio': {
             const { renderPortfolioRollup } = await import('../portfolio.js');
             await renderPortfolioRollup();

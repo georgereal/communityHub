@@ -192,7 +192,6 @@ export const NAV_MODULES = [
                     'finance-billing-aging',
                 ],
             },
-            { route: 'finance-parking-fines' },
             { route: 'finance-ledger' },
             { route: 'finance-docs' },
             { route: 'finance-reports' },
@@ -265,14 +264,6 @@ export const NAV_MODULES = [
                 hideFromNav: true,
             },
             {
-                route: 'finance-parking-fines',
-                label: 'Parking Fines',
-                icon: 'fa-triangle-exclamation',
-                view: 'parking-fines',
-                permission: 'vehicle_registry.edit',
-                legacy: ['property-parking-fines'],
-            },
-            {
                 route: 'finance-bank-recon',
                 label: 'Bank Reconciliation',
                 icon: 'fa-scale-balanced',
@@ -316,7 +307,7 @@ export const NAV_MODULES = [
         pages: [
             {
                 route: 'admin-access',
-                label: 'Roles & Pages',
+                label: 'Roles',
                 icon: 'fa-user-lock',
                 view: 'access-control',
                 permission: 'rbac.edit',

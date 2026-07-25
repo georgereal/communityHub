@@ -3,7 +3,7 @@
  */
 import { findPage } from './navigation.js';
 
-export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin', 'parking'];
+export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin'];
 
 /** Domains loaded when entering each top-level view (via ensureRouteState). */
 const VIEW_DOMAINS = {
@@ -19,7 +19,6 @@ const VIEW_DOMAINS = {
     operations: ['operations', 'property'],
     units: ['property'],
     apartment: ['property'],
-    'parking-fines': ['parking', 'finance', 'property'],
     // Portfolio fetches per-apartment snapshots itself.
     portfolio: ['core'],
     email: ['operations'],

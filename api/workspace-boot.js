@@ -137,8 +137,9 @@ export default async function handler(req, res) {
                 permissions: [],
                 isSystemAdmin: false,
                 effectiveRoleKey: null,
-                moduleAccess: { apartment: {}, user: {} },
+                moduleAccess: { apartment: {}, user: {}, role: {} },
                 pageAccess: { user: {}, societyRole: {} },
+                crudAccess: {},
                 core: null,
                 summary: null,
             });
@@ -180,15 +181,44 @@ export default async function handler(req, res) {
         const permInfo = await loadPermissionsForRoles(service, roleAssignments, apartmentId);
 
         let societyRoleMap = {};
+        let roleModuleMap = {};
+        let crudAccess = {};
         if (permInfo.effectiveRoleKey && permInfo.effectiveRoleKey !== 'system_admin') {
-            const { data: societyPages } = await service
-                .from('society_role_page_access')
-                .select('route, allowed')
-                .eq('apartment_id', apartmentId)
-                .eq('role_key', permInfo.effectiveRoleKey);
-            (societyPages || []).forEach((row) => {
+            const [societyPagesRes, roleModsRes, roleCrudRes] = await Promise.all([
+                service
+                    .from('society_role_page_access')
+                    .select('route, allowed')
+                    .eq('apartment_id', apartmentId)
+                    .eq('role_key', permInfo.effectiveRoleKey),
+                service
+                    .from('society_role_module_access')
+                    .select('module_key, enabled')
+                    .eq('apartment_id', apartmentId)
+                    .eq('role_key', permInfo.effectiveRoleKey),
+                service
+                    .from('society_role_crud_access')
+                    .select('resource_key, can_create, can_read, can_update, can_delete')
+                    .eq('apartment_id', apartmentId)
+                    .eq('role_key', permInfo.effectiveRoleKey),
+            ]);
+            emptyArr(societyPagesRes).forEach((row) => {
                 societyRoleMap[row.route] = row.allowed;
             });
+            emptyArr(roleModsRes).forEach((row) => {
+                roleModuleMap[row.module_key] = row.enabled !== false;
+            });
+            emptyArr(roleCrudRes).forEach((row) => {
+                crudAccess[row.resource_key] = {
+                    create: !!row.can_create,
+                    read: !!row.can_read,
+                    update: !!row.can_update,
+                    delete: !!row.can_delete,
+                };
+            });
+        } else if (permInfo.effectiveRoleKey === 'system_admin' || permInfo.isSystemAdmin) {
+            roleModuleMap = {
+                home: true, portal: true, security: true, property: true, finance: true, admin: true,
+            };
         }
 
         const normalizeModules = (rows) => {
@@ -233,6 +263,7 @@ export default async function handler(req, res) {
             moduleAccess: {
                 apartment: modAptRes.error ? {} : normalizeModules(modAptRes.data),
                 user: modUserRes.error ? {} : normalizeModules(modUserRes.data),
+                role: roleModuleMap,
             },
             pageAccess: {
                 user: userPageMap,
@@ -240,6 +271,7 @@ export default async function handler(req, res) {
                     ? { [permInfo.effectiveRoleKey]: societyRoleMap }
                     : {},
             },
+            crudAccess,
             core,
             summary,
         });

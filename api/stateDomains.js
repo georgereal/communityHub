@@ -1,6 +1,6 @@
 /** Domain-scoped apartment state loaders for /api/state */
 
-export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin', 'parking'];
+export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'security', 'portal', 'admin'];
 
 function emptyArr(result) {
     return result?.error ? [] : (result?.data || []);
@@ -395,21 +395,12 @@ export async function fetchAdminState(service, apartmentId) {
     };
 }
 
-export async function fetchParkingState(service, apartmentId) {
-    const queries = [
-        service.from('parking_fine_rules').select('*').eq('apartment_id', apartmentId).order('name'),
-        service.from('parking_violations').select('*').eq('apartment_id', apartmentId).order('violation_date', { ascending: false }),
-    ];
-    const results = await Promise.all(queries);
-    const [pfr, pv] = results;
-
+export async function fetchParkingState() {
+    // Parking fines/violations removed — visitor passes live under security domain.
     return {
         domain: 'parking',
-        errors: collectErrors(results),
-        parking: {
-            fineRules: emptyArr(pfr),
-            violations: emptyArr(pv),
-        },
+        errors: [],
+        parking: {},
     };
 }
 
@@ -422,7 +413,6 @@ export async function fetchAllLegacyState(service, apartmentId, userId) {
         fetchSecurityState(service, apartmentId),
         fetchPortalState(service, apartmentId, userId),
         fetchAdminState(service, apartmentId),
-        fetchParkingState(service, apartmentId),
     ]);
     return mergeDomainStates(chunks, apartmentId);
 }

@@ -115,8 +115,11 @@ export function isModuleEnabled(moduleKey) {
 
     const apt = portalState.moduleAccess?.apartment || {};
     const user = portalState.moduleAccess?.user || {};
+    const role = portalState.moduleAccess?.role || {};
 
     if (Object.prototype.hasOwnProperty.call(user, moduleKey)) return user[moduleKey];
+    // Society role matrix (per-role module on/off) wins over apartment-wide defaults when set.
+    if (Object.prototype.hasOwnProperty.call(role, moduleKey)) return role[moduleKey];
     if (Object.prototype.hasOwnProperty.call(apt, moduleKey)) return apt[moduleKey];
     return true;
 }

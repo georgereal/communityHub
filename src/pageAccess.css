@@ -138,6 +138,192 @@
   font-size: 0.8rem;
 }
 
+.page-access-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rbac-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.rbac-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.rbac-tab.is-active {
+  background: var(--surface, #fff);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.rbac-table-wrap {
+  overflow: auto;
+  max-height: min(70vh, 720px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+
+.rbac-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  font-size: 0.8rem;
+}
+
+.rbac-matrix th,
+.rbac-matrix td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0.55rem;
+  vertical-align: middle;
+}
+
+.rbac-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-elevated, #f8fafc);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.25;
+  max-width: 5.5rem;
+}
+
+.rbac-matrix .rbac-corner,
+.rbac-matrix .rbac-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface, #fff);
+  text-align: left;
+  min-width: 12rem;
+  max-width: 16rem;
+  font-weight: 700;
+}
+
+.rbac-matrix thead .rbac-corner {
+  z-index: 3;
+  background: var(--surface-elevated, #f8fafc);
+}
+
+.rbac-col span {
+  display: block;
+  writing-mode: horizontal-tb;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.rbac-cell {
+  text-align: center;
+  min-width: 2.5rem;
+}
+
+.rbac-cell input {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.rbac-row-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.rbac-row-label i {
+  margin-right: 0.35rem;
+  color: var(--text-dim);
+}
+
+.rbac-row-label--sub {
+  padding-left: 1.25rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.rbac-submark {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  margin-left: 0.35rem;
+}
+
+.rbac-lock,
+.rbac-resource-key {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.rbac-group-head th {
+  background: var(--surface-elevated, #f1f5f9);
+  font-weight: 900;
+  font-size: 0.78rem;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  text-align: left;
+}
+
+.rbac-group-head i {
+  margin-right: 0.4rem;
+  opacity: 0.75;
+}
+
+.rbac-matrix--crud thead tr:first-child th {
+  top: 0;
+}
+
+.rbac-matrix--crud thead tr:nth-child(2) th {
+  top: 2.1rem;
+  z-index: 2;
+  font-size: 0.65rem;
+  min-width: 1.75rem;
+  padding: 0.25rem;
+}
+
+.rbac-crud-role {
+  text-align: center;
+  border-left: 1px solid var(--border);
+}
+
+.rbac-crud-action {
+  text-align: center;
+  border-left: 1px solid transparent;
+}
+
+.rbac-cell--crud {
+  min-width: 1.75rem;
+  padding: 0.3rem 0.2rem;
+}
+
 @media (max-width: 640px) {
   .page-access-toolbar {
     flex-direction: column;
@@ -150,5 +336,10 @@
 
   .page-access-toolbar__actions .btn {
     flex: 1;
+  }
+
+  .page-access-header {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

@@ -199,7 +199,7 @@ export function buildMockFinanceState() {
         admin: { bankAccount: { bank_name: 'HDFC Bank', account_number: '••••4821' }, staff: [] },
         portal: { residentLinks: [], portalInvites: [], paymentIntents: [], paymentConfig: null, notices: [], noticeReadLog: [] },
         operations: { helpdeskTickets: [], unitTransitions: [], unitDocuments: [], societyAssets: [], assetServiceLog: [], amenities: [], amenityBookings: [], visitorLog: [], visitorLogUnits: [], gateParcels: [], staffAttendance: [], payrollRuns: [] },
-        parking: { visitorPasses: [], fineRules: [], violations: [] },
+        parking: { visitorPasses: [] },
         ledger: { accounts: [], entries: [], lines: [] },
         email: { outbox: [] },
         moduleAccess: { apartment: {}, user: {} },

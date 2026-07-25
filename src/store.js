@@ -65,8 +65,6 @@ export let portalState = {
     },
     parking: {
         visitorPasses: [],
-        fineRules: [],
-        violations: [],
     },
     ledger: {
         accounts: [],
@@ -79,7 +77,9 @@ export let portalState = {
     moduleAccess: {
         apartment: {},
         user: {},
+        role: {},
     },
+    crudAccess: {},
     activeUnitId: null,
     editingTxnId: null,
     editingFinanceDocId: null,
@@ -109,7 +109,11 @@ export function applyBootPayload(boot = {}) {
         portalState.moduleAccess = {
             apartment: boot.moduleAccess.apartment || {},
             user: boot.moduleAccess.user || {},
+            role: boot.moduleAccess.role || {},
         };
+    }
+    if (boot.crudAccess) {
+        portalState.crudAccess = boot.crudAccess || {};
     }
     if (boot.pageAccess) {
         portalState.pageAccess = {

@@ -18,6 +18,7 @@ import {
     refreshAuditBadge,
 } from '../../vehicleAudit.js';
 import { initParkingReconcileUi } from '../../parkingReconcileUi.js';
+import { initParkingOps } from '../../parkingOps.js';
 import { withButtonBusy } from '../../buttonBusy.js';
 
 let wired = false;
@@ -181,4 +182,5 @@ export default async function initRegistryView() {
     document.getElementById('capacity-search')?.addEventListener('input', refreshCapacityUnitList);
 
     initParkingReconcileUi();
+    initParkingOps();
 }

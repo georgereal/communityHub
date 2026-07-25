@@ -12,13 +12,14 @@ const APARTMENT_SCOPED_TABLES = new Set([
     'resident_user_links', 'payment_intents', 'apartment_payment_config', 'society_notices',
     'resident_portal_invites', 'helpdesk_tickets', 'unit_transitions', 'unit_documents',
     'society_assets', 'asset_service_log', 'amenities', 'amenity_bookings', 'visitor_log',
-    'staff_attendance', 'payroll_runs', 'visitor_parking_passes', 'parking_fine_rules',
-    'parking_violations', 'chart_of_accounts', 'journal_entries', 'journal_lines', 'email_outbox',
+    'staff_attendance', 'payroll_runs', 'visitor_parking_passes',
+    'chart_of_accounts', 'journal_entries', 'journal_lines', 'email_outbox',
     'gate_parcels', 'visitor_log_units', 'ledger_sync_settings', 'ledger_sync_runs',
     'ledger_sync_oauth_apps',
     'user_oauth_connections', 'apartment_external_connections', 'residents', 'activity_audit_log',
     'vehicle_audit_log', 'sms_outbox', 'user_notifications', 'apartment_module_settings',
     'user_module_access', 'society_role_page_access', 'user_page_overrides',
+    'society_role_module_access', 'society_role_crud_access',
     'nobroker_invoices_raised',
 ]);
 
