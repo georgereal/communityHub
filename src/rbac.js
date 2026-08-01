@@ -11,6 +11,7 @@ export const ROLE_OPTIONS = [
     { key: 'apartment_admin', v1Key: 'admin', label: 'Association Office Bearer' },
     { key: 'property_manager', v1Key: 'property_manager', label: 'Office Manager' },
     { key: 'accounts_manager', v1Key: 'accounts_manager', label: 'Accounts Manager' },
+    { key: 'office_staff', v1Key: 'office_staff', label: 'Office Staff' },
     { key: 'security', v1Key: 'security', label: 'Security' },
     { key: 'resident_viewer', v1Key: 'resident_viewer', label: 'Resident Viewer' },
 ];
@@ -18,7 +19,7 @@ export const ROLE_OPTIONS = [
 const V1_PERMISSION_MATRIX = {
     admin: [
         'vehicle_registry.view', 'vehicle_registry.edit',
-        'accounts.view', 'accounts.edit',
+        'accounts.view', 'accounts.edit', 'accounts.bills_entry',
         'setup.view', 'setup.edit',
         'rbac.view', 'rbac.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
@@ -27,9 +28,10 @@ const V1_PERMISSION_MATRIX = {
     property_manager: [
         'vehicle_registry.view', 'vehicle_registry.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
-        'portal.view', 'security.view',
+        'portal.view', 'security.view', 'accounts.bills_entry',
     ],
-    accounts_manager: ['accounts.view', 'accounts.edit', 'apartment_mgmt.view', 'portal.view'],
+    accounts_manager: ['accounts.view', 'accounts.edit', 'accounts.bills_entry', 'apartment_mgmt.view', 'portal.view'],
+    office_staff: ['accounts.bills_entry'],
     security: ['vehicle_registry.view', 'vehicle_registry.edit', 'security.view'],
     resident_viewer: ['portal.view'],
 };

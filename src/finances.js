@@ -12,6 +12,7 @@ import {
     validateMaintenanceAllocations,
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
+import { hasClientPermission } from './rbac.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
 import { initLedgerExport } from './ledgerExport.js';
 import { getLedgerBankBalance, annotateLedgerRunningBalancesInOrder, getActiveLedgerTxns } from './ledgerBalance.js';
@@ -1842,11 +1843,22 @@ window.saveLedgerLineData = saveLedgerLineData;
 export const syncAccountsHeaderActions = (sv) => {
     const bills = sv === 'finance-docs';
     const ledger = sv === 'ledger' || sv === 'bank-recon' || sv === 'activity';
+    const standalone = sv === 'expense-plan';
     document.querySelectorAll('[data-accounts-actions]').forEach((el) => {
         const kind = el.dataset.accountsActions;
         if (kind === 'bills') el.hidden = !bills;
         else if (kind === 'ledger') el.hidden = !ledger;
     });
+    // Staff with bills_entry only: keep Add bill/receipt; hide Bank Sync.
+    const staffOnly = hasClientPermission('accounts.bills_entry') && !hasClientPermission('accounts.edit');
+    const bankSync = document.querySelector('#accounts-header-actions [onclick*="openBankSnapshot"]');
+    if (bankSync) bankSync.hidden = staffOnly || standalone;
+
+    // Expense plan is a Finance sidebar page — not part of the Income & Expenses tab strip.
+    const tabs = document.querySelector('.accounts-subview-tabs');
+    if (tabs) tabs.hidden = standalone;
+    const title = document.querySelector('#view-accounts .ledger-page-header__title h2');
+    if (title) title.textContent = standalone ? 'Expense plan' : 'Income & Expenses';
 };
 
 const wireAccountsHeaderActionButtons = () => {
@@ -2151,6 +2163,7 @@ window.switchSubView = (sv) => {
     const views = {
         ledger: 'subview-ledger',
         'finance-docs': 'subview-finance-docs',
+        'expense-plan': 'subview-expense-plan',
         reports: 'subview-reports',
         'invoices-raised': 'subview-invoices-raised',
         'bank-recon': 'subview-bank-recon',
@@ -2168,6 +2181,12 @@ window.switchSubView = (sv) => {
         import('./financeDocuments.js').then((m) => {
             m.initFinanceDocumentsPage();
             m.renderFinanceDocumentsPage();
+        });
+    }
+    if (sv === 'expense-plan') {
+        import('./expensePlan.js').then((m) => {
+            m.initExpensePlanPage();
+            m.renderExpensePlanPage();
         });
     }
     if (sv === 'invoices-raised') {

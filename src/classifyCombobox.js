@@ -30,9 +30,19 @@ export function isCustomClassifyInput(input) {
 
 /**
  * @param {HTMLElement} wrap - .bank-recon-classify-combobox container
- * @param {{ getOptions?: () => string[], onKnownSelect?: (value: string) => void, onStateChange?: () => void }} opts
+ * @param {{
+ *   getOptions?: () => string[],
+ *   onKnownSelect?: (value: string) => void,
+ *   onCustomSelect?: (value: string) => void,
+ *   onStateChange?: () => void,
+ * }} opts
  */
-export function wireClassifyCombobox(wrap, { getOptions = () => [], onKnownSelect, onStateChange } = {}) {
+export function wireClassifyCombobox(wrap, {
+    getOptions = () => [],
+    onKnownSelect,
+    onCustomSelect,
+    onStateChange,
+} = {}) {
     const input = wrap?.querySelector('input');
     const menu = wrap?.querySelector('.bank-recon-classify-combobox__menu');
     if (!input || !menu) return;
@@ -41,9 +51,17 @@ export function wireClassifyCombobox(wrap, { getOptions = () => [], onKnownSelec
 
     const pickValue = (value, { custom = false } = {}) => {
         input.value = value;
-        setClassifyInputState(input, custom ? 'custom' : 'known');
+        if (custom) {
+            // Let the page register the value into shared option lists, then treat as known
+            // so dropdowns reload and auto-save / auto-post can run (same as Bills).
+            onCustomSelect?.(value);
+            setClassifyInputState(input, 'known');
+            onKnownSelect?.(value);
+        } else {
+            setClassifyInputState(input, 'known');
+            onKnownSelect?.(value);
+        }
         closeMenu();
-        if (!custom) onKnownSelect?.(value);
         onStateChange?.();
     };
 
@@ -79,7 +97,11 @@ export function wireClassifyCombobox(wrap, { getOptions = () => [], onKnownSelec
             const options = getOptions();
             const exact = isExactListMatch(input.value, options);
             if (exact) pickValue(exact, { custom: false });
-            else closeMenu();
+            else {
+                const trimmed = String(input.value || '').trim();
+                if (trimmed) pickValue(trimmed, { custom: true });
+                else closeMenu();
+            }
         }
     });
     input.addEventListener('blur', () => {

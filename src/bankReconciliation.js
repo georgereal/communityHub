@@ -31,11 +31,16 @@ import {
 
 import {
     EXPENSE_CATS,
-    SUB_CAT_SUGGESTIONS,
     INCOME_CATS,
     BANK_REJECT_CAT,
     defaultExcludeFromReports,
 } from './expenseCategories.js';
+import {
+    buildCategoryOptions,
+    buildSubCategoryOptions,
+    registerCustomCategory,
+    registerCustomSubCategory,
+} from './classifyOptions.js';
 import {
     isExactListMatch,
     isKnownClassifyInput,
@@ -1427,17 +1432,10 @@ const importResultMessage = ({ count, skipped, skippedExisting, skippedBatch }) 
 
 const categoryOptionsForRow = (row) => {
     const isIncome = row?.dataset.lineType === 'IN';
-    return isIncome ? INCOME_CATS : EXPENSE_CATS;
+    return buildCategoryOptions(isIncome);
 };
 
-const subCatOptionsForCategory = (catKey) => {
-    if (!catKey) return [];
-    const defaults = SUB_CAT_SUGGESTIONS[catKey] || SUB_CAT_SUGGESTIONS.Other || [];
-    const saved = (portalState.finances.subCategories || [])
-        .filter((row) => row.category === catKey)
-        .map((row) => row.name);
-    return [...new Set([...defaults, ...saved])].sort((a, b) => a.localeCompare(b));
-};
+const subCatOptionsForCategory = (catKey) => buildSubCategoryOptions(catKey);
 
 const resolvedCategoryForRow = (row) => {
     const input = row?.querySelector('.bank-recon-cat-input');
@@ -2846,6 +2844,9 @@ const wireStatementTable = (linesEl) => {
         if (catWrap) {
             wireClassifyCombobox(catWrap, {
                 getOptions: () => categoryOptionsForRow(row),
+                onCustomSelect: (value) => {
+                    registerCustomCategory(value, row.dataset.lineType === 'IN');
+                },
                 onKnownSelect: () => {
                     clearRowMatch(row);
                     const isIncome = row.dataset.lineType === 'IN';
@@ -2865,6 +2866,9 @@ const wireStatementTable = (linesEl) => {
         if (subWrap) {
             wireClassifyCombobox(subWrap, {
                 getOptions: () => subCatOptionsForCategory(resolvedCategoryForRow(row)),
+                onCustomSelect: (value) => {
+                    registerCustomSubCategory(resolvedCategoryForRow(row), value);
+                },
                 onKnownSelect: () => {
                     syncRowPostButton(row);
                     maybeAutoPostRow(row);

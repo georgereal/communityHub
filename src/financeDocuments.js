@@ -9,8 +9,13 @@ import {
   INCOME_CATS,
   normalizeCategoryKey,
   categoryDisplayLabel,
-  SUB_CAT_SUGGESTIONS,
 } from './expenseCategories.js';
+import {
+  buildCategoryOptions,
+  buildSubCategoryOptions,
+  registerCustomCategory,
+  registerCustomSubCategory,
+} from './classifyOptions.js';
 import { postFinanceMutation, filesToBase64Payload } from './financeApi.js';
 import { withButtonBusy } from './buttonBusy.js';
 import { applySavedTransactionLocally } from './ledgerTxnLocal.js';
@@ -20,6 +25,7 @@ import {
   setClassifyInputState,
   isExactListMatch,
 } from './classifyCombobox.js';
+import { hasClientPermission } from './rbac.js';
 
 const formatMoney = (n) =>
   `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -27,6 +33,33 @@ const formatMoney = (n) =>
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/** Full bills management (link, delete, float, deposit). */
+export const canManageFinanceDocs = () => hasClientPermission('accounts.edit');
+
+/** Add / upload / view bills (includes staff entry). */
+export const canEnterFinanceDocs = () =>
+  hasClientPermission('accounts.edit') || hasClientPermission('accounts.bills_entry');
+
+const isStaffBillsOnly = () =>
+  hasClientPermission('accounts.bills_entry') && !hasClientPermission('accounts.edit');
+
+const applyFinanceDocsStaffMode = () => {
+  const root = document.getElementById('subview-finance-docs');
+  if (!root) return;
+  const staffOnly = isStaffBillsOnly();
+  root.classList.toggle('fdoc-staff-mode', staffOnly);
+  const funding = document.getElementById('fdoc-funding-details');
+  const kpis = document.getElementById('fdoc-float-kpis');
+  if (funding) funding.hidden = staffOnly;
+  if (kpis) kpis.hidden = staffOnly;
+  ['fdoc-bulk-link', 'fdoc-deposit-wallet', 'fdoc-sync-cats', 'fdoc-bulk-delete'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = staffOnly;
+  });
+  const checkCol = root.querySelector('.fdoc-check-col');
+  if (checkCol) checkCol.hidden = staffOnly;
+};
 
 const esc = (s) => String(s ?? '')
   .replace(/&/g, '&amp;')
@@ -39,6 +72,14 @@ export const getFinanceDocuments = () =>
 /** Open (unlinked) expense bills — proposed / not yet posted to ledger. */
 export const getOpenExpenseDocuments = () =>
   getFinanceDocuments().filter((d) => d.kind === 'OUT' && d.status === 'open');
+
+/** Cheque payment on a bill/receipt (notes: `Cheque: …`). */
+export const isChequeFinanceDocument = (doc) =>
+  /^Cheque:\s*.+/i.test(String(doc?.notes || '').trim());
+
+/** Open cheque expenses — issued but not yet linked to a bank ledger line. */
+export const getOpenChequeExpenseDocuments = () =>
+  getOpenExpenseDocuments().filter(isChequeFinanceDocument);
 
 /** Open Bills & receipts filtered to unlinked expenses. */
 export const focusOpenExpenseBills = () => {
@@ -54,6 +95,26 @@ export const focusOpenExpenseBills = () => {
   if (kindEl) kindEl.value = 'OUT';
   if (statusEl) statusEl.value = 'open';
   if (payEl) payEl.value = 'all';
+  if (searchEl) searchEl.value = '';
+  renderFdocReportBanner();
+  window.switchView?.('finance-docs');
+  renderFinanceDocumentsPage();
+};
+
+/** Open cheque bills on Bills & receipts (issued, not linked to bank yet). */
+export const focusOpenChequeBills = () => {
+  docsReportFilter = null;
+  filterState.kind = 'OUT';
+  filterState.status = 'open';
+  filterState.pay = 'cheque';
+  filterState.q = '';
+  const kindEl = document.getElementById('fdoc-filter-kind');
+  const statusEl = document.getElementById('fdoc-filter-status');
+  const payEl = document.getElementById('fdoc-filter-pay');
+  const searchEl = document.getElementById('fdoc-search');
+  if (kindEl) kindEl.value = 'OUT';
+  if (statusEl) statusEl.value = 'open';
+  if (payEl) payEl.value = 'cheque';
   if (searchEl) searchEl.value = '';
   renderFdocReportBanner();
   window.switchView?.('finance-docs');
@@ -120,10 +181,26 @@ const cellRaw = (row, colIdx) => {
   return unwrapExcelValue(row.getCell(colIdx).value);
 };
 
+/** Calendar YYYY-MM-DD from a Date using local components (avoid UTC day-shift). */
+const isoDateLocal = (d) => {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Expand 2-digit year → 20xx (petty-cash / bank books use YY). */
+const expandYear = (y) => {
+  if (y >= 100) return y;
+  if (y < 0 || !Number.isFinite(y)) return null;
+  return 2000 + y;
+};
+
 const parseDate = (val) => {
   const v = unwrapExcelValue(val);
   if (v == null || v === '') return null;
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return isoDateLocal(v);
   if (typeof v === 'number' && Number.isFinite(v)) {
     // Excel serial date (days since 1899-12-30)
     if (v > 20000 && v < 80000) {
@@ -135,13 +212,24 @@ const parseDate = (val) => {
   const s = String(v).trim();
   if (!s || s === '-' || s === '–' || s === '—') return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime()) && /[a-z]/i.test(s)) return d.toISOString().slice(0, 10);
-  const parts = s.split(/[\/\-.]/);
-  if (parts.length === 3) {
+  // Prefer explicit numeric dates before Date() — "25/07/26" is invalid / wrong under US parse.
+  const parts = s.split(/[\/\-.]/).map((x) => x.trim());
+  if (parts.length === 3 && parts.every((p) => /^\d{1,4}$/.test(p))) {
     const [a, b, c] = parts.map((x) => parseInt(x, 10));
-    if (c > 1000) return `${c}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
-    if (a > 1000) return `${a}-${String(b).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+    // YYYY-MM-DD or YYYY/MM/DD
+    if (a > 1000 && b >= 1 && b <= 12 && c >= 1 && c <= 31) {
+      return `${a}-${String(b).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+    }
+    // DD/MM/YYYY or DD/MM/YY (Indian bank / cash books)
+    const year = expandYear(c);
+    if (year && a >= 1 && a <= 31 && b >= 1 && b <= 12) {
+      return `${year}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
+    }
+  }
+  // Named months e.g. "1 Aug 2026"
+  if (/[a-z]/i.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return isoDateLocal(d);
   }
   return null;
 };
@@ -192,13 +280,27 @@ const docMatchesReportFilter = (d, f) => {
   if (f.type === 'OUT' && d.kind !== 'OUT') return false;
   if (f.type === 'IN' && d.kind !== 'IN') return false;
   if (paymentInfo(d).mode !== 'cash') return false;
+  // Bills linked to a specific Petty Cash funding bucket (pivot-style drill-down).
+  if (f.transactionId) {
+    return d.transaction_id === f.transactionId;
+  }
+  // Cash bills never belong under Bank in Cash / Bank → Category.
+  if (f.wallet === 'BANK' || f.key === 'BANK') return false;
   if (f.key && f.key !== '__other__') {
     const dim = f.dimension || 'cat';
-    let key;
-    if (dim === 'sub_category') key = d.sub_category?.trim() || '(none)';
-    else if (dim === 'vendor') key = d.vendor_name?.trim() || '(none)';
-    else key = normalizeCategoryKey(d.cat || 'Other');
-    if (key !== f.key) return false;
+    if (dim === 'wallet_cat') {
+      if (f.key.includes('|')) {
+        const cat = f.key.split('|').slice(1).join('|');
+        if (normalizeCategoryKey(d.cat || 'Other') !== cat) return false;
+      }
+      // else whole Cash group — any cash bill in range matches
+    } else {
+      let key;
+      if (dim === 'sub_category') key = d.sub_category?.trim() || '(none)';
+      else if (dim === 'vendor') key = d.vendor_name?.trim() || '(none)';
+      else key = normalizeCategoryKey(d.cat || 'Other');
+      if (key !== f.key) return false;
+    }
   }
   const dateStr = String(d.doc_date || '').slice(0, 10);
   const dt = dateStr ? new Date(`${dateStr}T12:00:00`) : null;
@@ -216,10 +318,13 @@ export const applyFinanceDocsReportFilter = (filter) => {
   if (docsReportFilter) {
     filterState.kind = docsReportFilter.type === 'IN' ? 'IN' : 'OUT';
     filterState.pay = 'cash';
+    filterState.status = docsReportFilter.transactionId ? 'linked' : (filterState.status || 'all');
     const kindEl = document.getElementById('fdoc-filter-kind');
     const payEl = document.getElementById('fdoc-filter-pay');
+    const statusEl = document.getElementById('fdoc-filter-status');
     if (kindEl) kindEl.value = filterState.kind;
     if (payEl) payEl.value = 'cash';
+    if (statusEl && docsReportFilter.transactionId) statusEl.value = 'linked';
   }
   renderFdocReportBanner();
   renderFinanceDocumentsPage();
@@ -262,7 +367,9 @@ export const focusFinanceDocument = async (docId) => {
 const describeDocsReportFilter = (f) => {
   if (!f) return '';
   const parts = [f.type === 'IN' ? 'Income' : 'Expense', 'cash bills'];
-  if (f.key && f.key !== '__other__') {
+  if (f.transactionId) {
+    parts.push(f.label || 'linked to Petty Cash bucket');
+  } else if (f.key && f.key !== '__other__') {
     const dim = f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
     parts.push(`${dim}: ${categoryDisplayLabel(f.key)}`);
   }
@@ -416,6 +523,7 @@ async function saveDocumentFromForm() {
 
 const isFundingLedgerTxn = (t) => {
   if (!t || t.excluded_from_ledger) return false;
+  if (t.exclude_from_cash_float) return false;
   if (t.is_cash_float) return true;
   if (normalizeCategoryKey(t.cat) === 'Petty Cash') return true;
   return isBankPettyFunding(t);
@@ -430,13 +538,102 @@ const linkedCashTotalForTxn = (txnId) => {
   );
 };
 
+/** Negative opening = prior / untracked spend that must consume oldest bucket capacity first. */
+const openingDeficitOf = (openingAmt) => round2(Math.max(0, -(Number(openingAmt) || 0)));
+
+/**
+ * Running cash through buckets (oldest → newest):
+ *   carryIn (can be −ve) + bucket − linked bills = carryOut (can be −ve into next month).
+ * Bills stay on their linked bucket; overspend is pocket/float shortfall carried forward.
+ * No whole-bill forced moves — a month can finish negative.
+ */
+const planCashFloatBucketAllocation = (funding, openingAmt = getCashFloatOpeningConfig().amount) => {
+  const list = [...(funding || [])].sort((a, b) =>
+    String(a.date || '').localeCompare(String(b.date || '')),
+  );
+
+  const startCarry = openingAmt != null && Number.isFinite(Number(openingAmt))
+    ? round2(Number(openingAmt))
+    : 0;
+
+  let carry = startCarry;
+  const rows = [];
+
+  for (const t of list) {
+    const amt = Math.abs(parseFloat(t.amount) || 0);
+    const carryIn = carry;
+    const linkedBills = linkedCashTotalForTxn(t.id);
+    const remaining = round2(carryIn + amt - linkedBills);
+    // Prior shortfall absorbed into this bucket (up to bucket size), plus this month's bills.
+    const broughtForward = carryIn < -0.009 ? round2(-carryIn) : 0;
+    const effectiveUsed = round2(broughtForward + linkedBills);
+    const pct = amt > 0 ? Math.min(100, Math.round((Math.min(effectiveUsed, amt) / amt) * 100)) : 0;
+    const overdrawn = remaining < -0.009;
+
+    rows.push({
+      t,
+      id: t.id,
+      amt,
+      carryIn,
+      linkedBills,
+      openingHit: broughtForward,
+      billRoom: round2(Math.max(0, amt - broughtForward)),
+      billUsed: linkedBills,
+      assignedDocs: [],
+      effectiveUsed,
+      remaining,
+      full: remaining <= 0.009,
+      overdrawn,
+      isUnused: effectiveUsed <= 0.009 && remaining > 0.009,
+      pct: overdrawn ? 100 : pct,
+    });
+
+    carry = remaining;
+  }
+
+  const finalCarry = carry;
+  const effectiveUnused = round2(Math.max(0, finalCarry));
+  const openingAbsorbed = openingDeficitOf(openingAmt);
+  const billsTotal = round2(rows.reduce((s, r) => s + r.linkedBills, 0));
+  const funded = round2(rows.reduce((s, r) => s + r.amt, 0));
+  // Used across the run = opening deficit + all bills (matches funded − final unused when final ≥ 0).
+  const effectiveUsedTotal = round2(openingAbsorbed + billsTotal);
+
+  return {
+    rows,
+    byTxnId: new Map(rows.map((r) => [r.id, r])),
+    moves: [],
+    effectiveUnused,
+    effectiveUsedTotal: funded > 0 ? round2(funded - effectiveUnused) : effectiveUsedTotal,
+    openingAbsorbed,
+    finalCarry,
+    deficit: openingAbsorbed,
+  };
+};
+
 const fundingBucketOf = (txnId) => {
   const t = (portalState.finances.txns || []).find((x) => x.id === txnId);
   if (!t) return null;
+  const funding = (portalState.finances.txns || [])
+    .filter(isFundingLedgerTxn)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const plan = planCashFloatBucketAllocation(funding);
+  const row = plan.byTxnId.get(txnId);
+  if (row) {
+    return {
+      t,
+      amt: row.amt,
+      linked: row.linkedBills,
+      // Room for new links = positive carry-out only (overdrawn months are full).
+      remaining: round2(Math.max(0, row.remaining)),
+      full: row.remaining <= 0.009,
+      openingHit: row.openingHit,
+    };
+  }
   const amt = Math.abs(parseFloat(t.amount) || 0);
   const linked = linkedCashTotalForTxn(txnId);
   const remaining = round2(amt - linked);
-  return { t, amt, linked, remaining, full: remaining <= 0.009 };
+  return { t, amt, linked, remaining, full: remaining <= 0.009, openingHit: 0 };
 };
 
 /** Fit selected cash bills into a funding bucket without exceeding remaining capacity. */
@@ -481,13 +678,26 @@ const docsLinkMode = (docs) => {
 };
 
 const ledgerCandidatesForCashLink = () => {
-  return (portalState.finances.txns || [])
-    .filter(isFundingLedgerTxn)
+  const funding = (portalState.finances.txns || []).filter(isFundingLedgerTxn);
+  const plan = planCashFloatBucketAllocation(
+    [...funding].sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))),
+  );
+  return funding
     .map((t) => {
-      const linked = linkedCashTotalForTxn(t.id);
-      const amt = Math.abs(parseFloat(t.amount) || 0);
-      const remaining = round2(amt - linked);
-      return { t, linked, remaining, amt, full: remaining <= 0.009 };
+      const row = plan.byTxnId.get(t.id);
+      const amt = row?.amt ?? Math.abs(parseFloat(t.amount) || 0);
+      const linked = row?.linkedBills ?? linkedCashTotalForTxn(t.id);
+      const remaining = row
+        ? round2(Math.max(0, row.remaining))
+        : round2(amt - linked);
+      return {
+        t,
+        linked,
+        remaining,
+        amt,
+        full: remaining <= 0.009,
+        openingHit: row?.openingHit || 0,
+      };
     })
     // Oldest open bucket first — fill month-on-month (bills may land on the next month).
     .sort((a, b) => {
@@ -1121,7 +1331,7 @@ export async function downloadFinanceDocumentsTemplate() {
   notes.addRow(['• Sheet "Expenses" → expense bills (OUT)']);
   notes.addRow(['• Sheet "Income" → income receipts (IN)']);
   notes.addRow(['• Leave Cheque No. blank (or "-") for cash']);
-  notes.addRow(['• Date can be blank for cash lines — import uses today\'s date']);
+  notes.addRow(['• Date: use DD/MM/YY or DD/MM/YYYY (e.g. 25/07/26). Blank → today\'s date']);
   notes.addRow(['• Description / Particulars is used as vendor / payee when needed']);
   notes.getColumn(1).width = 72;
 
@@ -1189,11 +1399,25 @@ const filteredDocs = () => {
 };
 
 /** Cash-float snapshot: bank buckets + cash receipts − expenses − deposits. */
+const getCashFloatOpeningConfig = () => {
+  const bank = portalState.admin?.bankAccount;
+  const raw = bank?.cash_float_opening_balance;
+  const amount = raw == null || raw === '' ? null : Number(raw);
+  return {
+    amount: amount != null && Number.isFinite(amount) ? amount : null,
+    date: bank?.cash_float_opening_date ? String(bank.cash_float_opening_date).slice(0, 10) : null,
+  };
+};
+
 const computeBillsCashFloatSummary = () => {
   const store = computeCashFloatStore();
   const funding = [...store.funding];
   const txns = portalState.finances.txns || [];
-  const marked = txns.filter((t) => t.is_cash_float && !funding.some((f) => f.id === t.id));
+  const marked = txns.filter((t) =>
+    t.is_cash_float
+    && !t.exclude_from_cash_float
+    && !funding.some((f) => f.id === t.id),
+  );
   // Oldest → newest so month-on-month allocation reads top to bottom.
   const allFunding = [...funding, ...marked].sort((a, b) =>
     String(a.date || '').localeCompare(String(b.date || '')),
@@ -1225,8 +1449,17 @@ const computeBillsCashFloatSummary = () => {
       .reduce((s, t) => s + Math.max(0, parseFloat(t.cash_desk_deposit) || 0), 0),
   );
 
-  // Wallet left = unused bank float + cash receipts still on desk − float drawn into bank deposits
-  const unused = round2(bankUnused + receiptsOnHand - deskDeposits);
+  const opening = getCashFloatOpeningConfig();
+  const openingAmt = opening.amount != null ? round2(opening.amount) : 0;
+  // Raw per-bucket leftover (ignores opening carry) — kept for reference only.
+  const bookUnused = round2(bankUnused + receiptsOnHand - deskDeposits);
+
+  const bucketPlan = planCashFloatBucketAllocation(allFunding, opening.amount);
+  // On-hand Left follows the month-to-month run (final = Left), then receipts / desk deposits.
+  const bucketLeft = allFunding.length
+    ? round2(bucketPlan.finalCarry ?? 0)
+    : round2((opening.amount != null ? openingAmt : 0) + bankUnused);
+  const unused = round2(bucketLeft + receiptsOnHand - deskDeposits);
   const funded = round2(bankFunded + receiptsAmt);
   const remaining = unused;
 
@@ -1246,6 +1479,14 @@ const computeBillsCashFloatSummary = () => {
     receiptsOnHand,
     deskDeposits,
     bankUnused,
+    bookUnused,
+    bucketPlan,
+    bucketLeft,
+    effectiveUnused: bucketPlan.effectiveUnused,
+    effectiveUsedTotal: bucketPlan.effectiveUsedTotal,
+    openingAbsorbed: bucketPlan.openingAbsorbed,
+    openingAmt: opening.amount != null ? openingAmt : null,
+    openingDate: opening.date,
     unused,
     remaining,
     walletCash: store.walletCash,
@@ -1256,64 +1497,96 @@ const computeBillsCashFloatSummary = () => {
 /** Cash-desk wallet Left (bank float unused + receipts on hand − desk deposits). */
 export const getCashWalletLeft = () => computeBillsCashFloatSummary().unused;
 
+const moneyClass = (n) => {
+  const v = round2(n);
+  if (v < -0.009) return 'fdoc-amt--neg';
+  if (v > 0.009) return 'fdoc-amt--pos';
+  return '';
+};
+
 const renderFundingTableHtml = (funding, summary = {}) => {
   if (!funding.length) {
     return '<p class="fa-panel__hint">No bank Petty Cash funding yet. Classify withdrawals as Petty Cash on the Ledger, or mark a line with the wallet icon.</p>';
   }
 
-  const funded = summary.bankFunded ?? summary.funded ?? 0;
-  const linkedAmt = summary.linkedAmt ?? 0;
   const openAmt = summary.openAmt ?? 0;
+  const plan = summary.bucketPlan || planCashFloatBucketAllocation(funding, summary.openingAmt);
+  const unusedTotal = plan.effectiveUnused ?? summary.bankUnused ?? 0;
+  const billsTotal = round2(plan.rows.reduce((s, r) => s + r.linkedBills, 0));
+  const chequeTotal = round2(plan.rows.reduce((s, r) => s + r.amt, 0));
+  const openingStart = plan.rows[0]?.carryIn ?? (summary.openingAmt != null ? round2(summary.openingAmt) : 0);
 
-  const rows = funding.map((t) => {
+  const rows = plan.rows.map((row, idx) => {
+    const t = row.t;
     const d = t.date
       ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
       : '—';
-    const amt = Math.abs(parseFloat(t.amount) || 0);
-    const linked = linkedCashTotalForTxn(t.id);
-    const rowLeft = round2(amt - linked);
-    const full = rowLeft <= 0.009;
-    const isUnused = linked <= 0.009;
-    const pct = amt > 0 ? Math.min(100, Math.round((linked / amt) * 100)) : 0;
-    const status = full
-      ? '<span class="fdoc-status fdoc-status--full">Full</span>'
-      : isUnused
-        ? '<span class="fdoc-status fdoc-status--open">Unused</span>'
-        : `<span class="fdoc-status fdoc-status--linked">${pct}%</span>`;
-    const rowClass = full ? 'fdoc-funding-row--full' : (isUnused ? 'fdoc-funding-row--unused' : '');
-    return `<tr class="${rowClass}">
+    const prevLabel = idx === 0 && summary.openingAmt != null
+      ? 'Opening'
+      : 'Prev';
+
+    const rowClass = [
+      'fdoc-funding-row',
+      'fdoc-funding-row--clickable',
+      row.overdrawn ? 'fdoc-funding-row--over' : '',
+      row.remaining > 0.009 && row.linkedBills <= 0.009 ? 'fdoc-funding-row--unused' : '',
+    ].filter(Boolean).join(' ');
+
+    return `<tr class="${rowClass}" data-funding-txn="${esc(t.id)}" title="Open ledger entry">
       <td class="fdoc-funding-col-date">${esc(d)}</td>
       <td class="fdoc-funding-col-note">${esc(t.vendor_name || t.description || '—')}</td>
-      <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(amt)}</td>
-      <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(linked)}</td>
-      <td class="fdoc-funding-col-status">
-        <div class="fdoc-bucket-meter" title="${pct}% used">
-          <div class="fdoc-bucket-meter__bar" style="width:${pct}%"></div>
-        </div>
-        ${status}
+      <td class="cash-float-amt fdoc-funding-col-num ${moneyClass(row.carryIn)}" title="${prevLabel} balance brought forward">
+        <span class="fdoc-funding-col-caption">${prevLabel}</span>
+        ${formatMoney(row.carryIn)}
+      </td>
+      <td class="cash-float-amt fdoc-funding-col-num">
+        <button type="button" class="fdoc-funding-drill fdoc-amt--pos" data-funding-cheque="${esc(t.id)}" title="Open Petty Cash ledger / cheque entry">
+          <span class="fdoc-funding-col-caption">+ Cheque</span>
+          ${formatMoney(row.amt)}
+        </button>
+      </td>
+      <td class="cash-float-amt fdoc-funding-col-num">
+        <button type="button" class="fdoc-funding-drill fdoc-amt--neg" data-funding-bills="${esc(t.id)}" title="Show cash bills linked to this bucket" ${row.linkedBills <= 0.009 ? 'disabled' : ''}>
+          <span class="fdoc-funding-col-caption">− Bills</span>
+          ${formatMoney(row.linkedBills)}
+        </button>
+      </td>
+      <td class="cash-float-amt fdoc-funding-col-num ${moneyClass(row.remaining)}" title="Prev + cheque − bills (carries to next month)">
+        <span class="fdoc-funding-col-caption">= Left</span>
+        <strong>${formatMoney(row.remaining)}</strong>
+      </td>
+      <td class="fdoc-funding-col-actions">
+        <button type="button" class="btn btn-outline btn--small fdoc-funding-exclude" data-funding-exclude="${esc(t.id)}" title="Remove from Petty Cash buckets (keeps the ledger line)">
+          Exclude
+        </button>
       </td>
     </tr>`;
   }).join('');
 
-  return `<table class="fa-pivot-table cash-float-table fdoc-funding-table">
+  const finalLeft = plan.finalCarry ?? unusedTotal;
+
+  return `<table class="fa-pivot-table cash-float-table fdoc-funding-table fdoc-funding-table--ledger">
     <thead>
       <tr>
         <th class="fdoc-funding-col-date">Date</th>
         <th class="fdoc-funding-col-note">Vendor / note</th>
-        <th class="cash-float-amt fdoc-funding-col-num">Bucket</th>
-        <th class="cash-float-amt fdoc-funding-col-num">Used</th>
-        <th class="fdoc-funding-col-status">Status</th>
+        <th class="cash-float-amt fdoc-funding-col-num" title="Balance brought into this month (opening or previous left)">Prev</th>
+        <th class="cash-float-amt fdoc-funding-col-num" title="Bank Petty Cash cheque — click to open on Ledger">+ Cheque</th>
+        <th class="cash-float-amt fdoc-funding-col-num" title="Cash bills linked to this bucket — click to filter">− Bills</th>
+        <th class="cash-float-amt fdoc-funding-col-num" title="Prev + cheque − bills (carries to next month)">= Left</th>
+        <th class="fdoc-funding-col-actions"></th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
     <tfoot>
       <tr class="fdoc-funding-totals">
-        <td colspan="2">Bucket totals</td>
-        <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(funded)}</td>
-        <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(linkedAmt)}</td>
-        <td class="fdoc-funding-col-status">
-          <span class="fdoc-funding-left-agg">Bank unused ${formatMoney(summary.bankUnused ?? funded - linkedAmt)}</span>
-          <span class="fdoc-funding-pending-agg">Expense bills pending ${formatMoney(openAmt)}</span>
+        <td colspan="2">Total</td>
+        <td class="cash-float-amt fdoc-funding-col-num ${moneyClass(openingStart)}">${formatMoney(openingStart)}</td>
+        <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(chequeTotal)}</td>
+        <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(billsTotal)}</td>
+        <td class="cash-float-amt fdoc-funding-col-num ${moneyClass(finalLeft)}"><strong>${formatMoney(finalLeft)}</strong></td>
+        <td class="fdoc-funding-col-actions">
+          ${openAmt > 0.009 ? `<span class="fdoc-funding-pending-agg">Pending ${formatMoney(openAmt)}</span>` : ''}
         </td>
       </tr>
     </tfoot>
@@ -1371,7 +1644,7 @@ const listCashToBankDeposits = () => {
 const renderCashToBankTableHtml = (summary = {}) => {
   const rows = listCashToBankDeposits();
   if (!rows.length) {
-    return `<p class="fa-panel__hint">No cash banked yet. Select cash receipt(s) below → <strong>Deposit to bank</strong> → pick the bank credit. Shortfall pulls from wallet float and shows here.</p>`;
+    return `<p class="fdoc-funding-empty">None yet. Use Deposit to bank on open cash receipts.</p>`;
   }
 
   const body = rows.map(({ t, receiptsAmt, receiptCount, fromWallet, offDesk }) => {
@@ -1408,24 +1681,19 @@ const renderCashToBankTableHtml = (summary = {}) => {
     <tbody>${body}</tbody>
     <tfoot>
       <tr class="fdoc-funding-totals">
-        <td colspan="3">Reduces Left</td>
+        <td colspan="3">Total</td>
         <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(totalReceipts)}</td>
         <td class="cash-float-amt fdoc-funding-col-num">${formatMoney(totalWallet)}</td>
         <td class="cash-float-amt fdoc-funding-col-num fdoc-funding-offdesk">${formatMoney(totalOff)}</td>
       </tr>
     </tfoot>
-  </table>
-  <p class="fa-panel__hint" style="margin:0.45rem 0 0;">
-    Left on hand now ${formatMoney(summary.unused ?? 0)}
-    (bank unused ${formatMoney(summary.bankUnused ?? 0)}
-    + receipts ${formatMoney(summary.receiptsOnHand ?? 0)}
-    − wallet→bank ${formatMoney(summary.deskDeposits ?? 0)}).
-  </p>`;
+  </table>`;
 };
 
 const renderFloatKpis = (f) => {
   const kpiEl = document.getElementById('fdoc-float-kpis');
   const fundingMeta = document.getElementById('fdoc-funding-summary-meta');
+  const cashToBankMeta = document.getElementById('fdoc-cash-to-bank-meta');
   const fundingTable = document.getElementById('fdoc-funding-table');
   const cashToBankTable = document.getElementById('fdoc-cash-to-bank-table');
   if (!kpiEl) return;
@@ -1440,19 +1708,11 @@ const renderFloatKpis = (f) => {
       </div>
     </div>
     <div class="ledger-kpi">
-      <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i>
-      <div class="ledger-kpi__body">
-        <span class="ledger-kpi__label">Cash receipts</span>
-        <span class="ledger-kpi__value">${formatMoney(f.receiptsAmt)}</span>
-        <span class="ledger-kpi__hint">${f.receiptsCount} · banked ${formatMoney(f.depositedAmt)}${f.deskDeposits ? ` · float ${formatMoney(f.deskDeposits)}` : ''}</span>
-      </div>
-    </div>
-    <div class="ledger-kpi">
       <i class="fa-solid fa-vault" aria-hidden="true"></i>
       <div class="ledger-kpi__body">
         <span class="ledger-kpi__label">Left (on hand)</span>
         <span class="ledger-kpi__value">${formatMoney(f.unused)}</span>
-        <span class="ledger-kpi__hint">Unused ${formatMoney(f.bankUnused)} + receipts ${formatMoney(f.receiptsOnHand)} − banked float ${formatMoney(f.deskDeposits)}</span>
+        <span class="ledger-kpi__hint">Final bucket Left</span>
       </div>
     </div>
     <div class="ledger-kpi">
@@ -1466,7 +1726,11 @@ const renderFloatKpis = (f) => {
   `;
 
   if (fundingMeta) {
-    fundingMeta.textContent = `Left ${formatMoney(f.unused)} · buckets ${formatMoney(f.bankFunded)} · to bank ${formatMoney(round2(f.depositedAmt + f.deskDeposits))}`;
+    fundingMeta.textContent = `Left ${formatMoney(f.unused)} · ${f.fundingCount} bucket${f.fundingCount === 1 ? '' : 's'}`;
+  }
+  if (cashToBankMeta) {
+    const banked = round2((f.depositedAmt || 0) + (f.deskDeposits || 0));
+    cashToBankMeta.textContent = banked > 0.009 ? formatMoney(banked) : 'None';
   }
   if (fundingTable) {
     fundingTable.innerHTML = renderFundingTableHtml(f.funding, f);
@@ -1474,7 +1738,65 @@ const renderFloatKpis = (f) => {
   if (cashToBankTable) {
     cashToBankTable.innerHTML = renderCashToBankTableHtml(f);
   }
+  renderCashOpeningControls(f);
 };
+
+const suggestedOpeningForTarget = (f, targetLeft) => {
+  // finalLeft = opening + cheques − bills + receipts − deskDeposits
+  const runExOpening = round2(
+    (f.bankFunded || 0) - (f.linkedAmt || 0) + (f.receiptsOnHand || 0) - (f.deskDeposits || 0),
+  );
+  return round2((Number(targetLeft) || 0) - runExOpening);
+};
+
+const renderCashOpeningControls = (f) => {
+  const dateEl = document.getElementById('fdoc-cash-opening-date');
+  const amtEl = document.getElementById('fdoc-cash-opening-amount');
+  const hintEl = document.getElementById('fdoc-cash-opening-hint');
+  if (!dateEl || !amtEl) return;
+
+  const opening = getCashFloatOpeningConfig();
+  if (!dateEl.dataset.touched) {
+    dateEl.value = opening.date || '2026-04-01';
+  }
+  if (!amtEl.dataset.touched) {
+    amtEl.value = opening.amount != null ? String(opening.amount) : '';
+  }
+
+  if (hintEl) {
+    if (opening.amount == null) {
+      const suggest360 = suggestedOpeningForTarget(f, 360);
+      hintEl.hidden = false;
+      hintEl.textContent = `Suggested for ₹360 on hand: ${formatMoney(suggest360)}`;
+    } else {
+      hintEl.hidden = true;
+      hintEl.textContent = '';
+    }
+  }
+};
+
+export async function saveCashFloatOpening(date, amount) {
+  const apt = portalState.access?.activeApartmentId;
+  if (!apt) throw new Error('Select an apartment first.');
+  const bank = portalState.admin?.bankAccount || {};
+  const result = await postFinanceMutation('saveCashFloatOpening', {
+    apartment_id: apt,
+    date,
+    amount,
+    bank,
+  });
+  if (result.bankAccount) {
+    portalState.admin = portalState.admin || {};
+    portalState.admin.bankAccount = {
+      ...(portalState.admin.bankAccount || {}),
+      ...result.bankAccount,
+    };
+  } else if (portalState.admin?.bankAccount) {
+    portalState.admin.bankAccount.cash_float_opening_balance = amount;
+    portalState.admin.bankAccount.cash_float_opening_date = amount == null ? null : date;
+  }
+  return result;
+}
 
 const syncBulkActionButtons = () => {
   const checked = [...document.querySelectorAll('#fdoc-table-body .fdoc-row-check:checked')];
@@ -1575,6 +1897,10 @@ export function renderFinanceDocumentsPage() {
   const meta = document.getElementById('fdoc-meta');
   if (!body) return;
 
+  applyFinanceDocsStaffMode();
+  const staffOnly = isStaffBillsOnly();
+  const manage = canManageFinanceDocs();
+
   renderFdocReportBanner();
 
   const docs = filteredDocs();
@@ -1583,13 +1909,20 @@ export function renderFinanceDocumentsPage() {
   const linkedAmt = round2(all.filter((d) => d.status === 'linked' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
 
   if (meta) {
-    meta.textContent = `${all.length} bill(s)/receipt(s) · open ${formatMoney(openAmt)} · linked ${formatMoney(linkedAmt)}`;
+    meta.textContent = staffOnly
+      ? `${all.length} bill(s)/receipt(s) · add & upload only`
+      : `${all.length} bill(s)/receipt(s) · open ${formatMoney(openAmt)} · linked ${formatMoney(linkedAmt)}`;
   }
 
-  renderFloatKpis(computeBillsCashFloatSummary());
+  if (!staffOnly) {
+    renderFloatKpis(computeBillsCashFloatSummary());
+  }
 
   const selectAll = document.getElementById('fdoc-select-all');
-  if (selectAll) selectAll.checked = false;
+  if (selectAll) {
+    selectAll.checked = false;
+    selectAll.hidden = staffOnly;
+  }
 
   if (!docs.length) {
     body.innerHTML = `<tr><td colspan="9" class="fa-panel__hint">No bills or receipts yet. Use Add bill / Add receipt, or Import Excel (Expenses + Income sheets). Attachments go to private Cloudflare R2.</td></tr>`;
@@ -1606,15 +1939,20 @@ export function renderFinanceDocumentsPage() {
     const linkLabel = d.transaction_id
       ? `<span class="fdoc-status fdoc-status--linked" title="${esc(txnLabel(d.transaction_id))}">Linked</span>`
       : `<span class="fdoc-status fdoc-status--open">Open</span>`;
-    const linkBtn = d.transaction_id
-      ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
-      : `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`;
+    const linkBtn = manage
+      ? (d.transaction_id
+        ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
+        : `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
+      : '';
+    const delBtn = manage
+      ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+      : '';
     const pay = paymentInfo(d);
     const payClass = pay.mode === 'cash' ? 'fdoc-pay fdoc-pay--cash' : (pay.mode === 'cheque' ? 'fdoc-pay fdoc-pay--cheque' : 'fdoc-pay');
     const isIncome = d.kind === 'IN';
     return `<tr class="fdoc-row fdoc-row--clickable" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}" title="Click row to view details">
-      <td class="fdoc-check-col">
-        <input type="checkbox" class="fdoc-row-check" value="${esc(d.id)}" aria-label="Select bill" />
+      <td class="fdoc-check-col"${staffOnly ? ' hidden' : ''}>
+        <input type="checkbox" class="fdoc-row-check" value="${esc(d.id)}" aria-label="Select bill" ${staffOnly ? 'disabled' : ''} />
       </td>
       <td class="fdoc-cell-open">${esc(date)}</td>
       <td class="fdoc-cell-open">${isIncome ? 'Income' : 'Expense'}</td>
@@ -1627,38 +1965,16 @@ export function renderFinanceDocumentsPage() {
         ${linkBtn}
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-view="${esc(d.id)}" title="View details" aria-label="View details"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-edit="${esc(d.id)}" title="Edit" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-        <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+        ${delBtn}
       </td>
     </tr>`;
   }).join('');
   syncBulkActionButtons();
 }
 
-const fdocCatOptions = (isIncome) => {
-  const base = isIncome ? INCOME_CATS : EXPENSE_CATS;
-  const fromDocs = (portalState.finances.financeDocuments || [])
-    .filter((d) => (isIncome ? d.kind === 'IN' : d.kind === 'OUT') && d.cat)
-    .map((d) => normalizeCategoryKey(d.cat) || d.cat);
-  const fromTxns = (portalState.finances.txns || [])
-    .filter((t) => (isIncome ? t.type === 'IN' : t.type === 'OUT') && t.cat)
-    .map((t) => normalizeCategoryKey(t.cat) || t.cat);
-  return [...new Set([...base, ...fromDocs, ...fromTxns].filter(Boolean))]
-    .sort((a, b) => categoryDisplayLabel(a).localeCompare(categoryDisplayLabel(b)));
-};
+const fdocCatOptions = (isIncome) => buildCategoryOptions(isIncome);
 
-const fdocSubOptions = (catKey) => {
-  if (!catKey) return [];
-  const key = normalizeCategoryKey(catKey) || catKey;
-  const defaults = SUB_CAT_SUGGESTIONS[key] || SUB_CAT_SUGGESTIONS.Other || [];
-  const saved = (portalState.finances.subCategories || [])
-    .filter((row) => row.category === key || row.category === catKey)
-    .map((row) => row.name);
-  const fromDocs = (portalState.finances.financeDocuments || [])
-    .filter((d) => d.kind === 'OUT' && d.sub_category && (normalizeCategoryKey(d.cat) || d.cat) === key)
-    .map((d) => d.sub_category);
-  return [...new Set([...defaults, ...saved, ...fromDocs].filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-};
+const fdocSubOptions = (catKey) => buildSubCategoryOptions(catKey);
 
 const renderFdocClassifyDisplay = (d, isIncome) => {
   const catKey = d.cat ? (normalizeCategoryKey(d.cat) || d.cat) : '';
@@ -1728,6 +2044,9 @@ const openFdocCatEditor = (docId) => {
     if (catWrap) {
       wireClassifyCombobox(catWrap, {
         getOptions: () => fdocCatOptions(isIncome),
+        onCustomSelect: (value) => {
+          registerCustomCategory(value, isIncome);
+        },
         onKnownSelect: () => {
           if (subInput) {
             subInput.value = '';
@@ -1743,6 +2062,11 @@ const openFdocCatEditor = (docId) => {
           const raw = row.querySelector('.fdoc-cat-input')?.value?.trim() || '';
           const key = normalizeCategoryKey(isExactListMatch(raw, fdocCatOptions(isIncome)) || raw) || raw;
           return fdocSubOptions(key);
+        },
+        onCustomSelect: (value) => {
+          const raw = row.querySelector('.fdoc-cat-input')?.value?.trim() || '';
+          const key = normalizeCategoryKey(isExactListMatch(raw, fdocCatOptions(isIncome)) || raw) || raw;
+          registerCustomSubCategory(key, value);
         },
       });
     }
@@ -2046,6 +2370,140 @@ export function initFinanceDocumentsPage() {
     void linkSelectedDocsToTxn(txnId).catch((err) => alert(err?.message || 'Link failed.'));
   });
 
+  document.getElementById('fdoc-funding-table')?.addEventListener('click', (e) => {
+    const excludeBtn = e.target.closest('[data-funding-exclude]');
+    if (excludeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const txnId = excludeBtn.dataset.fundingExclude;
+      if (!txnId) return;
+      void withButtonBusy(excludeBtn, '…', async () => {
+        const updated = await excludeLedgerFromCashFloat(txnId);
+        if (updated) {
+          renderFinanceDocumentsPage();
+          window.renderCashLedger?.();
+        }
+      }).catch((err) => alert(err?.message || 'Could not exclude from float.'));
+      return;
+    }
+
+    const chequeBtn = e.target.closest('[data-funding-cheque]');
+    if (chequeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const txnId = chequeBtn.dataset.fundingCheque;
+      if (!txnId) return;
+      const t = (portalState.finances.txns || []).find((x) => x.id === txnId);
+      const label = t
+        ? `${t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : ''} · ${formatMoney(t.amount)} · Petty Cash cheque`.trim()
+        : 'Petty Cash funding cheque';
+      void import('./ledgerFilter.js').then(({ navigateToLedgerFromPivot }) => {
+        navigateToLedgerFromPivot({
+          type: 'OUT',
+          transactionId: txnId,
+          label,
+        });
+      });
+      return;
+    }
+
+    const billsBtn = e.target.closest('[data-funding-bills]');
+    if (billsBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const txnId = billsBtn.dataset.fundingBills;
+      if (!txnId) return;
+      const t = (portalState.finances.txns || []).find((x) => x.id === txnId);
+      const label = t
+        ? `bucket ${t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : ''} · ${formatMoney(t.amount)}`.trim()
+        : 'Petty Cash bucket';
+      void import('./ledgerFilter.js').then(({ navigateToFinanceDocsFromPivot }) => {
+        navigateToFinanceDocsFromPivot({
+          type: 'OUT',
+          transactionId: txnId,
+          label,
+        });
+        // Ensure bill list is visible under any open funding panel.
+        requestAnimationFrame(() => {
+          document.getElementById('fdoc-report-banner')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      });
+      return;
+    }
+
+    const row = e.target.closest('tr.fdoc-funding-row[data-funding-txn]');
+    if (!row) return;
+    // Ignore clicks on numeric drill targets already handled above.
+    if (e.target.closest('.fdoc-funding-drill, .fdoc-funding-col-actions')) return;
+    const txnId = row.dataset.fundingTxn;
+    if (!txnId) return;
+    window.editTxn?.(txnId);
+  });
+
+  const openingDateEl = document.getElementById('fdoc-cash-opening-date');
+  const openingAmtEl = document.getElementById('fdoc-cash-opening-amount');
+  openingDateEl?.addEventListener('input', () => { openingDateEl.dataset.touched = '1'; });
+  openingAmtEl?.addEventListener('input', () => { openingAmtEl.dataset.touched = '1'; });
+
+  document.getElementById('fdoc-cash-opening-save')?.addEventListener('click', () => {
+    const btn = document.getElementById('fdoc-cash-opening-save');
+    const date = openingDateEl?.value || '';
+    const raw = openingAmtEl?.value?.trim();
+    const amount = raw === '' || raw == null ? null : parseFloat(raw);
+    void withButtonBusy(btn, 'Saving…', async () => {
+      await saveCashFloatOpening(date || '2026-04-01', amount);
+      if (openingDateEl) delete openingDateEl.dataset.touched;
+      if (openingAmtEl) delete openingAmtEl.dataset.touched;
+      renderFinanceDocumentsPage();
+    }).catch((err) => alert(err?.message || 'Could not save opening cash.'));
+  });
+
+  document.getElementById('fdoc-cash-opening-match')?.addEventListener('click', () => {
+    const f = computeBillsCashFloatSummary();
+    const runExOpening = round2(
+      (f.bankFunded || 0) - (f.linkedAmt || 0) + (f.receiptsOnHand || 0) - (f.deskDeposits || 0),
+    );
+    const raw = prompt(
+      `Physical cash on hand now (₹)?\n\n`
+      + `Without opening, the bucket run ends at ${formatMoney(runExOpening)} `
+      + `(cheques ${formatMoney(f.bankFunded)} − bills ${formatMoney(f.linkedAmt)}`
+      + `${(f.receiptsOnHand > 0.009 || f.deskDeposits > 0.009)
+        ? ` + receipts ${formatMoney(f.receiptsOnHand)} − banked ${formatMoney(f.deskDeposits)}`
+        : ''}).\n`
+      + `Opening will be: physical − that run.`,
+      '360',
+    );
+    if (raw == null) return;
+    const target = parseFloat(String(raw).replace(/[,₹]/g, ''));
+    if (!Number.isFinite(target)) {
+      alert('Enter a valid amount.');
+      return;
+    }
+    const opening = suggestedOpeningForTarget(f, target);
+    const date = openingDateEl?.value || '2026-04-01';
+    if (openingAmtEl) {
+      openingAmtEl.value = String(opening);
+      openingAmtEl.dataset.touched = '1';
+    }
+    if (openingDateEl && !openingDateEl.value) {
+      openingDateEl.value = date;
+      openingDateEl.dataset.touched = '1';
+    }
+    const ok = confirm(
+      `Set opening cash to ${formatMoney(opening)} as of ${date}?\n\n`
+      + `Then Left (on hand) = ${formatMoney(opening)} + ${formatMoney(runExOpening)} = ${formatMoney(target)}.\n\n`
+      + `Negative monthly Left carries into the next Prev until the final Left matches ${formatMoney(target)}.`,
+    );
+    if (!ok) return;
+    const btn = document.getElementById('fdoc-cash-opening-match');
+    void withButtonBusy(btn, 'Saving…', async () => {
+      await saveCashFloatOpening(date, opening);
+      if (openingDateEl) delete openingDateEl.dataset.touched;
+      if (openingAmtEl) delete openingAmtEl.dataset.touched;
+      renderFinanceDocumentsPage();
+    }).catch((err) => alert(err?.message || 'Could not save opening cash.'));
+  });
+
   renderFinanceDocumentsPage();
 }
 
@@ -2055,9 +2513,32 @@ export async function markLedgerAsCashFloat(txnId, isCashFloat = true) {
     transaction_id: txnId,
     is_cash_float: isCashFloat,
     set_petty_cash_cat: true,
+    // Clearing the wallet mark also opts the line out of auto Petty Cash buckets.
+    exclude_from_cash_float: !isCashFloat,
   });
   if (result.transaction) applySavedTransactionLocally(result.transaction);
   return result.transaction;
+}
+
+/** Remove a funding line from Petty Cash buckets without deleting the ledger entry. */
+export async function excludeLedgerFromCashFloat(txnId) {
+  const linked = linkedCashTotalForTxn(txnId);
+  if (linked > 0.009) {
+    const ok = confirm(
+      `This bucket still has ${formatMoney(linked)} in linked cash bills.\n\n`
+      + 'Exclude it from Petty Cash buckets anyway?\n'
+      + '(Bills stay linked on the ledger; the bucket just leaves the float list.)',
+    );
+    if (!ok) return null;
+  } else {
+    const ok = confirm(
+      'Exclude this line from Petty Cash buckets?\n\n'
+      + 'The ledger entry stays; it will no longer count toward float / Wallet Left.\n'
+      + 'You can put it back later with the wallet icon on the Ledger.',
+    );
+    if (!ok) return null;
+  }
+  return markLedgerAsCashFloat(txnId, false);
 }
 
 const paymentNotesFromTxn = (txn) => {

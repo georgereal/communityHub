@@ -43,9 +43,16 @@ const txnMatchesExpenseSourceScope = (txn, scope) => {
     return true;
 };
 
+const reportWallet = (txn) =>
+    String(txn?.wallet || '').toUpperCase() === 'BANK' ? 'BANK' : 'CASH';
+
 const pivotKeyOnTxn = (txn, dimension) => {
     if (dimension === 'sub_category') return txn.sub_category?.trim() || '(none)';
     if (dimension === 'vendor') return txn.vendor_name?.trim() || '(none)';
+    if (dimension === 'wallet_cat') {
+        const cat = normalizeCategoryKey(txn.cat || 'Other');
+        return `${reportWallet(txn)}|${cat}`;
+    }
     return normalizeCategoryKey(txn.cat || 'Other');
 };
 
@@ -258,6 +265,8 @@ export const txnMatchesLedgerSearch = (txn, rawQuery) => {
 export const txnMatchesLedgerPivotFilter = (txn) => {
     if (!ledgerPivotFilter || !txn) return true;
     const f = ledgerPivotFilter;
+    // Exact ledger row (e.g. Petty Cash funding cheque from buckets table).
+    if (f.transactionId) return txn.id === f.transactionId;
     if (f.type && txn.type !== f.type) return false;
     if (f.sourceScope && !txnMatchesExpenseSourceScope(txn, f.sourceScope)) return false;
     // Match expense pivot in cash_detail: bank Petty funding + cash-desk ledger
@@ -265,7 +274,19 @@ export const txnMatchesLedgerPivotFilter = (txn) => {
     if (f.cashExpenseReporting === 'cash_detail' && !txn._fromFinanceDocument) {
         if (isBankPettyFunding(txn) || isCashDeskSpend(txn)) return false;
     }
-    if (f.key && f.key !== '__other__' && pivotKeyOnTxn(txn, f.dimension) !== f.key) return false;
+    if (f.wallet && reportWallet(txn) !== f.wallet) return false;
+    if (f.key && f.key !== '__other__') {
+        if (f.dimension === 'wallet_cat') {
+            // Group row key is CASH/BANK; leaf is CASH|Category.
+            if (f.key.includes('|')) {
+                if (pivotKeyOnTxn(txn, 'wallet_cat') !== f.key) return false;
+            } else if (reportWallet(txn) !== f.key) {
+                return false;
+            }
+        } else if (pivotKeyOnTxn(txn, f.dimension) !== f.key) {
+            return false;
+        }
+    }
     const d = new Date(txn.date);
     if (f.year != null && f.month != null) {
         if (d.getFullYear() !== f.year || d.getMonth() !== f.month) return false;
@@ -291,10 +312,25 @@ const describeLedgerPivotFilter = (f) => {
     else if (f.sourceScope === 'excluded-reports') parts.push('excluded from reports');
     else if (f.sourceScope === 'omitted') parts.push('omitted from expense pivot');
 
-    if (f.key && f.key !== '__other__') {
-        const dim =
-            f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
-        parts.push(`${dim}: ${categoryDisplayLabel(f.key)}`);
+    if (f.transactionId) {
+        parts.push(f.label || 'Petty Cash funding cheque');
+    } else if (f.key && f.key !== '__other__') {
+        if (f.dimension === 'wallet_cat') {
+            if (f.key.includes('|')) {
+                const cat = f.key.split('|').slice(1).join('|');
+                const wallet = f.wallet || f.key.split('|')[0];
+                const wLabel = wallet === 'BANK' ? 'Bank' : 'Cash';
+                parts.push(`${wLabel} · ${categoryDisplayLabel(cat)}`);
+            } else {
+                parts.push(f.key === 'BANK' ? 'Bank' : 'Cash');
+            }
+        } else {
+            const dim =
+                f.dimension === 'sub_category' ? 'sub-category' : f.dimension === 'vendor' ? 'vendor' : 'category';
+            parts.push(`${dim}: ${categoryDisplayLabel(f.key)}`);
+        }
+    } else if (f.wallet) {
+        parts.push(f.wallet === 'BANK' ? 'Bank' : 'Cash');
     } else if (f.scope === 'col-total' || f.scope === 'grand-total') {
         parts.push('all categories');
     }
@@ -338,9 +374,16 @@ export const renderLedgerPivotBanner = () => {
         return;
     }
 
-    const showBillsJump = ledgerPivotFilter.cashExpenseReporting === 'cash_detail'
-        && ledgerPivotFilter.type !== 'IN'
-        && !ledgerPivotFilter.sourceScope;
+    const showBillsJump = ledgerPivotFilter.type !== 'IN'
+        && !ledgerPivotFilter.sourceScope
+        && (
+            !!ledgerPivotFilter.transactionId
+            || (
+                ledgerPivotFilter.cashExpenseReporting === 'cash_detail'
+                && ledgerPivotFilter.wallet !== 'BANK'
+                && ledgerPivotFilter.key !== 'BANK'
+            )
+        );
 
     el.hidden = false;
     el.innerHTML = `

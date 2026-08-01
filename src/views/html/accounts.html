@@ -345,6 +345,7 @@
                 <span>Pivot by</span>
                 <select id="fa-pivot-dimension" class="expense-combobox">
                   <option value="cat">Category</option>
+                  <option value="wallet_cat">Cash / Bank → Category</option>
                   <option value="sub_category">Sub-category</option>
                   <option value="vendor">Vendor</option>
                 </select>
@@ -491,21 +492,35 @@
 
           <section id="fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" aria-label="Cash float store"></section>
 
-          <details class="fdoc-funding-details" id="fdoc-funding-details">
+          <details class="fdoc-funding-details" id="fdoc-funding-details" open>
             <summary class="fdoc-funding-details__summary">
-              <span>Funding — bank Petty Cash</span>
+              <span class="fdoc-funding-details__title">Petty Cash float</span>
               <span id="fdoc-funding-summary-meta" class="fdoc-funding-details__meta"></span>
             </summary>
-            <p class="fa-panel__hint" style="margin:0.5rem 0 0.75rem;">
-              <strong>1.</strong> Select cash receipts in the table below → <strong>Deposit to bank</strong> → pick the bank credit.
-              Amounts need not match; shortfall comes from wallet float.
-              <strong>2.</strong> Petty Cash rows below are money <em>into</em> the desk; deposits to bank appear under
-              <strong>Cash to bank</strong> (that is where Left is reduced).
-            </p>
-            <h4 class="fdoc-funding-section-title">Petty Cash buckets (in)</h4>
-            <div id="fdoc-funding-table" class="fa-table-wrap"></div>
-            <h4 class="fdoc-funding-section-title">Cash to bank (out of desk)</h4>
-            <div id="fdoc-cash-to-bank-table" class="fa-table-wrap"></div>
+            <div class="fdoc-funding-details__body">
+              <div class="fdoc-cash-opening" id="fdoc-cash-opening">
+                <span class="fdoc-cash-opening__label" title="Desk cash before the first bucket (Prev on the first row)">Opening</span>
+                <label class="fdoc-cash-opening__field">
+                  <span class="visually-hidden">As of</span>
+                  <input type="date" id="fdoc-cash-opening-date" class="expense-combobox" aria-label="Opening as of" />
+                </label>
+                <label class="fdoc-cash-opening__field fdoc-cash-opening__field--amt">
+                  <span class="visually-hidden">Opening cash</span>
+                  <input type="number" id="fdoc-cash-opening-amount" class="expense-combobox" step="1" placeholder="₹ opening" aria-label="Opening cash" />
+                </label>
+                <button type="button" class="btn btn-outline btn--small" id="fdoc-cash-opening-save">Save</button>
+                <button type="button" class="btn btn-outline btn--small" id="fdoc-cash-opening-match" title="Set opening so Left equals a cash count">Match…</button>
+                <p class="fdoc-cash-opening__hint" id="fdoc-cash-opening-hint" hidden></p>
+              </div>
+              <div id="fdoc-funding-table" class="fa-table-wrap fdoc-funding-table-wrap"></div>
+              <details class="fdoc-funding-sub" id="fdoc-cash-to-bank-details">
+                <summary class="fdoc-funding-sub__summary">
+                  <span>Cash to bank</span>
+                  <span id="fdoc-cash-to-bank-meta" class="fdoc-funding-details__meta"></span>
+                </summary>
+                <div id="fdoc-cash-to-bank-table" class="fa-table-wrap"></div>
+              </details>
+            </div>
           </details>
 
           <div id="fdoc-report-banner" class="ledger-pivot-banner" hidden></div>
@@ -592,6 +607,115 @@
                 <span>Use wallet float when bank deposit ≠ selected receipts</span>
               </label>
               <div id="fdoc-link-list" class="fdoc-link-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="subview-expense-plan" class="eplan-subview" style="display:none; padding: 0 1.6rem 1.6rem;">
+          <div class="eplan-toolbar">
+            <p class="fa-panel__hint" style="margin:0;">Planned spends over the horizon vs book balance. Click a row for details.</p>
+            <div class="eplan-toolbar__actions">
+              <label class="eplan-horizon">
+                <span>Horizon</span>
+                <select id="eplan-horizon" class="expense-combobox">
+                  <option value="3">3 months</option>
+                  <option value="6" selected>6 months</option>
+                  <option value="12">12 months</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-outline btn--small" id="eplan-add-oneoff" hidden>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add one-off
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="eplan-add-recurring" hidden>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add recurring
+              </button>
+            </div>
+          </div>
+          <section id="eplan-summary" class="ledger-kpi-bar" aria-label="Expense plan summary"></section>
+
+          <section class="fa-panel eplan-main" style="margin-top:0.75rem;">
+            <div class="eplan-section-head">
+              <h4 class="fdoc-funding-section-title" style="margin:0;">Planned expenses</h4>
+              <span id="eplan-timeline-meta" class="eplan-section-meta"></span>
+            </div>
+            <div id="eplan-timeline" class="fa-table-wrap"></div>
+          </section>
+
+          <details class="fa-panel eplan-templates" id="eplan-templates-panel">
+            <summary class="eplan-templates__summary">
+              <span>Recurring templates</span>
+              <span id="eplan-recurring-meta" class="eplan-section-meta"></span>
+            </summary>
+            <div id="eplan-recurring-list" class="fa-table-wrap" style="margin-top:0.65rem;"></div>
+          </details>
+
+          <div id="eplan-detail-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="eplan-detail-backdrop"></div>
+            <div class="fdoc-link-modal__panel fdoc-link-modal__panel--wide" role="dialog" aria-labelledby="eplan-detail-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="eplan-detail-title" class="fa-panel__title" style="margin:0;">Details</h3>
+                <button type="button" class="btn btn-outline btn--small" id="eplan-detail-close">Close</button>
+              </div>
+              <div id="eplan-detail-body" class="eplan-detail__body"></div>
+            </div>
+          </div>
+
+          <div id="eplan-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="eplan-modal-backdrop"></div>
+            <div class="fdoc-link-modal__panel fdoc-link-modal__panel--wide" role="dialog" aria-labelledby="eplan-modal-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="eplan-modal-title" class="fa-panel__title" style="margin:0;">Add</h3>
+                <button type="button" class="btn btn-outline btn--small" id="eplan-modal-close">Close</button>
+              </div>
+              <div id="eplan-modal-oneoff" class="eplan-modal-form" hidden>
+                <div class="eplan-form-grid">
+                  <label class="eplan-form-span eplan-form-primary">
+                    <span>What’s it for</span>
+                    <input type="text" id="eplan-item-desc" class="expense-combobox" placeholder="e.g. Transformer earthing" required />
+                  </label>
+                  <label><span>Category</span>
+                    <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat" id="eplan-item-cat-wrap">
+                      <input type="text" id="eplan-item-cat" class="expense-combobox" placeholder="Type or pick category" autocomplete="off" />
+                      <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+                    </div>
+                  </label>
+                  <label><span>Vendor</span><input type="text" id="eplan-item-vendor" class="expense-combobox" placeholder="Optional" /></label>
+                  <label><span>Amount</span><input type="number" id="eplan-item-amount" class="expense-combobox" step="1" min="0" placeholder="0" /></label>
+                  <label><span>Planned for</span><input type="date" id="eplan-item-date" class="expense-combobox" /></label>
+                  <label><span>Due by</span><input type="date" id="eplan-item-due" class="expense-combobox" title="Complete by this date" /></label>
+                </div>
+                <div class="eplan-modal-actions">
+                  <button type="button" class="btn btn-primary" id="eplan-item-save">Save one-off</button>
+                </div>
+              </div>
+              <div id="eplan-modal-recurring" class="eplan-modal-form" hidden>
+                <div class="eplan-form-grid">
+                  <label class="eplan-form-span eplan-form-primary">
+                    <span>What’s it for</span>
+                    <input type="text" id="eplan-rec-title" class="expense-combobox" placeholder="e.g. Lift AMC" />
+                  </label>
+                  <label class="eplan-form-span"><span>Category</span>
+                    <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat" id="eplan-rec-cat-wrap">
+                      <input type="text" id="eplan-rec-cat" class="expense-combobox" placeholder="Type or pick category" autocomplete="off" />
+                      <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+                    </div>
+                  </label>
+                  <label><span>Amount</span><input type="number" id="eplan-rec-amount" class="expense-combobox" step="1" min="0" placeholder="0" /></label>
+                  <label><span>Every</span>
+                    <select id="eplan-rec-cadence" class="expense-combobox">
+                      <option value="monthly">Month</option>
+                      <option value="quarterly">Quarter</option>
+                      <option value="yearly">Year</option>
+                    </select>
+                  </label>
+                  <label><span>On day</span><input type="number" id="eplan-rec-day" class="expense-combobox" min="1" max="28" value="1" title="Day of month the spend falls" /></label>
+                  <label><span>Due day</span><input type="number" id="eplan-rec-due-day" class="expense-combobox" min="1" max="28" value="1" title="Complete by this day of the month" /></label>
+                  <label><span>Starts</span><input type="date" id="eplan-rec-start" class="expense-combobox" /></label>
+                </div>
+                <div class="eplan-modal-actions">
+                  <button type="button" class="btn btn-primary" id="eplan-rec-save">Save recurring</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

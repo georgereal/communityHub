@@ -1,4 +1,4 @@
-import { requireApartmentPermission } from './serverAuth.js';
+import { requireApartmentPermission, requireAnyApartmentPermission } from './serverAuth.js';
 import { prepareImportedStatementLines, computeRunningBalances } from '../src/bankStatementOrdering.js';
 import { inferExpenseCategory, BANK_REJECT_CAT } from '../src/expenseCategories.js';
 import { findMatchingRule } from '../src/bankClassificationRules.js';
@@ -539,13 +539,50 @@ async function setCashFloatFlagMutation(service, apartmentId, body) {
     if (isCashFloat && body.set_petty_cash_cat !== false) {
         patch.cat = 'Petty Cash';
     }
-    const { data, error } = await service
+    // Including in float clears exclude; clearing float mark (or explicit exclude) opts out of buckets.
+    if (Object.prototype.hasOwnProperty.call(body, 'exclude_from_cash_float')) {
+        patch.exclude_from_cash_float = body.exclude_from_cash_float === true;
+    } else if (isCashFloat) {
+        patch.exclude_from_cash_float = false;
+    } else {
+        // Unmarking wallet → stop counting bank Petty Cash as a float bucket.
+        patch.exclude_from_cash_float = true;
+    }
+
+    let { data, error } = await service
         .from('transactions')
         .update(patch)
         .eq('apartment_id', apartmentId)
         .eq('id', txnId)
         .select('*')
         .maybeSingle();
+
+    // Older DBs may lack exclude_from_cash_float — retry without it.
+    if (error && /exclude_from_cash_float/i.test(error.message)) {
+        const fallback = { ...patch };
+        delete fallback.exclude_from_cash_float;
+        ({ data, error } = await service
+            .from('transactions')
+            .update(fallback)
+            .eq('apartment_id', apartmentId)
+            .eq('id', txnId)
+            .select('*')
+            .maybeSingle());
+        if (!error && data && patch.exclude_from_cash_float) {
+            // Column missing: fall back to clearing Petty Cash so isBankPettyFunding drops the line.
+            if (String(data.cat || '').toLowerCase() === 'petty cash') {
+                const retry = await service
+                    .from('transactions')
+                    .update({ cat: 'Other', exclude_from_reports: true })
+                    .eq('apartment_id', apartmentId)
+                    .eq('id', txnId)
+                    .select('*')
+                    .maybeSingle();
+                if (!retry.error && retry.data) data = retry.data;
+            }
+        }
+    }
+
     if (error) throw Object.assign(new Error(error.message), { status: 500 });
     return { ok: true, transaction: data };
 }
@@ -710,6 +747,59 @@ async function deleteTransactionsMutation(service, apartmentId, body) {
     await maybeDeletePaths(service, paths);
 
     return { ok: true, deleted: ids.length };
+}
+
+async function saveCashFloatOpeningMutation(service, apartmentId, body) {
+    const date = body.date ? String(body.date).slice(0, 10) : null;
+    const amountRaw = body.amount;
+    const amount = amountRaw == null || amountRaw === '' ? null : parseFloat(amountRaw);
+    if (amount != null && Number.isNaN(amount)) {
+        throw Object.assign(new Error('Enter a valid opening cash amount.'), { status: 400 });
+    }
+    if (amount != null && !date) {
+        throw Object.assign(new Error('Enter the opening cash date.'), { status: 400 });
+    }
+
+    const bank = body.bank && typeof body.bank === 'object' ? body.bank : {};
+    const { data: existing } = await service
+        .from('apartment_bank_accounts')
+        .select('*')
+        .eq('apartment_id', apartmentId)
+        .maybeSingle();
+
+    const payload = {
+        id: existing?.id || bank.id || crypto.randomUUID(),
+        apartment_id: apartmentId,
+        bank_name: existing?.bank_name || bank.bank_name || 'Bank account',
+        cash_float_opening_balance: amount,
+        cash_float_opening_date: amount == null ? null : date,
+        updated_at: new Date().toISOString(),
+    };
+    ['branch', 'account_holder', 'account_number', 'ifsc', 'upi_id', 'notes',
+        'opening_balance', 'opening_balance_date'].forEach((key) => {
+        if (existing?.[key] != null) payload[key] = existing[key];
+        else if (bank[key] != null) payload[key] = bank[key];
+    });
+
+    let { data, error } = await service
+        .from('apartment_bank_accounts')
+        .upsert(payload, { onConflict: 'apartment_id' })
+        .select('*')
+        .maybeSingle();
+
+    if (error && /cash_float_opening/i.test(error.message)) {
+        throw Object.assign(
+            new Error('Run the cash float opening SQL migration (cash_float_opening_balance on apartment_bank_accounts).'),
+            { status: 500 },
+        );
+    }
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+    return {
+        ok: true,
+        bankAccount: data,
+        amount: data?.cash_float_opening_balance ?? null,
+        date: data?.cash_float_opening_date || null,
+    };
 }
 
 async function saveBankOpeningBalanceMutation(service, apartmentId, body) {
@@ -1534,6 +1624,134 @@ async function setLedgerExclusionMutation(service, apartmentId, body) {
     return { ok: true, excluded };
 }
 
+async function saveExpensePlanItemMutation(service, apartmentId, userId, body) {
+    const row = {
+        apartment_id: apartmentId,
+        plan_date: body.plan_date || body.date,
+        due_date: body.due_date || null,
+        amount: roundMoney(body.amount),
+        cat: body.cat || null,
+        sub_category: body.sub_category || null,
+        vendor_name: body.vendor_name || null,
+        description: body.description || null,
+        status: body.status || 'planned',
+        recurring_id: body.recurring_id || null,
+        notes: body.notes || null,
+        updated_at: new Date().toISOString(),
+    };
+    if (!row.plan_date) throw Object.assign(new Error('plan_date is required.'), { status: 400 });
+    if (!(row.amount >= 0)) throw Object.assign(new Error('amount must be ≥ 0.'), { status: 400 });
+    // If due_date column missing, retry without it.
+    const save = async (payload) => {
+        if (body.id) {
+            return service
+                .from('expense_plan_items')
+                .update(payload)
+                .eq('id', body.id)
+                .eq('apartment_id', apartmentId)
+                .select('*')
+                .single();
+        }
+        return service
+            .from('expense_plan_items')
+            .insert({ ...payload, created_by: userId || null })
+            .select('*')
+            .single();
+    };
+
+    let { data, error } = await save(row);
+    if (error && /due_date/i.test(error.message)) {
+        const { due_date: _drop, ...withoutDue } = row;
+        ({ data, error } = await save(withoutDue));
+        if (!error) {
+            return {
+                item: data,
+                warning: 'Run docs/scripts/sql/supabase_expense_plan_and_bills_entry.sql to enable due_date.',
+            };
+        }
+    }
+    if (error) throw Object.assign(new Error(error.message), { status: 400 });
+    return { item: data };
+}
+
+async function deleteExpensePlanItemMutation(service, apartmentId, body) {
+    const id = body.id || body.item_id;
+    if (!id) throw Object.assign(new Error('id is required.'), { status: 400 });
+    const { error } = await service
+        .from('expense_plan_items')
+        .delete()
+        .eq('id', id)
+        .eq('apartment_id', apartmentId);
+    if (error) throw Object.assign(new Error(error.message), { status: 400 });
+    return { ok: true, id };
+}
+
+async function saveExpensePlanRecurringMutation(service, apartmentId, userId, body) {
+    const day = Math.min(28, Math.max(1, parseInt(body.day_of_month, 10) || 1));
+    const dueDayRaw = body.due_day_of_month;
+    const dueDay = dueDayRaw == null || dueDayRaw === ''
+        ? day
+        : Math.min(28, Math.max(1, parseInt(dueDayRaw, 10) || day));
+    const row = {
+        apartment_id: apartmentId,
+        title: String(body.title || '').trim(),
+        amount: roundMoney(body.amount),
+        cat: body.cat || null,
+        sub_category: body.sub_category || null,
+        vendor_name: body.vendor_name || null,
+        description: body.description || null,
+        cadence: body.cadence || 'monthly',
+        day_of_month: day,
+        due_day_of_month: dueDay,
+        start_date: body.start_date,
+        end_date: body.end_date || null,
+        active: body.active !== false,
+        updated_at: new Date().toISOString(),
+    };
+    if (!row.title) throw Object.assign(new Error('title is required.'), { status: 400 });
+    if (!row.start_date) throw Object.assign(new Error('start_date is required.'), { status: 400 });
+    if (!['monthly', 'quarterly', 'yearly'].includes(row.cadence)) {
+        throw Object.assign(new Error('cadence must be monthly, quarterly, or yearly.'), { status: 400 });
+    }
+
+    const save = async (payload) => {
+        if (body.id) {
+            return service
+                .from('expense_plan_recurring')
+                .update(payload)
+                .eq('id', body.id)
+                .eq('apartment_id', apartmentId)
+                .select('*')
+                .single();
+        }
+        return service
+            .from('expense_plan_recurring')
+            .insert({ ...payload, created_by: userId || null })
+            .select('*')
+            .single();
+    };
+
+    let { data, error } = await save(row);
+    if (error && /due_day_of_month/i.test(error.message)) {
+        const { due_day_of_month: _drop, ...withoutDue } = row;
+        ({ data, error } = await save(withoutDue));
+    }
+    if (error) throw Object.assign(new Error(error.message), { status: 400 });
+    return { recurring: data };
+}
+
+async function deleteExpensePlanRecurringMutation(service, apartmentId, body) {
+    const id = body.id || body.recurring_id;
+    if (!id) throw Object.assign(new Error('id is required.'), { status: 400 });
+    const { error } = await service
+        .from('expense_plan_recurring')
+        .delete()
+        .eq('id', id)
+        .eq('apartment_id', apartmentId);
+    if (error) throw Object.assign(new Error(error.message), { status: 400 });
+    return { ok: true, id };
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -1542,7 +1760,10 @@ export default async function handler(req, res) {
     try {
         const body = req.body || await readJsonBody(req);
         const action = body.action;
-        const auth = await requireApartmentPermission(req, body.apartment_id, 'accounts.edit');
+        const billsEntryActions = new Set(['saveFinanceDocument', 'importFinanceDocuments']);
+        const auth = billsEntryActions.has(action)
+            ? await requireAnyApartmentPermission(req, body.apartment_id, ['accounts.edit', 'accounts.bills_entry'])
+            : await requireApartmentPermission(req, body.apartment_id, 'accounts.edit');
         const { apartmentId, service, user } = auth;
 
         let result;
@@ -1570,6 +1791,21 @@ export default async function handler(req, res) {
                 break;
             case 'setCashFloatFlag':
                 result = await setCashFloatFlagMutation(service, apartmentId, body);
+                break;
+            case 'saveCashFloatOpening':
+                result = await saveCashFloatOpeningMutation(service, apartmentId, body);
+                break;
+            case 'saveExpensePlanItem':
+                result = await saveExpensePlanItemMutation(service, apartmentId, user?.id, body);
+                break;
+            case 'deleteExpensePlanItem':
+                result = await deleteExpensePlanItemMutation(service, apartmentId, body);
+                break;
+            case 'saveExpensePlanRecurring':
+                result = await saveExpensePlanRecurringMutation(service, apartmentId, user?.id, body);
+                break;
+            case 'deleteExpensePlanRecurring':
+                result = await deleteExpensePlanRecurringMutation(service, apartmentId, body);
                 break;
             case 'deleteTransaction':
                 result = await deleteTransactionMutation(service, apartmentId, body);

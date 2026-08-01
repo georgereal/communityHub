@@ -135,3 +135,48 @@ export async function requireApartmentPermission(req, apartmentIdRaw, permission
 
     return { user, authHeader, apartmentId, service };
 }
+
+/** Accept if the user has any of the listed permissions. */
+export async function requireAnyApartmentPermission(req, apartmentIdRaw, permissionKeys = ['accounts.edit']) {
+    const keys = [...new Set((Array.isArray(permissionKeys) ? permissionKeys : [permissionKeys]).filter(Boolean))];
+    if (!keys.length) keys.push('accounts.edit');
+
+    const apartmentId = assertUuid(apartmentIdRaw, 'apartment_id');
+    const { user, authHeader } = await requireSession(req);
+    let service;
+    try {
+        service = createServiceClient();
+    } catch (err) {
+        if (!/SUPABASE_SERVICE_ROLE_KEY/i.test(err?.message || '')) throw err;
+        if (!keys.includes('accounts.edit')) {
+            throw Object.assign(
+                new Error('SUPABASE_SERVICE_ROLE_KEY is required for this server route in local development.'),
+                { status: 500 },
+            );
+        }
+        const fallback = await requireAccountsEditor(authHeader, apartmentId);
+        return {
+            user: fallback.user,
+            authHeader: fallback.authHeader,
+            apartmentId,
+            service: createUserClient(fallback.authHeader),
+        };
+    }
+
+    const { data: mapping, error: mapErr } = await service
+        .from('user_apartments')
+        .select('apartment_id')
+        .eq('user_id', user.id)
+        .eq('apartment_id', apartmentId)
+        .maybeSingle();
+    if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
+    if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+
+    for (const key of keys) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await userHasPermission(service, user.id, apartmentId, key)) {
+            return { user, authHeader, apartmentId, service };
+        }
+    }
+    throw Object.assign(new Error('Not permitted.'), { status: 403 });
+}

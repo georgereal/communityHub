@@ -22,9 +22,11 @@ import {
     isBankPettyFunding,
     isCashDeskSpend,
 } from './cashFloat.js';
-import { cashBillsAsReportExpenses, getOpenExpenseDocuments, getCashWalletLeft } from './financeDocuments.js';
+import { cashBillsAsReportExpenses, getOpenExpenseDocuments, getOpenChequeExpenseDocuments, getCashWalletLeft, isChequeFinanceDocument } from './financeDocuments.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const labelForCat = (cat) => categoryDisplayLabel(cat);
 
@@ -38,6 +40,60 @@ export const isExpenseFromBankRecon = (txn) =>
 
 export const isStructuredExpense = (txn) =>
     isExpenseFromSheet(txn) || isExpenseFromBankRecon(txn);
+
+/** Bank OUT that looks like a cheque (type CHEQUE, or CHQ/CHEQUE in narration/ref). */
+export const isLedgerChequePayment = (t) => {
+    if (!t || t.type !== 'OUT' || (t.wallet || 'CASH') !== 'BANK') return false;
+    if (t.excluded_from_ledger) return false;
+    const typ = String(t.bank_payment_type || '').toUpperCase();
+    if (typ === 'CHEQUE') return true;
+    if (typ === 'UPI' || typ === 'NEFT' || typ === 'IMPS' || typ === 'RTGS') return false;
+    const hay = `${t.description || ''} ${t.bank_reference || ''} ${t.vendor_name || ''}`.toUpperCase();
+    return /\bCHQ\b|CHEQUE/.test(hay);
+};
+
+/**
+ * Pending cheques for book balance:
+ * - open cheque bills (issued, not linked to ledger)
+ * - unmatched bank ledger cheque OUTs (posted, not yet on statement)
+ */
+export const getPendingChequesSummary = () => {
+    const openBills = getOpenChequeExpenseDocuments();
+    const openAmt = round2(openBills.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+    const uncleared = getUnmatchedLedgerTxns('OUT').filter(isLedgerChequePayment);
+    const unclearedAmt = round2(uncleared.reduce((s, t) => s + Math.abs(parseFloat(t.amount) || 0), 0));
+    return {
+        openBills,
+        uncleared,
+        openAmt,
+        unclearedAmt,
+        openCount: openBills.length,
+        unclearedCount: uncleared.length,
+        total: round2(openAmt + unclearedAmt),
+        count: openBills.length + uncleared.length,
+    };
+};
+
+/** Book balance = statement/calculated bank + Wallet Left − pending cheques. */
+export const getBookBalanceSummary = () => {
+    const cash = getCashWalletLeft();
+    const recon = getBankBalanceReconciliation();
+    const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
+    const pending = getPendingChequesSummary();
+    const hasBank = bankBalance != null;
+    const book = hasBank
+        ? round2(bankBalance + cash - pending.total)
+        : round2(cash);
+    return {
+        cash,
+        bankBalance,
+        hasBank,
+        pending,
+        book,
+        asOf: recon.passbook?.asOf || recon.calculated.asOf,
+        recon,
+    };
+};
 
 const monthLabel = (y, m) =>
     new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
@@ -167,9 +223,21 @@ const monthlyTotals = (txns, months) =>
             .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0),
     );
 
+/** Ledger / bill wallet for Cash vs Bank reporting (anything not BANK → CASH). */
+const reportWallet = (txn) =>
+    String(txn?.wallet || '').toUpperCase() === 'BANK' ? 'BANK' : 'CASH';
+
+const walletGroupLabel = (wallet) => (wallet === 'BANK' ? 'Bank' : 'Cash');
+
+const WALLET_CAT_SEP = '|';
+
 const pivotKey = (txn, dimension) => {
     if (dimension === 'sub_category') return txn.sub_category?.trim() || '(none)';
     if (dimension === 'vendor') return txn.vendor_name?.trim() || '(none)';
+    if (dimension === 'wallet_cat') {
+        const cat = normalizeCategoryKey(txn.cat || 'Other');
+        return `${reportWallet(txn)}${WALLET_CAT_SEP}${cat}`;
+    }
     return normalizeCategoryKey(txn.cat || 'Other');
 };
 
@@ -200,11 +268,58 @@ const buildCategoryPivot = (txns, months, dimension) => {
     return { rows: rows.filter((r) => r.total > 0.001), colTotals, grandTotal };
 };
 
+/** Cash / Bank as parent rows, categories nested underneath (expense pivot only). */
+const buildWalletCategoryPivot = (txns, months) => {
+    const rows = [];
+    for (const wallet of ['CASH', 'BANK']) {
+        const walletTxns = txns.filter((t) => reportWallet(t) === wallet);
+        const { rows: catRows } = buildCategoryPivot(walletTxns, months, 'cat');
+        if (!catRows.length) continue;
+
+        const groupCells = months.map((_, i) => catRows.reduce((s, r) => s + r.cells[i], 0));
+        const groupTotal = groupCells.reduce((a, b) => a + b, 0);
+        rows.push({
+            key: wallet,
+            label: walletGroupLabel(wallet),
+            cells: groupCells,
+            total: groupTotal,
+            rowKind: 'wallet-group',
+            wallet,
+        });
+        catRows.forEach((r) => {
+            rows.push({
+                key: `${wallet}${WALLET_CAT_SEP}${r.key}`,
+                label: r.label,
+                cells: r.cells,
+                total: r.total,
+                rowKind: 'wallet-cat',
+                wallet,
+                categoryKey: r.key,
+            });
+        });
+    }
+
+    const leafRows = rows.filter((r) => r.rowKind === 'wallet-cat');
+    const colTotals = months.map((_, i) => leafRows.reduce((s, r) => s + r.cells[i], 0));
+    const grandTotal = colTotals.reduce((a, b) => a + b, 0);
+    return { rows, colTotals, grandTotal };
+};
+
 const buildIncomePivot = (months, dimension = 'cat', incomeTxns = filterIncome()) =>
     buildCategoryPivot(incomeTxns, months, dimension);
 
 const buildExpensePivot = (expenses, months, dimension) =>
-    buildCategoryPivot(expenses, months, dimension);
+    (dimension === 'wallet_cat'
+        ? buildWalletCategoryPivot(expenses, months)
+        : buildCategoryPivot(expenses, months, dimension));
+
+/** Leaf rows for charts / top-N (skip Cash/Bank group headers). */
+const expenseRowsForChart = (rows) =>
+    rows
+        .filter((r) => r.rowKind !== 'wallet-group')
+        .map((r) => (r.rowKind === 'wallet-cat'
+            ? { ...r, label: `${walletGroupLabel(r.wallet)} · ${r.label}` }
+            : r));
 
 /** Keep top N categories by total; roll the rest into "Other". */
 const topCategoryRows = (rows, limit = 8) => {
@@ -365,11 +480,13 @@ const renderRaisedInvoicesPivot = (months) => {
 const buildCombinedChartDatasets = (months, sheetOnly, pivotDimension, cashExpenseReporting = 'petty_bank') => {
     const incomeRows = topCategoryRows(buildIncomePivot(months, 'cat', filterTxnsInMonthRange(filterIncome(), months)).rows, 6);
     const expenseRows = topCategoryRows(
-        buildExpensePivot(
-            filterTxnsInMonthRange(filterExpenses(sheetOnly, cashExpenseReporting), months),
-            months,
-            pivotDimension,
-        ).rows,
+        expenseRowsForChart(
+            buildExpensePivot(
+                filterTxnsInMonthRange(filterExpenses(sheetOnly, cashExpenseReporting), months),
+                months,
+                pivotDimension,
+            ).rows,
+        ),
         6,
     );
     const { heads: raisedHeads, series: raisedSeries } = buildRaisedInvoicesStack(months);
@@ -568,11 +685,8 @@ const renderBalanceMetrics = () => {
     const el = document.getElementById('fa-balance-metrics');
     if (!el) return;
 
-    const cash = getCashWalletLeft();
-    const recon = getBankBalanceReconciliation();
-    const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
+    const { cash, bankBalance, hasBank, pending, book, asOf, recon } = getBookBalanceSummary();
     const passbookVariance = recon.diff;
-    const asOf = recon.passbook?.asOf || recon.calculated.asOf;
     const unmatchedLines = getUnmatchedBankLines().length;
     const unreconciledTxns = getUnmatchedLedgerTxns().length;
     const unmatchedNet = sumUnmatchedStatementNet();
@@ -583,9 +697,14 @@ const renderBalanceMetrics = () => {
         ? 'fa-metric--ok'
         : 'fa-metric--warn';
 
-    const bankSub = bankBalance != null
+    const bankSub = hasBank
         ? (asOf ? `As of ${new Date(`${asOf}T12:00:00`).toLocaleDateString('en-GB')}` : 'From bank reconciliation')
         : 'Import a statement in Bank Reconciliation';
+
+    const pendingSub = [
+        pending.openCount ? `${pending.openCount} open bill${pending.openCount === 1 ? '' : 's'}` : null,
+        pending.unclearedCount ? `${pending.unclearedCount} uncleared` : null,
+    ].filter(Boolean).join(' · ') || 'None outstanding';
 
     const varianceCard = passbookVariance != null && Math.abs(passbookVariance) >= 1
         ? `<div class="metric-card fa-metric ${passbookVarClass} metric-card--clickable" data-goto-bank-recon title="Review in Bank Reconciliation">
@@ -598,7 +717,7 @@ const renderBalanceMetrics = () => {
     el.innerHTML = `
       <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Open Bank Reconciliation">
         <span class="label">Bank balance</span>
-        <span class="value">${bankBalance != null ? formatMoney(bankBalance) : '—'}</span>
+        <span class="value">${hasBank ? formatMoney(bankBalance) : '—'}</span>
         <span class="fa-metric__sub">${bankSub}</span>
       </div>
       ${varianceCard}
@@ -607,10 +726,28 @@ const renderBalanceMetrics = () => {
         <span class="value">${formatMoney(cash)}</span>
         <span class="fa-metric__sub">Wallet Left (Bills &amp; receipts)</span>
       </div>
-      <div class="metric-card fa-metric">
-        <span class="label">Total balance</span>
-        <span class="value">${bankBalance != null ? formatMoney(cash + bankBalance) : formatMoney(cash)}</span>
-        <span class="fa-metric__sub">Wallet Left + bank</span>
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-pending-cheques title="Open cheque bills and uncleared ledger cheques">
+        <span class="label">Pending cheques</span>
+        <span class="value">${formatMoney(pending.total)}</span>
+        <span class="fa-metric__sub">${pendingSub}</span>
+      </div>
+      <div class="metric-card fa-metric fa-metric--total">
+        <span class="label">
+          Total balance
+          <button type="button" class="fa-metric__info-btn" data-book-balance-info aria-expanded="false" aria-controls="fa-book-balance-tip" title="How Total is calculated">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          </button>
+        </span>
+        <span class="value">${formatMoney(book)}</span>
+        <span class="fa-metric__sub">${hasBank
+          ? `${formatMoney(bankBalance)} − ${formatMoney(pending.total)} + ${formatMoney(cash)}`
+          : formatMoney(cash)}</span>
+        <div class="fa-metric__tip" id="fa-book-balance-tip" hidden role="tooltip">
+          <strong>Book balance</strong> = bank statement
+          − pending cheques (open cheque bills + uncleared ledger cheques)
+          + petty cash (Wallet Left).
+          Bank stays the passbook figure; Total is what you have after committed cheques.
+        </div>
       </div>
       <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Review unmatched statement lines">
         <span class="label">Unmatched statement</span>
@@ -623,8 +760,6 @@ const renderBalanceMetrics = () => {
         <span class="fa-metric__sub">Net ${formatMoney(unreconciledNet)} · ${matchedCount} matched · click to act</span>
       </div>`;
 };
-
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const monthKeyFromDate = (iso) => {
     const s = String(iso || '').slice(0, 10);
@@ -678,29 +813,62 @@ const renderPlannedExpensesCard = () => {
     const wasOpen = el.open;
 
     const planned = summarizePlannedExpenses();
-    const cash = getCashWalletLeft();
-    const recon = getBankBalanceReconciliation();
-    const bankBalance = recon.passbook?.balance ?? recon.calculated.balance ?? null;
-    const hasBank = bankBalance != null;
-    const current = hasBank ? round2(cash + bankBalance) : round2(cash);
-    const after = round2(current - planned.total);
+    // Open cheque bills are already in book Total — don't subtract them again.
+    const openNonCheque = planned.docs.filter((d) => !isChequeFinanceDocument(d));
+    const plannedRemaining = round2(
+        openNonCheque.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0),
+    );
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const todayIso = today.toISOString().slice(0, 10);
+    const thisMonthKey = monthKeyFromDate(todayIso);
+    let overdue = 0;
+    let thisMonth = 0;
+    let later = 0;
+    openNonCheque.forEach((d) => {
+        const amt = round2(parseFloat(d.amount) || 0);
+        const dateStr = String(d.doc_date || '').slice(0, 10);
+        if (dateStr && dateStr < todayIso) overdue += amt;
+        else if (monthKeyFromDate(dateStr) === thisMonthKey) thisMonth += amt;
+        else later += amt;
+    });
+    overdue = round2(overdue);
+    thisMonth = round2(thisMonth);
+    later = round2(later);
+
+    const byCat = new Map();
+    openNonCheque.forEach((d) => {
+        const key = normalizeCategoryKey(d.cat || 'Other') || 'Other';
+        byCat.set(key, round2((byCat.get(key) || 0) + (parseFloat(d.amount) || 0)));
+    });
+    const topCats = [...byCat.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([key, amount]) => ({ key, label: categoryDisplayLabel(key), amount }));
+
+    const { book: current, hasBank, pending, bankBalance, cash } = getBookBalanceSummary();
+    const after = round2(current - plannedRemaining);
     const afterClass = after < -0.009 ? 'fa-planned__after--short' : (after < current * 0.15 ? 'fa-planned__after--tight' : 'fa-planned__after--ok');
 
-    const catChips = planned.topCats.length
-        ? planned.topCats.map((c) =>
+    const catChips = topCats.length
+        ? topCats.map((c) =>
             `<span class="fa-planned__chip"><strong>${c.label}</strong> ${formatMoney(c.amount)}</span>`,
         ).join('')
         : '<span class="fa-planned__chip fa-planned__chip--muted">No open expense bills yet</span>';
 
+    const chequeNote = pending.total > 0.009
+        ? ` Pending cheques ${formatMoney(pending.total)} already deducted from book balance.`
+        : '';
+
     el.innerHTML = `
       <summary class="fa-collapsible-panel__summary">
         <span class="fa-collapsible-panel__title">Planned expenses vs balance</span>
-        <span class="fa-collapsible-panel__meta">Planned ${formatMoney(planned.total)} · After ${formatMoney(after)} · ${planned.count} open</span>
+        <span class="fa-collapsible-panel__meta">Planned ${formatMoney(plannedRemaining)} · After ${formatMoney(after)} · ${openNonCheque.length} open</span>
       </summary>
       <div class="fa-collapsible-panel__body">
         <div class="fa-panel__head fa-panel__head--row">
           <p class="fa-panel__hint" style="margin:0;">
-            Open (unlinked) bills from <strong>Bills &amp; receipts</strong> — proposed spend until you link them to the ledger.
+            Open (unlinked) non-cheque bills from <strong>Bills &amp; receipts</strong>.${chequeNote}
           </p>
           <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
             <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Review open bills
@@ -708,25 +876,27 @@ const renderPlannedExpensesCard = () => {
         </div>
         <div class="fa-planned__metrics">
           <div class="fa-planned__metric">
-            <span class="fa-planned__label">Current balance</span>
+            <span class="fa-planned__label">Book balance</span>
             <span class="fa-planned__value">${formatMoney(current)}</span>
-            <span class="fa-planned__sub">${hasBank ? 'Wallet Left + bank' : 'Wallet Left only (set bank opening / passbook)'}</span>
+            <span class="fa-planned__sub">${hasBank
+              ? `${formatMoney(bankBalance)} − ${formatMoney(pending.total)} + ${formatMoney(cash)}`
+              : formatMoney(cash)}</span>
           </div>
           <div class="fa-planned__metric">
             <span class="fa-planned__label">Planned spend</span>
-            <span class="fa-planned__value fa-planned__value--out">${formatMoney(planned.total)}</span>
-            <span class="fa-planned__sub">${planned.count} open bill${planned.count === 1 ? '' : 's'}</span>
+            <span class="fa-planned__value fa-planned__value--out">${formatMoney(plannedRemaining)}</span>
+            <span class="fa-planned__sub">${openNonCheque.length} open bill${openNonCheque.length === 1 ? '' : 's'}${pending.openCount ? ` · ${pending.openCount} cheque in Total` : ''}</span>
           </div>
           <div class="fa-planned__metric ${afterClass}">
             <span class="fa-planned__label">After planned</span>
             <span class="fa-planned__value">${formatMoney(after)}</span>
-            <span class="fa-planned__sub">${after < -0.009 ? 'Shortfall if all open bills clear' : 'Left if all open bills clear'}</span>
+            <span class="fa-planned__sub">${after < -0.009 ? 'Shortfall if remaining open bills clear' : 'Left if remaining open bills clear'}</span>
           </div>
         </div>
         <div class="fa-planned__buckets">
-          <span><strong>Overdue</strong> ${formatMoney(planned.overdue)}</span>
-          <span><strong>This month</strong> ${formatMoney(planned.thisMonth)}</span>
-          <span><strong>Later</strong> ${formatMoney(planned.later)}</span>
+          <span><strong>Overdue</strong> ${formatMoney(overdue)}</span>
+          <span><strong>This month</strong> ${formatMoney(thisMonth)}</span>
+          <span><strong>Later</strong> ${formatMoney(later)}</span>
         </div>
         <div class="fa-planned__cats" aria-label="Top planned categories">${catChips}</div>
       </div>`;
@@ -800,6 +970,14 @@ const renderMonthlySummaryCard = () => {
     el.open = wasOpen;
 };
 
+const pivotDimensionLabel = (dimension) => {
+    if (dimension === 'sub_category') return 'Sub-category';
+    if (dimension === 'vendor') return 'Vendor';
+    if (dimension === 'charge') return 'Charge head';
+    if (dimension === 'wallet_cat') return 'Cash / Bank → Category';
+    return 'Category';
+};
+
 const renderPivotTable = ({
     el,
     metaEl,
@@ -812,11 +990,7 @@ const renderPivotTable = ({
 }) => {
     if (!el) return;
 
-    const dimLabel =
-        dimension === 'sub_category' ? 'Sub-category'
-            : dimension === 'vendor' ? 'Vendor'
-                : dimension === 'charge' ? 'Charge head'
-                    : 'Category';
+    const dimLabel = pivotDimensionLabel(dimension);
     const amountClass = type === 'IN' ? 'fa-income' : 'fa-expense';
 
     if (!rows.length) {
@@ -825,7 +999,9 @@ const renderPivotTable = ({
         return;
     }
 
-    const colTotals = months.map((_, i) => rows.reduce((s, r) => s + r.cells[i], 0));
+    // Group header rows mirror child totals — exclude them from footers.
+    const sumRows = rows.filter((r) => r.rowKind !== 'wallet-group');
+    const colTotals = months.map((_, i) => sumRows.reduce((s, r) => s + r.cells[i], 0));
     const grandTotal = colTotals.reduce((a, b) => a + b, 0);
     const rangeStart = months[0];
     const rangeEnd = months[months.length - 1];
@@ -850,6 +1026,12 @@ const renderPivotTable = ({
             return `<td class="fa-num ${amountClass} ${extraClass}">${content}</td>`;
         }
 
+        const drillLabel = row?.rowKind === 'wallet-group'
+            ? row.label
+            : row?.rowKind === 'wallet-cat'
+                ? `${walletGroupLabel(row.wallet)} · ${row.label}`
+                : row?.label;
+
         const attrs = [
             `class="fa-num fa-pivot-cell fa-pivot-cell--clickable ${amountClass} ${extraClass}"`,
             'role="button" tabindex="0"',
@@ -857,7 +1039,8 @@ const renderPivotTable = ({
             `data-pivot-dimension="${dimension}"`,
             `data-pivot-scope="${scope}"`,
             row?.key != null ? `data-pivot-key="${escAttr(row.key)}"` : '',
-            row?.label != null ? `data-pivot-label="${escAttr(row.label)}"` : '',
+            drillLabel != null ? `data-pivot-label="${escAttr(drillLabel)}"` : '',
+            row?.wallet ? `data-pivot-wallet="${escAttr(row.wallet)}"` : '',
             month ? `data-pivot-year="${month.y}" data-pivot-month="${month.m}"` : '',
             (scope === 'row-total' || scope === 'grand-total') ? monthRangeAttrs : '',
             `title="View matching ledger entries"`,
@@ -865,8 +1048,18 @@ const renderPivotTable = ({
         return `<td ${attrs}>${content}</td>`;
     };
 
+    const labelCell = (r) => {
+        if (r.rowKind === 'wallet-group') {
+            return `<td class="fa-pivot-group-label"><strong>${r.label}</strong></td>`;
+        }
+        if (r.rowKind === 'wallet-cat') {
+            return `<td class="fa-pivot-nested-label">${r.label}</td>`;
+        }
+        return `<td>${r.label}</td>`;
+    };
+
     el.innerHTML = `
-      <table class="fa-pivot-table">
+      <table class="fa-pivot-table${dimension === 'wallet_cat' ? ' fa-pivot-table--wallet' : ''}">
         <thead>
           <tr>
             <th>${dimLabel}</th>
@@ -876,8 +1069,8 @@ const renderPivotTable = ({
         </thead>
         <tbody>
           ${rows.map((r) => `
-            <tr>
-              <td>${r.label}</td>
+            <tr class="${r.rowKind === 'wallet-group' ? 'fa-pivot-row--group' : r.rowKind === 'wallet-cat' ? 'fa-pivot-row--nested' : ''}">
+              ${labelCell(r)}
               ${r.cells.map((v, i) => renderAmountCell({ value: v, scope: 'cell', row: r, monthIndex: i })).join('')}
               ${renderAmountCell({ value: r.total, scope: 'row-total', row: r, extraClass: 'fa-col-total', strong: true })}
             </tr>`).join('')}
@@ -967,14 +1160,19 @@ const renderExpensePivot = (months, dimension, sheetOnly, cashExpenseReporting =
     const { fromSheet, fromBank, excludedFromReports, manualOmitted } = expenseSourceCounts(months, sheetOnly);
 
     if (metaEl) {
+        const chips = [];
         if (sheetOnly) {
-            metaEl.innerHTML = `${expenseMetaChip(fromSheet, 'from expense sheets', 'sheet', 'fa-meta-chip--sheet')}
-               ${expenseMetaChip(fromBank, 'from bank reconciliation', 'bank')}
-               ${renderOmittedMetaChip(manualOmitted, excludedFromReports)}`;
+            chips.push(expenseMetaChip(fromSheet, 'from expense sheets', 'sheet', 'fa-meta-chip--sheet'));
+            chips.push(expenseMetaChip(fromBank, 'from bank reconciliation', 'bank'));
+            chips.push(renderOmittedMetaChip(manualOmitted, excludedFromReports));
         } else {
-            metaEl.innerHTML = `<span class="fa-meta-chip">${expenses.length} in period (${fromSheet} sheets, ${fromBank} bank)</span>
-               ${expenseMetaChip(excludedFromReports, 'excluded from reports', 'excluded-reports')}`;
+            chips.push(`<span class="fa-meta-chip">${expenses.length} in period (${fromSheet} sheets, ${fromBank} bank)</span>`);
+            chips.push(expenseMetaChip(excludedFromReports, 'excluded from reports', 'excluded-reports'));
         }
+        if (dimension === 'wallet_cat' && cashExpenseReporting !== 'cash_detail') {
+            chips.push('<span class="fa-meta-chip fa-meta-chip--hint">Turn on Cash bills by category to put cash bills under Cash</span>');
+        }
+        metaEl.innerHTML = chips.filter(Boolean).join('\n               ');
     }
 
     const { rows } = buildExpensePivot(expenses, months, dimension);
@@ -1007,6 +1205,10 @@ const wirePivotContainer = (containerId) => {
         if (cell.dataset.pivotKey) {
             filter.key = cell.dataset.pivotKey;
             filter.label = cell.dataset.pivotLabel;
+        }
+
+        if (cell.dataset.pivotWallet) {
+            filter.wallet = cell.dataset.pivotWallet;
         }
 
         if (cell.dataset.pivotYear) {
@@ -1096,10 +1298,38 @@ const wireBalanceMetricClicks = () => {
     const el = document.getElementById('fa-balance-metrics');
     if (!el || el.dataset.wired) return;
     el.dataset.wired = '1';
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
+        const infoBtn = e.target.closest('[data-book-balance-info]');
+        if (infoBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tip = document.getElementById('fa-book-balance-tip');
+            if (!tip) return;
+            const open = tip.hidden;
+            tip.hidden = !open;
+            infoBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            return;
+        }
         const billsCard = e.target.closest('[data-goto-bills-wallet]');
         if (billsCard) {
             window.switchView?.('finance-docs');
+            return;
+        }
+        const pendingCard = e.target.closest('[data-goto-pending-cheques]');
+        if (pendingCard) {
+            const pending = getPendingChequesSummary();
+            if (pending.unclearedCount && !pending.openCount) {
+                window.switchView?.('finance-bank-recon');
+                requestAnimationFrame(() => {
+                    const panel = document.getElementById('bank-recon-txns');
+                    panel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    panel?.classList.add('bank-recon-txns--highlight');
+                    setTimeout(() => panel?.classList.remove('bank-recon-txns--highlight'), 2400);
+                });
+                return;
+            }
+            const { focusOpenChequeBills } = await import('./financeDocuments.js');
+            focusOpenChequeBills();
             return;
         }
         const card = e.target.closest('[data-goto-bank-recon]');
@@ -1115,13 +1345,30 @@ const wireBalanceMetricClicks = () => {
             });
         }
     });
+
+    document.addEventListener('click', (e) => {
+        const tip = document.getElementById('fa-book-balance-tip');
+        const btn = el.querySelector('[data-book-balance-info]');
+        if (!tip || tip.hidden) return;
+        if (e.target.closest('[data-book-balance-info]') || e.target.closest('#fa-book-balance-tip')) return;
+        tip.hidden = true;
+        btn?.setAttribute('aria-expanded', 'false');
+    });
 };
 
 export const initFinanceAnalyticsUi = () => {
     const rerender = () => renderFinanceAnalytics();
 
-    ['fa-month-range', 'fa-pivot-dimension', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
+    ['fa-month-range', 'fa-sheet-only', 'fa-project-months', 'fa-date-tolerance'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', rerender);
+    });
+
+    document.getElementById('fa-pivot-dimension')?.addEventListener('change', (e) => {
+        // Cash / Bank → Category is most useful with cash bills under Cash.
+        if (e.target.value === 'wallet_cat' && getCashExpenseReportingMode() !== 'cash_detail') {
+            setCashExpenseReportingMode('cash_detail');
+        }
+        rerender();
     });
 
     const cashModeEl = document.getElementById('fa-cash-expense-reporting');

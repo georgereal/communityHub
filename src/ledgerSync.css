@@ -816,62 +816,14 @@
 }
 
 .ledger-classify-cell {
-  min-width: 0;
+  min-width: 11rem;
 }
 
-.ledger-classify-display {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  padding: 0.1rem 0.15rem;
-  margin: 0;
-  cursor: pointer;
-  font: inherit;
-  color: var(--text-main);
-  line-height: 1.35;
-}
-
-.ledger-classify-display:hover {
-  background: rgba(15, 23, 42, 0.04);
-}
-
-.ledger-classify-display--empty .ledger-classify-display__main {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-.ledger-classify-display__main {
-  display: block;
-  font-size: 0.78rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ledger-classify-display__vendor {
-  display: block;
-  font-size: 0.68rem;
-  font-weight: 500;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ledger-classify-edit {
-  display: none;
-}
-
-.ledger-txn-row--classify-open .ledger-classify-display {
-  display: none;
-}
-
-.ledger-txn-row--classify-open .ledger-classify-edit {
+.ledger-classify-cell .bank-recon-classify-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 tr.ledger-txn-row--dirty {

@@ -27,15 +27,20 @@ const appendStackBlock = (ws, title, rowHeader, months, rows) => {
   titleRow.font = { bold: true, size: 12 };
   styleHeaderRow(ws.addRow([rowHeader, ...months.map((m) => m.label), 'Total']));
   rows.forEach((r) => {
-    ws.addRow([
+    const row = ws.addRow([
       r.label,
       ...r.cells.map((v) => Math.round((v || 0) * 100) / 100),
       Math.round((r.total || 0) * 100) / 100,
     ]);
+    if (r.rowKind === 'wallet-group') row.font = { bold: true };
   });
   if (rows.length) {
+    // Group headers mirror nested category totals — don't double-count.
+    const sumRows = rows.some((r) => r.rowKind === 'wallet-group')
+      ? rows.filter((r) => r.rowKind !== 'wallet-group')
+      : rows;
     const colTotals = months.map((_, i) =>
-      Math.round(rows.reduce((s, r) => s + (r.cells[i] || 0), 0) * 100) / 100,
+      Math.round(sumRows.reduce((s, r) => s + (r.cells[i] || 0), 0) * 100) / 100,
     );
     const grand = Math.round(colTotals.reduce((a, b) => a + b, 0) * 100) / 100;
     const totalRow = ws.addRow(['Monthly total', ...colTotals, grand]);
@@ -116,16 +121,23 @@ export async function exportFinanceReportsExcel() {
   const expenseDimLabel =
     settings.pivotDimension === 'sub_category' ? 'Sub-category'
       : settings.pivotDimension === 'vendor' ? 'Vendor'
-        : 'Category';
+        : settings.pivotDimension === 'wallet_cat' ? 'Cash / Bank → Category'
+          : 'Category';
 
   appendStackBlock(ws, 'Invoices (by charge head)', 'Charge head', months, raised.rows);
   appendStackBlock(ws, 'Income by category', 'Category', months, income.rows);
   appendStackBlock(
     ws,
-    `Expenses by ${expenseDimLabel.toLowerCase()}`,
+    settings.pivotDimension === 'wallet_cat'
+      ? 'Expenses by Cash / Bank → category'
+      : `Expenses by ${expenseDimLabel.toLowerCase()}`,
     expenseDimLabel,
     months,
-    expense.rows,
+    expense.rows.map((r) => (
+      r.rowKind === 'wallet-cat'
+        ? { ...r, label: `  ${r.label}` }
+        : r
+    )),
   );
 
   ws.getColumn(1).width = 28;

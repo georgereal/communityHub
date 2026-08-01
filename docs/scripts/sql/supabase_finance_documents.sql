@@ -117,6 +117,27 @@ comment on table public.finance_documents is
 comment on column public.transactions.is_cash_float is
   'True when this ledger line funds the cash float (typically bank Petty Cash).';
 
+-- Opt out of Petty Cash float buckets (pre-cutover / invalid funding lines).
+alter table public.transactions
+  add column if not exists exclude_from_cash_float boolean not null default false;
+
+create index if not exists idx_transactions_exclude_cash_float
+  on public.transactions (apartment_id, exclude_from_cash_float)
+  where exclude_from_cash_float = true;
+
+comment on column public.transactions.exclude_from_cash_float is
+  'True when this bank Petty Cash / float line should not appear in cash float buckets (e.g. before tracking started).';
+
+-- Opening desk cash when bill/float tracking started (can be negative = already spent vs buckets).
+alter table public.apartment_bank_accounts
+  add column if not exists cash_float_opening_balance numeric(12, 2),
+  add column if not exists cash_float_opening_date date;
+
+comment on column public.apartment_bank_accounts.cash_float_opening_balance is
+  'Desk cash on hand as of cash_float_opening_date. Left = opening + bucket unused + receipts − banked float.';
+comment on column public.apartment_bank_accounts.cash_float_opening_date is
+  'Date the cash float opening balance applies (usually start of bill tracking).';
+
 -- Bank credit that took cash off the desk (float / wallet), beyond linked cash receipts.
 alter table public.transactions
   add column if not exists cash_desk_deposit numeric not null default 0;

@@ -38,6 +38,11 @@ export async function activateView(route, page) {
                 initFinanceDocumentsPage();
                 renderFinanceDocumentsPage();
             }
+            else if (sub === 'expense-plan') {
+                const { initExpensePlanPage, renderExpensePlanPage } = await import('../expensePlan.js');
+                initExpensePlanPage();
+                renderExpensePlanPage();
+            }
             else if (sub === 'invoices-raised') {
                 const { initInvoicesRaisedPage, renderInvoicesRaisedPage } = await import('../invoicesRaisedPage.js');
                 initInvoicesRaisedPage();

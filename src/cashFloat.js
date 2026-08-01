@@ -19,7 +19,8 @@ const txnWallet = (t) => (t?.wallet === 'BANK' ? 'BANK' : 'CASH');
 export const isBankPettyFunding = (t) =>
   t?.type === 'OUT'
   && txnWallet(t) === 'BANK'
-  && normalizeCategoryKey(t.cat) === 'Petty Cash';
+  && normalizeCategoryKey(t.cat) === 'Petty Cash'
+  && !t.exclude_from_cash_float;
 
 /** Cash-desk spend that draws down the float (real expense categories). */
 export const isCashDeskSpend = (t) =>
