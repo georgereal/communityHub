@@ -312,8 +312,8 @@ export async function renderUserPageAccessPanel(userId, apartmentIds = []) {
     }
 
     const roleKey = document.getElementById('access-user-role-v2')?.value || 'resident_viewer';
-    if (roleKey === 'apartment_admin') {
-        host.innerHTML = '<p class="page-access-hint">Apartment admins use the role template without page overrides.</p>';
+    if (roleKey === 'society_admin') {
+        host.innerHTML = '<p class="page-access-hint">Society administrators use the role template without page overrides.</p>';
         host.hidden = false;
         return;
     }
@@ -353,7 +353,7 @@ export async function saveUserPageOverridesFromPanel(userId, apartmentIds = []) 
     const host = document.getElementById('user-page-access-panel');
     if (!host || host.hidden) return;
     const roleKey = document.getElementById('access-user-role-v2')?.value || 'resident_viewer';
-    if (roleKey === 'apartment_admin') return;
+    if (roleKey === 'society_admin') return;
     const apartmentId = apartmentIds[0] || portalState.access?.activeApartmentId;
     if (!userId || !apartmentId) return;
 

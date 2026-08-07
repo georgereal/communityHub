@@ -257,6 +257,10 @@ export const renderResidentLinksAdmin = async () => {
     if (!list) return;
     if (!canManageLinks()) {
         list.innerHTML = '<p class="admin-hint">You do not have permission to manage portal links.</p>';
+        try {
+            const { setPendingInviteAttention } = await import('./setupSocietyUi.js');
+            setPendingInviteAttention(0);
+        } catch { /* ignore */ }
         return;
     }
 
@@ -320,6 +324,11 @@ export const renderResidentLinksAdmin = async () => {
       </div>` : '';
 
     list.innerHTML = linksHtml + invitesHtml;
+
+    try {
+        const { setPendingInviteAttention } = await import('./setupSocietyUi.js');
+        setPendingInviteAttention(invites.length);
+    } catch { /* ignore */ }
 
     list.querySelectorAll('.resident-link-unlink').forEach((btn) => {
         btn.onclick = async () => {

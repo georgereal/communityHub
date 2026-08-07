@@ -1,12 +1,22 @@
--- Property Manager: operational access only (no society admin / setup screens).
--- Run in Supabase SQL Editor after supabase_rbac_v2.sql
+-- Property Manager (Office Manager): operational access only (no society admin / setup screens).
+-- Run in Supabase SQL Editor after supabase_rbac_v2.sql (or re-run supabase_society_admin_role.sql).
 
 delete from public.role_permissions
 where role_key = 'property_manager'
-  and permission_key in ('setup.view', 'setup.edit', 'rbac.view', 'rbac.edit');
+  and permission_key in (
+    'setup.view', 'setup.edit',
+    'rbac.view', 'rbac.edit',
+    'accounts.view', 'accounts.edit'
+  );
 
 insert into public.role_permissions (role_key, permission_key) values
-  ('property_manager', 'apartment_mgmt.edit')
+  ('property_manager', 'vehicle_registry.view'),
+  ('property_manager', 'vehicle_registry.edit'),
+  ('property_manager', 'apartment_mgmt.view'),
+  ('property_manager', 'apartment_mgmt.edit'),
+  ('property_manager', 'portal.view'),
+  ('property_manager', 'security.view'),
+  ('property_manager', 'accounts.bills_entry')
 on conflict do nothing;
 
 -- Align v1 profile.role fallback with v2 property_manager (no setup/rbac)

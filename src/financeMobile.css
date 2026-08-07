@@ -71,12 +71,13 @@
 
   .ledger-toolbar {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr 1fr;
     grid-template-areas:
       "search search"
       "filter filter"
-      "count actions";
-    gap: 0.3rem 0.45rem;
+      "count count"
+      "actions actions";
+    gap: 0.3rem 0.35rem;
     padding: 0.38rem 0.48rem;
     margin-bottom: 0.25rem;
     border-radius: 10px;
@@ -108,21 +109,44 @@
 
   .ledger-toolbar__actions {
     grid-area: actions;
-    width: auto;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
     margin-left: 0;
-    justify-self: end;
-    align-self: center;
+    justify-self: stretch;
+    align-self: stretch;
+    gap: 0.3rem;
   }
 
-  #ledger-download-xlsx {
-    font-size: 0;
-    padding-left: 0.45rem !important;
-    padding-right: 0.45rem !important;
+  .ledger-toolbar__actions > *,
+  .ledger-toolbar__actions #ledger-columns-slot,
+  .ledger-toolbar__actions #ledger-columns-slot > * {
+    min-width: 0;
+  }
+
+  .ledger-toolbar__actions .btn,
+  .ledger-toolbar__actions summary.btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 2rem;
+    padding: 0.32rem 0.3rem !important;
+    font-size: 0.68rem !important;
+    white-space: nowrap;
+  }
+
+  .ledger-toolbar__actions .bank-recon-columns-picker,
+  .ledger-toolbar__actions .ledger-opening-picker {
+    width: 100%;
+  }
+
+  .ledger-toolbar__actions .bank-recon-columns-picker summary,
+  .ledger-toolbar__actions .ledger-opening-picker summary {
+    width: 100%;
+    box-sizing: border-box;
   }
 
   #ledger-download-xlsx .fa-solid {
-    font-size: 0.78rem;
-    margin: 0;
+    font-size: 0.72rem;
   }
 
   .ledger-bulk-bar:not([hidden]) {
@@ -146,8 +170,11 @@
   }
 
   #ledger-bulk-apply,
-  #ledger-bulk-save {
+  #ledger-bulk-save,
+  #ledger-bulk-delete {
     width: 100%;
+    justify-content: center;
+    min-height: 2rem;
   }
 
   #ledger-bulk-apply {
@@ -156,6 +183,72 @@
 
   #ledger-bulk-save {
     grid-column: 2;
+  }
+
+  #ledger-bulk-delete {
+    grid-column: 1 / -1;
+  }
+
+  /* Unwrap table shell so cards scroll with the page */
+  #ledger-table-shell.ledger-table-shell {
+    resize: none;
+    overflow: visible;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  #ledger-table-wrap {
+    overflow: visible;
+  }
+
+  .ledger-toolbar__actions #ledger-columns-slot {
+    display: block;
+    width: 100%;
+  }
+
+  .ledger-toolbar__actions #ledger-columns-slot > details {
+    width: 100%;
+  }
+
+  /* Cols / Opening menus: keep fully on-screen (Cols is leftmost) */
+  .ledger-toolbar__actions {
+    position: relative;
+    z-index: 6;
+  }
+
+  .ledger-toolbar__actions .ledger-columns-picker,
+  .ledger-toolbar__actions .ledger-opening-picker {
+    position: static;
+  }
+
+  .ledger-toolbar__actions .ledger-columns-picker .bank-recon-columns-picker__menu,
+  .ledger-toolbar__actions .ledger-opening-picker .ledger-opening-picker__menu {
+    left: 0;
+    right: 0;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+    z-index: 30;
+  }
+
+  /* Avoid page-section clipping the dropdown */
+  #subview-ledger.page-section,
+  #subview-ledger {
+    overflow: visible;
+  }
+
+  /* Short/full labels for ledger + bills chrome */
+  .fdoc-action-full {
+    display: none;
+  }
+
+  .fdoc-action-short {
+    display: inline;
   }
 }
 
@@ -193,10 +286,30 @@
   #subview-reports,
   #subview-activity,
   #subview-gl,
-  #subview-bank-recon {
+  #subview-bank-recon,
+  #subview-finance-docs {
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
     padding-bottom: 1rem !important;
+  }
+
+  .accounts-subview-tabs--compact {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.65rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .accounts-subview-tabs--compact::-webkit-scrollbar {
+    display: none;
+  }
+
+  .accounts-subview-tabs--compact button {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   #view-invoices > header {
@@ -1055,13 +1168,17 @@
   }
 
   #cash-ledger-items .bank-recon-table tr.ledger-txn-row {
-    grid-template-columns: auto 1fr auto;
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "check date amount"
       "desc desc desc"
       "classify classify classify"
-      "meta meta meta"
-      "actions actions actions";
+      "calc passbook passbook"
+      "actions actions order";
+    column-gap: 0.4rem;
+    row-gap: 0.28rem;
+    align-items: start;
   }
 
   #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row {
@@ -1123,16 +1240,163 @@
     padding: 0;
     width: auto;
     min-width: 0;
+    max-width: none;
+    overflow: visible;
   }
 
-  /* Ledger row areas */
-  #cash-ledger-items td.bank-recon-table__cell--check { grid-area: check; align-self: start; }
-  #cash-ledger-items td.bank-recon-table__cell--date { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  /* Ledger row areas — separate columns so checkbox never covers the date */
+  #cash-ledger-items td.bank-recon-table__cell--check {
+    grid-area: check;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    align-self: start;
+    justify-self: start;
+    width: auto;
+    height: 1.15rem; /* match date line box */
+    padding: 0;
+    margin: 0;
+    text-align: left;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--check input.ledger-row-check {
+    margin: 0;
+    width: 1.05rem;
+    height: 1.05rem;
+    flex: 0 0 auto;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--date {
+    grid-area: date;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-self: stretch;
+    align-self: start;
+    gap: 0.12rem;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+  }
+  #cash-ledger-items .ledger-card-date {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-dim);
+    line-height: 1.15rem;
+    height: 1.15rem;
+    display: flex;
+    align-items: center;
+  }
+  #cash-ledger-items .ledger-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.15rem 0.28rem;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    line-height: 1.25;
+  }
+  #cash-ledger-items .ledger-card-meta__sep {
+    opacity: 0.45;
+    font-weight: 500;
+  }
+  #cash-ledger-items .ledger-card-meta__item--in { color: var(--success); }
+  #cash-ledger-items .ledger-card-meta__item--out { color: var(--danger); }
+  #cash-ledger-items .ledger-card-meta__item--ok { color: #15803d; }
+  #cash-ledger-items .ledger-card-meta__item--open { color: #b45309; }
+  #cash-ledger-items .ledger-card-meta__item--warn { color: #b45309; }
+
   #cash-ledger-items td.bank-recon-table__cell--desc { grid-area: desc; }
   #cash-ledger-items td.bank-recon-table__cell--classify { grid-area: classify; }
+
+  /* Desktop pills move into the compact meta line on cards */
   #cash-ledger-items td.bank-recon-table__cell--type,
-  #cash-ledger-items td.bank-recon-table__cell--ledger { grid-area: meta; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
-  #cash-ledger-items td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+  #cash-ledger-items td.bank-recon-table__cell--ledger {
+    display: none !important;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--bills {
+    display: none !important; /* linked-bills count is secondary on cards; omit to keep balance row clean */
+  }
+  #cash-ledger-items td.bank-recon-table__cell--actions {
+    grid-area: actions;
+    padding-top: 0.35rem;
+    margin-top: 0.15rem;
+    border-top: 1px solid #f1f3f5;
+    min-width: 0;
+    overflow: hidden; /* keep icons from covering ↑↓ */
+  }
+
+  #cash-ledger-items tr.ledger-txn-row:not(:has(td.bank-recon-table__cell--order .bank-recon-order-btns)) td.bank-recon-table__cell--actions {
+    grid-column: 1 / -1;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order {
+    grid-area: order;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    align-self: stretch;
+    flex-shrink: 0;
+    width: auto;
+    min-width: 4.6rem;
+    margin: 0.15rem 0 0;
+    padding: 0.35rem 0 0 0.35rem;
+    border-top: 1px solid #f1f3f5;
+    overflow: visible;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order:empty {
+    display: none !important;
+    border-top: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-order-btns {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.1rem;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step {
+    display: block;
+    width: 1.65rem;
+    min-width: 1.65rem;
+    min-height: 1.35rem;
+    padding: 0.1rem 0.05rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-align: center;
+    border-radius: 6px;
+    -moz-appearance: textfield;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-outer-spin-button,
+  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-order-btns .btn--icon {
+    width: 1.35rem;
+    height: 1.35rem;
+    min-width: 1.35rem;
+    padding: 0;
+    font-size: 0.58rem;
+    border-radius: 999px;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--ocr {
+    display: none !important;
+  }
 
   #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in,
   #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out {
@@ -1141,60 +1405,120 @@
     font-weight: 800;
     text-align: right;
     font-variant-numeric: tabular-nums;
+    align-self: start;
+    justify-self: end;
+    line-height: 1.15rem;
+    padding: 0;
   }
 
   #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in { color: var(--success); }
   #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out { color: var(--danger); }
 
-  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out):not(.bank-recon-table__cell--computed) {
+  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out):not(.bank-recon-table__cell--computed):not(.bank-recon-table__cell--passbook) {
     display: none !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--computed {
-    grid-area: meta;
-    font-size: 0.72rem;
+  #cash-ledger-items td.bank-recon-table__cell--computed,
+  #cash-ledger-items td.bank-recon-table__cell--computed.ledger-col--desktop-hidden {
+    display: block !important;
+    grid-area: calc;
+    font-size: 0.68rem;
     color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    text-align: left;
+    padding: 0.15rem 0 !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out)::before {
-    content: 'Balance ';
+  #cash-ledger-items td.bank-recon-table__cell--computed::before {
+    content: 'Calc ';
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 0.6rem;
-    margin-right: 0.25rem;
+    font-size: 0.55rem;
+    margin-right: 0.2rem;
+    letter-spacing: 0.02em;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--passbook,
+  #cash-ledger-items td.bank-recon-table__cell--passbook.ledger-col--desktop-hidden {
+    display: block !important;
+    grid-area: passbook;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    padding: 0.15rem 0 !important;
+  }
+
+  #cash-ledger-items td.bank-recon-table__cell--passbook::before {
+    content: 'Passbook ';
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.55rem;
+    margin-right: 0.2rem;
+    letter-spacing: 0.02em;
+  }
+
+  #cash-ledger-items .ledger-classify-cell {
+    min-width: 0;
+    width: 100%;
+  }
+
+  #cash-ledger-items .ledger-classify-cell .fdoc-cat-display {
+    width: 100%;
+  }
+
+  #cash-ledger-items .ledger-txn-row--classify-open .fdoc-cat-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  #cash-ledger-items .bank-recon-classify-combobox,
+  #cash-ledger-items .bank-recon-vendor-input,
+  #cash-ledger-items .bank-recon-cell-input {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
   }
 
   #cash-ledger-items .bank-recon-row-actions {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: stretch;
-    gap: 0.35rem;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 0.28rem;
     width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 0.1rem;
+    box-sizing: border-box;
+  }
+
+  #cash-ledger-items .bank-recon-row-actions::-webkit-scrollbar {
+    display: none;
   }
 
   #cash-ledger-items .bank-recon-row-actions .btn {
-    flex: 1 1 auto;
-    min-width: 2.25rem;
+    flex: 0 0 auto;
+    min-width: 2.15rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
+    gap: 0;
     padding: 0.38rem 0.45rem !important;
     font-size: 0.72rem !important;
   }
 
+  /* Icon-only actions — titles/aria-labels remain for long-press */
   #cash-ledger-items .bank-recon-row-actions .btn--icon::after {
-    content: attr(aria-label);
-    font-size: 0.65rem;
-    font-weight: 600;
+    content: none;
   }
 
-  #cash-ledger-items .bank-recon-row-actions .btn--icon:has(.fa-floppy-disk)::after {
-    content: 'Save';
-  }
-
-  #cash-ledger-items .bank-recon-row-actions .btn--icon:has(.fa-box-archive)::after {
-    content: 'Archive';
+  #cash-ledger-items .bank-recon-order-btns {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
   }
 
   /* Bank recon statement row areas */
@@ -1373,5 +1697,596 @@
   .ledger-bulk-bar__field select {
     width: 100%;
     max-width: none;
+  }
+}
+
+/* ── Bills & receipts (finance-docs) ── */
+@media (max-width: 767px) {
+  #subview-finance-docs .raised-page-toolbar {
+    gap: 0.55rem;
+    margin-bottom: 0.65rem;
+  }
+
+  #subview-finance-docs .raised-page-toolbar__left {
+    min-width: 0;
+    width: 100%;
+  }
+
+  #subview-finance-docs .raised-page-toolbar .fa-panel__title {
+    font-size: 0.95rem;
+  }
+
+  #subview-finance-docs .raised-page-toolbar .fa-panel__hint {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  #subview-finance-docs .raised-page-meta {
+    font-size: 0.72rem;
+  }
+
+  #subview-finance-docs .raised-page-toolbar__actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
+
+  #subview-finance-docs .raised-page-toolbar__actions .btn {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    justify-content: center;
+    min-height: 2.35rem;
+  }
+
+  /* 3 KPIs: 2-up then full-width third (no empty cell) */
+  #subview-finance-docs .fdoc-float-kpis.ledger-kpi-bar {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  #subview-finance-docs .fdoc-float-kpis .ledger-kpi:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    border-right: 0;
+  }
+
+  .fdoc-funding-details__summary {
+    padding: 0.5rem 0.7rem;
+    gap: 0.25rem 0.5rem;
+  }
+
+  .fdoc-funding-details__title {
+    font-size: 0.78rem;
+  }
+
+  .fdoc-funding-details__meta {
+    font-size: 0.7rem;
+  }
+
+  .fdoc-funding-details__body {
+    padding: 0.55rem 0.6rem 0.65rem;
+  }
+
+  .fdoc-cash-opening__field input,
+  .fdoc-cash-opening__field--amt input {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+  }
+
+  .fdoc-cash-opening .btn {
+    min-height: 2.15rem;
+  }
+
+  .fdoc-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem 0.35rem;
+    padding: 0.4rem 0.45rem;
+    margin-bottom: 0.65rem;
+    border-radius: 10px;
+  }
+
+  .fdoc-filters__search {
+    grid-column: 1 / -1;
+    flex: none;
+    max-width: none;
+    min-width: 0;
+    order: unset;
+  }
+
+  .fdoc-filters__select {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    font-size: 0.7rem;
+    padding: 0.32rem 0.35rem;
+  }
+
+  .fdoc-filters__actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.3rem;
+  }
+
+  .fdoc-filters__actions .btn {
+    width: 100%;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 2rem;
+    font-size: 0.72rem;
+    padding: 0.32rem 0.4rem;
+    white-space: nowrap;
+  }
+
+  .fdoc-filters__actions .btn .fa-solid {
+    font-size: 0.72rem;
+  }
+
+  .fdoc-action-full {
+    display: none;
+  }
+
+  .fdoc-action-short {
+    display: inline;
+  }
+
+  /* Bills list table → stacked cards (exclude funding / cash-to-bank tables) */
+  #subview-finance-docs > .fa-table-wrap {
+    overflow: visible;
+    margin-bottom: 1rem !important;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table.fa-pivot-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table thead {
+    display: none;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "check date amount"
+      "check kind status"
+      "check cat cat"
+      "check vendor vendor"
+      "check pay actions";
+    gap: 0.2rem 0.5rem;
+    border: 1px solid #eef0f3;
+    border-radius: 12px;
+    padding: 0.7rem 0.75rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 0.78rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-check-col {
+    grid-area: check;
+    align-self: start;
+    padding-top: 0.15rem;
+    width: auto;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(2) {
+    grid-area: date;
+    font-weight: 700;
+    font-size: 0.82rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(3) {
+    grid-area: kind;
+    font-size: 0.72rem;
+    color: var(--text-dim, #64748b);
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-cat-col {
+    grid-area: cat;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(5) {
+    grid-area: vendor;
+    color: var(--text-dim, #64748b);
+    font-size: 0.74rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(6) {
+    grid-area: pay;
+    align-self: center;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td.cash-float-amt {
+    grid-area: amount;
+    text-align: right;
+    font-weight: 800;
+    font-size: 0.9rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-status-cell {
+    grid-area: status;
+    justify-self: end;
+    align-self: start;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-actions {
+    grid-area: actions;
+    justify-self: end;
+    display: inline-flex;
+    gap: 0.25rem;
+  }
+
+  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr:not(.fdoc-row) td {
+    display: block;
+    padding: 0.85rem;
+    border: 1px solid #eef0f3;
+    border-radius: 12px;
+    background: #fff;
+    text-align: center;
+  }
+
+  /* Petty Cash float — opening + bucket cards */
+  .fdoc-funding-details__summary {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .fdoc-funding-details__title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .fdoc-funding-details__meta {
+    width: auto;
+    flex: 0 1 auto;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .fdoc-cash-opening {
+    display: grid;
+    grid-template-columns: auto 1fr 1fr;
+    grid-template-areas:
+      "label date amt"
+      "save save match";
+    gap: 0.35rem 0.4rem;
+    align-items: center;
+    margin-bottom: 0.65rem;
+  }
+
+  .fdoc-cash-opening__label {
+    grid-area: label;
+    margin-right: 0;
+  }
+
+  .fdoc-cash-opening__field:not(.fdoc-cash-opening__field--amt) {
+    grid-area: date;
+  }
+
+  .fdoc-cash-opening__field--amt {
+    grid-area: amt;
+  }
+
+  .fdoc-cash-opening #fdoc-cash-opening-save {
+    grid-area: save;
+    flex: none;
+    width: 100%;
+  }
+
+  .fdoc-cash-opening #fdoc-cash-opening-match {
+    grid-area: match;
+    flex: none;
+    width: 100%;
+  }
+
+  .fdoc-cash-opening__hint {
+    grid-column: 1 / -1;
+  }
+
+  .fdoc-funding-table-wrap,
+  #fdoc-cash-to-bank-table.fa-table-wrap {
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+  }
+
+  .fdoc-funding-table.fa-pivot-table {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    border: 0;
+    background: transparent;
+  }
+
+  .fdoc-funding-table thead {
+    display: none;
+  }
+
+  .fdoc-funding-table tbody,
+  .fdoc-funding-table tfoot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .fdoc-funding-table tfoot {
+    margin-top: 0.15rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas:
+      "date date date actions"
+      "note note note note"
+      "prev cheque bills left";
+    gap: 0.2rem 0.25rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.5rem 0.55rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row td {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .fdoc-funding-table .fdoc-funding-col-date {
+    grid-area: date;
+    font-weight: 800;
+    font-size: 0.78rem;
+    align-self: center;
+  }
+
+  .fdoc-funding-table .fdoc-funding-col-note {
+    grid-area: note;
+    font-size: 0.68rem;
+    color: var(--text-dim, #64748b);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.1rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row td:nth-child(3) {
+    grid-area: prev;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row td:nth-child(4) {
+    grid-area: cheque;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row td:nth-child(5) {
+    grid-area: bills;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-row td:nth-child(6) {
+    grid-area: left;
+  }
+
+  .fdoc-funding-table .fdoc-funding-col-actions {
+    grid-area: actions;
+    width: auto;
+    padding: 0;
+    text-align: right;
+    justify-self: end;
+  }
+
+  /* One-line formula: Opening → +Cheque → −Bills → =Left */
+  .fdoc-funding-table .fdoc-funding-col-num {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0.2rem;
+    padding: 0.15rem 0 !important;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    min-width: 0;
+  }
+
+  .fdoc-funding-table .fdoc-funding-col-caption {
+    display: inline;
+    margin-bottom: 0;
+    text-align: left;
+    font-size: 0.55rem;
+    letter-spacing: 0.01em;
+    flex: 0 0 auto;
+  }
+
+  .fdoc-funding-table .fdoc-funding-drill {
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: 0.2rem;
+    width: auto;
+    max-width: 100%;
+    padding: 0;
+    text-align: left;
+  }
+
+  .fdoc-funding-table .fdoc-funding-drill .fdoc-funding-col-caption {
+    text-align: left;
+  }
+
+  .fdoc-funding-table .fdoc-funding-col-actions .btn {
+    min-height: 1.6rem;
+    font-size: 0.62rem;
+    padding: 0.15rem 0.4rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals {
+    display: grid;
+    grid-template-columns: auto repeat(4, minmax(0, 1fr));
+    grid-template-areas: "label prev cheque bills left";
+    gap: 0.2rem 0.25rem;
+    align-items: baseline;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    padding: 0.45rem 0.55rem;
+    background: #f8fbff;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td {
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:first-child {
+    grid-area: label;
+    font-weight: 800;
+    font-size: 0.68rem;
+    padding-right: 0.25rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(2) {
+    grid-area: prev;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(3) {
+    grid-area: cheque;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(4) {
+    grid-area: bills;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(5) {
+    grid-area: left;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals .fdoc-funding-col-actions {
+    display: none;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals .fdoc-funding-col-num {
+    font-size: 0.68rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals .fdoc-funding-col-num::before {
+    display: inline;
+    font-size: 0.55rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    color: var(--text-dim, #64748b);
+    margin-right: 0.2rem;
+  }
+
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(2)::before { content: 'Open'; }
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(3)::before { content: '+Chq'; }
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(4)::before { content: '−Bill'; }
+  .fdoc-funding-table tr.fdoc-funding-totals td:nth-child(5)::before { content: '=Left'; }
+
+  /* Cash-to-bank nested table */
+  .fdoc-cash-to-bank-table.fa-pivot-table {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    border: 0;
+    background: transparent;
+  }
+
+  .fdoc-cash-to-bank-table thead {
+    display: none;
+  }
+
+  .fdoc-cash-to-bank-table tbody,
+  .fdoc-cash-to-bank-table tfoot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .fdoc-cash-to-bank-table tbody tr,
+  .fdoc-cash-to-bank-table tfoot tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.3rem 0.4rem;
+    border: 1px solid #eef0f3;
+    border-radius: 10px;
+    padding: 0.55rem 0.65rem;
+    background: #fff;
+  }
+
+  .fdoc-cash-to-bank-table td {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    min-width: 0 !important;
+  }
+
+  .fdoc-cash-to-bank-table .fdoc-funding-col-date,
+  .fdoc-cash-to-bank-table .fdoc-funding-col-note {
+    grid-column: 1 / -1;
+  }
+
+  .fdoc-cash-to-bank-table .fdoc-funding-col-note {
+    font-size: 0.74rem;
+    color: var(--text-dim, #64748b);
+    white-space: normal;
+  }
+
+  .fdoc-cash-to-bank-table .fdoc-funding-col-num {
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+}
+
+@media (max-width: 520px) {
+  #subview-finance-docs .raised-page-toolbar .fa-panel__hint {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  .fdoc-funding-details__summary {
+    flex-wrap: wrap;
+  }
+
+  .fdoc-funding-details__meta {
+    width: 100%;
+    text-align: left;
+    white-space: normal;
   }
 }

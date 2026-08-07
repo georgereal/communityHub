@@ -18,13 +18,13 @@ const MODULE_KEYS = new Set(MODULE_CATALOG.map((m) => m.key));
 /** Modules that cannot be turned off (would lock out society configuration). */
 export const LOCKED_MODULE_KEYS = new Set(['admin']);
 
-/** Only apartment admins bypass module toggles (not property managers with setup.view). */
+/** Society / system admins bypass module toggles (Office Bearer uses the matrix). */
 export function moduleBypassGating() {
     if (portalState.auth?.isSystemAdmin || portalState.auth?.effectiveRoleKey === 'system_admin') return true;
     const perms = portalState.authPermissions || [];
     if (perms.includes('rbac.edit')) return true;
-    if (portalState.auth?.effectiveRoleKey === 'apartment_admin') return true;
-    if (portalState.auth?.role === 'admin') return true;
+    // society_admin — avoid importing rbac.js (circular with isModuleEnabled)
+    if (portalState.auth?.effectiveRoleKey === 'society_admin') return true;
     return false;
 }
 

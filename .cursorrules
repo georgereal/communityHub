@@ -1,0 +1,77 @@
+# CommunityHub / ApartmentMaintenance — Cursor Rules
+
+## CRITICAL: Repository Map — Read Before Coding
+
+### Read-First Rule
+
+**Before starting ANY task that involves planning, exploration, or code changes, you MUST first read the repository map:**
+- `docs/REPO_MAP.md`
+
+This file is the single source of truth for the project's directory structure, feature modules, API endpoints, views/routes, SQL migrations, architectural patterns, and development commands. Reading it first:
+- Provides instant context without re-exploring the entire codebase
+- Identifies where features live (`src/` UI modules, `api/` serverless handlers)
+- Reveals existing patterns (state in `store.js`, routing in `navigation.js`, lazy views in `views/controllers.js`)
+- Keeps new work consistent with current conventions
+
+**Workflow:**
+1. Read `docs/REPO_MAP.md` first
+2. Use its structure to locate relevant files
+3. Only then explore specific files with `read_file` / `search_files`
+4. If the repo map is stale or missing sections relevant to your task, update it as part of your changes
+
+### Update Repo Map on Structural Changes
+
+**Whenever you make any of the following changes, you MUST update `docs/REPO_MAP.md`:**
+
+1. **New or removed files/directories** — under `src/`, `api/`, or `scripts/`
+2. **New feature modules** — additions to `src/` (ledger, notices, portal, etc.)
+3. **New routes / views** — changes to `src/navigation.js` (`NAV_MODULES`) or `src/views/controllers.js` view dispatch
+4. **New `api/` endpoints** — adding/removing serverless handlers in `api/`
+5. **New npm scripts** — adding/removing scripts in `package.json`
+6. **New SQL migrations** — `supabase_*.sql` at repo root or `docs/scripts/sql/`
+7. **Build/config changes** — `vite.config.js`, `vercel.json`, root config files
+8. **Architectural pattern changes** — state, auth, RBAC/access, or data-flow changes
+
+### Regenerate the Repo Map
+
+```bash
+# From root directory
+npm run generate-repo-map
+
+# Or directly
+node scripts/utilities/generate-repo-map.js
+```
+
+### Commit Checklist for Structural Changes
+
+Before committing structural changes, ensure:
+
+- [ ] Repo map has been updated (`docs/REPO_MAP.md`)
+- [ ] New/modified files are documented in the appropriate section
+- [ ] Route table is updated (if routes changed)
+- [ ] No stale references to deleted files/directories
+
+### Guardrails (enforced automatically)
+
+- **Git pre-push hook** (`.git/hooks/pre-push`, installed via `npm run setup:hooks`) detects structural
+  changes (`src/`, `api/`, `scripts/`, `package.json`, `vite.config.js`, `vercel.json`), auto-regenerates the
+  repo map, and warns if it is stale (does not block the push).
+- **CI (`.github/workflows/repo-map-check.yml`)** runs on PRs touching structural files, regenerates the map,
+  and comments on the PR if it is out of date.
+
+---
+
+## Project Conventions
+
+### State & Data Flow
+- Central state lives in `src/store.js` (`portalState`), hydrated by `pullState()`, with read-only domains in `src/stateLoader.js` / `stateDomains.js`.
+- Browser reads via the Supabase client (`src/dbClient.js`) and/or Vercel `/api/*` endpoints; admin/finance mutations go through `api/finance-mutations.js`.
+
+### Views & Routing
+- Routes are declared in `src/navigation.js`; each page maps to a `view` (and optional `subview`) dispatched lazily by `src/views/controllers.js` (dynamic `import()` keeps the initial bundle small).
+- Per-view init wiring lives in `src/views/inits/*.js`.
+
+### Conventions
+- SQL migrations as `supabase_*.sql` at repo root, run manually in the Supabase SQL Editor.
+- Feature modules in `src/`; UI in `index.html` + `src/style.css`.
+- Match existing patterns (see the repo map's feature-module index) instead of introducing new frameworks.

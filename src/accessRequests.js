@@ -4,6 +4,12 @@
 import { portalState, supabase, isPlaceholderApartmentId } from './store.js';
 import { ROLE_OPTIONS, saveUserAccess, loadUserRoleAssignments, v2KeyToLabel, hasClientPermission } from './rbac.js';
 import { queueStaffNotifications } from './staffNotifications.js';
+import {
+    getAuthUserKind,
+    isOfficeAuthKind,
+    AUTH_KIND_LABELS,
+    OFFICE_PENDING_ROLE_KEY,
+} from './authUserKind.js';
 
 const esc = (s) => String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -11,13 +17,45 @@ const esc = (s) => String(s ?? '')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-const REQUESTABLE_ROLES = ROLE_OPTIONS.filter((r) =>
-    ['resident_viewer', 'security', 'property_manager', 'accounts_manager'].includes(r.key),
-);
+/** Roles society admin can assign when approving office-staff requests. */
+const OFFICE_GRANT_ROLE_KEYS = [
+    'society_admin',
+    'apartment_admin',
+    'property_manager',
+    'accounts_manager',
+    'office_staff',
+    'security',
+];
+
+function inferRequestKind(request) {
+    if (request?.request_kind === 'office' || request?.request_kind === 'resident') {
+        return request.request_kind;
+    }
+    const role = request?.requested_role_key;
+    if (!role || role === 'resident_viewer' || role === OFFICE_PENDING_ROLE_KEY) {
+        return role === OFFICE_PENDING_ROLE_KEY ? 'office' : 'resident';
+    }
+    return 'office';
+}
+
+function requestKindLabel(kind) {
+    return AUTH_KIND_LABELS[kind === 'office' ? 'office' : 'resident'] || 'Resident';
+}
+
+function defaultGrantRoleForRequest(request) {
+    return inferRequestKind(request) === 'office' ? 'office_staff' : 'resident_viewer';
+}
+
+function officeGrantRoleOptions(selectedKey) {
+    return OFFICE_GRANT_ROLE_KEYS.map((key) => {
+        const label = ROLE_OPTIONS.find((r) => r.key === key)?.label || key;
+        return `<option value="${key}" ${key === selectedKey ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
+}
 
 export function canReviewAccessRequests() {
     const perms = portalState.authPermissions || [];
-    return hasClientPermission('rbac.view', perms) || hasClientPermission('setup.view', perms);
+    return hasClientPermission('rbac.edit', perms);
 }
 
 export async function fetchRequestableApartments() {
@@ -36,12 +74,20 @@ export async function fetchRequestableApartments() {
 
 export async function fetchMyPendingAccessRequests() {
     if (!supabase || !portalState.auth?.id) return [];
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('access_requests')
-        .select('id, apartment_id, requested_role_key, status, message, created_at')
+        .select('id, apartment_id, requested_role_key, request_kind, status, message, created_at')
         .eq('user_id', portalState.auth.id)
         .eq('status', 'PENDING')
         .order('created_at', { ascending: false });
+    if (error && /request_kind/i.test(error.message)) {
+        ({ data, error } = await supabase
+            .from('access_requests')
+            .select('id, apartment_id, requested_role_key, status, message, created_at')
+            .eq('user_id', portalState.auth.id)
+            .eq('status', 'PENDING')
+            .order('created_at', { ascending: false }));
+    }
     if (error) {
         if (/access_requests/i.test(error.message)) return [];
         throw error;
@@ -49,30 +95,45 @@ export async function fetchMyPendingAccessRequests() {
     return data || [];
 }
 
-export async function submitAccessRequest({ apartmentId, roleKey = 'resident_viewer', message = '' }) {
+export async function submitAccessRequest({ apartmentId, message = '', requestKind = null } = {}) {
     if (!supabase) throw new Error('Supabase is not configured.');
     const uid = portalState.auth?.id;
     if (!uid) throw new Error('Sign in first.');
+
+    const kind = requestKind === 'office' || isOfficeAuthKind() ? 'office' : 'resident';
+    const roleKey = kind === 'office' ? OFFICE_PENDING_ROLE_KEY : 'resident_viewer';
 
     const existing = await fetchMyPendingAccessRequests();
     if (existing.some((r) => r.apartment_id === apartmentId)) {
         throw new Error('You already have a pending request for this society.');
     }
 
-    const { data, error } = await supabase
+    const row = {
+        id: crypto.randomUUID(),
+        user_id: uid,
+        apartment_id: apartmentId,
+        requested_role_key: roleKey,
+        request_kind: kind,
+        message: message?.trim() || null,
+        requester_email: portalState.auth?.email || null,
+        requester_name: portalState.auth?.name || null,
+        status: 'PENDING',
+    };
+
+    let { data, error } = await supabase
         .from('access_requests')
-        .insert({
-            id: crypto.randomUUID(),
-            user_id: uid,
-            apartment_id: apartmentId,
-            requested_role_key: roleKey,
-            message: message?.trim() || null,
-            requester_email: portalState.auth?.email || null,
-            requester_name: portalState.auth?.name || null,
-            status: 'PENDING',
-        })
+        .insert(row)
         .select('id')
         .single();
+
+    if (error && /request_kind/i.test(error.message)) {
+        const { request_kind: _drop, ...legacyRow } = row;
+        ({ data, error } = await supabase
+            .from('access_requests')
+            .insert(legacyRow)
+            .select('id')
+            .single());
+    }
 
     if (error) {
         if (/duplicate|unique/i.test(error.message)) {
@@ -91,12 +152,21 @@ export async function fetchPendingAccessRequestsForAdmin(apartmentId = null) {
     const aptId = apartmentId || portalState.access?.activeApartmentId;
     if (!aptId) return [];
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('access_requests')
-        .select('id, user_id, apartment_id, requested_role_key, status, message, requester_email, requester_name, created_at')
+        .select('id, user_id, apartment_id, requested_role_key, request_kind, status, message, requester_email, requester_name, created_at')
         .eq('apartment_id', aptId)
         .eq('status', 'PENDING')
         .order('created_at', { ascending: false });
+
+    if (error && /request_kind/i.test(error.message)) {
+        ({ data, error } = await supabase
+            .from('access_requests')
+            .select('id, user_id, apartment_id, requested_role_key, status, message, requester_email, requester_name, created_at')
+            .eq('apartment_id', aptId)
+            .eq('status', 'PENDING')
+            .order('created_at', { ascending: false }));
+    }
 
     if (error) {
         if (/access_requests/i.test(error.message)) return [];
@@ -119,7 +189,7 @@ export async function approveAccessRequest(request, { roleKey, adminNote = '' } 
     if (!supabase) throw new Error('Supabase is not configured.');
     if (!canReviewAccessRequests()) throw new Error('You do not have permission to approve access requests.');
 
-    const grantRole = roleKey || request.requested_role_key || 'resident_viewer';
+    const grantRole = roleKey || defaultGrantRoleForRequest(request);
     const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('id, full_name, email, role')
@@ -153,9 +223,12 @@ export async function approveAccessRequest(request, { roleKey, adminNote = '' } 
     if (updErr) throw new Error(updErr.message);
 
     const societyName = portalState.access?.apartments?.find((a) => a.id === request.apartment_id)?.name || 'your society';
+    const kind = inferRequestKind(request);
     await notifyRequester(request, {
         title: 'Access approved',
-        body: `Your access to ${societyName} was approved (${v2KeyToLabel(grantRole)}). Sign in again to load the workspace.`,
+        body: kind === 'office'
+            ? `Your office access to ${societyName} was approved (${v2KeyToLabel(grantRole)}). Sign in again to load the workspace.`
+            : `Your resident access to ${societyName} was approved. Sign in again to load the portal.`,
     });
 
     return { approved: true, roleKey: grantRole };
@@ -192,55 +265,70 @@ export async function denyAccessRequest(request, { adminNote = '' } = {}) {
 
 export async function renderAccessRequestsAdmin() {
     const container = document.getElementById('access-requests-admin');
+    const wrap = document.getElementById('access-requests-admin-wrap');
     if (!container) return;
 
     if (!canReviewAccessRequests()) {
         container.hidden = true;
+        if (wrap) wrap.hidden = true;
+        try {
+            const { setPendingAccessAttention } = await import('./setupSocietyUi.js');
+            setPendingAccessAttention(0);
+        } catch { /* ignore */ }
         return;
     }
 
-    container.hidden = false;
+    if (wrap) wrap.hidden = false;
     const pending = await fetchPendingAccessRequestsForAdmin();
+
+    try {
+        const { setPendingAccessAttention } = await import('./setupSocietyUi.js');
+        setPendingAccessAttention(pending.length, pending.length
+            ? `${pending.length} pending`
+            : '');
+    } catch { /* ignore */ }
+
     if (!pending.length) {
+        container.hidden = false;
         container.innerHTML = `
-          <div class="access-requests-empty" style="padding:1.25rem; color:var(--text-dim); font-size:0.85rem;">
+          <div class="access-requests-empty">
             No pending access requests for this society.
           </div>`;
         return;
     }
 
-    const roleOptions = ROLE_OPTIONS
-        .filter((r) => r.key !== 'system_admin')
-        .map((r) => `<option value="${r.key}">${esc(r.label)}</option>`)
-        .join('');
-
+    container.hidden = false;
     container.innerHTML = pending.map((req) => {
         const name = req.requester_name || req.requester_email || 'Unknown user';
         const email = req.requester_email || '—';
         const when = req.created_at
             ? new Date(req.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
             : '';
-        const defaultRole = req.requested_role_key || 'resident_viewer';
+        const kind = inferRequestKind(req);
+        const defaultRole = defaultGrantRoleForRequest(req);
         const message = req.message ? `<p class="access-request-note">${esc(req.message)}</p>` : '';
+        const kindBadge = `<span class="access-request-kind access-request-kind--${kind}">${esc(requestKindLabel(kind))}</span>`;
+        const roleControl = kind === 'resident'
+            ? `<input type="hidden" class="access-request-role" value="resident_viewer" />
+               <span class="access-request-role-label">Resident Viewer</span>`
+            : `<select class="access-request-role expense-combobox" aria-label="Office role to grant">
+                ${officeGrantRoleOptions(defaultRole)}
+              </select>`;
 
         return `
-          <div class="access-request-row" data-request-id="${req.id}">
+          <div class="access-request-row" data-request-id="${req.id}" data-request-kind="${kind}">
             <div class="access-request-main">
               <div class="access-request-user">
                 <strong>${esc(name)}</strong>
                 <span class="access-request-email">${esc(email)}</span>
               </div>
               <div class="access-request-meta">
-                Requested ${esc(v2KeyToLabel(defaultRole))} · ${esc(when)}
+                ${kindBadge} · ${esc(when)}
               </div>
               ${message}
             </div>
             <div class="access-request-actions">
-              <select class="access-request-role expense-combobox" aria-label="Role to grant">
-                ${ROLE_OPTIONS.filter((r) => r.key !== 'system_admin').map((r) =>
-                    `<option value="${r.key}" ${r.key === defaultRole ? 'selected' : ''}>${esc(r.label)}</option>`,
-                ).join('')}
-              </select>
+              ${roleControl}
               <input type="text" class="access-request-note-input expense-combobox" placeholder="Optional note" />
               <div class="access-request-btns">
                 <button type="button" class="btn btn-primary btn--small access-request-approve">Approve</button>
@@ -256,7 +344,7 @@ export async function renderAccessRequestsAdmin() {
             const id = row?.dataset.requestId;
             const request = pending.find((r) => r.id === id);
             if (!request) return;
-            const roleKey = row.querySelector('.access-request-role')?.value || request.requested_role_key;
+            const roleKey = row.querySelector('.access-request-role')?.value || defaultGrantRoleForRequest(request);
             const adminNote = row.querySelector('.access-request-note-input')?.value || '';
             btn.disabled = true;
             try {
@@ -298,11 +386,12 @@ export async function initAccessRequestWorkspaceGate() {
     const selectPanel = document.getElementById('workspace-gate-select-panel');
     const pendingPanel = document.getElementById('workspace-gate-pending-panel');
     const aptSelect = document.getElementById('workspace-gate-request-apartment');
-    const roleSelect = document.getElementById('workspace-gate-request-role');
     const messageEl = document.getElementById('workspace-gate-request-message');
     const submitBtn = document.getElementById('workspace-gate-request-submit');
     const errEl = document.getElementById('workspace-gate-error');
     const titleEl = document.getElementById('workspace-gate-title');
+    const requestIntro = document.getElementById('workspace-gate-request-intro');
+    const kind = getAuthUserKind();
 
     if (!requestPanel || !selectPanel || !pendingPanel) return;
 
@@ -329,8 +418,8 @@ export async function initAccessRequestWorkspaceGate() {
         if (list) {
             list.innerHTML = pending.map((r) => {
                 const society = aptNames[r.apartment_id] || 'Society';
-                const role = v2KeyToLabel(r.requested_role_key);
-                return `<li><strong>${esc(society)}</strong> — ${esc(role)}</li>`;
+                const kindLabel = requestKindLabel(inferRequestKind(r));
+                return `<li><strong>${esc(society)}</strong> — ${esc(kindLabel)}</li>`;
             }).join('');
         }
         return;
@@ -338,7 +427,22 @@ export async function initAccessRequestWorkspaceGate() {
 
     pendingPanel.hidden = true;
     requestPanel.hidden = false;
-    if (titleEl) titleEl.textContent = 'Request society access';
+    if (titleEl) {
+        titleEl.textContent = kind === 'office' ? 'Request office access' : 'Request resident access';
+    }
+    if (requestIntro) {
+        requestIntro.textContent = kind === 'office'
+            ? 'Choose your society. A society administrator will assign your staff role after review — you do not pick a role here.'
+            : 'Choose your society and flat details. An admin will link your account to the resident portal after approval.';
+    }
+    if (messageEl) {
+        messageEl.placeholder = kind === 'office'
+            ? 'Your name and role in the association office (e.g. accounts, security desk)'
+            : 'Flat number, block, and your name as on society records';
+    }
+    if (submitBtn) {
+        submitBtn.textContent = kind === 'office' ? 'Request office access' : 'Request resident access';
+    }
 
     const requestable = await fetchRequestableApartments();
     if (aptSelect) {
@@ -353,17 +457,10 @@ export async function initAccessRequestWorkspaceGate() {
         }
     }
 
-    if (roleSelect && !roleSelect.options.length) {
-        roleSelect.innerHTML = REQUESTABLE_ROLES.map((r) =>
-            `<option value="${r.key}">${esc(r.label)}</option>`,
-        ).join('');
-    }
-
     if (submitBtn && !submitBtn.dataset.wired) {
         submitBtn.dataset.wired = '1';
         submitBtn.addEventListener('click', async () => {
             const apartmentId = aptSelect?.value;
-            const roleKey = roleSelect?.value || 'resident_viewer';
             const message = messageEl?.value || '';
             if (!apartmentId) {
                 if (errEl) {
@@ -375,7 +472,7 @@ export async function initAccessRequestWorkspaceGate() {
             submitBtn.disabled = true;
             if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
             try {
-                await submitAccessRequest({ apartmentId, roleKey, message });
+                await submitAccessRequest({ apartmentId, message, requestKind: kind });
                 await initAccessRequestWorkspaceGate();
             } catch (err) {
                 if (errEl) {

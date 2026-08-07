@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build && node scripts/verify-build-chunks.mjs",
     "preview": "vite preview",
-    "verify:vercel-api": "node scripts/verify-vercel-api.mjs"
+    "verify:vercel-api": "node scripts/verify-vercel-api.mjs",
+    "generate-repo-map": "node scripts/utilities/generate-repo-map.js",
+    "setup:hooks": "node scripts/git-hooks/install-hooks.js"
   },
   "devDependencies": {
     "playwright": "^1.61.1",

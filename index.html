@@ -255,25 +255,38 @@
           onclick="document.getElementById('cash-modal').classList.remove('active')">&times;</button>
       </div>
 
-      <div id="bill-payment-section" class="expense-form" hidden style="display:none; padding: 0 1.15rem 0.25rem; gap: 0.65rem;">
-        <div class="expense-form__section">
-          <span class="expense-label">Payment</span>
-          <div class="expense-wallet-pills expense-wallet-pills--compact" id="bill-payment-pills" role="group" aria-label="Payment mode">
-            <button type="button" class="expense-wallet-pill active" data-bill-pay="cash">
-              <i class="fa-solid fa-money-bill-wave"></i> Cash
-            </button>
-            <button type="button" class="expense-wallet-pill" data-bill-pay="cheque">
-              <i class="fa-solid fa-money-check"></i> Cheque
-            </button>
-          </div>
+      <div id="bill-documents-section" class="bill-docs" hidden>
+        <div class="bill-docs__intro">
+          <h3 class="bill-docs__title">Attachments</h3>
+          <p class="bill-docs__desc">Invoice, payment proof, cheque photo, or transfer screenshot — photos or PDFs, multiple allowed.</p>
         </div>
-        <div id="bill-cheque-wrap" class="expense-form__section" hidden>
-          <label class="expense-label" for="bill-cheque-no">Cheque number</label>
-          <input type="text" id="bill-cheque-no" class="expense-combobox" placeholder="e.g. 27108" autocomplete="off" />
+        <div class="expense-receipt-box expense-receipt-box--drop">
+          <label class="expense-attach-drop" for="cash-bill">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            <span class="expense-attach-drop__title">Drop files here or browse</span>
+            <span class="expense-attach-drop__hint" id="cash-receipt-hint">Images or PDFs · invoice and payment proof</span>
+          </label>
+          <div class="expense-attach-drop__actions">
+            <label class="btn btn-outline btn--small" for="cash-bill">
+              <i class="fa-solid fa-folder-open" aria-hidden="true"></i> Choose files
+            </label>
+            <label class="btn btn-primary btn--small" for="cash-bill-camera">
+              <i class="fa-solid fa-camera" aria-hidden="true"></i> Take photo
+            </label>
+          </div>
+          <input type="file" id="cash-bill" accept="image/*,.pdf,application/pdf" multiple />
+          <input type="file" id="cash-bill-camera" accept="image/*" capture="environment" />
+          <div id="cash-receipt-preview" class="expense-attach-preview" hidden></div>
+          <ul id="cash-receipt-list" class="expense-receipt-list" hidden></ul>
         </div>
       </div>
 
+      <div class="cash-modal-body">
       <div id="expense-form-view" class="expense-form">
+        <div class="bill-docs__intro bill-details-step" hidden>
+          <h3 class="bill-docs__title">Details from the bill</h3>
+          <p class="bill-docs__desc">Copy amount, vendor, and date as printed on the invoice.</p>
+        </div>
         <div class="expense-form__section expense-form__section--wallet">
           <div class="expense-wallet-row">
             <span class="expense-label expense-label--inline">Paid from</span>
@@ -314,7 +327,7 @@
         </div>
 
         <div class="expense-form__section expense-form__section--date">
-          <label class="expense-label" for="cash-date">Date</label>
+          <label class="expense-label" for="cash-date">Bill date</label>
           <input type="date" id="cash-date" class="expense-date" />
         </div>
 
@@ -339,10 +352,14 @@
               placeholder="e.g. ABC Elevators, Sharma Plumbing" autocomplete="off" />
             <datalist id="expense-vendor-datalist"></datalist>
           </div>
-          <div class="expense-form__section expense-form__section--invoice">
+          <div class="expense-form__section expense-form__section--invoice" id="expense-invoice-wrap">
             <label class="expense-label" for="expense-invoice-input">Invoice # <span class="expense-optional">(optional)</span></label>
             <input type="text" id="expense-invoice-input" class="expense-combobox"
               placeholder="e.g. INV-4821" autocomplete="off" />
+          </div>
+          <div class="expense-form__section expense-form__section--invoice" id="bill-invoice-wrap" hidden>
+            <label class="expense-label" for="bill-invoice-input" id="bill-invoice-label">Invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="bill-invoice-input" class="expense-combobox" placeholder="e.g. INV-4821" autocomplete="off" />
           </div>
         </div>
 
@@ -352,17 +369,22 @@
             placeholder="Work done, payment terms, or other details"></textarea>
         </div>
 
-        <div class="expense-form__section expense-form__section--receipt">
+        <div class="expense-form__section expense-form__section--receipt" id="ledger-receipt-section">
           <label class="expense-label">Receipt <span class="expense-optional">(optional)</span></label>
           <div class="expense-receipt-box">
-            <input type="file" id="cash-bill" accept="image/*,.pdf,application/pdf" multiple />
-            <p class="expense-receipt-hint" id="cash-receipt-hint">Upload one or more images or PDFs. Stored in Supabase and linked to this expense.</p>
-            <ul id="cash-receipt-list" class="expense-receipt-list" hidden></ul>
+            <input type="file" id="cash-bill-ledger" accept="image/*,.pdf,application/pdf" multiple />
+            <p class="expense-receipt-hint" id="cash-ledger-receipt-hint">Upload one or more images or PDFs. Stored and linked to this ledger entry.</p>
+            <div id="cash-ledger-receipt-preview" class="expense-attach-preview" hidden></div>
+            <ul id="cash-ledger-receipt-list" class="expense-receipt-list" hidden></ul>
           </div>
         </div>
       </div>
 
       <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
+        <div class="bill-docs__intro bill-details-step" hidden>
+          <h3 class="bill-docs__title">Details from the receipt</h3>
+          <p class="bill-docs__desc">Amount, date, and income type for this receipt.</p>
+        </div>
         <div class="payment-record__details">
           <div class="payment-record__amount-row payment-record__amount-row--lead">
             <div class="expense-form__section expense-form__section--amount">
@@ -373,6 +395,11 @@
               <label class="expense-label" for="income-date">Date</label>
               <input type="date" id="income-date" class="expense-date" />
             </div>
+          </div>
+
+          <div class="expense-form__section" id="income-bill-invoice-wrap" hidden>
+            <label class="expense-label" for="income-bill-invoice-input" id="income-bill-invoice-label">Receipt / invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="income-bill-invoice-input" class="expense-combobox" placeholder="e.g. INV-4821" autocomplete="off" />
           </div>
 
           <div class="payment-record__flat-row expense-form__section" id="payment-record-flat-wrap" hidden>
@@ -460,6 +487,39 @@
         </div>
       </div>
 
+      <div id="bill-payment-section" class="bill-payment" hidden>
+        <div class="bill-docs__intro">
+          <h3 class="bill-docs__title" id="bill-payment-title">Payment status</h3>
+          <p class="bill-docs__desc" id="bill-payment-desc">Already paid, or leave unpaid until cash / bank is linked later?</p>
+        </div>
+        <div class="expense-wallet-pills expense-wallet-pills--compact bill-payment-pills" id="bill-payment-pills" role="group" aria-label="Payment status">
+          <button type="button" class="expense-wallet-pill active" data-bill-pay="unpaid">
+            <i class="fa-solid fa-clock"></i> Unpaid
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="cash">
+            <i class="fa-solid fa-money-bill-wave"></i> Paid · Cash
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="cheque">
+            <i class="fa-solid fa-money-check"></i> Paid · Cheque
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="online">
+            <i class="fa-solid fa-mobile-screen"></i> Paid · Online
+          </button>
+        </div>
+        <div id="bill-cheque-wrap" hidden>
+          <label class="expense-label" for="bill-cheque-no">Cheque number</label>
+          <input type="text" id="bill-cheque-no" class="expense-combobox" placeholder="e.g. 27108" autocomplete="off" />
+        </div>
+        <div id="bill-online-wrap" hidden>
+          <label class="expense-label" for="bill-online-ref">UTR / transfer ref <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="bill-online-ref" class="expense-combobox" placeholder="e.g. UPI ref or NEFT UTR" autocomplete="off" />
+        </div>
+        <div id="bill-paid-date-wrap" hidden>
+          <label class="expense-label" for="bill-paid-date">Payment date</label>
+          <input type="date" id="bill-paid-date" class="expense-combobox" />
+        </div>
+      </div>
+
       <!-- kept for save logic -->
       <select id="cash-cat-select" hidden aria-hidden="true" tabindex="-1">
         <option value="Security">Security / Guards</option>
@@ -481,6 +541,7 @@
         <option value="CASH">Cash Desk</option>
         <option value="BANK">Main Bank</option>
       </select>
+      </div>
 
       <div class="expense-modal__footer">
         <label class="expense-form__exclude-reports">
@@ -1052,12 +1113,11 @@
       </div>
 
       <div id="workspace-gate-request-panel" hidden>
+        <p id="workspace-gate-request-intro" style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.85rem;"></p>
         <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
         <select id="workspace-gate-request-apartment" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:0.75rem;"></select>
-        <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Access type</label>
-        <select id="workspace-gate-request-role" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:0.75rem;"></select>
         <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Message (optional)</label>
-        <textarea id="workspace-gate-request-message" rows="3" placeholder="Flat number, your name, or why you need access" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:600; margin-bottom:0.75rem; resize:vertical;"></textarea>
+        <textarea id="workspace-gate-request-message" rows="3" placeholder="Flat number and your name (residents), or your role in the association office (staff)" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:600; margin-bottom:0.75rem; resize:vertical;"></textarea>
         <button type="button" id="workspace-gate-request-submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem; margin-bottom:0.5rem;">Request access</button>
       </div>
 
@@ -1076,7 +1136,12 @@
   <div class="modal-backdrop" id="auth-modal">
     <div class="modal-content auth-card">
       <h2 style="font-size: 1.35rem; font-weight: 950; letter-spacing: -0.3px;">Sign in</h2>
-      <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1.25rem;">Access your CommunityHub workspace.</p>
+      <p id="auth-intro" style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1rem;">Residents and office staff use separate sign-in paths.</p>
+      <div class="auth-kind-tabs" role="tablist" aria-label="Sign-in type">
+        <button type="button" class="auth-kind-tab is-active" data-auth-kind="resident" role="tab" aria-selected="true">Resident</button>
+        <button type="button" class="auth-kind-tab" data-auth-kind="office" role="tab" aria-selected="false">Office staff</button>
+      </div>
+      <p id="auth-kind-hint" class="auth-kind-hint">For owners, tenants, and residents — request portal access to your society.</p>
       <form id="auth-form" autocomplete="on" style="display:flex; flex-direction:column; gap:0.75rem;">
         <div>
           <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Email</label>
@@ -1099,26 +1164,53 @@
 
   <!-- ADMIN MODALS -->
   <div class="modal-backdrop" id="admin-vendor-modal">
-    <div class="modal-content" style="max-width: 480px;">
-      <h2 id="admin-vendor-modal-title" style="font-size:1.1rem; font-weight:900;">Add Vendor</h2>
-      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
-        <div><label class="expense-label" for="admin-vendor-name">Vendor name</label><input type="text" id="admin-vendor-name" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-vendor-phone">Phone</label><input type="text" id="admin-vendor-phone" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-vendor-email">Email</label><input type="email" id="admin-vendor-email" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-vendor-notes">Notes</label><textarea id="admin-vendor-notes" class="expense-textarea" rows="2"></textarea></div>
+    <div class="modal-content admin-modal">
+      <header class="admin-modal__header">
+        <div>
+          <h2 id="admin-vendor-modal-title" class="admin-modal__title">Add vendor</h2>
+          <p class="admin-modal__desc">Vendors appear in expense autocomplete for this society.</p>
+        </div>
+        <button type="button" class="admin-modal__close" onclick="window.closeVendorModal()" aria-label="Close">&times;</button>
+      </header>
+      <div class="admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label" for="admin-vendor-name">Vendor name</label>
+          <input type="text" id="admin-vendor-name" class="expense-combobox" />
+        </div>
+        <div class="admin-form-grid admin-form-grid--modal">
+          <div class="admin-field">
+            <label class="expense-label" for="admin-vendor-phone">Phone</label>
+            <input type="text" id="admin-vendor-phone" class="expense-combobox" />
+          </div>
+          <div class="admin-field">
+            <label class="expense-label" for="admin-vendor-email">Email</label>
+            <input type="email" id="admin-vendor-email" class="expense-combobox" />
+          </div>
+        </div>
+        <div class="admin-field">
+          <label class="expense-label" for="admin-vendor-notes">Notes</label>
+          <textarea id="admin-vendor-notes" class="expense-textarea" rows="2"></textarea>
+        </div>
       </div>
-      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+      <footer class="admin-modal__footer">
         <button type="button" class="btn btn-outline" onclick="window.closeVendorModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" id="admin-vendor-save">Save Vendor</button>
-      </div>
+        <button type="button" class="btn btn-primary" id="admin-vendor-save">Save vendor</button>
+      </footer>
     </div>
   </div>
 
   <div class="modal-backdrop" id="admin-subcat-modal">
-    <div class="modal-content" style="max-width: 420px;">
-      <h2 id="admin-subcat-modal-title" style="font-size:1.1rem; font-weight:900;">Add Sub-category</h2>
-      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
-        <div><label class="expense-label" for="admin-subcat-category">Category</label>
+    <div class="modal-content admin-modal admin-modal--sm">
+      <header class="admin-modal__header">
+        <div>
+          <h2 id="admin-subcat-modal-title" class="admin-modal__title">Add sub-category</h2>
+          <p class="admin-modal__desc">Group expense labels under a primary category.</p>
+        </div>
+        <button type="button" class="admin-modal__close" onclick="window.closeSubCatModal()" aria-label="Close">&times;</button>
+      </header>
+      <div class="admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label" for="admin-subcat-category">Category</label>
           <select id="admin-subcat-category" class="expense-combobox">
             <option value="Maintenance">Maintenance</option>
             <option value="Security">Security</option>
@@ -1128,39 +1220,66 @@
             <option value="Other">Other</option>
           </select>
         </div>
-        <div><label class="expense-label" for="admin-subcat-name">Sub-category name</label><input type="text" id="admin-subcat-name" class="expense-combobox" placeholder="e.g. Lift motor" /></div>
+        <div class="admin-field">
+          <label class="expense-label" for="admin-subcat-name">Sub-category name</label>
+          <input type="text" id="admin-subcat-name" class="expense-combobox" placeholder="e.g. Lift motor" />
+        </div>
       </div>
-      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+      <footer class="admin-modal__footer">
         <button type="button" class="btn btn-outline" onclick="window.closeSubCatModal()">Cancel</button>
         <button type="button" class="btn btn-primary" id="admin-subcat-save">Save</button>
-      </div>
+      </footer>
     </div>
   </div>
 
   <div class="modal-backdrop" id="admin-staff-modal">
-    <div class="modal-content" style="max-width: 480px;">
-      <h2 id="admin-staff-modal-title" style="font-size:1.1rem; font-weight:900;">Add Staff</h2>
-      <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
-        <div><label class="expense-label" for="admin-staff-name">Full name</label><input type="text" id="admin-staff-name" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-staff-role">Role</label>
-          <select id="admin-staff-role" class="expense-combobox">
-            <option value="Manager">Manager</option>
-            <option value="Security Guard">Security Guard</option>
-            <option value="Housekeeping">Housekeeping</option>
-            <option value="Maintenance">Maintenance</option>
-            <option value="Accounts">Accounts</option>
-            <option value="Other">Other</option>
-          </select>
+    <div class="modal-content admin-modal">
+      <header class="admin-modal__header">
+        <div>
+          <h2 id="admin-staff-modal-title" class="admin-modal__title">Add staff</h2>
+          <p class="admin-modal__desc">On-site staff directory entry — separate from login roles.</p>
         </div>
-        <div><label class="expense-label" for="admin-staff-phone">Phone</label><input type="text" id="admin-staff-phone" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-staff-email">Email</label><input type="email" id="admin-staff-email" class="expense-combobox" /></div>
-        <div><label class="expense-label" for="admin-staff-notes">Notes</label><textarea id="admin-staff-notes" class="expense-textarea" rows="2"></textarea></div>
-        <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.85rem; font-weight:700;"><input type="checkbox" id="admin-staff-active" checked /> Active</label>
+        <button type="button" class="admin-modal__close" onclick="window.closeStaffModal()" aria-label="Close">&times;</button>
+      </header>
+      <div class="admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label" for="admin-staff-name">Full name</label>
+          <input type="text" id="admin-staff-name" class="expense-combobox" />
+        </div>
+        <div class="admin-form-grid admin-form-grid--modal">
+          <div class="admin-field">
+            <label class="expense-label" for="admin-staff-role">Role</label>
+            <select id="admin-staff-role" class="expense-combobox">
+              <option value="Manager">Manager</option>
+              <option value="Security Guard">Security Guard</option>
+              <option value="Housekeeping">Housekeeping</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Accounts">Accounts</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="admin-field">
+            <label class="expense-label" for="admin-staff-phone">Phone</label>
+            <input type="text" id="admin-staff-phone" class="expense-combobox" />
+          </div>
+        </div>
+        <div class="admin-field">
+          <label class="expense-label" for="admin-staff-email">Email</label>
+          <input type="email" id="admin-staff-email" class="expense-combobox" />
+        </div>
+        <div class="admin-field">
+          <label class="expense-label" for="admin-staff-notes">Notes</label>
+          <textarea id="admin-staff-notes" class="expense-textarea" rows="2"></textarea>
+        </div>
+        <label class="setup-inline-check">
+          <input type="checkbox" id="admin-staff-active" checked />
+          Active
+        </label>
       </div>
-      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+      <footer class="admin-modal__footer">
         <button type="button" class="btn btn-outline" onclick="window.closeStaffModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" id="admin-staff-save">Save Staff</button>
-      </div>
+        <button type="button" class="btn btn-primary" id="admin-staff-save">Save staff</button>
+      </footer>
     </div>
   </div>
 
@@ -1285,62 +1404,58 @@
 
   <!-- RESIDENT PORTAL LINK MODAL -->
   <div class="modal-backdrop" id="resident-link-modal">
-    <div class="modal-content" style="max-width: 520px;">
-      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+    <div class="modal-content admin-modal">
+      <header class="admin-modal__header">
         <div>
-          <h2 style="font-size: 1.25rem; font-weight: 900; letter-spacing: -0.02em;">Portal access</h2>
-          <p style="font-size: 0.8rem; color: var(--text-dim);">Manually link an account or send an email invitation.</p>
+          <h2 class="admin-modal__title">Portal access</h2>
+          <p class="admin-modal__desc">Link an existing account or send an email invitation to a resident.</p>
         </div>
-        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" onclick="window.closeResidentLinkModal()">&times;</button>
-      </div>
+        <button type="button" class="admin-modal__close" onclick="window.closeResidentLinkModal()" aria-label="Close">&times;</button>
+      </header>
 
       <div class="resident-link-tabs">
         <button type="button" class="resident-link-tab resident-link-tab--active" data-link-mode="manual">Manual link</button>
         <button type="button" class="resident-link-tab" data-link-mode="invite">Email invitation</button>
       </div>
 
-      <div id="resident-link-panel-manual" class="resident-link-panel">
-        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
-          <div>
-            <label class="resident-link-label">Flat</label>
-            <select id="resident-link-flat" class="resident-link-field"></select>
-          </div>
-          <div>
-            <label class="resident-link-label">Resident on flat</label>
-            <select id="resident-link-resident" class="resident-link-field"></select>
-          </div>
-          <div>
-            <label class="resident-link-label">User account (if already signed up)</label>
-            <select id="resident-link-user" class="resident-link-field"></select>
-            <p class="resident-link-hint">Or enter their login email:</p>
-            <input id="resident-link-email" type="email" placeholder="user@email.com" class="resident-link-field" />
-          </div>
+      <div id="resident-link-panel-manual" class="resident-link-panel admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label" for="resident-link-flat">Flat</label>
+          <select id="resident-link-flat" class="expense-combobox"></select>
         </div>
-        <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem;">
-          <button type="button" class="btn btn-outline" style="flex: 1;" id="resident-link-cancel">Cancel</button>
-          <button type="button" class="btn btn-primary" style="flex: 1;" id="resident-link-save">Link account</button>
+        <div class="admin-field">
+          <label class="expense-label" for="resident-link-resident">Resident on flat</label>
+          <select id="resident-link-resident" class="expense-combobox"></select>
+        </div>
+        <div class="admin-field">
+          <label class="expense-label" for="resident-link-user">User account <span class="expense-optional">(if already signed up)</span></label>
+          <select id="resident-link-user" class="expense-combobox"></select>
+          <p class="resident-link-hint">Or enter their login email:</p>
+          <input id="resident-link-email" type="email" placeholder="user@email.com" class="expense-combobox" />
+        </div>
+        <div class="admin-modal__footer admin-modal__footer--inbody">
+          <button type="button" class="btn btn-outline" id="resident-link-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="resident-link-save">Link account</button>
         </div>
       </div>
 
-      <div id="resident-link-panel-invite" class="resident-link-panel" hidden>
-        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
-          <div>
-            <label class="resident-link-label">Flat</label>
-            <select id="resident-invite-flat" class="resident-link-field"></select>
-          </div>
-          <div>
-            <label class="resident-link-label">Resident on flat</label>
-            <select id="resident-invite-resident" class="resident-link-field"></select>
-          </div>
-          <div>
-            <label class="resident-link-label">Invitation email</label>
-            <input id="resident-invite-email" type="email" placeholder="owner@email.com" class="resident-link-field" />
-            <p class="resident-link-hint">They sign up with this email and their flat links automatically.</p>
-          </div>
+      <div id="resident-link-panel-invite" class="resident-link-panel admin-modal__body" hidden>
+        <div class="admin-field">
+          <label class="expense-label" for="resident-invite-flat">Flat</label>
+          <select id="resident-invite-flat" class="expense-combobox"></select>
         </div>
-        <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem;">
-          <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeResidentLinkModal()">Cancel</button>
-          <button type="button" class="btn btn-primary" style="flex: 1;" id="resident-invite-send"><i class="fa-solid fa-envelope"></i> Send invitation</button>
+        <div class="admin-field">
+          <label class="expense-label" for="resident-invite-resident">Resident on flat</label>
+          <select id="resident-invite-resident" class="expense-combobox"></select>
+        </div>
+        <div class="admin-field">
+          <label class="expense-label" for="resident-invite-email">Invitation email</label>
+          <input id="resident-invite-email" type="email" placeholder="owner@email.com" class="expense-combobox" />
+          <p class="resident-link-hint">They sign up with this email and their flat links automatically.</p>
+        </div>
+        <div class="admin-modal__footer admin-modal__footer--inbody">
+          <button type="button" class="btn btn-outline" onclick="window.closeResidentLinkModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="resident-invite-send"><i class="fa-solid fa-envelope" aria-hidden="true"></i> Send invitation</button>
         </div>
       </div>
     </div>
@@ -1348,61 +1463,61 @@
 
   <!-- USER ACCESS MODAL -->
   <div class="modal-backdrop" id="user-access-modal">
-    <div class="modal-content" style="max-width: 560px; max-height: 90vh; overflow: auto;">
-      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1.5rem;">
+    <div class="modal-content admin-modal admin-modal--lg">
+      <header class="admin-modal__header">
         <div>
-          <h2 style="font-size: 1.25rem; font-weight: 900; letter-spacing: -0.02em;">Assign User Access</h2>
-          <p style="font-size: 0.8rem; color: var(--text-dim);">Grant permissions and map users to apartments.</p>
+          <h2 class="admin-modal__title">Assign user access</h2>
+          <p class="admin-modal__desc">Map a user to this society and choose their office role.</p>
         </div>
-        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" onclick="window.closeUserModal()">&times;</button>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.4rem;">User Identity</label>
-          <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 0.75rem;">
-            <input id="access-user-name-v2" type="text" placeholder="Full Name" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
-            <input id="access-user-email-v2" type="text" placeholder="Email (must exist)" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
+        <button type="button" class="admin-modal__close" onclick="window.closeUserModal()" aria-label="Close">&times;</button>
+      </header>
+      <div class="admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label">User identity</label>
+          <div class="admin-form-grid admin-form-grid--modal">
+            <input id="access-user-name-v2" type="text" class="expense-combobox" placeholder="Full name" />
+            <input id="access-user-email-v2" type="text" class="expense-combobox" placeholder="Email (must already exist)" />
           </div>
         </div>
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.4rem;">System Role</label>
-          <select id="access-user-role-v2" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;"></select>
+        <div class="admin-field">
+          <label class="expense-label" for="access-user-role-v2">Role</label>
+          <select id="access-user-role-v2" class="expense-combobox"></select>
         </div>
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.4rem;">Apartment Access (Select Multiple)</label>
-          <select id="access-user-apartments-v2" multiple style="width:100%; min-height:120px; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:600;"></select>
-          <p style="font-size:0.65rem; color:var(--text-dim); margin-top:0.4rem;">Hold Ctrl/Cmd to select multiple apartments.</p>
+        <div class="admin-field">
+          <label class="expense-label" for="access-user-apartments-v2">Society access</label>
+          <select id="access-user-apartments-v2" class="expense-combobox admin-modal__multi" multiple></select>
+          <p class="resident-link-hint">Hold Ctrl/Cmd to select multiple societies.</p>
         </div>
         <div id="user-module-access-panel" hidden></div>
         <div id="user-page-access-panel" hidden></div>
       </div>
-      <div style="margin-top: 2rem; display: flex; gap: 0.75rem;">
-        <button class="btn btn-outline" style="flex: 1; padding: 0.7rem;" onclick="window.closeUserModal()">Cancel</button>
-        <button id="save-user-access-btn" class="btn btn-primary" style="flex: 1; padding: 0.7rem;">Save Access & Role</button>
-      </div>
+      <footer class="admin-modal__footer">
+        <button type="button" class="btn btn-outline" onclick="window.closeUserModal()">Cancel</button>
+        <button type="button" id="save-user-access-btn" class="btn btn-primary">Save access</button>
+      </footer>
     </div>
   </div>
 
   <!-- APARTMENT MODAL -->
   <div class="modal-backdrop" id="apt-mgmt-modal">
-    <div class="modal-content" style="max-width: 400px;">
-      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1.5rem;">
+    <div class="modal-content admin-modal admin-modal--sm">
+      <header class="admin-modal__header">
         <div>
-          <h2 id="apt-mgmt-title" style="font-size: 1.25rem; font-weight: 900; letter-spacing: -0.02em;">Add Apartment</h2>
-          <p style="font-size: 0.8rem; color: var(--text-dim);">Manage your apartment portfolio.</p>
+          <h2 id="apt-mgmt-title" class="admin-modal__title">Add society</h2>
+          <p class="admin-modal__desc">Create or rename a society in this workspace.</p>
         </div>
-        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" onclick="window.closeAptModal()">&times;</button>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.4rem;">Apartment Name</label>
-          <input id="apt-mgmt-name" type="text" placeholder="e.g. CommunityHub - West Wing" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
+        <button type="button" class="admin-modal__close" onclick="window.closeAptModal()" aria-label="Close">&times;</button>
+      </header>
+      <div class="admin-modal__body">
+        <div class="admin-field">
+          <label class="expense-label" for="apt-mgmt-name">Society name</label>
+          <input id="apt-mgmt-name" type="text" class="expense-combobox" placeholder="e.g. Elixir Heights" />
         </div>
       </div>
-      <div style="margin-top: 2rem; display: flex; gap: 0.75rem;">
-        <button class="btn btn-outline" style="flex: 1; padding: 0.7rem;" onclick="window.closeAptModal()">Cancel</button>
-        <button id="save-apt-mgmt-btn" class="btn btn-primary" style="flex: 1; padding: 0.7rem;">Save Apartment</button>
-      </div>
+      <footer class="admin-modal__footer">
+        <button type="button" class="btn btn-outline" onclick="window.closeAptModal()">Cancel</button>
+        <button type="button" id="save-apt-mgmt-btn" class="btn btn-primary">Save society</button>
+      </footer>
     </div>
   </div>
 

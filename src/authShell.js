@@ -1,7 +1,7 @@
 /** Auth profile + topbar/sidebar UI refresh (no imports from main.js). */
 
 import { portalState, supabase, withTimeout } from './store.js';
-import { ROLE_OPTIONS, v2KeyToLabel, resolveEffectivePermissions } from './rbac.js';
+import { ROLE_OPTIONS, v2KeyToLabel, resolveEffectivePermissions, v1RoleToV2Key } from './rbac.js';
 import { applyNavPermissions } from './navigation.js';
 
 let cachedProfile = null;
@@ -42,8 +42,13 @@ export const deferAfterFirstPaint = (fn, timeoutMs = 8000) => {
 };
 
 export const formatRoleLabel = (role) => {
-    const match = ROLE_OPTIONS.find((r) => r.key === role || r.v1Key === role);
-    return match?.label || v2KeyToLabel(role) || String(role || 'Viewer').replace(/_/g, ' ');
+    const byKey = ROLE_OPTIONS.find((r) => r.key === role);
+    if (byKey) return byKey.label;
+    // Legacy profiles.role = 'admin' must not resolve to System Administrator
+    const key = v1RoleToV2Key(role);
+    return ROLE_OPTIONS.find((r) => r.key === key)?.label
+        || v2KeyToLabel(key)
+        || String(role || 'Viewer').replace(/_/g, ' ');
 };
 
 export const refreshAuthUiShell = () => {

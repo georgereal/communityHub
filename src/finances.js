@@ -4,7 +4,7 @@
 import { portalState, persist, supabase, pullState } from './store.js';
 import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection, setLedgerViewRefresh } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
-import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter } from './ledgerFilter.js';
+import { renderLedgerPivotBanner, sortLedgerTxns, sortLedgerTxnsChronological, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
     collectAllocationDraft,
     formatAllocationSummary,
@@ -12,7 +12,7 @@ import {
     validateMaintenanceAllocations,
 } from './maintenanceBilling.js';
 import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
-import { hasClientPermission } from './rbac.js';
+import { hasClientPermission, isApartmentAdminUser } from './rbac.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
 import { initLedgerExport } from './ledgerExport.js';
 import { getLedgerBankBalance, annotateLedgerRunningBalancesInOrder, getActiveLedgerTxns } from './ledgerBalance.js';
@@ -395,23 +395,110 @@ const resetReceiptUI = (existingPaths = []) => {
     renderReceiptUI();
 };
 
+const revokeReceiptPreviewUrls = () => {
+    (portalState.receiptPreviewObjectUrls || []).forEach((url) => {
+        try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+    });
+    portalState.receiptPreviewObjectUrls = [];
+};
+
+const receiptPreviewHost = () => {
+    const isBill = portalState.cashSaveTarget === 'bill';
+    return document.getElementById(isBill ? 'cash-receipt-preview' : 'cash-ledger-receipt-preview');
+};
+
+const isAttachmentPdf = (label = '', key = '') =>
+    /\.pdf$/i.test(String(label)) || /\.pdf$/i.test(String(key));
+
+let receiptPreviewRenderGen = 0;
+
+const resolveAttachmentThumbSource = (item) => {
+    if (item.billAtt) return billAttachmentKey(item.billAtt) || item.billAtt;
+    if (item.path) return item.path;
+    return null;
+};
+
+/** Load real image previews for already-uploaded (R2/storage) attachments. */
+const hydrateSavedAttachmentThumbs = async (preview, items, gen) => {
+    if (!preview || !items?.length) return;
+    const jobs = items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.saved && item.kind === 'image');
+    await Promise.all(jobs.map(async ({ item, index }) => {
+        if (gen !== receiptPreviewRenderGen) return;
+        const source = resolveAttachmentThumbSource(item);
+        if (!source) return;
+        const card = preview.children[index];
+        const thumbEl = card?.querySelector?.('.expense-attach-card__thumb');
+        if (!thumbEl || thumbEl.querySelector('img.expense-attach-card__img')) return;
+        thumbEl.classList.add('expense-attach-card__thumb--loading');
+        try {
+            const url = await resolveReceiptUrl(source);
+            if (gen !== receiptPreviewRenderGen || !url) return;
+            const img = document.createElement('img');
+            img.className = 'expense-attach-card__img';
+            img.alt = '';
+            img.loading = 'lazy';
+            img.src = url;
+            img.onerror = () => {
+                thumbEl.classList.remove('expense-attach-card__thumb--loading');
+            };
+            img.onload = () => {
+                thumbEl.classList.remove('expense-attach-card__thumb--loading');
+                const icon = thumbEl.querySelector('.expense-attach-card__icon');
+                if (icon) icon.remove();
+            };
+            // Insert behind any "New" badge
+            const badge = thumbEl.querySelector('.expense-attach-card__new');
+            if (badge) thumbEl.insertBefore(img, badge);
+            else thumbEl.prepend(img);
+        } catch {
+            thumbEl.classList.remove('expense-attach-card__thumb--loading');
+        }
+    }));
+};
+
 const renderReceiptUI = () => {
-    const list = document.getElementById('cash-receipt-list');
-    if (!list) return;
+    const preview = receiptPreviewHost();
+    const list = document.getElementById(
+        portalState.cashSaveTarget === 'bill' ? 'cash-receipt-list' : 'cash-ledger-receipt-list',
+    );
+    // Hide the inactive host so bill vs ledger previews never stack
+    const otherPreview = document.getElementById(
+        portalState.cashSaveTarget === 'bill' ? 'cash-ledger-receipt-preview' : 'cash-receipt-preview',
+    );
+    const otherList = document.getElementById(
+        portalState.cashSaveTarget === 'bill' ? 'cash-ledger-receipt-list' : 'cash-receipt-list',
+    );
+    if (otherPreview) {
+        otherPreview.hidden = true;
+        otherPreview.innerHTML = '';
+    }
+    if (otherList) {
+        otherList.hidden = true;
+        otherList.innerHTML = '';
+    }
+
+    revokeReceiptPreviewUrls();
+    const gen = ++receiptPreviewRenderGen;
 
     const isBill = portalState.cashSaveTarget === 'bill';
     const keptBill = isBill ? (portalState.billKeepAttachments || []) : [];
     const kept = isBill ? [] : (portalState.pendingReceiptPaths || []);
     const pending = portalState.pendingReceiptFiles || [];
     const items = [
-        ...keptBill.map((att, i) => ({
-            key: `bill-${i}-${billAttachmentKey(att)}`,
-            label: billAttachmentLabel(att, i),
-            kind: /\.pdf$/i.test(billAttachmentLabel(att, i)) ? 'pdf' : 'image',
-            saved: true,
-            billAtt: att,
-            billKey: billAttachmentKey(att),
-        })),
+        ...keptBill.map((att, i) => {
+            const label = billAttachmentLabel(att, i);
+            const key = billAttachmentKey(att);
+            return {
+                key: `bill-${i}-${key}`,
+                label,
+                kind: isAttachmentPdf(label, key) ? 'pdf' : 'image',
+                saved: true,
+                billAtt: att,
+                billKey: key,
+            };
+        }),
         ...kept.map((path, i) => ({
             key: `saved-${i}-${path}`,
             label: receiptFileName(path),
@@ -429,63 +516,105 @@ const renderReceiptUI = () => {
     ];
 
     if (!items.length) {
-        list.hidden = true;
-        list.innerHTML = '';
+        if (preview) {
+            preview.hidden = true;
+            preview.innerHTML = '';
+        }
+        if (list) {
+            list.hidden = true;
+            list.innerHTML = '';
+        }
         return;
     }
 
-    list.hidden = false;
-    list.innerHTML = items.map((item) => {
-        const icon = item.kind === 'pdf' ? 'fa-file-pdf' : 'fa-file-image';
-        let viewBtn = '';
+    if (list) {
+        list.hidden = true;
+        list.innerHTML = '';
+    }
+    if (!preview) return;
+
+    preview.hidden = false;
+    preview.innerHTML = items.map((item) => {
+        let thumb = '';
+        if (!item.saved && item.file && item.kind === 'image') {
+            const url = URL.createObjectURL(item.file);
+            portalState.receiptPreviewObjectUrls = [...(portalState.receiptPreviewObjectUrls || []), url];
+            thumb = `<img class="expense-attach-card__img" src="${url}" alt="" />`;
+        } else {
+            const icon = item.kind === 'pdf' ? 'fa-file-pdf' : 'fa-file-image';
+            thumb = `<span class="expense-attach-card__icon expense-attach-card__icon--${item.kind}"><i class="fa-solid ${icon}"></i></span>`;
+        }
+
+        let viewAttr = '';
         let removeAttr = '';
         if (item.billKey) {
-            viewBtn = `<button type="button" class="expense-link-btn" data-view-bill-key="${encodeURIComponent(item.billKey)}">view</button>`;
+            viewAttr = `data-view-bill-key="${encodeURIComponent(item.billKey)}"`;
             removeAttr = `data-remove-bill-key="${encodeURIComponent(item.billKey)}"`;
         } else if (item.saved) {
-            viewBtn = `<button type="button" class="expense-link-btn" data-view-path="${encodeURIComponent(item.path)}">view</button>`;
+            viewAttr = `data-view-path="${encodeURIComponent(item.path)}"`;
             removeAttr = `data-remove-saved="${encodeURIComponent(item.path)}"`;
         } else {
-            viewBtn = `<button type="button" class="expense-link-btn" data-view-file="${encodeURIComponent(item.label)}::${item.file?.size || 0}">view</button>`;
+            viewAttr = `data-view-file="${encodeURIComponent(item.label)}::${item.file?.size || 0}"`;
             removeAttr = `data-remove-file="${encodeURIComponent(item.label)}::${item.file?.size || 0}"`;
         }
-        return `<li class="expense-receipt-item">
-          <span class="expense-receipt-item__name"><i class="fa-solid ${icon}"></i> ${item.label}</span>
-          <span class="expense-receipt-item__actions">${viewBtn}<button type="button" class="expense-link-btn" ${removeAttr}>remove</button></span>
-        </li>`;
+
+        const badge = item.saved ? '' : '<span class="expense-attach-card__new">New</span>';
+        const loadingClass = item.saved && item.kind === 'image' ? ' expense-attach-card__thumb--loading' : '';
+        return `<article class="expense-attach-card" ${viewAttr} title="${item.label.replace(/"/g, '&quot;')}">
+          <div class="expense-attach-card__thumb${loadingClass}">${thumb}${badge}</div>
+          <div class="expense-attach-card__meta">
+            <span class="expense-attach-card__name">${item.label}</span>
+            <button type="button" class="expense-attach-card__remove" ${removeAttr} aria-label="Remove ${item.label}">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </div>
+        </article>`;
     }).join('');
 
-    list.querySelectorAll('[data-view-path]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            window.viewReceipt(decodeURIComponent(btn.dataset.viewPath));
+    preview.querySelectorAll('[data-view-path]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
+            window.viewReceipt(decodeURIComponent(el.dataset.viewPath));
         });
     });
-    list.querySelectorAll('[data-view-bill-key]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+    preview.querySelectorAll('[data-view-bill-key]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
             void viewBillAttachment(
-                decodeURIComponent(btn.dataset.viewBillKey),
+                decodeURIComponent(el.dataset.viewBillKey),
                 portalState.billKeepAttachments || [],
             );
         });
     });
-    list.querySelectorAll('[data-view-file]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const token = decodeURIComponent(btn.dataset.viewFile);
+    preview.querySelectorAll('[data-view-file]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
+            const token = decodeURIComponent(el.dataset.viewFile);
             const [name, sizeStr] = token.split('::');
             const size = parseInt(sizeStr, 10);
             const file = (portalState.pendingReceiptFiles || []).find((f) => f.name === name && f.size === size);
-            if (file) window.previewReceiptFile(file);
+            if (file) {
+                // Open full gallery with all pending + kept so arrows work across files
+                const gallery = [
+                    ...(isBill ? (portalState.billKeepAttachments || []) : (portalState.pendingReceiptPaths || [])),
+                    ...(portalState.pendingReceiptFiles || []),
+                ];
+                const start = gallery.findIndex((g) => g === file || (g instanceof File && g.name === file.name && g.size === file.size));
+                void window.viewAttachmentGallery?.(gallery, start >= 0 ? start : 0);
+            }
         });
     });
-    list.querySelectorAll('[data-remove-saved]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+    preview.querySelectorAll('[data-remove-saved]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const path = decodeURIComponent(btn.dataset.removeSaved);
             portalState.pendingReceiptPaths = (portalState.pendingReceiptPaths || []).filter((p) => p !== path);
             renderReceiptUI();
         });
     });
-    list.querySelectorAll('[data-remove-bill-key]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+    preview.querySelectorAll('[data-remove-bill-key]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const key = decodeURIComponent(btn.dataset.removeBillKey);
             portalState.billKeepAttachments = (portalState.billKeepAttachments || []).filter(
                 (a) => billAttachmentKey(a) !== key,
@@ -493,8 +622,9 @@ const renderReceiptUI = () => {
             renderReceiptUI();
         });
     });
-    list.querySelectorAll('[data-remove-file]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+    preview.querySelectorAll('[data-remove-file]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const token = decodeURIComponent(btn.dataset.removeFile);
             const [name, sizeStr] = token.split('::');
             const size = parseInt(sizeStr, 10);
@@ -504,6 +634,8 @@ const renderReceiptUI = () => {
             renderReceiptUI();
         });
     });
+
+    void hydrateSavedAttachmentThumbs(preview, items, gen);
 };
 
 const viewBillAttachment = async (key, allEntries = null) => {
@@ -637,9 +769,17 @@ export const initExpenseModal = () => {
             const btn = e.target.closest('[data-bill-pay]');
             if (!btn || !billPayPills.contains(btn)) return;
             if (portalState.billModalReadOnly) return;
-            syncBillPaymentUI(btn.dataset.billPay, document.getElementById('bill-cheque-no')?.value || '');
+            syncBillPaymentUI(btn.dataset.billPay, {
+                chequeNo: document.getElementById('bill-cheque-no')?.value || '',
+                onlineRef: document.getElementById('bill-online-ref')?.value || '',
+                paidOn: document.getElementById('bill-paid-date')?.value || '',
+            });
             if (btn.dataset.billPay === 'cheque') {
                 setTimeout(() => document.getElementById('bill-cheque-no')?.focus(), 30);
+            } else if (btn.dataset.billPay === 'online') {
+                setTimeout(() => document.getElementById('bill-online-ref')?.focus(), 30);
+            } else if (btn.dataset.billPay === 'cash') {
+                setTimeout(() => document.getElementById('bill-paid-date')?.focus(), 30);
             }
         });
     }
@@ -691,18 +831,22 @@ export const initExpenseModal = () => {
         incomeCatInput.addEventListener('input', syncIncomeSections);
     }
 
-    const billInput = document.getElementById('cash-bill');
-    if (billInput && !billInput.dataset.wired) {
-        billInput.dataset.wired = '1';
-        billInput.addEventListener('change', () => {
-            const picked = Array.from(billInput.files || []);
+    const wireReceiptFileInput = (inputId) => {
+        const input = document.getElementById(inputId);
+        if (!input || input.dataset.wired) return;
+        input.dataset.wired = '1';
+        input.addEventListener('change', () => {
+            const picked = Array.from(input.files || []);
             if (picked.length) {
                 portalState.pendingReceiptFiles = [...(portalState.pendingReceiptFiles || []), ...picked];
                 renderReceiptUI();
             }
-            billInput.value = '';
+            input.value = '';
         });
-    }
+    };
+    wireReceiptFileInput('cash-bill');
+    wireReceiptFileInput('cash-bill-camera');
+    wireReceiptFileInput('cash-bill-ledger');
 
     const wireBankProofInput = (inputId) => {
         const input = document.getElementById(inputId);
@@ -719,6 +863,27 @@ export const initExpenseModal = () => {
     };
     wireBankProofInput('cash-bank-proof');
     wireBankProofInput('cash-income-bank-proof');
+
+    if (!initExpenseModal._escWired) {
+        initExpenseModal._escWired = true;
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            // Receipt viewer handles its own Escape
+            if (document.getElementById('receipt-modal')?.classList.contains('active')) return;
+            // Open combobox menus handle Escape first via stopPropagation when focused
+            const cash = document.getElementById('cash-modal');
+            if (cash?.classList.contains('active')) {
+                e.preventDefault();
+                cash.classList.remove('active');
+                return;
+            }
+            const ledgerLine = document.getElementById('ledger-line-modal');
+            if (ledgerLine?.classList.contains('active')) {
+                e.preventDefault();
+                ledgerLine.classList.remove('active');
+            }
+        });
+    }
 };
 
 export const processFinances = () => {
@@ -792,8 +957,8 @@ export const renderCashLedger = () => {
     const active = getActiveLedgerTxns([...portalState.finances.txns]);
     const filtered = applyLedgerTableFilters(active);
     const sorted = sortLedgerTxns(filtered);
-    // Enrich balances after sort so _ledgerComputedBalance matches table order.
-    const running = annotateLedgerRunningBalancesInOrder(sorted);
+    // Running Calculated always walks oldest→newest, even when the table shows newest-first.
+    const running = annotateLedgerRunningBalancesInOrder(sortLedgerTxnsChronological(filtered));
     const enrichedSorted = sorted.map((t) => ({
         ...t,
         _ledgerComputedBalance: running.byId.get(t.id) ?? null,
@@ -1079,6 +1244,8 @@ const showReceiptAtIndex = async (index) => {
             img.removeAttribute('src');
             img.style.transform = '';
         }
+        const zoomWrap = document.getElementById('receipt-zoom-wrap');
+        if (zoomWrap) zoomWrap.hidden = true;
         if (empty) empty.hidden = true;
         if (pdf) {
             pdf.hidden = false;
@@ -1092,6 +1259,8 @@ const showReceiptAtIndex = async (index) => {
             pdf.hidden = true;
             pdf.removeAttribute('src');
         }
+        const zoomWrap = document.getElementById('receipt-zoom-wrap');
+        if (zoomWrap) zoomWrap.hidden = false;
         if (empty) empty.hidden = !!url;
         if (img) {
             img.hidden = !url;
@@ -1236,7 +1405,10 @@ export const saveCashData = async () => {
     let vendor_invoice = null;
     if (!isIncome) {
         vendor_name = vendorEl?.value?.trim() || null;
-        vendor_invoice = invoiceEl?.value?.trim() || null;
+        vendor_invoice = readBillInvoiceNumber() || invoiceEl?.value?.trim() || null;
+    } else if (saveTarget === 'bill') {
+        vendor_invoice = readBillInvoiceNumber();
+        vendor_name = document.getElementById('income-vendor-input')?.value?.trim() || null;
     } else {
         const extra = INCOME_EXTRA_BY_CAT[cat];
         if (extra?.vendor) {
@@ -1263,9 +1435,14 @@ export const saveCashData = async () => {
         const payMode = getBillPaymentMode();
         const chequeNo = document.getElementById('bill-cheque-no')?.value?.trim() || '';
         if (payMode === 'cheque' && !chequeNo) {
-            return alert('Enter the cheque number, or switch payment to Cash.');
+            return alert('Enter the cheque number, or choose Unpaid / Paid · Cash / Paid · Online.');
         }
-        const notes = payMode === 'cheque' ? `Cheque: ${chequeNo}` : 'Payment: Cash';
+        const onlineRef = document.getElementById('bill-online-ref')?.value?.trim() || '';
+        const paidOn = document.getElementById('bill-paid-date')?.value?.trim() || '';
+        if (payMode !== 'unpaid' && !paidOn) {
+            return alert('Enter the payment date.');
+        }
+        const notes = billPaymentNotes(payMode, chequeNo, onlineRef, paidOn);
 
         const existing = portalState.editingFinanceDocId
             ? (portalState.finances.financeDocuments || []).find((d) => d.id === portalState.editingFinanceDocId)
@@ -1295,7 +1472,9 @@ export const saveCashData = async () => {
                     notes,
                     transaction_id: existing?.transaction_id || null,
                     source: existing?.source || 'manual',
-                    status: existing?.status || 'open',
+                    status: existing?.transaction_id
+                        ? 'linked'
+                        : (payMode === 'unpaid' ? 'unpaid' : 'paid'),
                 },
                 keepAttachments,
                 removeAttachments,
@@ -1354,8 +1533,8 @@ export const saveCashData = async () => {
         ? (portalState.originalBankProofPaths || []).filter((p) => !bank_proof_urls.includes(p))
         : (portalState.originalBankProofPaths || []);
 
-    const excludeFromReports = document.getElementById('txn-exclude-reports')?.checked === true
-        || cat === BANK_REJECT_CAT;
+    const excludeFromReports = cat === BANK_REJECT_CAT
+        || (isApartmentAdminUser() && document.getElementById('txn-exclude-reports')?.checked === true);
 
     try {
         const payload = {
@@ -1453,6 +1632,8 @@ const openExpenseFormDefaults = (wallet = 'CASH') => {
     document.getElementById('cash-desc').value = '';
     document.getElementById('expense-vendor-input').value = '';
     document.getElementById('expense-invoice-input').value = '';
+    const billInv = document.getElementById('bill-invoice-input');
+    if (billInv) billInv.value = '';
     document.getElementById('cash-date').value = todayISO();
     document.getElementById('expense-cat-input').value = labelForCat('Maintenance');
     document.getElementById('expense-subcat-input').value = '';
@@ -1478,6 +1659,10 @@ const openIncomeFormDefaults = (wallet = 'CASH', catKey = 'Maintenance Collectio
     document.getElementById('maintenance-unit-input').value = '';
     document.getElementById('income-vendor-input').value = '';
     document.getElementById('income-reference-input').value = '';
+    const billInv = document.getElementById('bill-invoice-input');
+    if (billInv) billInv.value = '';
+    const incomeBillInv = document.getElementById('income-bill-invoice-input');
+    if (incomeBillInv) incomeBillInv.value = '';
     syncWalletPills('income-wallet-pills', wallet);
     syncBankTypePills('CHEQUE');
     document.getElementById('income-bank-ref').value = '';
@@ -1492,21 +1677,69 @@ const openIncomeFormDefaults = (wallet = 'CASH', catKey = 'Maintenance Collectio
     if (excludeEl) excludeEl.checked = false;
 };
 
-const getBillPaymentMode = () =>
-    document.querySelector('#bill-payment-pills .expense-wallet-pill.active')?.dataset?.billPay === 'cheque'
-        ? 'cheque'
-        : 'cash';
+const getBillPaymentMode = () => {
+    const active = document.querySelector('#bill-payment-pills .expense-wallet-pill.active')?.dataset?.billPay;
+    if (active === 'cheque' || active === 'cash' || active === 'online' || active === 'unpaid') return active;
+    return 'unpaid';
+};
 
-const syncBillPaymentUI = (mode = 'cash', chequeNo = '') => {
+const syncBillPaymentUI = (mode = 'unpaid', opts = {}) => {
+    const options = typeof opts === 'string' ? { chequeNo: opts } : (opts || {});
+    const chequeNo = options.chequeNo || '';
+    const onlineRef = options.onlineRef || '';
+    const paidOn = options.paidOn || '';
     const pills = document.getElementById('bill-payment-pills');
-    const wrap = document.getElementById('bill-cheque-wrap');
-    const input = document.getElementById('bill-cheque-no');
-    const pay = mode === 'cheque' ? 'cheque' : 'cash';
+    const chequeWrap = document.getElementById('bill-cheque-wrap');
+    const chequeInput = document.getElementById('bill-cheque-no');
+    const onlineWrap = document.getElementById('bill-online-wrap');
+    const onlineInput = document.getElementById('bill-online-ref');
+    const dateWrap = document.getElementById('bill-paid-date-wrap');
+    const dateInput = document.getElementById('bill-paid-date');
+    const pay = ['cheque', 'cash', 'online', 'unpaid'].includes(mode) ? mode : 'unpaid';
+    const isPaid = pay === 'cheque' || pay === 'cash' || pay === 'online';
     pills?.querySelectorAll('[data-bill-pay]').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.billPay === pay);
     });
-    if (wrap) wrap.hidden = pay !== 'cheque';
-    if (input) input.value = pay === 'cheque' ? (chequeNo || '') : '';
+    if (chequeWrap) chequeWrap.hidden = pay !== 'cheque';
+    if (chequeInput) chequeInput.value = pay === 'cheque' ? chequeNo : '';
+    if (onlineWrap) onlineWrap.hidden = pay !== 'online';
+    if (onlineInput) onlineInput.value = pay === 'online' ? onlineRef : '';
+    if (dateWrap) dateWrap.hidden = !isPaid;
+    if (dateInput) {
+        if (isPaid) {
+            dateInput.value = paidOn || dateInput.value || todayISO();
+        } else {
+            dateInput.value = '';
+        }
+    }
+};
+
+const billPaymentNotes = (mode, chequeNo = '', onlineRef = '', paidOn = '') => {
+    let base = 'Payment: Unpaid';
+    if (mode === 'cheque') base = `Cheque: ${chequeNo}`;
+    else if (mode === 'online') base = onlineRef ? `Online: ${onlineRef}` : 'Payment: Online';
+    else if (mode === 'cash') base = 'Payment: Cash';
+    if (mode !== 'unpaid' && paidOn) return `${base}\nPaid on: ${String(paidOn).slice(0, 10)}`;
+    return base;
+};
+
+const parseBillPaymentFromNotes = (notes = '') => {
+    const text = String(notes || '');
+    const paidOnMatch = text.match(/Paid on:\s*(\d{4}-\d{2}-\d{2})/i);
+    const paidOn = paidOnMatch ? paidOnMatch[1] : '';
+    const chequeMatch = text.match(/^Cheque:\s*(.+)$/im);
+    if (chequeMatch) {
+        return { mode: 'cheque', chequeNo: chequeMatch[1].trim().split('\n')[0].trim(), onlineRef: '', paidOn };
+    }
+    const onlineMatch = text.match(/^Online:\s*(.+)$/im);
+    if (onlineMatch) {
+        return { mode: 'online', chequeNo: '', onlineRef: onlineMatch[1].trim().split('\n')[0].trim(), paidOn };
+    }
+    if (/Payment:\s*Online/i.test(text)) return { mode: 'online', chequeNo: '', onlineRef: '', paidOn };
+    if (/Payment:\s*Cash/i.test(text)) return { mode: 'cash', chequeNo: '', onlineRef: '', paidOn };
+    if (/Payment:\s*Unpaid/i.test(text)) return { mode: 'unpaid', chequeNo: '', onlineRef: '', paidOn: '' };
+    if (!text.trim()) return { mode: 'unpaid', chequeNo: '', onlineRef: '', paidOn: '' };
+    return { mode: 'unpaid', chequeNo: '', onlineRef: '', paidOn: '' };
 };
 
 const billAttachmentKey = (entry) => {
@@ -1532,6 +1765,7 @@ const resetBillAttachmentUI = (attachments = []) => {
 };
 
 const applyCashModalChrome = ({ isIncome, isBill }) => {
+    const modal = document.getElementById('cash-modal');
     const walletSection = document.querySelector('#expense-form-view .expense-form__section--wallet');
     const bankSection = document.getElementById('expense-bank-section');
     const incomeWallet = document.querySelector('#income-form-view .expense-form__section--wallet');
@@ -1539,26 +1773,114 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     const excludeWrap = document.querySelector('.expense-form__exclude-reports');
     const receiptHint = document.getElementById('cash-receipt-hint');
     const billPay = document.getElementById('bill-payment-section');
+    const billDocs = document.getElementById('bill-documents-section');
+    const ledgerReceipt = document.getElementById('ledger-receipt-section');
+    const expenseInvoiceWrap = document.getElementById('expense-invoice-wrap');
+    const billInvoiceWrap = document.getElementById('bill-invoice-wrap');
+    const incomeBillInvoiceWrap = document.getElementById('income-bill-invoice-wrap');
+    const billInvoiceLabel = document.getElementById('bill-invoice-label');
+    const payTitle = document.getElementById('bill-payment-title');
+    const payDesc = document.getElementById('bill-payment-desc');
+    const docsTitle = billDocs?.querySelector('.bill-docs__title');
+    const docsDesc = billDocs?.querySelector('.bill-docs__desc');
 
+    modal?.classList.toggle('cash-modal--bill', !!isBill);
+    modal?.classList.toggle('cash-modal--ledger', !isBill);
+
+    if (billDocs) billDocs.hidden = !isBill;
     if (walletSection) walletSection.hidden = !!isBill;
     if (bankSection && isBill) bankSection.hidden = true;
     if (incomeWallet) incomeWallet.hidden = !!isBill;
     if (incomeBank && isBill) incomeBank.hidden = true;
-    if (excludeWrap) excludeWrap.hidden = !!isBill;
+    if (excludeWrap) excludeWrap.hidden = !!isBill || !isApartmentAdminUser();
+    if (ledgerReceipt) ledgerReceipt.hidden = !!isBill;
+    if (expenseInvoiceWrap) expenseInvoiceWrap.hidden = !!isBill;
+    if (billInvoiceWrap) billInvoiceWrap.hidden = !(isBill && !isIncome);
+    if (incomeBillInvoiceWrap) incomeBillInvoiceWrap.hidden = !(isBill && isIncome);
+
+    document.querySelectorAll('.bill-details-step').forEach((el) => {
+        el.hidden = !isBill;
+    });
+
     if (billPay) {
         billPay.hidden = !isBill;
-        billPay.style.display = isBill ? 'grid' : 'none';
+        billPay.style.display = isBill ? 'block' : 'none';
+    }
+
+    if (isBill && docsTitle && docsDesc) {
+        if (isIncome) {
+            docsTitle.textContent = 'Attachments';
+            docsDesc.textContent = 'Receipt, payment proof, or other files — photos or PDFs, multiple allowed.';
+        } else {
+            docsTitle.textContent = 'Attachments';
+            docsDesc.textContent = 'Invoice, payment proof, cheque photo, or transfer screenshot — photos or PDFs, multiple allowed.';
+        }
+    }
+
+    if (payTitle && payDesc) {
+        if (isIncome) {
+            payTitle.textContent = 'Money received?';
+            payDesc.textContent = 'Mark how funds arrived, or leave unpaid if this is only an acknowledgement for now.';
+            // Relabel pills for income
+            const unpaidBtn = billPay?.querySelector('[data-bill-pay="unpaid"]');
+            const cashBtn = billPay?.querySelector('[data-bill-pay="cash"]');
+            const chequeBtn = billPay?.querySelector('[data-bill-pay="cheque"]');
+            const onlineBtn = billPay?.querySelector('[data-bill-pay="online"]');
+            if (unpaidBtn) unpaidBtn.innerHTML = '<i class="fa-solid fa-clock"></i> Not yet';
+            if (cashBtn) cashBtn.innerHTML = '<i class="fa-solid fa-money-bill-wave"></i> Cash in';
+            if (chequeBtn) chequeBtn.innerHTML = '<i class="fa-solid fa-money-check"></i> Cheque in';
+            if (onlineBtn) onlineBtn.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> Online in';
+        } else {
+            payTitle.textContent = 'Payment status';
+            payDesc.textContent = 'Already paid, or leave unpaid until cash / bank is linked later?';
+            const unpaidBtn = billPay?.querySelector('[data-bill-pay="unpaid"]');
+            const cashBtn = billPay?.querySelector('[data-bill-pay="cash"]');
+            const chequeBtn = billPay?.querySelector('[data-bill-pay="cheque"]');
+            const onlineBtn = billPay?.querySelector('[data-bill-pay="online"]');
+            if (unpaidBtn) unpaidBtn.innerHTML = '<i class="fa-solid fa-clock"></i> Unpaid';
+            if (cashBtn) cashBtn.innerHTML = '<i class="fa-solid fa-money-bill-wave"></i> Paid · Cash';
+            if (chequeBtn) chequeBtn.innerHTML = '<i class="fa-solid fa-money-check"></i> Paid · Cheque';
+            if (onlineBtn) onlineBtn.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> Paid · Online';
+        }
+    }
+
+    if (billInvoiceLabel) {
+        billInvoiceLabel.innerHTML = 'Invoice # <span class="expense-optional">(optional)</span>';
     }
     if (receiptHint) {
         receiptHint.textContent = isBill
-            ? 'Upload bill/receipt images or PDFs. Stored in private Cloudflare R2.'
-            : 'Upload one or more images or PDFs. Stored in Supabase and linked to this ledger entry.';
+            ? 'Images or PDFs · invoice and payment proof'
+            : 'Upload one or more images or PDFs linked to this ledger entry.';
     }
 
     if (!isBill) {
         if (!isIncome) syncExpenseWalletUI();
         else syncBankWalletUI();
     }
+};
+
+const readBillInvoiceNumber = () => {
+    if (portalState.cashSaveTarget === 'bill') {
+        if (portalState.cashModalMode === 'income') {
+            return document.getElementById('income-bill-invoice-input')?.value?.trim()
+                || document.getElementById('bill-invoice-input')?.value?.trim()
+                || null;
+        }
+        return document.getElementById('bill-invoice-input')?.value?.trim() || null;
+    }
+    return document.getElementById('expense-invoice-input')?.value?.trim() || null;
+};
+
+const parseInvoiceFromDescription = (description = '') => {
+    const match = String(description || '').match(/\bInv\s+([^·]+)/i);
+    return match ? match[1].trim() : '';
+};
+
+const stripInvoiceFromDescription = (description = '') => {
+    return String(description || '')
+        .replace(/\s*·\s*Inv\s+[^·]+/gi, '')
+        .replace(/^Inv\s+[^·]+(?:\s*·\s*)?/i, '')
+        .trim();
 };
 
 window.openExpense = (wallet = 'CASH', { asBill = true } = {}) => {
@@ -1573,9 +1895,9 @@ window.openExpense = (wallet = 'CASH', { asBill = true } = {}) => {
     document.getElementById('income-form-view').style.display = 'none';
     if (asBill) {
         document.getElementById('cash-modal-title').textContent = 'Add bill';
-        document.getElementById('cash-modal-desc').textContent = 'Bill or cash spend with optional upload — link to a ledger / Petty Cash line later.';
+        document.getElementById('cash-modal-desc').textContent = 'Fill details from the invoice, mark paid or unpaid, and attach invoice or payment proof.';
         document.getElementById('save-cash-btn').textContent = 'Save bill';
-        syncBillPaymentUI('cash');
+        syncBillPaymentUI('unpaid');
         resetBillAttachmentUI([]);
     } else {
         document.getElementById('cash-modal-title').textContent = 'Add Expense';
@@ -1588,7 +1910,10 @@ window.openExpense = (wallet = 'CASH', { asBill = true } = {}) => {
     applyCashModalChrome({ isIncome: false, isBill: asBill });
     setBillModalReadOnly(false);
     modal.classList.add('active');
-    setTimeout(() => document.getElementById('cash-amt')?.focus(), 50);
+    setTimeout(() => {
+        if (asBill) document.getElementById('cash-amt')?.focus();
+        else document.getElementById('cash-amt')?.focus();
+    }, 50);
 };
 
 window.openIncome = (wallet = 'CASH', { asBill = true } = {}) => {
@@ -1603,7 +1928,7 @@ window.openIncome = (wallet = 'CASH', { asBill = true } = {}) => {
     document.getElementById('income-form-view').style.display = 'grid';
     if (asBill) {
         document.getElementById('cash-modal-title').textContent = 'Add receipt';
-        document.getElementById('cash-modal-desc').textContent = 'Income receipt with optional upload — link to a ledger line later.';
+        document.getElementById('cash-modal-desc').textContent = 'Fill details from the receipt, mark how money arrived, and attach files if needed.';
         document.getElementById('save-cash-btn').textContent = 'Save receipt';
         syncBillPaymentUI('cash');
         resetBillAttachmentUI([]);
@@ -1644,16 +1969,19 @@ window.openFinanceDocumentEdit = (doc, { readOnly = false } = {}) => {
     } else {
         document.getElementById('cash-modal-title').textContent = isIncome ? 'Edit receipt' : 'Edit bill';
         document.getElementById('cash-modal-desc').textContent = isIncome
-            ? 'Update this receipt. Change Cash ↔ Cheque if needed.'
-            : 'Update category and subcategory for financial reports. Change Cash ↔ Cheque if needed.';
+            ? 'Update this receipt. Change payment status or add files if needed.'
+            : 'Update category and payment status. Attach invoice or payment proof in Attachments.';
         document.getElementById('save-cash-btn').textContent = 'Save changes';
     }
+
+    const invFromDesc = parseInvoiceFromDescription(doc.description);
+    const cleanDesc = stripInvoiceFromDescription(doc.description);
 
     if (isIncome) {
         openIncomeFormDefaults('CASH', doc.cat || 'Other Income');
         document.getElementById('income-amt').value = doc.amount ?? '';
         document.getElementById('income-date').value = String(doc.doc_date || '').slice(0, 10);
-        document.getElementById('income-desc').value = doc.description || '';
+        document.getElementById('income-desc').value = cleanDesc;
         document.getElementById('income-cat-input').value = labelForCat(doc.cat || 'Other Income');
         document.getElementById('income-vendor-input').value = doc.vendor_name || '';
         document.getElementById('cash-cat-select').value = doc.cat || 'Other Income';
@@ -1663,20 +1991,27 @@ window.openFinanceDocumentEdit = (doc, { readOnly = false } = {}) => {
         openExpenseFormDefaults('CASH');
         document.getElementById('cash-amt').value = doc.amount ?? '';
         document.getElementById('cash-date').value = String(doc.doc_date || '').slice(0, 10);
-        document.getElementById('cash-desc').value = doc.description || '';
+        document.getElementById('cash-desc').value = cleanDesc;
         document.getElementById('expense-cat-input').value = labelForCat(doc.cat || 'Other');
         document.getElementById('expense-subcat-input').value = doc.sub_category || '';
         document.getElementById('expense-vendor-input').value = doc.vendor_name || '';
-        document.getElementById('expense-invoice-input').value = '';
+        document.getElementById('expense-invoice-input').value = invFromDesc;
         document.getElementById('cash-cat-select').value = doc.cat || 'Other';
         populateSubCatDatalist(doc.cat || 'Other');
         populateVendorDatalist();
     }
 
-    const notes = String(doc.notes || '');
-    const chequeMatch = notes.match(/^Cheque:\s*(.+)$/i);
-    if (chequeMatch) syncBillPaymentUI('cheque', chequeMatch[1].trim());
-    else syncBillPaymentUI('cash');
+    const billInv = document.getElementById('bill-invoice-input');
+    if (billInv) billInv.value = invFromDesc;
+    const incomeBillInv = document.getElementById('income-bill-invoice-input');
+    if (incomeBillInv) incomeBillInv.value = invFromDesc;
+
+    const pay = parseBillPaymentFromNotes(doc.notes);
+    syncBillPaymentUI(pay.mode, {
+        chequeNo: pay.chequeNo,
+        onlineRef: pay.onlineRef,
+        paidOn: pay.paidOn || '',
+    });
 
     resetBillAttachmentUI(Array.isArray(doc.attachment_urls) ? doc.attachment_urls : []);
     applyCashModalChrome({ isIncome, isBill: true });
@@ -1724,9 +2059,9 @@ const setBillModalReadOnly = (readOnly) => {
         unlockBtn.hidden = !readOnly;
         unlockBtn.disabled = false;
     }
-    // Attachment remove/view: allow view, block remove in readonly via CSS + disabled file input
-    modal.querySelectorAll('#cash-receipt-list .expense-link-btn').forEach((btn) => {
-        const isRemove = /remove/i.test(btn.textContent || '');
+    // Attachment remove: allow view, block remove in readonly
+    modal.querySelectorAll('#cash-receipt-list .expense-link-btn, .expense-attach-card__remove').forEach((btn) => {
+        const isRemove = btn.classList.contains('expense-attach-card__remove') || /remove/i.test(btn.textContent || '');
         btn.disabled = !!readOnly && isRemove;
         btn.hidden = !!readOnly && isRemove;
     });
@@ -1777,6 +2112,8 @@ const openLedgerLineModal = (mode = 'expense') => {
     syncWalletPills('ledger-line-wallet-pills', 'BANK');
     const refWrap = document.getElementById('ledger-line-bank-ref-wrap');
     if (refWrap) refWrap.hidden = false;
+    const excludeWrap = document.querySelector('#ledger-line-modal .expense-form__exclude-reports');
+    if (excludeWrap) excludeWrap.hidden = !isApartmentAdminUser();
     modal.classList.add('active');
     setTimeout(() => document.getElementById('ledger-line-amt')?.focus(), 50);
 };
@@ -1797,8 +2134,8 @@ export const saveLedgerLineData = async () => {
     const bank_reference = wallet === 'BANK'
         ? (document.getElementById('ledger-line-bank-ref')?.value?.trim() || null)
         : null;
-    const excludeFromReports = document.getElementById('ledger-line-exclude-reports')?.checked === true
-        || cat === BANK_REJECT_CAT;
+    const excludeFromReports = cat === BANK_REJECT_CAT
+        || (isApartmentAdminUser() && document.getElementById('ledger-line-exclude-reports')?.checked === true);
 
     if (isNaN(amt) || amt <= 0) return alert('Enter a valid amount.');
     const apartment_id = portalState.access?.activeApartmentId;

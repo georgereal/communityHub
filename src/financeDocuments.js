@@ -69,23 +69,45 @@ const esc = (s) => String(s ?? '')
 export const getFinanceDocuments = () =>
   (portalState.finances.financeDocuments || []).filter((d) => d.status !== 'void');
 
-/** Open (unlinked) expense bills — proposed / not yet posted to ledger. */
+/** Resolve bookkeeping status: unpaid → paid → linked (legacy `open` via payment notes). */
+export const bookStatus = (doc) => {
+  const raw = String(doc?.status || '').toLowerCase();
+  if (raw === 'void') return 'void';
+  if (raw === 'linked' || doc?.transaction_id) return 'linked';
+  if (raw === 'unpaid' || raw === 'paid') return raw;
+  // Legacy open / unknown
+  const mode = paymentModeFromNotes(doc?.notes);
+  return mode === 'cash' || mode === 'cheque' || mode === 'online' ? 'paid' : 'unpaid';
+};
+
+const paymentModeFromNotes = (notes) => {
+  const text = String(notes || '').trim();
+  if (/^Cheque:\s*.+/i.test(text)) return 'cheque';
+  if (/^Online:\s*.+/i.test(text) || /Payment:\s*Online/i.test(text)) return 'online';
+  if (/^Payment:\s*Cash$/i.test(text) || text.toLowerCase() === 'cash') return 'cash';
+  if (/Payment:\s*Unpaid/i.test(text) || !text) return 'unpaid';
+  return 'unknown';
+};
+
+/** Unpaid expense bills — still to pay (planned spend). */
 export const getOpenExpenseDocuments = () =>
-  getFinanceDocuments().filter((d) => d.kind === 'OUT' && d.status === 'open');
+  getFinanceDocuments().filter((d) => d.kind === 'OUT' && bookStatus(d) === 'unpaid');
 
 /** Cheque payment on a bill/receipt (notes: `Cheque: …`). */
 export const isChequeFinanceDocument = (doc) =>
   /^Cheque:\s*.+/i.test(String(doc?.notes || '').trim());
 
-/** Open cheque expenses — issued but not yet linked to a bank ledger line. */
+/** Paid cheque expenses — issued but not yet linked to a bank ledger line. */
 export const getOpenChequeExpenseDocuments = () =>
-  getOpenExpenseDocuments().filter(isChequeFinanceDocument);
+  getFinanceDocuments().filter(
+    (d) => d.kind === 'OUT' && bookStatus(d) === 'paid' && isChequeFinanceDocument(d),
+  );
 
-/** Open Bills & receipts filtered to unlinked expenses. */
+/** Bills & receipts filtered to unpaid expenses. */
 export const focusOpenExpenseBills = () => {
   docsReportFilter = null;
   filterState.kind = 'OUT';
-  filterState.status = 'open';
+  filterState.status = 'unpaid';
   filterState.pay = 'all';
   filterState.q = '';
   const kindEl = document.getElementById('fdoc-filter-kind');
@@ -93,7 +115,7 @@ export const focusOpenExpenseBills = () => {
   const payEl = document.getElementById('fdoc-filter-pay');
   const searchEl = document.getElementById('fdoc-search');
   if (kindEl) kindEl.value = 'OUT';
-  if (statusEl) statusEl.value = 'open';
+  if (statusEl) statusEl.value = 'unpaid';
   if (payEl) payEl.value = 'all';
   if (searchEl) searchEl.value = '';
   renderFdocReportBanner();
@@ -101,11 +123,11 @@ export const focusOpenExpenseBills = () => {
   renderFinanceDocumentsPage();
 };
 
-/** Open cheque bills on Bills & receipts (issued, not linked to bank yet). */
+/** Paid cheque bills on Bills & receipts (issued, not linked to bank yet). */
 export const focusOpenChequeBills = () => {
   docsReportFilter = null;
   filterState.kind = 'OUT';
-  filterState.status = 'open';
+  filterState.status = 'paid';
   filterState.pay = 'cheque';
   filterState.q = '';
   const kindEl = document.getElementById('fdoc-filter-kind');
@@ -113,7 +135,7 @@ export const focusOpenChequeBills = () => {
   const payEl = document.getElementById('fdoc-filter-pay');
   const searchEl = document.getElementById('fdoc-search');
   if (kindEl) kindEl.value = 'OUT';
-  if (statusEl) statusEl.value = 'open';
+  if (statusEl) statusEl.value = 'paid';
   if (payEl) payEl.value = 'cheque';
   if (searchEl) searchEl.value = '';
   renderFdocReportBanner();
@@ -1349,15 +1371,29 @@ export async function downloadFinanceDocumentsTemplate() {
 
 const paymentInfo = (doc) => {
   const notes = String(doc?.notes || '').trim();
-  const chequeMatch = notes.match(/^Cheque:\s*(.+)$/i);
+  const paidOnMatch = notes.match(/Paid on:\s*(\d{4}-\d{2}-\d{2})/i);
+  const paidOn = paidOnMatch ? paidOnMatch[1] : '';
+  const withDate = (label) => (paidOn ? `${label} · ${paidOn}` : label);
+  const chequeMatch = notes.match(/^Cheque:\s*(.+)$/im);
   if (chequeMatch) {
-    return { mode: 'cheque', label: `Cheque ${chequeMatch[1].trim()}`, short: chequeMatch[1].trim() };
+    const no = chequeMatch[1].trim().split('\n')[0].trim();
+    return { mode: 'cheque', label: withDate(`Cheque ${no}`), short: no, paidOn };
   }
-  if (/^Payment:\s*Cash$/i.test(notes) || notes.toLowerCase() === 'cash') {
-    return { mode: 'cash', label: 'Cash', short: 'Cash' };
+  const onlineMatch = notes.match(/^Online:\s*(.+)$/im);
+  if (onlineMatch) {
+    const ref = onlineMatch[1].trim().split('\n')[0].trim();
+    return { mode: 'online', label: withDate(`Online ${ref}`), short: ref, paidOn };
   }
-  // Heuristic for older rows without notes
-  return { mode: 'unknown', label: '—', short: '—' };
+  if (/Payment:\s*Online/i.test(notes)) {
+    return { mode: 'online', label: withDate('Online'), short: 'Online', paidOn };
+  }
+  if (/^Payment:\s*Cash$/im.test(notes) || notes.toLowerCase() === 'cash') {
+    return { mode: 'cash', label: withDate('Cash'), short: 'Cash', paidOn };
+  }
+  if (/Payment:\s*Unpaid/i.test(notes) || !notes) {
+    return { mode: 'unpaid', label: 'Unpaid', short: 'Unpaid', paidOn: '' };
+  }
+  return { mode: 'unknown', label: '—', short: '—', paidOn: '' };
 };
 
 /**
@@ -1386,11 +1422,13 @@ const filteredDocs = () => {
   return getFinanceDocuments().filter((d) => {
     if (docsReportFilter && !docMatchesReportFilter(d, docsReportFilter)) return false;
     if (filterState.kind !== 'all' && d.kind !== filterState.kind) return false;
-    if (filterState.status !== 'all' && d.status !== filterState.status) return false;
+    if (filterState.status !== 'all' && bookStatus(d) !== filterState.status) return false;
     if (filterState.pay !== 'all') {
       const pay = paymentInfo(d).mode;
       if (filterState.pay === 'cash' && pay !== 'cash') return false;
       if (filterState.pay === 'cheque' && pay !== 'cheque') return false;
+      if (filterState.pay === 'online' && pay !== 'online') return false;
+      if (filterState.pay === 'unpaid' && pay !== 'unpaid') return false;
     }
     if (!q) return true;
     const hay = [d.vendor_name, d.description, d.cat, d.sub_category, d.notes].join(' ').toLowerCase();
@@ -1433,13 +1471,13 @@ const computeBillsCashFloatSummary = () => {
   const cashOut = getFinanceDocuments().filter((d) => d.kind === 'OUT' && paymentInfo(d).mode === 'cash');
   const cashIn = getFinanceDocuments().filter((d) => d.kind === 'IN' && paymentInfo(d).mode === 'cash');
 
-  const linkedCash = cashOut.filter((d) => d.status === 'linked' && d.transaction_id);
-  const openCash = cashOut.filter((d) => d.status === 'open');
+  const linkedCash = cashOut.filter((d) => bookStatus(d) === 'linked' && d.transaction_id);
+  const openCash = cashOut.filter((d) => bookStatus(d) === 'paid');
   const linkedAmt = round2(linkedCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
   const openAmt = round2(openCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
 
   const receiptsAmt = round2(cashIn.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const deposited = cashIn.filter((d) => d.status === 'linked' && d.transaction_id);
+  const deposited = cashIn.filter((d) => bookStatus(d) === 'linked' && d.transaction_id);
   const depositedAmt = round2(deposited.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
   const receiptsOnHand = round2(receiptsAmt - depositedAmt);
 
@@ -1596,7 +1634,7 @@ const renderFundingTableHtml = (funding, summary = {}) => {
 /** Bank credits that took cash off the desk (linked receipts and/or wallet float). */
 const listCashToBankDeposits = () => {
   const cashInLinked = getFinanceDocuments().filter(
-    (d) => d.kind === 'IN' && paymentInfo(d).mode === 'cash' && d.status === 'linked' && d.transaction_id,
+    (d) => d.kind === 'IN' && paymentInfo(d).mode === 'cash' && bookStatus(d) === 'linked' && d.transaction_id,
   );
   const byTxn = new Map();
   cashInLinked.forEach((d) => {
@@ -1803,7 +1841,7 @@ const syncBulkActionButtons = () => {
   const selectedIds = checked.map((el) => el.value).filter(Boolean);
   const openIds = selectedIds.filter((id) => {
     const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === id);
-    return doc && !doc.transaction_id;
+    return doc && bookStatus(doc) === 'paid';
   });
   const openDocs = openIds
     .map((id) => (portalState.finances.financeDocuments || []).find((d) => d.id === id))
@@ -1815,30 +1853,42 @@ const syncBulkActionButtons = () => {
     .filter((d) => d.kind === 'OUT' && paymentInfo(d).mode === 'cash')
     .map((d) => d.id);
 
+  const actionLabel = (full, short) =>
+    `<span class="fdoc-action-full">${full}</span><span class="fdoc-action-short">${short}</span>`;
+
   const linkBtn = document.getElementById('fdoc-bulk-link');
   if (linkBtn) {
     linkBtn.disabled = openIds.length === 0;
-    const label = openReceiptIds.length && !openExpenseIds.length
-      ? 'Link to bank deposit'
+    const count = openIds.length ? ` (${openIds.length})` : '';
+    const full = openReceiptIds.length && !openExpenseIds.length
+      ? `Link to bank deposit${count}`
       : openExpenseIds.length && !openReceiptIds.length
-        ? 'Link to bucket'
-        : 'Link selected';
-    linkBtn.innerHTML = `<i class="fa-solid fa-link" aria-hidden="true"></i> ${label}${openIds.length ? ` (${openIds.length})` : ''}`;
+        ? `Link to bucket${count}`
+        : `Link selected${count}`;
+    const short = `Link${count}`;
+    linkBtn.title = full;
+    linkBtn.innerHTML = `<i class="fa-solid fa-link" aria-hidden="true"></i> ${actionLabel(full, short)}`;
   }
 
   const depositBtn = document.getElementById('fdoc-deposit-wallet');
   if (depositBtn) {
     if (openReceiptIds.length) {
-      depositBtn.innerHTML = `<i class="fa-solid fa-building-columns" aria-hidden="true"></i> Deposit to bank (${openReceiptIds.length})`;
+      const full = `Deposit to bank (${openReceiptIds.length})`;
+      depositBtn.title = full;
+      depositBtn.innerHTML = `<i class="fa-solid fa-building-columns" aria-hidden="true"></i> ${actionLabel(full, `Deposit (${openReceiptIds.length})`)}`;
     } else {
-      depositBtn.innerHTML = `<i class="fa-solid fa-building-columns" aria-hidden="true"></i> Deposit wallet to bank`;
+      depositBtn.title = 'Deposit wallet to bank';
+      depositBtn.innerHTML = `<i class="fa-solid fa-building-columns" aria-hidden="true"></i> ${actionLabel('Deposit wallet to bank', 'Deposit')}`;
     }
   }
 
   const delBtn = document.getElementById('fdoc-bulk-delete');
   if (delBtn) {
     delBtn.disabled = selectedIds.length === 0;
-    delBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected${selectedIds.length ? ` (${selectedIds.length})` : ''}`;
+    const count = selectedIds.length ? ` (${selectedIds.length})` : '';
+    const full = `Delete selected${count}`;
+    delBtn.title = full;
+    delBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${actionLabel(full, `Delete${count}`)}`;
   }
 };
 
@@ -1850,7 +1900,7 @@ const selectedDocIds = () =>
 const selectedUnlinkedDocIds = () =>
   selectedDocIds().filter((id) => {
     const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === id);
-    return doc && !doc.transaction_id;
+    return doc && bookStatus(doc) === 'paid';
   });
 
 const selectedOpenCashReceiptIds = () =>
@@ -1905,13 +1955,14 @@ export function renderFinanceDocumentsPage() {
 
   const docs = filteredDocs();
   const all = getFinanceDocuments();
-  const openAmt = round2(all.filter((d) => d.status === 'open' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const linkedAmt = round2(all.filter((d) => d.status === 'linked' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  const unpaidAmt = round2(all.filter((d) => bookStatus(d) === 'unpaid' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  const paidAmt = round2(all.filter((d) => bookStatus(d) === 'paid' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  const linkedAmt = round2(all.filter((d) => bookStatus(d) === 'linked' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
 
   if (meta) {
     meta.textContent = staffOnly
       ? `${all.length} bill(s)/receipt(s) · add & upload only`
-      : `${all.length} bill(s)/receipt(s) · open ${formatMoney(openAmt)} · linked ${formatMoney(linkedAmt)}`;
+      : `${all.length} bill(s)/receipt(s) · unpaid ${formatMoney(unpaidAmt)} · paid ${formatMoney(paidAmt)} · linked ${formatMoney(linkedAmt)}`;
   }
 
   if (!staffOnly) {
@@ -1936,19 +1987,30 @@ export function renderFinanceDocumentsPage() {
         day: '2-digit', month: 'short', year: '2-digit',
       })
       : '—';
-    const linkLabel = d.transaction_id
+    const status = bookStatus(d);
+    const linkLabel = status === 'linked'
       ? `<span class="fdoc-status fdoc-status--linked" title="${esc(txnLabel(d.transaction_id))}">Linked</span>`
-      : `<span class="fdoc-status fdoc-status--open">Open</span>`;
+      : status === 'paid'
+        ? `<span class="fdoc-status fdoc-status--paid">Paid</span>`
+        : `<span class="fdoc-status fdoc-status--unpaid">Unpaid</span>`;
     const linkBtn = manage
-      ? (d.transaction_id
+      ? (status === 'linked'
         ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
-        : `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
+        : status === 'paid'
+          ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`
+          : '')
       : '';
     const delBtn = manage
       ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
       : '';
     const pay = paymentInfo(d);
-    const payClass = pay.mode === 'cash' ? 'fdoc-pay fdoc-pay--cash' : (pay.mode === 'cheque' ? 'fdoc-pay fdoc-pay--cheque' : 'fdoc-pay');
+    const payClass = pay.mode === 'cash'
+      ? 'fdoc-pay fdoc-pay--cash'
+      : pay.mode === 'cheque'
+        ? 'fdoc-pay fdoc-pay--cheque'
+        : pay.mode === 'online'
+          ? 'fdoc-pay fdoc-pay--online'
+          : (pay.mode === 'unpaid' ? 'fdoc-pay fdoc-pay--unpaid' : 'fdoc-pay');
     const isIncome = d.kind === 'IN';
     return `<tr class="fdoc-row fdoc-row--clickable" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}" title="Click row to view details">
       <td class="fdoc-check-col"${staffOnly ? ' hidden' : ''}>
@@ -2146,7 +2208,7 @@ const docsForCategorySync = () => {
     ? selected.map((id) => (portalState.finances.financeDocuments || []).find((d) => d.id === id)).filter(Boolean)
     : filteredDocs()
   );
-  return pool.filter((d) => d.transaction_id && d.status === 'linked' && paymentInfo(d).mode === 'cheque');
+  return pool.filter((d) => d.transaction_id && bookStatus(d) === 'linked' && paymentInfo(d).mode === 'cheque');
 };
 
 const syncSelectedCategories = async () => {
@@ -2208,7 +2270,7 @@ export function initFinanceDocumentsPage() {
   document.getElementById('fdoc-bulk-link')?.addEventListener('click', () => {
     const ids = selectedUnlinkedDocIds();
     if (!ids.length) {
-      alert('Select at least one open (unlinked) bill or receipt to link.');
+      alert('Select at least one paid (unlinked) bill or receipt to link.');
       return;
     }
     openLinkModal(ids);
@@ -2221,7 +2283,7 @@ export function initFinanceDocumentsPage() {
     }
     const ok = confirm(
       'No cash receipts selected.\n\n'
-      + 'Tip: tick one or more open cash receipts first, then Deposit to bank.\n\n'
+      + 'Tip: tick one or more paid cash receipts first, then Deposit to bank.\n\n'
       + 'Continue with wallet float only (no receipts)?',
     );
     if (!ok) return;

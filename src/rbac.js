@@ -7,24 +7,42 @@ import { isModuleEnabled } from './moduleAccess.js';
 import { logActivity } from './activityAudit.js';
 
 export const ROLE_OPTIONS = [
-    { key: 'system_admin', v1Key: 'admin', label: 'System Administrator' },
-    { key: 'apartment_admin', v1Key: 'admin', label: 'Association Office Bearer' },
-    { key: 'property_manager', v1Key: 'property_manager', label: 'Office Manager' },
-    { key: 'accounts_manager', v1Key: 'accounts_manager', label: 'Accounts Manager' },
-    { key: 'office_staff', v1Key: 'office_staff', label: 'Office Staff' },
-    { key: 'security', v1Key: 'security', label: 'Security' },
-    { key: 'resident_viewer', v1Key: 'resident_viewer', label: 'Resident Viewer' },
+    { key: 'system_admin', v1Key: 'admin', label: 'System Administrator', scope: 'system' },
+    { key: 'society_admin', v1Key: 'admin', label: 'Society Administrator', scope: 'apartment' },
+    { key: 'apartment_admin', v1Key: 'admin', label: 'Association Office Bearer', scope: 'apartment' },
+    { key: 'property_manager', v1Key: 'property_manager', label: 'Office Manager', scope: 'apartment' },
+    { key: 'accounts_manager', v1Key: 'accounts_manager', label: 'Accounts Manager', scope: 'apartment' },
+    { key: 'office_staff', v1Key: 'office_staff', label: 'Office Staff', scope: 'apartment' },
+    { key: 'security', v1Key: 'security', label: 'Security', scope: 'apartment' },
+    { key: 'resident_viewer', v1Key: 'resident_viewer', label: 'Resident Viewer', scope: 'apartment' },
+];
+
+/** Full society admin (Roles matrix, setup, all modules) — like dentalPractice ADMIN. */
+const FULL_SOCIETY_ADMIN_PERMS = [
+    'vehicle_registry.view', 'vehicle_registry.edit',
+    'accounts.view', 'accounts.edit', 'accounts.bills_entry',
+    'setup.view', 'setup.edit',
+    'rbac.view', 'rbac.edit',
+    'apartment_mgmt.view', 'apartment_mgmt.edit',
+    'portal.view', 'security.view',
+];
+
+/**
+ * Office Bearer — operational admin without Roles/permissions management
+ * (like dentalPractice CLINIC_MANAGER).
+ */
+const OFFICE_BEARER_PERMS = [
+    'vehicle_registry.view', 'vehicle_registry.edit',
+    'accounts.view', 'accounts.edit', 'accounts.bills_entry',
+    'setup.view', 'setup.edit',
+    'apartment_mgmt.view', 'apartment_mgmt.edit',
+    'portal.view', 'security.view',
 ];
 
 const V1_PERMISSION_MATRIX = {
-    admin: [
-        'vehicle_registry.view', 'vehicle_registry.edit',
-        'accounts.view', 'accounts.edit', 'accounts.bills_entry',
-        'setup.view', 'setup.edit',
-        'rbac.view', 'rbac.edit',
-        'apartment_mgmt.view', 'apartment_mgmt.edit',
-        'portal.view', 'security.view',
-    ],
+    admin: FULL_SOCIETY_ADMIN_PERMS,
+    society_admin: FULL_SOCIETY_ADMIN_PERMS,
+    apartment_admin: OFFICE_BEARER_PERMS,
     property_manager: [
         'vehicle_registry.view', 'vehicle_registry.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
@@ -36,13 +54,24 @@ const V1_PERMISSION_MATRIX = {
     resident_viewer: ['portal.view'],
 };
 
-export const v1RoleToV2Key = (role) =>
-    ROLE_OPTIONS.find((r) => r.v1Key === role || r.key === role)?.key || 'resident_viewer';
+/** Roles that get full society admin bypass (modules/pages always on). */
+export const SOCIETY_FULL_ADMIN_KEYS = new Set(['society_admin']);
+
+export const v1RoleToV2Key = (role) => {
+    if (role === 'society_admin') return 'society_admin';
+    if (role === 'system_admin') return 'system_admin';
+    if (role === 'apartment_admin') return 'apartment_admin';
+    // Legacy profiles.role = 'admin' maps to society admin (full), not office bearer
+    if (role === 'admin') return 'society_admin';
+    return ROLE_OPTIONS.find((r) => r.v1Key === role || r.key === role)?.key || 'resident_viewer';
+};
 
 export const v2KeyToLabel = (key) =>
     ROLE_OPTIONS.find((r) => r.key === key)?.label || key;
 
 export const permissionsFromV1Role = (role) => {
+    if (role === 'system_admin' || role === 'society_admin') return FULL_SOCIETY_ADMIN_PERMS;
+    if (role === 'apartment_admin') return OFFICE_BEARER_PERMS;
     const v1 = ROLE_OPTIONS.find((r) => r.key === role || r.v1Key === role)?.v1Key || role;
     return V1_PERMISSION_MATRIX[v1] || V1_PERMISSION_MATRIX.resident_viewer;
 };
@@ -51,19 +80,31 @@ export function isSystemAdminUser(auth = portalState.auth) {
     return auth?.isSystemAdmin === true || auth?.effectiveRoleKey === 'system_admin';
 }
 
-export function isApartmentAdminUser(auth = portalState.auth) {
+/** Society Administrator — full apartment admin including Roles. */
+export function isSocietyAdminUser(auth = portalState.auth) {
     return isSystemAdminUser(auth)
+        || auth?.effectiveRoleKey === 'society_admin'
+        || SOCIETY_FULL_ADMIN_KEYS.has(auth?.effectiveRoleKey);
+}
+
+/**
+ * Society-level admin ops (Society Admin or Office Bearer).
+ * Prefer isSocietyAdminUser() when checking Roles / rbac.edit capability.
+ */
+export function isApartmentAdminUser(auth = portalState.auth) {
+    return isSocietyAdminUser(auth)
         || auth?.effectiveRoleKey === 'apartment_admin'
         || auth?.role === 'admin';
 }
 
 export function rolePermissionFloor(roleKey = portalState.auth?.effectiveRoleKey) {
     if (roleKey === 'system_admin' || portalState.auth?.isSystemAdmin) {
-        return permissionsFromV1Role('admin');
+        return FULL_SOCIETY_ADMIN_PERMS;
     }
+    if (roleKey === 'society_admin') return FULL_SOCIETY_ADMIN_PERMS;
+    if (roleKey === 'apartment_admin') return OFFICE_BEARER_PERMS;
     const key = roleKey || v1RoleToV2Key(portalState.auth?.role || 'resident_viewer');
-    const v1 = ROLE_OPTIONS.find((r) => r.key === key)?.v1Key || portalState.auth?.role || 'resident_viewer';
-    return permissionsFromV1Role(v1);
+    return permissionsFromV1Role(key);
 }
 
 const roleBook = globalThis.__sentryRoleBook || (globalThis.__sentryRoleBook = {
@@ -128,36 +169,42 @@ export async function fetchEffectivePermissions(apartmentId, rolesOverride = nul
 
     // Always go through the coalesced cache — never issue parallel role selects.
     const roles = rolesOverride || await loadAllUserRoleAssignmentsCached(userId);
-    if (!roles?.length) return null;
+    // No assignments → no privileges (do not invent from profile.role)
+    if (!roles?.length) return [];
 
     const isSystemAdmin = roles.some((r) => r.scope === 'system' && r.role_key === 'system_admin');
     if (isSystemAdmin) {
         return loadAllPermissionKeys();
     }
 
-    const aptRoleKeys = roles
-        .filter((r) => r.scope === 'apartment' && r.apartment_id === apartmentId)
-        .map((r) => r.role_key);
+    const aptRoles = roles.filter((r) => r.scope === 'apartment' && r.apartment_id === apartmentId);
+    if (!aptRoles.length) return [];
 
-    if (!aptRoleKeys.length) return null;
-
+    // One primary society role — do not union permissions from every assignment
+    const primaryKey = primaryRoleFromAssignments(aptRoles);
     const { data: rp } = await supabase
         .from('role_permissions')
         .select('permission_key')
-        .in('role_key', aptRoleKeys);
+        .eq('role_key', primaryKey);
 
     return Array.from(new Set((rp || []).map((x) => x.permission_key)));
 }
 
-export function resolveEffectivePermissions(apartmentId) {
-    if (portalState.authPermissions?.length) return portalState.authPermissions;
-    const v1Role = portalState.auth?.role || 'resident_viewer';
-    return permissionsFromV1Role(v1Role);
+/**
+ * Effective permission keys for the session.
+ * Least privilege: an explicit list (including []) is authoritative.
+ * Missing list (not hydrated) → no access — never invent privileges.
+ */
+export function resolveEffectivePermissions() {
+    if (Array.isArray(portalState.authPermissions)) return portalState.authPermissions;
+    return [];
 }
 
 export function hasClientPermission(perm, perms = resolveEffectivePermissions()) {
-    if (!perm) return true;
-    return (perms || []).includes(perm);
+    // No privilege key declared, or empty set → deny
+    if (!perm) return false;
+    if (!Array.isArray(perms) || !perms.length) return false;
+    return perms.includes(perm);
 }
 
 export function routeIsAllowed(route, offline = !supabase) {
@@ -170,15 +217,15 @@ export function routeIsAllowed(route, offline = !supabase) {
 }
 
 export async function refreshAuthPermissions(apartmentId, rolesOverride = null) {
-    const floor = rolePermissionFloor();
     try {
         const dbPerms = await fetchEffectivePermissions(apartmentId, rolesOverride);
-        if (dbPerms?.length) {
-            portalState.authPermissions = [...new Set([...floor, ...dbPerms])];
+        // null = could not fetch; [] = fetched, zero privileges — both mean deny (no role floor invent)
+        if (dbPerms !== null) {
+            portalState.authPermissions = [...new Set(dbPerms)];
             return portalState.authPermissions;
         }
     } catch { /* ignore */ }
-    portalState.authPermissions = floor;
+    portalState.authPermissions = [];
     return portalState.authPermissions;
 }
 
@@ -208,7 +255,15 @@ export async function userHasSystemAdminRole(userId) {
 
 export function primaryRoleFromAssignments(assignments = []) {
     if (!assignments.length) return 'resident_viewer';
-    const priority = ['apartment_admin', 'accounts_manager', 'property_manager', 'security', 'resident_viewer'];
+    const priority = [
+        'society_admin',
+        'apartment_admin',
+        'accounts_manager',
+        'property_manager',
+        'office_staff',
+        'security',
+        'resident_viewer',
+    ];
     for (const key of priority) {
         if (assignments.some((a) => a.role_key === key)) return key;
     }
@@ -225,6 +280,9 @@ export async function saveUserAccess({
     managedApartmentIds = null,
 }) {
     if (!supabase) throw new Error('Supabase is not configured.');
+    if (!isSocietyAdminUser()) {
+        throw new Error('Only a Society Administrator can assign or change roles.');
+    }
     const v2Role = v1RoleToV2Key(roleKey);
     const scopeIds = managedApartmentIds?.length
         ? managedApartmentIds
@@ -295,7 +353,9 @@ export function isOfficeManager(roleKey = portalState.auth?.effectiveRoleKey) {
     return roleKey === 'property_manager';
 }
 
-/** Association office bearers who can approve/reject pending audit entries */
+/** Society admins / office bearers who can approve/reject pending audit entries */
 export function canReviewAudit(roleKey = portalState.auth?.effectiveRoleKey) {
-    return roleKey === 'apartment_admin' || roleKey === 'accounts_manager';
+    return roleKey === 'society_admin'
+        || roleKey === 'apartment_admin'
+        || roleKey === 'accounts_manager';
 }

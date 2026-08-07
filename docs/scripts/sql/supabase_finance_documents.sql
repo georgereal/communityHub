@@ -15,7 +15,8 @@ create table if not exists public.finance_documents (
   attachment_urls jsonb not null default '[]'::jsonb,
   -- Link to a ledger (transactions) row; many cash docs can share one Petty Cash funding line.
   transaction_id uuid references public.transactions(id) on delete set null,
-  status text not null default 'open' check (status in ('open', 'linked', 'void')),
+  -- unpaid → paid → linked (void = cancelled). Legacy installs: run supabase_finance_documents_status.sql
+  status text not null default 'unpaid' check (status in ('unpaid', 'paid', 'linked', 'void')),
   source text not null default 'manual' check (source in ('manual', 'excel')),
   source_file text,
   notes text,

@@ -58,7 +58,7 @@ const pivotKeyOnTxn = (txn, dimension) => {
 
 let ledgerPivotFilter = null;
 let ledgerCategoryFilter = null;
-let ledgerSort = { field: 'date', dir: 'asc' };
+let ledgerSort = { field: 'date', dir: 'desc' };
 let activityTimer = null;
 
 export const getLedgerPivotFilter = () => ledgerPivotFilter;
@@ -151,8 +151,21 @@ export const toggleLedgerSort = (field) => {
     if (ledgerSort.field === field) {
         ledgerSort = { field, dir: ledgerSort.dir === 'asc' ? 'desc' : 'asc' };
     } else {
-        ledgerSort = { field, dir: field === 'date' ? 'asc' : 'asc' };
+        // Date defaults to newest-first; other columns start ascending
+        ledgerSort = { field, dir: field === 'date' ? 'desc' : 'asc' };
     }
+};
+
+/** Oldest → newest (statement order) for running Calculated balances. */
+export const sortLedgerTxnsChronological = (txns) => {
+    const statementCtx = buildLedgerStatementContext();
+    return [...txns].sort((a, b) => {
+        const dayA = ledgerTxnDayKey(a, statementCtx);
+        const dayB = ledgerTxnDayKey(b, statementCtx);
+        const cmp = dayA.localeCompare(dayB);
+        if (cmp) return cmp;
+        return compareLedgerTxnStatementOrder(a, b, statementCtx);
+    });
 };
 
 export const sortLedgerTxns = (txns) => {

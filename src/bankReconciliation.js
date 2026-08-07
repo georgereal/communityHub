@@ -108,7 +108,8 @@ const formatDisplayDate = (isoDate) => {
     const match = String(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return String(isoDate || '');
     const [, year, month, day] = match;
-    return `${day}-${month}-${year.slice(-2)}`;
+    // Non-breaking hyphens so DD-MM-YY never wraps mid-date in narrow columns
+    return `${day}\u2011${month}\u2011${year.slice(-2)}`;
 };
 
 const normalizeDateParts = (year, monthIndex, day) => {
@@ -1783,14 +1784,14 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
               ${visibleColumns.rowOrder ? '<th class="bank-recon-table__th--order"><span class="sr-only">Order</span></th>' : ''}
               <th class="bank-recon-table__th--check"><span class="sr-only">Select</span></th>
               ${visibleColumns.ocrRow ? `<th class="bank-recon-table__th--num bank-recon-table__th--ocr">${renderSortHeader('OCR #', 'source_row_index', 'bank-recon-sort-btn--num')}</th>` : ''}
-              <th>${renderSortHeader('Date', 'line_date')}</th>
-              <th>${renderSortHeader('Description', 'description')}</th>
+              <th class="bank-recon-table__th--date">${renderSortHeader('Date', 'line_date')}</th>
+              <th class="bank-recon-table__th--desc">${renderSortHeader('Description', 'description')}</th>
               <th class="bank-recon-table__th--num">${renderSortHeader('Debit', 'debit', 'bank-recon-sort-btn--num')}</th>
               <th class="bank-recon-table__th--num">${renderSortHeader('Credit', 'credit', 'bank-recon-sort-btn--num')}</th>
               ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint}>${renderSortHeader('Calculated', 'computedBalance', 'bank-recon-sort-btn--num')}</th>` : ''}
               ${visibleColumns.passbookBalance ? `<th class="bank-recon-table__th--num">${renderSortHeader('Passbook', 'balance', 'bank-recon-sort-btn--num')}</th>` : ''}
-              <th>${renderSortHeader('Type', 'type')}</th>
-              <th>Category / vendor</th>
+              <th class="bank-recon-table__th--type">${renderSortHeader('Type', 'type')}</th>
+              <th class="bank-recon-table__th--classify">Category / vendor</th>
               <th class="bank-recon-table__th--match">Match ledger</th>
               <th class="bank-recon-table__th--actions"></th>
             </tr>

@@ -5,23 +5,33 @@
           </div>
           <div class="ledger-page-header__actions" id="accounts-header-actions">
             <div class="accounts-header-actions-group" data-accounts-actions="ledger">
-              <button class="btn btn-primary" type="button" id="btn-ledger-add-expense">
-                <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add ledger expense</span>
+              <button class="btn btn-primary" type="button" id="btn-ledger-add-expense" title="Add ledger expense">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Add ledger expense</span>
+                <span class="fdoc-action-short">Expense</span>
               </button>
-              <button class="btn btn-outline" type="button" id="btn-ledger-add-income">
-                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Record ledger income</span>
+              <button class="btn btn-outline" type="button" id="btn-ledger-add-income" title="Record ledger income">
+                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Record ledger income</span>
+                <span class="fdoc-action-short">Income</span>
               </button>
             </div>
             <div class="accounts-header-actions-group" data-accounts-actions="bills" hidden>
-              <button class="btn btn-primary" type="button" id="btn-bill-add-expense">
-                <i class="fa-solid fa-plus" aria-hidden="true"></i> <span>Add bill</span>
+              <button class="btn btn-primary" type="button" id="btn-bill-add-expense" title="Add bill">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Add bill</span>
+                <span class="fdoc-action-short">Bill</span>
               </button>
-              <button class="btn btn-outline" type="button" id="btn-bill-add-income">
-                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i> <span>Add receipt</span>
+              <button class="btn btn-outline" type="button" id="btn-bill-add-income" title="Add receipt">
+                <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Add receipt</span>
+                <span class="fdoc-action-short">Receipt</span>
               </button>
             </div>
             <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
-              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> <span>Bank Sync</span>
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+              <span class="fdoc-action-full">Bank Sync</span>
+              <span class="fdoc-action-short">Sync</span>
             </button>
           </div>
         </header>
@@ -98,7 +108,9 @@
                 <span id="ledger-columns-slot"></span>
                 <details class="bank-recon-columns-picker ledger-opening-picker" id="ledger-opening-picker">
                   <summary class="btn btn-outline btn--small" id="ledger-opening-summary" title="Set bank opening balance for Calculated values">
-                    <i class="fa-solid fa-bookmark" aria-hidden="true"></i> Opening
+                    <i class="fa-solid fa-bookmark" aria-hidden="true"></i>
+                    <span class="fdoc-action-full">Opening</span>
+                    <span class="fdoc-action-short">Open</span>
                   </summary>
                   <div class="bank-recon-columns-picker__menu ledger-opening-picker__menu">
                     <p class="ledger-opening-picker__hint">Passbook opening balance and date — the starting point for Calculated values.</p>
@@ -116,10 +128,14 @@
                   </div>
                 </details>
                 <button type="button" class="btn btn-outline btn--small" id="ledger-recalc-btn" title="Refresh Calculated from ledger entries (and refresh statement balances used for Passbook compare)">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i> Recalculate
+                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                  <span class="fdoc-action-full">Recalculate</span>
+                  <span class="fdoc-action-short">Recalc</span>
                 </button>
                 <button type="button" class="btn btn-outline btn--small" id="ledger-download-xlsx" title="Download filtered ledger as Excel">
-                  <i class="fa-solid fa-download" aria-hidden="true"></i> Excel
+                  <i class="fa-solid fa-download" aria-hidden="true"></i>
+                  <span class="fdoc-action-full">Excel</span>
+                  <span class="fdoc-action-short">Excel</span>
                 </button>
               </div>
             </div>
@@ -135,10 +151,18 @@
                 <option value="exclude">Omit from reports</option>
                 <option value="include">Show in reports</option>
               </select>
-              <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>Apply to selected</button>
-              <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>Save changes</button>
+              <button type="button" class="btn btn-outline btn--small" id="ledger-bulk-apply" disabled>
+                <span class="fdoc-action-full">Apply to selected</span>
+                <span class="fdoc-action-short">Apply</span>
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="ledger-bulk-save" disabled>
+                <span class="fdoc-action-full">Save changes</span>
+                <span class="fdoc-action-short">Save</span>
+              </button>
               <button type="button" class="btn btn-outline btn--small btn--danger" id="ledger-bulk-delete" disabled title="Permanently delete selected ledger entries">
-                <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Delete selected</span>
+                <span class="fdoc-action-short">Delete</span>
               </button>
             </div>
             <div id="cash-ledger-items" class="ledger-table-host"></div>
@@ -492,7 +516,7 @@
 
           <section id="fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" aria-label="Cash float store"></section>
 
-          <details class="fdoc-funding-details" id="fdoc-funding-details" open>
+          <details class="fdoc-funding-details" id="fdoc-funding-details">
             <summary class="fdoc-funding-details__summary">
               <span class="fdoc-funding-details__title">Petty Cash float</span>
               <span id="fdoc-funding-summary-meta" class="fdoc-funding-details__meta"></span>
@@ -544,26 +568,37 @@
             </select>
             <select id="fdoc-filter-status" class="expense-combobox fdoc-filters__select" aria-label="Filter by status">
               <option value="all">All statuses</option>
-              <option value="open">Open (unlinked)</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid (unlinked)</option>
               <option value="linked">Linked to ledger</option>
             </select>
             <select id="fdoc-filter-pay" class="expense-combobox fdoc-filters__select" aria-label="Filter by payment">
-              <option value="all">Cash + cheque</option>
+              <option value="all">All payment types</option>
               <option value="cash">Cash only</option>
               <option value="cheque">Cheque only</option>
+              <option value="online">Online / UPI</option>
+              <option value="unpaid">Unpaid only</option>
             </select>
             <div class="fdoc-filters__actions">
-              <button type="button" class="btn btn-outline btn--small" id="fdoc-bulk-link" disabled>
-                <i class="fa-solid fa-link" aria-hidden="true"></i> Link selected
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-bulk-link" disabled title="Link selected">
+                <i class="fa-solid fa-link" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Link selected</span>
+                <span class="fdoc-action-short">Link</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small" id="fdoc-deposit-wallet">
-                <i class="fa-solid fa-building-columns" aria-hidden="true"></i> Deposit to bank
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-deposit-wallet" title="Deposit wallet to bank">
+                <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Deposit wallet to bank</span>
+                <span class="fdoc-action-short">Deposit</span>
               </button>
               <button type="button" class="btn btn-outline btn--small" id="fdoc-sync-cats" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
-                <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Sync categories
+                <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Sync categories</span>
+                <span class="fdoc-action-short">Sync</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small btn--danger" id="fdoc-bulk-delete" disabled>
-                <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="fdoc-bulk-delete" disabled title="Delete selected">
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Delete selected</span>
+                <span class="fdoc-action-short">Delete</span>
               </button>
             </div>
           </div>

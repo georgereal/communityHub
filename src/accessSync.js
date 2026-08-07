@@ -19,6 +19,7 @@ import {
     clearRoleAssignmentsCache,
     seedRoleAssignmentsCache,
     rolePermissionFloor,
+    v1RoleToV2Key,
 } from './rbac.js';
 import { applyNavPermissions } from './navigation.js';
 import { refreshStaffNotifications } from './staffNotifications.js';
@@ -92,8 +93,7 @@ function applyAuthFromBoot(boot) {
     const profile = boot.profile;
     const roleKey = boot.effectiveRoleKey
         || (boot.isSystemAdmin ? 'system_admin' : null)
-        || ROLE_OPTIONS.find((r) => r.v1Key === (profile?.role || 'resident_viewer'))?.key
-        || 'resident_viewer';
+        || v1RoleToV2Key(profile?.role || 'resident_viewer');
     const v1Role = ROLE_OPTIONS.find((r) => r.key === roleKey)?.v1Key || profile?.role || 'resident_viewer';
 
     if (portalState.auth) {
@@ -105,7 +105,14 @@ function applyAuthFromBoot(boot) {
     }
 
     const floor = rolePermissionFloor(roleKey);
-    portalState.authPermissions = [...new Set([...floor, ...(boot.permissions || [])])];
+    // Boot list is authoritative — including [] (empty = no access). Never invent from floor.
+    if (Array.isArray(boot.permissions)) {
+        portalState.authPermissions = [...new Set(boot.permissions)];
+    } else if (boot.isSystemAdmin) {
+        portalState.authPermissions = floor;
+    } else {
+        portalState.authPermissions = [];
+    }
 }
 
 /** Legacy resolver kept for workspace-gate fallback paths. */

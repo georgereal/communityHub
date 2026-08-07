@@ -4,7 +4,7 @@
 
 import { isModuleEnabled } from './moduleAccess.js';
 import { portalState } from './store.js';
-import { pageAccessBlocksRoute, pageAccessGrantsRoute } from './pageAccessResolve.js';
+import { pageAccessBlocksRoute } from './pageAccessResolve.js';
 
 const OPERATIONS_ROUTES = [
     'ops-helpdesk', 'ops-transitions', 'ops-notices', 'ops-assets',
@@ -329,8 +329,8 @@ export const NAV_MODULES = [
                 icon: 'fa-building-user',
                 view: 'setup',
                 subview: 'society',
-                permission: 'rbac.view',
-                altPermissions: ['setup.edit'],
+                // Society Administrator (+ system) only — not Office Bearer
+                permission: 'rbac.edit',
                 legacy: ['admin-settings', 'setup'],
             },
             {
@@ -433,6 +433,7 @@ export function pageCatalogByModule(includeHidden = true) {
 }
 
 export function pageAllowedByPermissions(page, permSet) {
+    if (!page?.permission) return false;
     const set = permSet instanceof Set ? permSet : new Set(permSet || []);
     if (!set.size) return false;
     if (set.has(page.permission)) return true;
@@ -452,9 +453,9 @@ export const getDefaultRoute = (role) => findFirstAllowedRoute(role);
 export function findFirstAllowedRoute(role = portalState.auth?.role) {
     if (role === 'resident_viewer') return PORTAL_DEFAULT_ROUTE;
     if (role === 'security') return SECURITY_DEFAULT_ROUTE;
-    const perms = portalState.authPermissions?.length
-        ? new Set(portalState.authPermissions)
-        : null;
+    const raw = portalState.authPermissions;
+    // Unresolved or empty → no invented access; still try portal if that role, else dashboard for alert path
+    const perms = Array.isArray(raw) && raw.length ? new Set(raw) : new Set();
     for (const mod of NAV_MODULES) {
         for (const page of mod.pages) {
             if (pageIsVisible(page, perms, false, mod.id)) return page.route;
@@ -486,15 +487,24 @@ export const findPage = (route) => {
     return null;
 };
 
-export const pageIsVisible = (page, permSet, offline = false, navModuleId = null) => {
+export const pageIsVisible = (page, permSet, _offline = false, navModuleId = null) => {
     if (navModuleId && !isModuleEnabled(navModuleId)) return false;
     if (pageAccessBlocksRoute(page.route)) return false;
-    if (pageAccessGrantsRoute(page.route)) return true;
-    if (offline && page.permission === 'vehicle_registry.view') return true;
+    // Pages must declare a permission — missing key = no access
+    if (!page?.permission) return false;
     const set = permSet instanceof Set ? permSet : (permSet ? new Set(permSet) : null);
-    if (!set?.size) return true;
-    if (set.has(page.permission)) return true;
-    return (page.altPermissions || []).some((p) => set.has(p));
+    // Empty / unresolved permissions → deny (least privilege; never "show everything")
+    if (!set?.size) return false;
+    // Society Profile + Roles are Society Admin only — page-access grants cannot unlock them
+    if (page.route === 'admin-society' || page.route === 'admin-access') {
+        const role = portalState.auth?.effectiveRoleKey;
+        const isSocietyAdmin = portalState.auth?.isSystemAdmin === true
+            || role === 'society_admin'
+            || role === 'system_admin';
+        return isSocietyAdmin && set.has('rbac.edit');
+    }
+    return set.has(page.permission)
+        || (page.altPermissions || []).some((p) => set.has(p));
 };
 
 const getModuleNavEntries = (mod) => {

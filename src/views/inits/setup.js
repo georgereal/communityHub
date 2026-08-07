@@ -4,6 +4,11 @@ import { initResidentLinks } from '../../residentLinks.js';
 import { renderAccessRequestsAdmin } from '../../accessRequests.js';
 import { renderAccessMappings, ensureAccessState } from '../../mainBoot.js';
 import { processAnalytics, renderRegistry } from '../../registry.js';
+import {
+    initSetupSocietyAccordion,
+    refreshSetupSocietyMeta,
+    openSetupSection,
+} from '../../setupSocietyUi.js';
 
 let wired = false;
 
@@ -13,6 +18,7 @@ export default async function initSetupView() {
 
     initSetupAdmin();
     initResidentLinks();
+    initSetupSocietyAccordion();
 
     document.getElementById('save-setup-btn')?.addEventListener('click', async () => {
         const name = document.getElementById('setup-name').value;
@@ -28,7 +34,7 @@ export default async function initSetupView() {
 
         if (supabase) {
             const { error: cfgError } = await upsertSocietyConfig(apartment_id, { name, car_default, bike_default });
-            if (cfgError) return alert(`Could not save policy: ${cfgError.message}`);
+            if (cfgError) return alert(`Could not save profile: ${cfgError.message}`);
 
             const { error } = await supabase.from('units').update({ car_limit: car_default, bike_limit: bike_default }).eq('apartment_id', apartment_id).neq('number', '');
 
@@ -43,34 +49,21 @@ export default async function initSetupView() {
                 renderAccessMappings();
                 processAnalytics();
                 renderRegistry();
-                alert('Cloud Policy Synchronized: All units updated to new defaults!');
+                refreshSetupSocietyMeta();
+                alert('Society profile saved. Default parking limits applied to all units.');
             }
         }
         persist();
-    });
-
-    document.getElementById('clear-all-btn')?.addEventListener('click', () => {
-        if (confirm('DANGER: This will permanently wipe all community data (Vehicles, Accounts AND Units). Proceed?')) {
-            localStorage.clear();
-            portalState.units = [];
-            portalState.finances.txns = [];
-            persist();
-            window.location.reload();
-        }
-    });
-
-    document.getElementById('deep-repair-btn')?.addEventListener('click', () => {
-        portalState.units.forEach((u) => { if (!u.vehicles) u.vehicles = []; u.vehicles.forEach((v) => { if (v.isParkingActive === undefined) v.isParkingActive = true; }); });
-        portalState.finances.txns.forEach((t) => { if (!t.wallet) t.wallet = 'CASH'; if (!t.type) t.type = 'OUT'; });
-        persist();
-        alert('Deep repair complete. State sanitized.');
-        window.location.reload();
     });
 
     document.getElementById('access-users-show-unassigned')?.addEventListener('change', () => renderAccessMappings());
 }
 
 export async function refreshSetupAccessPanels() {
+    initSetupSocietyAccordion();
     renderAccessMappings();
     await renderAccessRequestsAdmin();
+    refreshSetupSocietyMeta();
 }
+
+export { openSetupSection };

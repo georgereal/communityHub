@@ -2,7 +2,7 @@
  * Society-scoped RBAC matrices: role × module, role × page, role × CRUD.
  */
 import { portalState, supabase } from './store.js';
-import { ROLE_OPTIONS } from './rbac.js';
+import { ROLE_OPTIONS, SOCIETY_FULL_ADMIN_KEYS } from './rbac.js';
 import { MODULE_CATALOG, LOCKED_MODULE_KEYS } from './moduleAccess.js';
 import {
     buildPageCatalog,
@@ -57,7 +57,7 @@ export function defaultCrudFromPermKeys(resourceKey, permKeys = []) {
 
 export function defaultModuleEnabled(moduleKey, roleKey, permKeys, pageStates) {
     if (LOCKED_MODULE_KEYS.has(moduleKey)) return true;
-    if (roleKey === 'apartment_admin') return true;
+    if (SOCIETY_FULL_ADMIN_KEYS.has(roleKey)) return true;
     const pages = buildPageCatalog().filter((p) => p.moduleId === moduleKey);
     if (!pages.length) return true;
     return pages.some((p) => {
@@ -280,7 +280,7 @@ export function canCrud(resourceKey, action = 'read') {
     if (portalState.auth?.isSystemAdmin || portalState.auth?.effectiveRoleKey === 'system_admin') {
         return true;
     }
-    if (portalState.auth?.effectiveRoleKey === 'apartment_admin') return true;
+    if (SOCIETY_FULL_ADMIN_KEYS.has(portalState.auth?.effectiveRoleKey)) return true;
 
     const stored = portalState.crudAccess?.[resourceKey];
     if (stored && Object.prototype.hasOwnProperty.call(stored, action)) {
@@ -297,7 +297,7 @@ export async function loadCrudAccessForRole(apartmentId, roleKey) {
         portalState.crudAccess = {};
         return {};
     }
-    if (roleKey === 'system_admin' || roleKey === 'apartment_admin') {
+    if (roleKey === 'system_admin' || SOCIETY_FULL_ADMIN_KEYS.has(roleKey)) {
         const full = {};
         CRUD_RESOURCES.forEach(({ key }) => {
             full[key] = { create: true, read: true, update: true, delete: true };
@@ -326,7 +326,7 @@ export async function loadRoleModuleAccess(apartmentId, roleKey) {
         portalState.moduleAccess.role = {};
         return {};
     }
-    if (roleKey === 'system_admin' || roleKey === 'apartment_admin') {
+    if (roleKey === 'system_admin' || SOCIETY_FULL_ADMIN_KEYS.has(roleKey)) {
         const all = {};
         MODULE_CATALOG.forEach(({ key }) => { all[key] = true; });
         portalState.moduleAccess.role = all;

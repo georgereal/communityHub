@@ -138,7 +138,7 @@ export const renderVendorsAdmin = () => {
 
 window.openVendorModal = (row = null) => {
     editingVendorId = row?.id || null;
-    document.getElementById('admin-vendor-modal-title').textContent = row ? 'Edit Vendor' : 'Add Vendor';
+    document.getElementById('admin-vendor-modal-title').textContent = row ? 'Edit vendor' : 'Add vendor';
     document.getElementById('admin-vendor-name').value = row?.name || '';
     document.getElementById('admin-vendor-phone').value = row?.contact_phone || '';
     document.getElementById('admin-vendor-email').value = row?.contact_email || '';
@@ -214,7 +214,7 @@ export const renderSubCatsAdmin = () => {
 
 window.openSubCatModal = (row = null) => {
     editingSubCatId = row?.id || null;
-    document.getElementById('admin-subcat-modal-title').textContent = row ? 'Edit Sub-category' : 'Add Sub-category';
+    document.getElementById('admin-subcat-modal-title').textContent = row ? 'Edit sub-category' : 'Add sub-category';
     document.getElementById('admin-subcat-category').value = row?.category || EXPENSE_CATS[0];
     document.getElementById('admin-subcat-name').value = row?.name || '';
     document.getElementById('admin-subcat-modal').classList.add('active');
@@ -287,7 +287,7 @@ export const renderStaffAdmin = () => {
 
 window.openStaffModal = (row = null) => {
     editingStaffId = row?.id || null;
-    document.getElementById('admin-staff-modal-title').textContent = row ? 'Edit Staff' : 'Add Staff';
+    document.getElementById('admin-staff-modal-title').textContent = row ? 'Edit staff' : 'Add staff';
     document.getElementById('admin-staff-name').value = row?.full_name || '';
     document.getElementById('admin-staff-role').value = row?.role_title || STAFF_ROLES[0];
     document.getElementById('admin-staff-phone').value = row?.phone || '';

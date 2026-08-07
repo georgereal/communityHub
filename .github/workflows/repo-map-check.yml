@@ -1,0 +1,89 @@
+name: Repo Map Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # Only run when structural files change
+      - 'src/**'
+      - 'api/**'
+      - 'scripts/**'
+      - 'docs/REPO_MAP.md'
+      - 'package.json'
+      - 'vite.config.js'
+      - 'vercel.json'
+      - '.github/workflows/repo-map-check.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-repo-map:
+    name: Verify Repo Map is Up to Date
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Save current repo map
+        run: |
+          if [ -f docs/REPO_MAP.md ]; then
+            cp docs/REPO_MAP.md /tmp/repo-map-before.md
+          else
+            echo "REPO_MAP_NOT_FOUND" > /tmp/repo-map-before.md
+          fi
+
+      - name: Regenerate repo map
+        run: node scripts/utilities/generate-repo-map.js
+
+      - name: Compare repo maps
+        id: compare
+        run: |
+          if diff -q /tmp/repo-map-before.md docs/REPO_MAP.md > /dev/null 2>&1; then
+            echo "is_stale=false" >> "$GITHUB_OUTPUT"
+            echo "✅ Repo map is up to date"
+          else
+            echo "is_stale=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️  Repo map is stale. Changes detected:"
+            diff /tmp/repo-map-before.md docs/REPO_MAP.md || true
+          fi
+
+      - name: Comment on PR (stale repo map)
+        if: steps.compare.outputs.is_stale == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const message = [
+              "## 📋 Repository Map Check",
+              "",
+              "The repository map (`docs/REPO_MAP.md`) appears to be out of date.",
+              "",
+              "This PR includes structural changes (new files, routes, modules, endpoints, etc.) that require a repo map update.",
+              "",
+              "### How to fix:",
+              "",
+              "1. Run the regeneration script locally:",
+              "   ```bash",
+              "   npm run generate-repo-map",
+              "   ```",
+              "2. Commit the updated `docs/REPO_MAP.md`",
+              "3. Push the changes to this PR branch",
+              "",
+              "> Tip: the pre-push hook also auto-checks this (`npm run setup:hooks`)."
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message,
+            });

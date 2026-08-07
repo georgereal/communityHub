@@ -75,6 +75,15 @@ export async function renderApartmentModulePanel() {
     }
 
     const aptName = portalState.access.apartments.find((a) => a.id === apartmentId)?.name || 'this society';
+    const enabledCount = MODULE_CATALOG.filter((mod) => {
+        if (LOCKED_MODULE_KEYS.has(mod.key)) return true;
+        return settings[mod.key] !== false;
+    }).length;
+
+    try {
+        const { setSetupSectionStat } = await import('./setupSocietyUi.js');
+        setSetupSectionStat('modules', `${enabledCount} of ${MODULE_CATALOG.length} on`);
+    } catch { /* ignore */ }
 
     host.innerHTML = `
       <p class="module-access-hint">Turn modules on or off for <strong>${esc(aptName)}</strong>. Admins always see all modules. Disabled modules are hidden from other users' menus and routes.</p>
@@ -107,6 +116,14 @@ export async function renderApartmentModulePanel() {
             const { loadModuleAccess } = await import('./moduleAccess.js');
             await loadModuleAccess(apartmentId);
             applyNavPermissions(new Set(resolveEffectivePermissions()));
+            const onCount = MODULE_CATALOG.filter((mod) => {
+                if (LOCKED_MODULE_KEYS.has(mod.key)) return true;
+                return values[mod.key] !== false;
+            }).length;
+            try {
+                const { setSetupSectionStat } = await import('./setupSocietyUi.js');
+                setSetupSectionStat('modules', `${onCount} of ${MODULE_CATALOG.length} on`);
+            } catch { /* ignore */ }
             alert('Module settings saved.');
         } catch (err) {
             alert(err.message || 'Could not save module settings.');
@@ -124,8 +141,8 @@ export async function renderUserModulePanel(userId, apartmentIds = []) {
     }
 
     const role = document.getElementById('access-user-role-v2')?.value;
-    if (role === 'apartment_admin') {
-        host.innerHTML = '<p class="module-access-hint">Apartment admins always have access to all modules.</p>';
+    if (role === 'society_admin') {
+        host.innerHTML = '<p class="module-access-hint">Society administrators always have access to all modules.</p>';
         host.hidden = false;
         return;
     }
@@ -179,7 +196,7 @@ export function readUserModuleOverridesFromPanel() {
 export async function saveUserModuleOverridesFromPanel(userId, apartmentIds) {
     if (!hasClientPermission('setup.edit')) return;
     const role = document.getElementById('access-user-role-v2')?.value;
-    if (role === 'apartment_admin') return;
+    if (role === 'society_admin') return;
     const overrides = readUserModuleOverridesFromPanel();
     await saveUserModuleAccess(userId, apartmentIds, overrides);
 }

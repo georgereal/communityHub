@@ -165,8 +165,11 @@ export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs 
     return { session: null, error: null };
 }
 
-export const NO_SOCIETY_ACCESS_MESSAGE =
-    'You are signed in but not linked to a society yet. Submit an access request below and an admin will approve it.';
+export const NO_SOCIETY_ACCESS_RESIDENT_MESSAGE =
+    'You are signed in as a resident. Choose your society below — an admin will link you to your flat after approval.';
+
+export const NO_SOCIETY_ACCESS_OFFICE_MESSAGE =
+    'You are signed in as office staff. Choose your society below — a society administrator will assign your role after approval.';
 
 export async function signInWithSocialProvider(supabase, provider) {
     const client = authClient || supabase;

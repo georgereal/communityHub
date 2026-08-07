@@ -8,6 +8,24 @@ import { getQueryParam } from './vercelRequest.js';
 import { fetchCoreState } from './stateDomains.js';
 import { buildDashboardSummary } from './dashboard-summary.js';
 
+/** Prefer higher-privilege society role when multiple assignments exist. */
+function primaryRoleFromAssignments(assignments = []) {
+    if (!assignments.length) return 'resident_viewer';
+    const priority = [
+        'society_admin',
+        'apartment_admin',
+        'accounts_manager',
+        'property_manager',
+        'office_staff',
+        'security',
+        'resident_viewer',
+    ];
+    for (const key of priority) {
+        if (assignments.some((a) => a.role_key === key)) return key;
+    }
+    return assignments[0].role_key;
+}
+
 function logBoot(userId, apartmentId, ms, error) {
     console.log(JSON.stringify({
         ts: new Date().toISOString(),
@@ -78,22 +96,22 @@ async function loadPermissionsForRoles(service, roles, apartmentId) {
         };
     }
 
-    const aptRoleKeys = (roles || [])
-        .filter((r) => r.scope === 'apartment' && r.apartment_id === apartmentId)
-        .map((r) => r.role_key);
-    if (!aptRoleKeys.length) {
+    const aptRoles = (roles || []).filter((r) => r.scope === 'apartment' && r.apartment_id === apartmentId);
+    if (!aptRoles.length) {
         return { isSystemAdmin: false, permissions: [], effectiveRoleKey: null };
     }
 
+    // Single primary society role — never union permissions from every assignment
+    const effectiveRoleKey = primaryRoleFromAssignments(aptRoles);
     const { data: rp } = await service
         .from('role_permissions')
         .select('permission_key')
-        .in('role_key', aptRoleKeys);
+        .eq('role_key', effectiveRoleKey);
 
     return {
         isSystemAdmin: false,
         permissions: [...new Set((rp || []).map((x) => x.permission_key))],
-        effectiveRoleKey: aptRoleKeys[0] || null,
+        effectiveRoleKey,
     };
 }
 

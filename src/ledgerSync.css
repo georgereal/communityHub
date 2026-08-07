@@ -448,6 +448,15 @@
   z-index: 20;
 }
 
+/* Compact status line under the date — mobile cards only */
+.ledger-card-meta {
+  display: none;
+}
+
+.ledger-card-date {
+  display: inline;
+}
+
 .ledger-opening-picker {
   display: inline-block;
 }
@@ -791,7 +800,7 @@
   display: flex;
   flex-direction: column;
   resize: vertical;
-  overflow: hidden;
+  overflow: auto; /* horizontal scroll when optional columns widen the table */
   flex: 1 1 auto;
   min-height: 320px;
   height: auto;
@@ -804,10 +813,42 @@
 #ledger-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: visible;
+  min-width: 0;
 }
 
+.bank-recon-table--ledger .ledger-col--desktop-hidden {
+  display: none !important;
+}
+
+/* Grow past the viewport instead of crushing Description when optional cols are on */
+.bank-recon-table.bank-recon-table--ledger {
+  width: max-content;
+  min-width: 100%;
+  table-layout: fixed;
+}
+
+.bank-recon-table--ledger .bank-recon-table__th--desc,
+.bank-recon-table--ledger .bank-recon-table__cell--desc {
+  width: 16rem;
+  min-width: 16rem;
+  max-width: 22rem;
+}
+
+.bank-recon-table--ledger .bank-recon-table__th--ledger,
 .bank-recon-table--ledger .bank-recon-table__cell--ledger {
-  white-space: nowrap;
+  width: 4.5rem;
+  min-width: 4.5rem;
+  max-width: 5.5rem;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--type {
+  white-space: normal;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--type .ledger-recon-badge {
+  display: inline-block;
+  margin-top: 0.2rem;
 }
 
 .bank-recon-table--ledger .ledger-txn-chip {
@@ -816,14 +857,52 @@
 }
 
 .ledger-classify-cell {
-  min-width: 11rem;
+  min-width: 0;
+  width: 100%;
 }
 
 .ledger-classify-cell .bank-recon-classify-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--desc .bank-recon-cell-input--desc {
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.bank-recon-table--ledger .bank-recon-row-actions {
+  flex-wrap: nowrap;
+}
+
+.bank-recon-table--ledger .bank-recon-table__cell--classify {
+  overflow: visible;
+}
+
+.bank-recon-table--ledger tr.ledger-txn-row--classify-open {
+  position: relative;
+  z-index: 5;
+}
+
+.bank-recon-table--ledger tr.ledger-txn-row--classify-open .bank-recon-table__cell--classify {
+  overflow: visible;
+}
+
+.bank-recon-table--ledger tr.ledger-txn-row--classify-open .fdoc-cat-editor {
+  display: flex;
+  flex-direction: column;
   gap: 0.35rem;
+  min-width: 12rem;
+  padding: 0.15rem 0;
+}
+
+.bank-recon-table--ledger tr.ledger-txn-row--classify-open .fdoc-cat-editor .bank-recon-classify-combobox,
+.bank-recon-table--ledger tr.ledger-txn-row--classify-open .fdoc-cat-editor .bank-recon-vendor-input {
+  display: block;
+  width: 100%;
 }
 
 tr.ledger-txn-row--dirty {
@@ -1002,6 +1081,8 @@ tr.ledger-txn-row--dirty {
 }
 
 .ledger-sort-btn--num {
+  display: inline-flex;
+  width: 100%;
   justify-content: flex-end;
   text-align: right;
 }
@@ -1189,10 +1270,30 @@ tr.ledger-txn-row--dirty {
   }
 
   .ledger-page-header--compact .ledger-page-header__actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     width: 100%;
     gap: 0.35rem;
+    align-items: stretch;
+  }
+
+  /* Flatten nested action groups so Add / Add / Bank Sync share one equal row
+     (avoids Bank Sync stretching to the height of a stacked pair). */
+  .ledger-page-header--compact .accounts-header-actions-group:not([hidden]) {
+    display: contents;
+  }
+
+  .ledger-page-header--compact .ledger-page-header__actions .btn {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    justify-content: center;
+    align-self: stretch;
+    white-space: nowrap;
+  }
+
+  .ledger-page-header--compact .ledger-page-header__actions .btn[hidden] {
+    display: none !important;
   }
 
   .accounts-subview-tabs--compact {
@@ -1200,6 +1301,17 @@ tr.ledger-txn-row--dirty {
     gap: 0.5rem;
     overflow-x: auto;
     flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .accounts-subview-tabs--compact::-webkit-scrollbar {
+    display: none;
+  }
+
+  .accounts-subview-tabs--compact button {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .ledger-subview {
@@ -1248,9 +1360,9 @@ tr.ledger-txn-row--dirty {
     width: 100%;
   }
 
+  /* Prefer financeMobile.css grid for actions; keep stretch as fallback */
   .ledger-toolbar__actions {
     width: 100%;
-    justify-content: flex-end;
   }
 
   .ledger-page-header {

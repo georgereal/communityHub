@@ -4,7 +4,7 @@
 import { portalState, supabase, isPlaceholderApartmentId } from './store.js';
 import { routeIsAllowed } from './rbac.js';
 
-const REVIEWER_V2 = new Set(['apartment_admin', 'accounts_manager']);
+const REVIEWER_V2 = new Set(['society_admin', 'apartment_admin', 'accounts_manager']);
 const REVIEWER_V1 = new Set(['admin', 'accounts_manager']);
 
 let panelOpen = false;
@@ -128,7 +128,7 @@ export async function getReviewerUserIds(apartmentId, excludeUserId = null) {
             .select('user_id, role_key')
             .eq('apartment_id', apartmentId)
             .eq('scope', 'apartment')
-            .in('role_key', ['apartment_admin', 'accounts_manager']);
+            .in('role_key', ['society_admin', 'apartment_admin', 'accounts_manager']);
         (roleRows || []).forEach((r) => ids.add(r.user_id));
 
         if (!ids.size) {
@@ -164,9 +164,9 @@ const navigateForNotification = async (note) => {
         if (routeIsAllowed('admin-society')) {
             await window.switchView?.('admin-society');
             const { renderAccessRequestsAdmin } = await import('./accessRequests.js');
+            const { openSetupSection } = await import('./setupSocietyUi.js');
             await renderAccessRequestsAdmin();
-            document.getElementById('access-requests-admin-wrap')
-                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            openSetupSection('people');
             return;
         }
         alert('Open Administration → Society Profile to review pending access requests.');

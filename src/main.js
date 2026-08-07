@@ -18,10 +18,18 @@ import {
 import { processFinances } from './finances.js';
 import {
   getEnabledSocialProviders,
-  NO_SOCIETY_ACCESS_MESSAGE,
+  NO_SOCIETY_ACCESS_RESIDENT_MESSAGE,
+  NO_SOCIETY_ACCESS_OFFICE_MESSAGE,
   signInWithSocialProvider,
   waitForBootAuthSession,
 } from './socialAuth.js';
+import {
+  getAuthUserKind,
+  setAuthUserKind,
+  clearAuthUserKind,
+  isOfficeAuthKind,
+  AUTH_KIND_LABELS,
+} from './authUserKind.js';
 import { ensureViewMounted, showView } from './views/viewShell.js';
 import { activateView } from './views/controllers.js';
 import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
@@ -43,6 +51,7 @@ import {
     v2KeyToLabel,
     v1RoleToV2Key,
     isApartmentAdminUser,
+    isSocietyAdminUser,
     isSystemAdminUser,
     loadAllUserRoleAssignments,
     loadAllUserRoleAssignmentsCached,
@@ -171,10 +180,10 @@ const applyAuthToUIInner = async (session, options = {}) => {
         effectiveRoleKey = 'system_admin';
         role = 'admin';
       } else if (aptId && !isPlaceholderApartmentId(aptId)) {
-        const aptAssignment = roleAssignments.find((a) => a.scope === 'apartment' && a.apartment_id === aptId);
-        if (aptAssignment?.role_key) {
-          effectiveRoleKey = aptAssignment.role_key;
-          role = ROLE_OPTIONS.find((r) => r.key === aptAssignment.role_key)?.v1Key || role;
+        const aptRoles = roleAssignments.filter((a) => a.scope === 'apartment' && a.apartment_id === aptId);
+        if (aptRoles.length) {
+          effectiveRoleKey = primaryRoleFromAssignments(aptRoles);
+          role = ROLE_OPTIONS.find((r) => r.key === effectiveRoleKey)?.v1Key || role;
         }
       }
     }
@@ -211,7 +220,8 @@ const applyAuthToUIInner = async (session, options = {}) => {
   const existingPerms = portalState.authPermissions;
   if (refreshPermissions && aptId && supabase && !isPlaceholderApartmentId(aptId)) {
     const { isSocietyHydrating } = await import('./accessLocks.js');
-    if (isSocietyHydrating() && existingPerms?.length) {
+    // Keep explicit boot list (including empty) during society hydrate — never invent from profile
+    if (isSocietyHydrating() && Array.isArray(existingPerms)) {
       portalState.authPermissions = existingPerms;
     } else {
       console.log('Refreshing permissions for:', aptId);
@@ -224,15 +234,19 @@ const applyAuthToUIInner = async (session, options = {}) => {
         } catch { /* tables may not exist yet */ }
       }
     }
-  } else if (existingPerms?.length) {
+  } else if (Array.isArray(existingPerms)) {
     portalState.authPermissions = existingPerms;
-  } else {
+  } else if (!supabase) {
+    // Offline demo only — map legacy profile role to a permission floor
     portalState.authPermissions = permissionsFromV1Role(role);
+  } else {
+    // Online but unresolved → least privilege
+    portalState.authPermissions = [];
   }
 
   // RBAC gating (UI-level; server-side via RLS in SQL file)
   const manageBtn = document.getElementById('user-menu-manage');
-  if (manageBtn) manageBtn.style.display = (isApartmentAdminUser() || can('rbac.view')) ? 'flex' : 'none';
+  if (manageBtn) manageBtn.style.display = can('rbac.edit') ? 'flex' : 'none';
   applyPermissionsToNav(portalState.authPermissions || resolveEffectivePermissions());
   if (notifications && aptId && !isPlaceholderApartmentId(aptId)) {
     const { accessLocks } = await import('./accessLocks.js');
@@ -270,10 +284,14 @@ const applyAuthToUI = (session, options = {}) => {
 
 const signOut = async (message = 'Signed out.') => {
   await clearBackendSession();
+  clearAuthUserKind();
   if (supabase) await supabase.auth.signOut();
   localStorage.removeItem('sentry_portal_v5_platinum');
   showAuth(message);
 };
+
+const workspaceGateIntroMessage = () =>
+  (isOfficeAuthKind() ? NO_SOCIETY_ACCESS_OFFICE_MESSAGE : NO_SOCIETY_ACCESS_RESIDENT_MESSAGE);
 
 const hideWorkspaceGate = () => {
   const modal = document.getElementById('workspace-gate-modal');
@@ -426,7 +444,7 @@ const finishAuthSession = async (session) => {
       notifications: false,
       adminRpc: false,
     });
-    if (!synced) showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
+    if (!synced) showWorkspaceGate(workspaceGateIntroMessage());
     window.switchView(resolveRoute(window.location.hash.slice(1), portalState.auth?.role));
     return synced;
   })().finally(() => {
@@ -434,6 +452,32 @@ const finishAuthSession = async (session) => {
   });
 
   return finishAuthInflight;
+};
+
+const AUTH_KIND_HINTS = {
+  resident: 'For owners, tenants, and residents — request portal access to your society.',
+  office: 'For association office, accounts, security, and staff — admin assigns your role after approval.',
+};
+
+const initAuthKindTabs = () => {
+  const tabs = document.querySelectorAll('[data-auth-kind]');
+  const hintEl = document.getElementById('auth-kind-hint');
+  if (!tabs.length) return;
+
+  const applyKind = (kind) => {
+    setAuthUserKind(kind);
+    tabs.forEach((tab) => {
+      const active = tab.dataset.authKind === kind;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (hintEl) hintEl.textContent = AUTH_KIND_HINTS[kind] || AUTH_KIND_HINTS.resident;
+  };
+
+  applyKind(getAuthUserKind());
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => applyKind(tab.dataset.authKind === 'office' ? 'office' : 'resident'));
+  });
 };
 
 const renderSocialAuthButtons = () => {
@@ -459,6 +503,7 @@ const renderSocialAuthButtons = () => {
     btn.onclick = async () => {
       btn.disabled = true;
       try {
+        setAuthUserKind(getAuthUserKind());
         const { error } = await signInWithSocialProvider(supabase, provider.id);
         if (error) showAuth(error.message);
       } catch (err) {
@@ -557,7 +602,7 @@ const boot = async () => {
       hideAuth();
       refreshAuthUiShell();
       renderAccessMappings();
-      showWorkspaceGate(NO_SOCIETY_ACCESS_MESSAGE);
+      showWorkspaceGate(workspaceGateIntroMessage());
     } else if (bootSession && accessSynced) {
       hideAuth();
       refreshAuthUiShell();
@@ -706,6 +751,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const email = (emailEl?.value || '').trim();
     const password = (passEl?.value || '').trim();
     if (!email || !password) return showAuth('Email and password required.');
+    setAuthUserKind(getAuthUserKind());
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return showAuth(error.message);
     await finishAuthSession(data.session);
@@ -716,12 +762,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const email = (emailEl?.value || '').trim();
     const password = (passEl?.value || '').trim();
     if (!email || !password) return showAuth('Email and password required.');
+    setAuthUserKind(getAuthUserKind());
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return showAuth(error.message);
     if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
     await finishAuthSession(data.session);
   };
 
+  initAuthKindTabs();
   if (loginBtn) loginBtn.onclick = signIn;
   if (signupBtn) signupBtn.onclick = signUp;
   renderSocialAuthButtons();
@@ -769,6 +817,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // User & Apartment Management Modals
   let activeUserIdForEdit = null;
   window.openUserModal = async (userId = null) => {
+    if (!isSocietyAdminUser()) {
+      alert('Only a Society Administrator can assign or change roles.');
+      return;
+    }
     activeUserIdForEdit = userId;
     const user = portalState.access.users.find(u => u.id === userId);
     document.getElementById('access-user-name-v2').value = user?.name || '';
@@ -799,13 +851,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.openAptModal = (aptId = null) => {
     activeAptIdForEdit = aptId;
     const apt = portalState.access.apartments.find(a => a.id === aptId);
-    document.getElementById('apt-mgmt-title').textContent = aptId ? 'Edit Apartment' : 'Add Apartment';
+    document.getElementById('apt-mgmt-title').textContent = aptId ? 'Edit society' : 'Add society';
     document.getElementById('apt-mgmt-name').value = apt?.name || '';
     document.getElementById('apt-mgmt-modal').classList.add('active');
   };
   window.closeAptModal = () => document.getElementById('apt-mgmt-modal').classList.remove('active');
 
   document.getElementById('save-user-access-btn').onclick = async () => {
+    if (!isSocietyAdminUser()) {
+      return alert('Only a Society Administrator can assign or change roles.');
+    }
     const name = document.getElementById('access-user-name-v2').value.trim();
     const email = document.getElementById('access-user-email-v2').value.trim();
     const role = document.getElementById('access-user-role-v2').value;
@@ -885,6 +940,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   window.deleteUser = async (userId) => {
+    if (!isSocietyAdminUser()) {
+      return alert('Only a Society Administrator can revoke society access.');
+    }
     if (!confirm('Revoke all access for this user?')) return;
     if (supabase) {
       const scopeIds = (portalState.access?.apartments || []).map((a) => a.id);
@@ -1000,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         .eq('user_id', uid).eq('scope', 'apartment').eq('apartment_id', aptId);
       const { error: roleErr } = await supabase.from('user_role_assignments').insert({
         user_id: uid,
-        role_key: 'apartment_admin',
+        role_key: 'society_admin',
         scope: 'apartment',
         apartment_id: aptId,
       });
@@ -1010,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const refreshed = await supabase.auth.getSession();
     await applyAuthToUI(refreshed.data.session);
-    alert('You are now Association Office Bearer (admin). Open Administration in the sidebar.');
+    alert('You are now Society Administrator. Open Administration → Roles in the sidebar.');
   };
 
   const activeUserSelect = document.getElementById('access-active-user');

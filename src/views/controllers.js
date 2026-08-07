@@ -101,7 +101,10 @@ export async function activateView(route, page) {
             void renderResidentLinksAdmin();
             void renderApartmentModulePanel();
             const { renderAccessRequestsAdmin } = await import('../accessRequests.js');
+            const { initSetupSocietyAccordion, refreshSetupSocietyMeta } = await import('../setupSocietyUi.js');
             void renderAccessRequestsAdmin();
+            initSetupSocietyAccordion();
+            refreshSetupSocietyMeta();
             switchSetupSubView(sub || 'society');
             break;
         }

@@ -1,5 +1,5 @@
 /**
- * Editable Financial Ledger table — bank-recon style layout with classify comboboxes.
+ * Editable Financial Ledger table — bank-recon layout with pencil/save/cancel category edit.
  */
 import { portalState } from './store.js';
 import { postFinanceMutation } from './financeApi.js';
@@ -14,7 +14,7 @@ import {
 } from './expenseCategories.js';
 import { isTransactionReconciled, getBankOpeningConfig } from './bankReconciliation.js';
 import { withButtonBusy } from './buttonBusy.js';
-import { setLedgerActivity } from './ledgerFilter.js';
+import { setLedgerActivity, sortLedgerTxnsChronological } from './ledgerFilter.js';
 import { annotateLedgerRunningBalancesInOrder, getExcludedLedgerTxns, patchAffectsLedgerBalance } from './ledgerBalance.js';
 import {
     wireClassifyCombobox,
@@ -132,16 +132,18 @@ const formatDisplayDate = (isoDate) => {
     const match = String(isoDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!match) return String(isoDate || '');
     const [, year, month, day] = match;
-    return `${day}-${month}-${year.slice(-2)}`;
+    // Non-breaking hyphens so DD-MM-YY never wraps mid-date in narrow columns
+    return `${day}\u2011${month}\u2011${year.slice(-2)}`;
 };
 
-const LEDGER_COLUMNS_KEY = 'ledgerTableColumns_v1';
+const LEDGER_COLUMNS_KEY = 'ledgerTableColumns_v2';
 
 const DEFAULT_LEDGER_COLUMNS = {
     calculatedBalance: true,
     passbookBalance: false,
     ocrRow: false,
     rowOrder: false,
+    wallet: false,
 };
 
 const loadLedgerColumns = () => {
@@ -152,6 +154,7 @@ const loadLedgerColumns = () => {
             passbookBalance: !!saved?.passbookBalance,
             ocrRow: !!saved?.ocrRow,
             rowOrder: !!saved?.rowOrder,
+            wallet: !!saved?.wallet,
         };
     } catch {
         return { ...DEFAULT_LEDGER_COLUMNS };
@@ -198,7 +201,7 @@ const mountLedgerColumnsPicker = (visibleColumns) => {
     const wasOpen = slot.querySelector('details.ledger-columns-picker')?.open;
     slot.innerHTML = `
       <details class="bank-recon-columns-picker ledger-columns-picker"${wasOpen ? ' open' : ''}>
-        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
+        <summary class="btn btn-outline btn--small" title="Show or hide columns"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> <span class="fdoc-action-full">Columns</span><span class="fdoc-action-short">Cols</span></summary>
         <div class="bank-recon-columns-picker__menu">
           <label class="bank-recon-columns-picker__option">
             <input type="checkbox" data-ledger-column-toggle="calculatedBalance" ${visibleColumns.calculatedBalance ? 'checked' : ''} />
@@ -215,6 +218,10 @@ const mountLedgerColumnsPicker = (visibleColumns) => {
           <label class="bank-recon-columns-picker__option">
             <input type="checkbox" data-ledger-column-toggle="rowOrder" ${visibleColumns.rowOrder ? 'checked' : ''} />
             <span>Row order (↑ ↓)</span>
+          </label>
+          <label class="bank-recon-columns-picker__option">
+            <input type="checkbox" data-ledger-column-toggle="wallet" ${visibleColumns.wallet ? 'checked' : ''} />
+            <span>Ledger (BANK / CASH)</span>
           </label>
         </div>
       </details>`;
@@ -319,27 +326,50 @@ const isBankNarrationVendor = (vendor, description) => {
 const renderSortHeader = (label, field, extraClass = '') =>
     `<button type="button" class="ledger-sort-btn ${extraClass}" data-sort="${field}" aria-sort="none">${label} <span class="ledger-sort-indicator"></span></button>`;
 
-/** Always-visible classify fields — same pattern as Bank Reconciliation. */
-const renderLedgerClassifyCell = (_t, isIncome) => {
-    const catCombobox = `
-      <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat">
-        <input type="text" class="bank-recon-cell-input bank-recon-cat-input" placeholder="Category…" autocomplete="off" />
-        <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
-      </div>`;
-    if (isIncome) {
-        return `<div class="ledger-classify-cell"><div class="bank-recon-classify-actions">${catCombobox}</div></div>`;
+/** Category / vendor — display + pencil, edit with save/cancel (same as Bills & receipts). */
+const renderLedgerClassifyDisplay = (t, isIncome) => {
+    const catKey = t.cat ? (normalizeCategoryKey(t.cat) || t.cat) : '';
+    const catLabel = catKey ? categoryDisplayLabel(catKey) : '';
+    const sub = String(t.sub_category || '').trim();
+    const vendor = (!isIncome && t.vendor_name && !isBankNarrationVendor(t.vendor_name, t.description))
+        ? String(t.vendor_name).trim()
+        : '';
+    let main = catLabel || 'Set category…';
+    if (!isIncome) {
+        const parts = [
+            catLabel,
+            sub && sub.toLowerCase() !== catLabel.toLowerCase() ? sub : '',
+            vendor,
+        ].filter(Boolean);
+        main = parts.length ? parts.join(' · ') : 'Set category…';
     }
-    return `<div class="ledger-classify-cell">
-      <div class="bank-recon-classify-actions">
-        ${catCombobox}
+    return `<button type="button" class="fdoc-cat-display${catLabel ? '' : ' fdoc-cat-display--empty'}" data-ledger-cat-edit="${esc(t.id)}" title="Edit category">
+    <span class="fdoc-cat-display__main">${esc(main)}</span>
+    <i class="fa-solid fa-pen fdoc-cat-display__pen" aria-hidden="true"></i>
+  </button>`;
+};
+
+const renderLedgerClassifyCell = (t, isIncome) => `
+  <div class="ledger-classify-cell fdoc-classify-cell">
+    ${renderLedgerClassifyDisplay(t, isIncome)}
+    <div class="fdoc-cat-editor" hidden>
+      <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat">
+        <input type="text" class="bank-recon-cell-input bank-recon-cat-input" placeholder="Category…" autocomplete="off" aria-label="Category" />
+        <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+      </div>
+      ${isIncome ? '' : `
         <div class="bank-recon-classify-combobox bank-recon-classify-combobox--sub">
-          <input type="text" class="bank-recon-cell-input bank-recon-subcat-input" placeholder="Sub-category" autocomplete="off" />
+          <input type="text" class="bank-recon-cell-input bank-recon-subcat-input" placeholder="Sub-category" autocomplete="off" aria-label="Sub-category" />
           <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
         </div>
-        <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" list="ledger-vendors" placeholder="Vendor" />
+        <input type="text" class="bank-recon-cell-input bank-recon-vendor-input" list="ledger-vendors" placeholder="Vendor" aria-label="Vendor" />
+      `}
+      <div class="fdoc-cat-editor__actions">
+        <button type="button" class="btn btn-primary btn--small btn--icon" data-ledger-cat-save="${esc(t.id)}" title="Save" aria-label="Save category"><i class="fa-solid fa-check" aria-hidden="true"></i></button>
+        <button type="button" class="btn btn-outline btn--small btn--icon" data-ledger-cat-cancel="${esc(t.id)}" title="Cancel" aria-label="Cancel"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>
-    </div>`;
-};
+    </div>
+  </div>`;
 
 const renderLedgerOrderButtons = (txnId, orderMeta) => {
     const o = orderMeta.get(txnId);
@@ -374,12 +404,8 @@ const renderCashBillPivotRow = (raw, { visibleColumns }) => {
     const emptyOcr = visibleColumns.ocrRow
         ? '<td class="bank-recon-table__cell bank-recon-table__cell--num">—</td>'
         : '';
-    const emptyCalc = visibleColumns.calculatedBalance
-        ? '<td class="bank-recon-table__cell bank-recon-table__cell--num">—</td>'
-        : '';
-    const emptyPassbook = visibleColumns.passbookBalance
-        ? '<td class="bank-recon-table__cell bank-recon-table__cell--num">—</td>'
-        : '';
+    const emptyCalc = `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed${visibleColumns.calculatedBalance ? '' : ' ledger-col--desktop-hidden'}">—</td>`;
+    const emptyPassbook = `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--passbook${visibleColumns.passbookBalance ? '' : ' ledger-col--desktop-hidden'}">—</td>`;
 
     return `<tr class="bank-recon-table__row ledger-txn-row ledger-txn-row--cash-bill${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}" data-txn-id="${esc(t.id)}" data-fdoc-id="${esc(docId)}" data-line-type="${lineType}" data-txn-date="${esc(String(t.date || '').slice(0, 10))}">
       ${emptyOrder}
@@ -387,9 +413,18 @@ const renderCashBillPivotRow = (raw, { visibleColumns }) => {
         <input type="checkbox" class="ledger-row-check" data-txn="${esc(t.id)}" aria-label="Select row" />
       </td>
       ${emptyOcr}
-      <td class="bank-recon-table__cell bank-recon-table__cell--date">${esc(formatDisplayDate(t.date))}</td>
+      <td class="bank-recon-table__cell bank-recon-table__cell--date">
+        <span class="ledger-card-date">${esc(formatDisplayDate(t.date))}</span>
+        <span class="ledger-card-meta" aria-label="Status">
+          <span class="ledger-card-meta__item ledger-card-meta__item--${lineType.toLowerCase()}">${isIncome ? 'Income' : 'Expense'}</span>
+          <span class="ledger-card-meta__sep" aria-hidden="true">·</span>
+          <span class="ledger-card-meta__item">CASH</span>
+          <span class="ledger-card-meta__sep" aria-hidden="true">·</span>
+          <span class="ledger-card-meta__item">Cash bill</span>
+        </span>
+      </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--desc">
-        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="2" placeholder="Description">${esc(detail)}</textarea>
+        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="1" placeholder="Description">${esc(detail)}</textarea>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${drClass}">${dr}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${crClass}">${cr}</td>
@@ -401,10 +436,10 @@ const renderCashBillPivotRow = (raw, { visibleColumns }) => {
       <td class="bank-recon-table__cell bank-recon-table__cell--classify">
         ${renderLedgerClassifyCell(t, isIncome)}
       </td>
-      <td class="bank-recon-table__cell bank-recon-table__cell--ledger">
+      ${visibleColumns.wallet ? `<td class="bank-recon-table__cell bank-recon-table__cell--ledger">
         <span class="ledger-txn-chip ledger-txn-chip--wallet">CASH</span>
         <span class="ledger-recon-badge ledger-recon-badge--cash-bill" title="From Bills &amp; receipts (cash)">Cash bill</span>
-      </td>
+      </td>` : ''}
       <td class="bank-recon-table__cell bank-recon-table__cell--bills">—</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
@@ -468,14 +503,11 @@ const renderLedgerRow = (raw, {
     const calcTitle = ledgerCalcNum != null
         ? (passbookMismatch
             ? `Ledger calculated ${ledgerCalc} ≠ passbook ${formatMoney(passbookNum)}`
-            : 'Running balance: previous Calculated ± this row (current table order)')
+            : 'Running balance after this row (oldest→newest), independent of table sort')
         : (needsOpening ? 'Set opening balance to calculate' : '');
-    const calcCell = visibleColumns.calculatedBalance
-        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed${mismatchClass}"${calcTitle ? ` title="${esc(calcTitle)}"` : ''}>${ledgerCalc}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`
-        : '';
-    const passbookCell = visibleColumns.passbookBalance
-        ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--passbook${mismatchClass}"${passbookMismatch ? ` title="${esc(calcTitle)}"` : ''}>${passbookNum != null ? formatMoney(passbookNum) : '—'}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`
-        : '';
+    const calcCell = `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--computed${visibleColumns.calculatedBalance ? '' : ' ledger-col--desktop-hidden'}${mismatchClass}"${calcTitle ? ` title="${esc(calcTitle)}"` : ''}>${ledgerCalc}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`;
+    const passbookLabel = passbookNum != null ? formatMoney(passbookNum) : '—';
+    const passbookCell = `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--passbook${visibleColumns.passbookBalance ? '' : ' ledger-col--desktop-hidden'}${mismatchClass}"${passbookMismatch ? ` title="${esc(calcTitle)}"` : ' title="Passbook balance from matched statement line"'}>${passbookLabel}${passbookMismatch ? '<i class="fa-solid fa-triangle-exclamation bank-recon-mismatch-icon" aria-hidden="true"></i>' : ''}</td>`;
     const ocrCell = visibleColumns.ocrRow
         ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr" title="OCR / statement row sequence">${formatOcrRowDisplay(stmt.line) ?? '—'}</td>`
         : '';
@@ -486,9 +518,22 @@ const renderLedgerRow = (raw, {
         <input type="checkbox" class="ledger-row-check" data-txn="${t.id}" aria-label="Select row" />
       </td>
       ${ocrCell}
-      <td class="bank-recon-table__cell bank-recon-table__cell--date">${esc(formatDisplayDate(t.date))}</td>
+      <td class="bank-recon-table__cell bank-recon-table__cell--date">
+        <span class="ledger-card-date">${esc(formatDisplayDate(t.date))}</span>
+        <span class="ledger-card-meta" aria-label="Status">
+          <span class="ledger-card-meta__item ledger-card-meta__item--${lineType.toLowerCase()}">${isIncome ? 'Income' : 'Expense'}</span>
+          <span class="ledger-card-meta__sep" aria-hidden="true">·</span>
+          <span class="ledger-card-meta__item">${esc(t.wallet || '—')}</span>
+          ${reconciled
+            ? '<span class="ledger-card-meta__sep" aria-hidden="true">·</span><span class="ledger-card-meta__item ledger-card-meta__item--ok">Reconciled</span>'
+            : (isBank ? '<span class="ledger-card-meta__sep" aria-hidden="true">·</span><span class="ledger-card-meta__item ledger-card-meta__item--open">Unreconciled</span>' : '')}
+          ${t.exclude_from_reports
+            ? '<span class="ledger-card-meta__sep" aria-hidden="true">·</span><span class="ledger-card-meta__item ledger-card-meta__item--warn">No reports</span>'
+            : ''}
+        </span>
+      </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--desc">
-        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="2"${descPlaceholder}>${esc(t.description || '')}</textarea>
+        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="1"${descPlaceholder}>${esc(t.description || '')}</textarea>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${drClass}">${dr}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${crClass}">${cr}</td>
@@ -496,15 +541,16 @@ const renderLedgerRow = (raw, {
       ${passbookCell}
       <td class="bank-recon-table__cell bank-recon-table__cell--type">
         <span class="bank-recon-type-badge bank-recon-type-badge--${lineType.toLowerCase()}">${isIncome ? 'Income' : 'Expense'}</span>
+        ${!visibleColumns.wallet ? `${reportsBadge}${reconBadge}` : ''}
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--classify">
         ${renderLedgerClassifyCell(t, isIncome)}
       </td>
-      <td class="bank-recon-table__cell bank-recon-table__cell--ledger">
+      ${visibleColumns.wallet ? `<td class="bank-recon-table__cell bank-recon-table__cell--ledger">
         <span class="ledger-txn-chip ledger-txn-chip--wallet">${esc(t.wallet)}</span>
         ${reportsBadge}
         ${reconBadge}
-      </td>
+      </td>` : ''}
       <td class="bank-recon-table__cell bank-recon-table__cell--bills">${linkedBillsCell}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
@@ -527,38 +573,141 @@ const initRowClassifyValues = (row) => {
     const t = mergedTxn(raw);
 
     const catInput = row.querySelector('.bank-recon-cat-input');
-    if (catInput && t.cat) {
-        const key = normalizeCategoryKey(t.cat) || t.cat;
-        catInput.value = key;
-        const options = categoryOptionsForTxnRow(row);
-        setClassifyInputState(catInput, isExactListMatch(key, options) ? 'known' : 'custom');
+    if (catInput) {
+        if (t.cat) {
+            const key = normalizeCategoryKey(t.cat) || t.cat;
+            catInput.value = key;
+            const options = categoryOptionsForTxnRow(row);
+            setClassifyInputState(catInput, isExactListMatch(key, options) ? 'known' : 'custom');
+        } else {
+            catInput.value = '';
+            setClassifyInputState(catInput, '');
+        }
     }
 
     const subInput = row.querySelector('.bank-recon-subcat-input');
-    if (subInput && t.sub_category) {
-        subInput.value = t.sub_category;
-        const options = subCatOptionsForLedgerCategory(resolvedCategoryForLedgerRow(row));
-        setClassifyInputState(subInput, isExactListMatch(t.sub_category, options) ? 'known' : 'custom');
+    if (subInput) {
+        if (t.sub_category) {
+            subInput.value = t.sub_category;
+            const options = subCatOptionsForLedgerCategory(resolvedCategoryForLedgerRow(row));
+            setClassifyInputState(subInput, isExactListMatch(t.sub_category, options) ? 'known' : 'custom');
+        } else {
+            subInput.value = '';
+            setClassifyInputState(subInput, '');
+        }
     }
 
     const vendorInput = row.querySelector('.bank-recon-vendor-input');
-    if (vendorInput && t.vendor_name && !isBankNarrationVendor(t.vendor_name, t.description)) {
-        vendorInput.value = t.vendor_name;
+    if (vendorInput) {
+        vendorInput.value = (t.vendor_name && !isBankNarrationVendor(t.vendor_name, t.description))
+            ? t.vendor_name
+            : '';
     }
 };
 
-const maybeAutoSaveLedgerClassify = async (row) => {
+const closeAllLedgerCatEditors = (exceptId = null) => {
+    document.querySelectorAll('#cash-ledger-items tr.ledger-txn-row').forEach((row) => {
+        if (exceptId && row.dataset.txnId === exceptId) return;
+        row.classList.remove('ledger-txn-row--classify-open');
+        const editor = row.querySelector('.fdoc-cat-editor');
+        if (editor) editor.hidden = true;
+    });
+};
+
+const openLedgerCatEditor = (txnId) => {
+    const row = document.querySelector(`#cash-ledger-items tr.ledger-txn-row[data-txn-id="${CSS.escape(txnId)}"]`);
+    if (!row) return;
+    closeAllLedgerCatEditors(txnId);
+    row.classList.add('ledger-txn-row--classify-open');
+    const editor = row.querySelector('.fdoc-cat-editor');
+    if (editor) editor.hidden = false;
+
+    // Wire first, then populate — avoids combobox handlers wiping loaded values.
+    if (!row.dataset.classifyWired) {
+        row.dataset.classifyWired = '1';
+        const catWrap = row.querySelector('.bank-recon-classify-combobox--cat');
+        if (catWrap) {
+            wireClassifyCombobox(catWrap, {
+                getOptions: () => categoryOptionsForTxnRow(row),
+                onCustomSelect: (value) => {
+                    registerCustomCategory(value, row.dataset.lineType === 'IN');
+                },
+                onKnownSelect: (value) => {
+                    const subInput = row.querySelector('.bank-recon-subcat-input');
+                    const prev = row.dataset.classifyCatSnapshot || '';
+                    // Only clear sub when the user actually changes category
+                    if (subInput && String(value || '') !== prev) {
+                        subInput.value = '';
+                        setClassifyInputState(subInput, '');
+                    }
+                    row.dataset.classifyCatSnapshot = String(value || '');
+                    syncLedgerRowExcludeForCategory(row);
+                },
+            });
+        }
+        const subWrap = row.querySelector('.bank-recon-classify-combobox--sub');
+        if (subWrap) {
+            wireClassifyCombobox(subWrap, {
+                getOptions: () => subCatOptionsForLedgerCategory(resolvedCategoryForLedgerRow(row)),
+                onCustomSelect: (value) => {
+                    registerCustomSubCategory(resolvedCategoryForLedgerRow(row), value);
+                },
+            });
+        }
+    }
+
+    initRowClassifyValues(row);
+    row.dataset.classifyCatSnapshot = row.querySelector('.bank-recon-cat-input')?.value?.trim() || '';
+
+    // Focus first empty classify field so sub/vendor stay visible
+    const catInput = row.querySelector('.bank-recon-cat-input');
+    const subInput = row.querySelector('.bank-recon-subcat-input');
+    const vendorInput = row.querySelector('.bank-recon-vendor-input');
+    if (subInput && !subInput.value.trim()) subInput.focus();
+    else if (vendorInput && !vendorInput.value.trim()) vendorInput.focus();
+    else catInput?.focus();
+};
+
+const saveLedgerClassifyRow = async (row) => {
     const txnId = row?.dataset?.txnId;
     if (!txnId || row.dataset.classifySaving === '1') return;
-    onRowFieldChange(row);
-    if (!pendingEdits.has(txnId)) return;
-    const patch = pendingEdits.get(txnId) || {};
-    if (!patch.cat) return;
+
+    const existing = resolveLedgerRowSource(txnId);
+    if (!existing) return;
+
+    syncLedgerRowExcludeForCategory(row);
+    const patch = readRowPatch(row);
+    const nextCat = patch.cat || existing.cat || '';
+    const nextSub = patch.sub_category || null;
+    const nextVendor = Object.prototype.hasOwnProperty.call(patch, 'vendor_name')
+        ? patch.vendor_name
+        : existing.vendor_name;
+    const prevVendor = isBankNarrationVendor(existing.vendor_name, existing.description)
+        ? null
+        : (existing.vendor_name || null);
+
+    const unchanged = nextCat === (existing.cat || '')
+        && (nextSub || null) === (existing.sub_category || null)
+        && (nextVendor || null) === (prevVendor || null);
+
+    if (unchanged) {
+        closeAllLedgerCatEditors();
+        return;
+    }
+
+    if (!isCashBillLedgerId(txnId)
+        && (patch.cat === BANK_REJECT_CAT || defaultExcludeFromReports(patch.cat))) {
+        patch.exclude_from_reports = true;
+    }
+    markDirty(txnId, patch);
+    const rowSaveBtn = row.querySelector('.ledger-row-save');
+    if (rowSaveBtn) rowSaveBtn.disabled = false;
 
     row.dataset.classifySaving = '1';
-    const saveBtn = row.querySelector('.ledger-row-save');
+    row.classList.add('ledger-txn-row--saving');
+    const saveBtn = row.querySelector('[data-ledger-cat-save]');
     try {
-        await withButtonBusy(saveBtn, 'Saving…', async () => {
+        await withButtonBusy(saveBtn, '…', async () => {
             setLedgerBulkSaving(true, 'Saving category…');
             await saveLedgerPendingEdits([txnId]);
             refreshAfterLedgerSave({ analytics: true });
@@ -567,60 +716,9 @@ const maybeAutoSaveLedgerClassify = async (row) => {
         alert(err?.message || 'Could not save category.');
     } finally {
         delete row.dataset.classifySaving;
+        row.classList.remove('ledger-txn-row--saving');
         setLedgerBulkSaving(false);
     }
-};
-
-const wireLedgerClassifyRows = (root) => {
-    root.querySelectorAll('tr.ledger-txn-row').forEach((row) => {
-        const onClassifyChange = () => onRowFieldChange(row);
-
-        const catWrap = row.querySelector('.bank-recon-classify-combobox--cat');
-        if (catWrap) {
-            wireClassifyCombobox(catWrap, {
-                getOptions: () => categoryOptionsForTxnRow(row),
-                onCustomSelect: (value) => {
-                    registerCustomCategory(value, row.dataset.lineType === 'IN');
-                },
-                onKnownSelect: () => {
-                    const subInput = row.querySelector('.bank-recon-subcat-input');
-                    if (subInput) {
-                        subInput.value = '';
-                        setClassifyInputState(subInput, '');
-                    }
-                    syncLedgerRowExcludeForCategory(row);
-                    onClassifyChange();
-                    // Same as bank recon income: picking a known category saves immediately.
-                    void maybeAutoSaveLedgerClassify(row);
-                },
-                onStateChange: onClassifyChange,
-            });
-        }
-
-        const subWrap = row.querySelector('.bank-recon-classify-combobox--sub');
-        if (subWrap) {
-            wireClassifyCombobox(subWrap, {
-                getOptions: () => subCatOptionsForLedgerCategory(resolvedCategoryForLedgerRow(row)),
-                onCustomSelect: (value) => {
-                    registerCustomSubCategory(resolvedCategoryForLedgerRow(row), value);
-                },
-                onKnownSelect: () => {
-                    onClassifyChange();
-                    void maybeAutoSaveLedgerClassify(row);
-                },
-                onStateChange: onClassifyChange,
-            });
-        }
-
-        const vendorInput = row.querySelector('.bank-recon-vendor-input');
-        vendorInput?.addEventListener('input', onClassifyChange);
-        vendorInput?.addEventListener('change', () => {
-            onClassifyChange();
-            void maybeAutoSaveLedgerClassify(row);
-        });
-    });
-
-    root.querySelectorAll('tr.ledger-txn-row').forEach(initRowClassifyValues);
 };
 
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
@@ -628,14 +726,14 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
     if (!list) return;
 
     const visibleColumns = { ...ledgerVisibleColumns };
-    // Calculated follows this table order: previous bank calculated ± this row.
-    const running = annotateLedgerRunningBalancesInOrder(txns);
+    // Calculated walks oldest→newest so balances stay correct when the table is newest-first.
+    const running = annotateLedgerRunningBalancesInOrder(sortLedgerTxnsChronological(txns));
     const opening = getBankOpeningConfig();
     const statementCtx = buildLedgerStatementContext();
     const orderMeta = buildSameDayLedgerOrderMeta(statementCtx);
     const calculatedHeaderHint = visibleColumns.calculatedBalance && opening.amount == null
         ? ' title="Set opening balance via the Opening control above"'
-        : ' title="Running balance: previous Calculated ± this row (table order)"';
+        : ' title="Running balance after this row (oldest→newest), independent of table sort"';
     const rowOpts = {
         formatTxnDetail,
         getAllAttachmentPaths,
@@ -671,16 +769,16 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
                 <th class="bank-recon-table__th--check">
                   <input type="checkbox" id="ledger-header-select-all" aria-label="Select all" />
                 </th>
-                ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num" title="OCR / statement row sequence">OCR #</th>' : ''}
-                <th>${renderSortHeader('Date', 'date')}</th>
-                <th>Description</th>
+                ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num bank-recon-table__th--ocr" title="OCR / statement row sequence">OCR #</th>' : ''}
+                <th class="bank-recon-table__th--date">${renderSortHeader('Date', 'date')}</th>
+                <th class="bank-recon-table__th--desc">Description</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Debit', 'dr', 'ledger-sort-btn--num')}</th>
                 <th class="bank-recon-table__th--num">${renderSortHeader('Credit', 'cr', 'ledger-sort-btn--num')}</th>
                 ${visibleColumns.calculatedBalance ? `<th class="bank-recon-table__th--num"${calculatedHeaderHint || ' title="Opening + BANK ledger entries only — does not include unmatched statement lines"'}>${renderSortHeader('Calculated', 'computedBalance', 'ledger-sort-btn--num')}</th>` : ''}
                 ${visibleColumns.passbookBalance ? '<th class="bank-recon-table__th--num" title="Balance printed on the matched passbook / statement line">Passbook</th>' : ''}
-                <th>Type</th>
-                <th>${renderSortHeader('Category / vendor', 'cat')}</th>
-                <th>${renderSortHeader('Ledger', 'wallet')}</th>
+                <th class="bank-recon-table__th--type">Type</th>
+                <th class="bank-recon-table__th--classify">${renderSortHeader('Category / vendor', 'cat')}</th>
+                ${visibleColumns.wallet ? `<th class="bank-recon-table__th--ledger">${renderSortHeader('Ledger', 'wallet')}</th>` : ''}
                 <th class="bank-recon-table__th--bills" title="Bills & receipts linked to this ledger row">Bills</th>
                 <th class="bank-recon-table__th--actions"></th>
               </tr>
@@ -690,7 +788,6 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
         </div>
       </div>`;
 
-    wireLedgerClassifyRows(list);
     wireLedgerTableEvents();
     syncLedgerBulkBar();
 };
@@ -999,6 +1096,12 @@ const applyBulkToSelected = () => {
                 catInput.value = cat;
                 setClassifyInputState(catInput, 'known');
             }
+            const displayMain = row?.querySelector('.fdoc-cat-display__main');
+            const displayBtn = row?.querySelector('.fdoc-cat-display');
+            if (displayMain) {
+                displayMain.textContent = categoryDisplayLabel(cat) || cat;
+            }
+            displayBtn?.classList.toggle('fdoc-cat-display--empty', !cat);
         }
         if (!isBill) {
             if (excludeMode === 'exclude') patch.exclude_from_reports = true;
@@ -1018,7 +1121,7 @@ const applyBulkToSelected = () => {
     );
 };
 
-const LEDGER_EVENTS_VERSION = 'ledger-events-v5';
+const LEDGER_EVENTS_VERSION = 'ledger-events-v6';
 
 export const wireLedgerTableEvents = () => {
     syncLedgerBulkBar();
@@ -1045,7 +1148,7 @@ export const wireLedgerTableEvents = () => {
 
     list._ledgerOnInput = (e) => {
         const row = e.target.closest('.ledger-txn-row');
-        if (row && e.target.matches('.bank-recon-cell-input--desc, .bank-recon-vendor-input')) {
+        if (row && e.target.matches('.bank-recon-cell-input--desc')) {
             onRowFieldChange(row);
         }
     };
@@ -1053,6 +1156,31 @@ export const wireLedgerTableEvents = () => {
     list._ledgerOnClick = async (e) => {
         if (e.target.closest('.ledger-move-step')) {
             e.stopPropagation();
+        }
+
+        const catEditId = e.target.closest('[data-ledger-cat-edit]')?.dataset?.ledgerCatEdit;
+        if (catEditId) {
+            e.preventDefault();
+            e.stopPropagation();
+            openLedgerCatEditor(catEditId);
+            return;
+        }
+
+        const catSaveId = e.target.closest('[data-ledger-cat-save]')?.dataset?.ledgerCatSave;
+        if (catSaveId) {
+            e.preventDefault();
+            e.stopPropagation();
+            const row = document.querySelector(`#cash-ledger-items tr.ledger-txn-row[data-txn-id="${CSS.escape(catSaveId)}"]`);
+            if (row) await saveLedgerClassifyRow(row);
+            return;
+        }
+
+        const catCancelId = e.target.closest('[data-ledger-cat-cancel]')?.dataset?.ledgerCatCancel;
+        if (catCancelId) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeAllLedgerCatEditors();
+            return;
         }
 
         const moveBtn = e.target.closest('.ledger-move-up, .ledger-move-down');
@@ -1193,7 +1321,11 @@ export const initLedgerBulkBar = () => {
 
     if (!document.body.dataset.ledgerClassifyDismissWired) {
         document.body.dataset.ledgerClassifyDismissWired = '1';
-        // Classify fields stay visible (bank-recon style); no click-outside dismiss.
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.ledger-classify-cell, .bank-recon-classify-combobox__menu')) return;
+            if (!document.querySelector('#cash-ledger-items tr.ledger-txn-row--classify-open')) return;
+            closeAllLedgerCatEditors();
+        });
     }
 
     const setAllSelected = (on) => {

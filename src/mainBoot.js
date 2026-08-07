@@ -1,10 +1,50 @@
 /** Shared access UI helpers and renderers used across boot and lazy views. */
 
 import { portalState, isPlaceholderApartmentId } from './store.js';
-import { ROLE_OPTIONS, v2KeyToLabel } from './rbac.js';
+import { ROLE_OPTIONS, v2KeyToLabel, v1RoleToV2Key, isSocietyAdminUser, hasClientPermission } from './rbac.js';
 import { withApartmentSelectSuppressed } from './accessLocks.js';
 
 export { renderResidents } from './residentView.js';
+
+/** Society-directory role for a user in the active apartment (never legacy admin → system_admin). */
+const societyDirectoryRoleKey = (user, apartmentId) => {
+    const aptRole = apartmentId ? user?.apartment_roles?.[apartmentId] : null;
+    if (aptRole) return aptRole;
+    if (
+        apartmentId
+        && user?.id
+        && user.id === portalState.auth?.id
+        && apartmentId === portalState.access?.activeApartmentId
+        && portalState.auth?.effectiveRoleKey
+    ) {
+        // Session already resolved the society role (Office Bearer, Society Admin, etc.)
+        return portalState.auth.effectiveRoleKey;
+    }
+    return v1RoleToV2Key(user?.role || 'resident_viewer');
+};
+
+/** Assign / change society roles — Society Admin (+ system) only; never trust inflated rbac.edit alone. */
+export const canManageSocietyRoles = () => isSocietyAdminUser();
+
+const applyPeopleAccessChrome = () => {
+    const canRoles = canManageSocietyRoles();
+    const assignBtn = document.getElementById('access-assign-btn');
+    if (assignBtn) assignBtn.hidden = !canRoles;
+    const showUnassigned = document.getElementById('access-users-show-unassigned')?.closest('label');
+    if (showUnassigned) showUnassigned.hidden = !canRoles;
+    const peopleDesc = document.querySelector('[data-setup-acc="people"] .setup-acc__desc');
+    if (peopleDesc) {
+        peopleDesc.textContent = canRoles
+            ? 'Approve sign-in requests and manage who can use this society'
+            : 'View who has access to this society (role changes need a Society Administrator)';
+    }
+    const dirDesc = document.querySelector('#setup-acc-people-panel .setup-acc__block--border .setup-acc__block-desc');
+    if (dirDesc) {
+        dirDesc.textContent = canRoles
+            ? 'Accounts linked to this society and their roles.'
+            : 'Accounts linked to this society. Role assignment is limited to Society Administrators.';
+    }
+};
 
 export const isSignedIn = () => Boolean(portalState.auth?.id);
 
@@ -77,8 +117,11 @@ export const renderAccessMappings = () => {
 
 const renderAccessMappingsInner = () => {
     ensureAccessState();
+    applyPeopleAccessChrome();
     const apartments = apartmentOptionsForUi();
     const users = portalState.access.users;
+    const canRoles = canManageSocietyRoles();
+    const canLinkPortal = hasClientPermission('portal.view') || hasClientPermission('apartment_mgmt.edit');
 
     const sidebarApartmentSelect = document.getElementById('sidebar-apartment-switch');
     const drawerApartmentSelect = document.getElementById('nav-apartment-switch');
@@ -142,10 +185,8 @@ const renderAccessMappingsInner = () => {
                 const mappedApts = apartments.filter((a) => (u.apartment_ids || []).includes(a.id));
                 const aptChips = mappedApts.map((a) => `<span class="apt-chip">${a.name}</span>`).join('') || '<span style="color:var(--text-dim); font-style:italic;">No access</span>';
                 const initials = (u.name || 'U').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
-                const aptRole = activeId && u.apartment_roles?.[activeId];
-                const displayRole = aptRole || u.role;
-                const roleLabel = ROLE_OPTIONS.find((r) => r.key === displayRole || r.v1Key === displayRole)?.label
-                    || v2KeyToLabel(displayRole) || displayRole || 'Viewer';
+                const displayRole = societyDirectoryRoleKey(u, activeId);
+                const roleLabel = v2KeyToLabel(displayRole) || displayRole || 'Viewer';
 
                 return `
         <div class="user-row">
@@ -161,9 +202,13 @@ const renderAccessMappingsInner = () => {
           </div>
           <div class="apt-chips">${aptChips}</div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button class="btn-icon" onclick="window.openResidentLinkModal('${u.id}', '${(u.email || '').replace(/'/g, "\\'")}')" title="Link portal flat"><i class="fa-solid fa-link"></i></button>
-            <button class="btn-icon" onclick="window.openUserModal('${u.id}')" title="Edit Access"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button class="btn-icon danger" onclick="window.deleteUser('${u.id}')" title="Revoke All Access"><i class="fa-solid fa-user-slash"></i></button>
+            ${canLinkPortal
+            ? `<button class="btn-icon" onclick="window.openResidentLinkModal('${u.id}', '${(u.email || '').replace(/'/g, "\\'")}')" title="Link portal flat"><i class="fa-solid fa-link"></i></button>`
+            : ''}
+            ${canRoles
+            ? `<button class="btn-icon" onclick="window.openUserModal('${u.id}')" title="Edit Access"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="btn-icon danger" onclick="window.deleteUser('${u.id}')" title="Revoke All Access"><i class="fa-solid fa-user-slash"></i></button>`
+            : ''}
           </div>
         </div>
       `;
@@ -172,7 +217,11 @@ const renderAccessMappingsInner = () => {
     }
 
     const portfolioGrid = document.getElementById('portfolio-grid');
-    if (portfolioGrid) {
+    const portfolioSection = portfolioGrid?.closest('[data-setup-acc="portfolio"]');
+    if (portfolioSection) {
+        portfolioSection.hidden = !portalState.auth?.isSystemAdmin;
+    }
+    if (portfolioGrid && portalState.auth?.isSystemAdmin) {
         portfolioGrid.innerHTML = apartments.map((a) => {
             const userCount = users.filter((u) => (u.apartment_ids || []).includes(a.id)).length;
             return `
@@ -188,11 +237,24 @@ const renderAccessMappingsInner = () => {
         </div>
       `;
         }).join('');
+        try {
+            import('./setupSocietyUi.js').then((m) => {
+                m.setSetupSectionStat('portfolio', `${apartments.length} societ${apartments.length === 1 ? 'y' : 'ies'}`);
+            });
+        } catch { /* ignore */ }
     }
+
+    try {
+        import('./setupSocietyUi.js').then((m) => m.refreshSetupSocietyMeta());
+    } catch { /* ignore */ }
 
     const userRoleSelectV2 = document.getElementById('access-user-role-v2');
     if (userRoleSelectV2) {
-        userRoleSelectV2.innerHTML = ROLE_OPTIONS.map((r) => `<option value="${r.key}">${r.label}</option>`).join('');
+        // system_admin is platform-scoped — assign via restore SQL / platform tools, not society directory
+        userRoleSelectV2.innerHTML = ROLE_OPTIONS
+            .filter((r) => r.key !== 'system_admin')
+            .map((r) => `<option value="${r.key}">${r.label}</option>`)
+            .join('');
     }
     const userAptsSelectV2 = document.getElementById('access-user-apartments-v2');
     if (userAptsSelectV2) {

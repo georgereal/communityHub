@@ -34,10 +34,12 @@ export async function fileToBase64Payload(file) {
     };
 }
 
-export async function filesToBase64Payload(files = []) {
+export async function filesToBase64Payload(files = [], { purpose } = {}) {
     const out = [];
     for (const file of files) {
-        out.push(await fileToBase64Payload(file));
+        const payload = await fileToBase64Payload(file);
+        if (purpose === 'payment' || purpose === 'bill') payload.purpose = purpose;
+        out.push(payload);
     }
     return out;
 }

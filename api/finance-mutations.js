@@ -14,6 +14,25 @@ import {
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 
+/** unpaid → paid → linked (void cancelled). Legacy "open" maps via payment notes. */
+const paymentLooksPaid = (notes) => {
+    const text = String(notes || '').trim();
+    return /^Cheque:\s*.+/i.test(text)
+        || /^Online:\s*.+/i.test(text)
+        || /Payment:\s*Cash/i.test(text)
+        || /Payment:\s*Online/i.test(text)
+        || /^cash$/i.test(text);
+};
+
+const resolveFinanceDocStatus = (doc = {}, transactionId = null) => {
+    const raw = String(doc.status || '').toLowerCase();
+    if (raw === 'void') return 'void';
+    if (transactionId || raw === 'linked') return 'linked';
+    if (raw === 'unpaid' || raw === 'paid') return raw;
+    // Legacy open / missing: derive from notes
+    return paymentLooksPaid(doc.notes) ? 'paid' : 'unpaid';
+};
+
 const roundMoney = (n) => Math.round(((parseFloat(n) || 0) + Number.EPSILON) * 100) / 100;
 const bankLineAmount = (line) => Math.max(parseFloat(line?.credit || 0), parseFloat(line?.debit || 0), 0);
 const bankLineType = (line) => parseFloat(line?.credit || 0) > 0.001 ? 'IN' : 'OUT';
@@ -106,12 +125,14 @@ async function uploadFinanceDocFilesToR2(apartmentId, files = [], { orgName, kin
             mimeOrExt: mime,
         });
         await r2PutObject({ key, body, contentType: mime });
+        const purpose = String(file.purpose || '').toLowerCase() === 'payment' ? 'payment' : 'bill';
         uploaded.push({
             key,
             contentType: mime,
             originalName: String(file.name || '').slice(0, 512),
             bytes: body.length,
             uploadedAt: new Date().toISOString(),
+            purpose,
         });
     }
     return uploaded;
@@ -141,12 +162,14 @@ function normalizeKeptAttachments(kept = []) {
             if (entry && typeof entry === 'object' && entry.key) {
                 const key = String(entry.key).trim();
                 if (!isAllowedFinanceDocObjectKey(key)) return null;
+                const purpose = String(entry.purpose || '').toLowerCase() === 'payment' ? 'payment' : 'bill';
                 return {
                     key,
                     contentType: String(entry.contentType || 'application/octet-stream'),
                     originalName: String(entry.originalName || '').slice(0, 512),
                     bytes: Number(entry.bytes) || 0,
                     uploadedAt: entry.uploadedAt || new Date().toISOString(),
+                    purpose,
                 };
             }
             const key = attachmentObjectKey(entry);
@@ -157,6 +180,7 @@ function normalizeKeptAttachments(kept = []) {
                 originalName: key.split('/').pop() || key,
                 bytes: 0,
                 uploadedAt: new Date().toISOString(),
+                purpose: 'bill',
             };
         })
         .filter(Boolean);
@@ -218,14 +242,7 @@ async function saveFinanceDocumentMutation(service, apartmentId, userId, body) {
     if (!doc.doc_date) throw Object.assign(new Error('Date is required.'), { status: 400 });
 
     const transactionId = doc.transaction_id || null;
-    let status = doc.status || 'open';
-    if (status === 'void') {
-        // keep void
-    } else if (transactionId) {
-        status = 'linked';
-    } else {
-        status = 'open';
-    }
+    let status = resolveFinanceDocStatus(doc, transactionId);
 
     const isNew = !doc.id;
     const payload = {
@@ -463,11 +480,12 @@ async function unlinkFinanceDocumentsMutation(service, apartmentId, body) {
     const docIds = [...new Set((body.document_ids || []).filter(Boolean))];
     if (!docIds.length) throw Object.assign(new Error('document_ids required.'), { status: 400 });
 
+    // Unlink returns to paid (money already settled; only ledger link removed).
     const { data, error } = await service
         .from('finance_documents')
         .update({
             transaction_id: null,
-            status: 'open',
+            status: 'paid',
             updated_at: new Date().toISOString(),
         })
         .eq('apartment_id', apartmentId)
@@ -520,7 +538,7 @@ async function importFinanceDocumentsMutation(service, apartmentId, userId, body
                 notes: row.notes || null,
                 source: 'excel',
                 source_file: sourceFile,
-                status: 'open',
+                status: paymentLooksPaid(row.notes) ? 'paid' : 'unpaid',
             },
             keepAttachmentPaths: [],
             newAttachmentFiles: [],
