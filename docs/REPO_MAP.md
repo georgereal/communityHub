@@ -169,8 +169,11 @@
 │   ├── allocation.js
 │   ├── apiJson.js
 │   ├── authClient.js
+│   ├── authRedirect.js
 │   ├── authShell.js
 │   ├── authUserKind.js
+│   ├── login.css
+│   ├── loginPage.js
 │   ├── bankClassificationRules.js
 │   ├── bankReconciliation.js
 │   ├── bankStatementLineUtils.js
@@ -282,6 +285,7 @@
 ├── .gitignore
 ├── AGENTS.md
 ├── index.html
+├── login.html
 ├── microsoft-auth.html
 ├── package-lock.json
 ├── package.json
@@ -358,8 +362,11 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ├── allocation.js
 ├── apiJson.js
 ├── authClient.js
+├── authRedirect.js
 ├── authShell.js
 ├── authUserKind.js
+├── login.css
+├── loginPage.js
 ├── bankClassificationRules.js
 ├── bankReconciliation.js
 ├── bankStatementLineUtils.js
@@ -482,7 +489,10 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/allocation.js | Parking slot allocation |
 | src/apiJson.js | API JSON request helpers |
 | src/authClient.js | Auth client & session handling |
+| src/authRedirect.js | /login ↔ app redirects + flash messages |
 | src/authShell.js | Auth UI shell |
+| src/loginPage.js | Dedicated /login page logic |
+| src/login.css | Dedicated /login page styles |
 | src/authUserKind.js | auth User Kind |
 | src/bankClassificationRules.js | Bank statement classification rules |
 | src/bankReconciliation.js | Bank reconciliation UI |
@@ -510,7 +520,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/externalFetch.js | External fetch helpers |
 | src/financeAnalytics.js | Finance reports & analytics |
 | src/financeApi.js | Finance API client |
-| src/financeDocuments.js | Bills & receipts — infinite-scroll list + session page/aggregate cache |
+| src/financeDocuments.js | Bills & receipts document management |
 | src/financeMobile.css | Mobile finance styles |
 | src/financePageHelp.js | finance Page Help |
 | src/financeReportsExport.js | Export finance reports (Excel) |
@@ -698,7 +708,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | evolyxConnection.js | Evolyx external connection |
 | external-connections.js | External connections read/write |
 | external-proxy.js | External API proxy |
-| finance-mutations.js | Finance write mutations + paginated `listFinanceDocuments` / `financeDocumentsAggregates` |
+| finance-mutations.js | Finance write mutations |
 | oauth-microsoft.js | Microsoft OAuth flow |
 | oauth-service.js | OAuth service helper |
 | passbook-jobs.js | Evolyx passbook jobs |
@@ -865,6 +875,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 | --- | --- |
 | AGENTS.md | Repo config / entry point |
 | index.html | Repo config / entry point |
+| login.html | Dedicated sign-in page |
 | microsoft-auth.html | Repo config / entry point |
 | package.json | Repo config / entry point |
 | vercel.json | Repo config / entry point |
@@ -877,12 +888,11 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 
 - **State:** `src/store.js` — `portalState` (units, slots, finances, access, community) hydrated by `pullState()`;
   partitioned read-only domains via `stateLoader.js` / `stateDomains.js`.
-  `finance_documents` are **not** full-hydrated with finance state — Bills uses infinite-scroll
-  `listFinanceDocuments` pages (session-cached) plus `financeDocumentsAggregates` for KPIs/cash float
-  (cached until mutation or hard refresh / society switch).
 - **Data access:** browser → Supabase client (`src/dbClient.js`) and/or Vercel `/api/*` endpoints; admin/finance
   mutations go through `api/finance-mutations.js`. Spreadsheet sync via `api/ledger*`, Excel push via Microsoft Graph.
-- **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
+- **Auth:** dedicated `/login` page (`login.html` + `src/loginPage.js`) styled like DentalPractice’s
+  staff login; `authClient.js` + `socialAuth.js` (Google/Microsoft); MSAL callback (`microsoft-auth.html`,
+  `ms-callback.js`). Unauthenticated app boot redirects to `/login`.
 - **RBAC & access:** `rbac.js` / `rbacMatrix.js` (roles/permissions), `moduleAccess*`, `pageAccess*`, `accessSync.js`.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.

@@ -166,10 +166,10 @@ export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs 
 }
 
 export const NO_SOCIETY_ACCESS_RESIDENT_MESSAGE =
-    'You are signed in as a resident. Choose your society below — an admin will link you to your flat after approval.';
+    'You are signed in. Choose your society below — an admin will approve access and assign your role or flat link.';
 
 export const NO_SOCIETY_ACCESS_OFFICE_MESSAGE =
-    'You are signed in as office staff. Choose your society below — a society administrator will assign your role after approval.';
+    'You are signed in. Choose your society below — a society administrator will assign your role after approval.';
 
 export async function signInWithSocialProvider(supabase, provider) {
     const client = authClient || supabase;

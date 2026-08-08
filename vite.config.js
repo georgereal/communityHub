@@ -2,6 +2,21 @@ import { resolve } from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import { viteApiDevPlugin } from './viteApiDev.js';
 
+function loginPathRewritePlugin() {
+  return {
+    name: 'login-path-rewrite',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url || '';
+        if (url === '/login' || url.startsWith('/login?')) {
+          req.url = url.replace(/^\/login/, '/login.html');
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiProxy = env.VITE_API_PROXY || 'https://communityhub.evolyx.in';
@@ -9,7 +24,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     // Always register local api/*.js handlers when present; proxy only fills gaps (VITE_LOCAL_API=0).
-    plugins: [viteApiDevPlugin(env)],
+    plugins: [viteApiDevPlugin(env), loginPathRewritePlugin()],
     server: {
       // Prevent Vite from serving api/*.js as static modules (breaks POST /api/*).
       fs: {
@@ -29,6 +44,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           main: resolve(__dirname, 'index.html'),
+          login: resolve(__dirname, 'login.html'),
           microsoftAuth: resolve(__dirname, 'microsoft-auth.html'),
         },
         output: {

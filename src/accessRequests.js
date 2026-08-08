@@ -6,6 +6,7 @@ import { ROLE_OPTIONS, saveUserAccess, loadUserRoleAssignments, v2KeyToLabel, ha
 import { queueStaffNotifications } from './staffNotifications.js';
 import {
     getAuthUserKind,
+    setAuthUserKind,
     isOfficeAuthKind,
     AUTH_KIND_LABELS,
     OFFICE_PENDING_ROLE_KEY,
@@ -391,9 +392,51 @@ export async function initAccessRequestWorkspaceGate() {
     const errEl = document.getElementById('workspace-gate-error');
     const titleEl = document.getElementById('workspace-gate-title');
     const requestIntro = document.getElementById('workspace-gate-request-intro');
-    const kind = getAuthUserKind();
+    const kindHint = document.getElementById('workspace-gate-kind-hint');
+    const kindTabs = document.querySelectorAll('[data-request-kind]');
 
     if (!requestPanel || !selectPanel || !pendingPanel) return;
+
+    const kindCopy = {
+        resident: {
+            title: 'Request resident access',
+            intro: 'Choose your society and flat details. An admin will link your account to the resident portal after approval.',
+            hint: 'Owners, tenants, and residents — you’ll be linked to a flat after approval.',
+            placeholder: 'Flat number, block, and your name as on society records',
+            submit: 'Request resident access',
+        },
+        office: {
+            title: 'Request office access',
+            intro: 'Choose your society. A society administrator will assign your staff role after review — you do not pick a role here.',
+            hint: 'Association office, accounts, security, and staff — admin assigns your role after approval.',
+            placeholder: 'Your name and role in the association office (e.g. accounts, security desk)',
+            submit: 'Request office access',
+        },
+    };
+
+    const applyRequestKind = (kindRaw) => {
+        const kind = kindRaw === 'office' ? 'office' : 'resident';
+        setAuthUserKind(kind);
+        kindTabs.forEach((tab) => {
+            const active = tab.dataset.requestKind === kind;
+            tab.classList.toggle('is-active', active);
+            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        const copy = kindCopy[kind];
+        if (titleEl) titleEl.textContent = copy.title;
+        if (requestIntro) requestIntro.textContent = copy.intro;
+        if (kindHint) kindHint.textContent = copy.hint;
+        if (messageEl) messageEl.placeholder = copy.placeholder;
+        if (submitBtn) submitBtn.textContent = copy.submit;
+        return kind;
+    };
+
+    if (kindTabs.length && !requestPanel.dataset.kindWired) {
+        requestPanel.dataset.kindWired = '1';
+        kindTabs.forEach((tab) => {
+            tab.addEventListener('click', () => applyRequestKind(tab.dataset.requestKind));
+        });
+    }
 
     const apartments = (portalState.access?.apartments || []).filter((a) => !isPlaceholderApartmentId(a.id));
     const hasSocietyAccess = apartments.length > 0;
@@ -427,22 +470,7 @@ export async function initAccessRequestWorkspaceGate() {
 
     pendingPanel.hidden = true;
     requestPanel.hidden = false;
-    if (titleEl) {
-        titleEl.textContent = kind === 'office' ? 'Request office access' : 'Request resident access';
-    }
-    if (requestIntro) {
-        requestIntro.textContent = kind === 'office'
-            ? 'Choose your society. A society administrator will assign your staff role after review — you do not pick a role here.'
-            : 'Choose your society and flat details. An admin will link your account to the resident portal after approval.';
-    }
-    if (messageEl) {
-        messageEl.placeholder = kind === 'office'
-            ? 'Your name and role in the association office (e.g. accounts, security desk)'
-            : 'Flat number, block, and your name as on society records';
-    }
-    if (submitBtn) {
-        submitBtn.textContent = kind === 'office' ? 'Request office access' : 'Request resident access';
-    }
+    applyRequestKind(getAuthUserKind());
 
     const requestable = await fetchRequestableApartments();
     if (aptSelect) {
@@ -462,6 +490,7 @@ export async function initAccessRequestWorkspaceGate() {
         submitBtn.addEventListener('click', async () => {
             const apartmentId = aptSelect?.value;
             const message = messageEl?.value || '';
+            const requestKind = getAuthUserKind();
             if (!apartmentId) {
                 if (errEl) {
                     errEl.style.display = 'block';
@@ -472,7 +501,7 @@ export async function initAccessRequestWorkspaceGate() {
             submitBtn.disabled = true;
             if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
             try {
-                await submitAccessRequest({ apartmentId, message, requestKind: kind });
+                await submitAccessRequest({ apartmentId, message, requestKind });
                 await initAccessRequestWorkspaceGate();
             } catch (err) {
                 if (errEl) {

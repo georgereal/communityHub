@@ -1120,6 +1120,11 @@
 
       <div id="workspace-gate-request-panel" hidden>
         <p id="workspace-gate-request-intro" style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.85rem;"></p>
+        <div class="workspace-gate-kind-tabs" role="tablist" aria-label="Access type">
+          <button type="button" class="workspace-gate-kind-tab is-active" data-request-kind="resident" role="tab" aria-selected="true">Resident</button>
+          <button type="button" class="workspace-gate-kind-tab" data-request-kind="office" role="tab" aria-selected="false">Office staff</button>
+        </div>
+        <p id="workspace-gate-kind-hint" class="workspace-gate-kind-hint">Owners, tenants, and residents — you’ll be linked to a flat after approval.</p>
         <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Society</label>
         <select id="workspace-gate-request-apartment" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700; margin-bottom:0.75rem;"></select>
         <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Message (optional)</label>
@@ -1138,35 +1143,7 @@
     </div>
   </div>
 
-  <!-- AUTH -->
-  <div class="modal-backdrop" id="auth-modal">
-    <div class="modal-content auth-card">
-      <h2 style="font-size: 1.35rem; font-weight: 950; letter-spacing: -0.3px;">Sign in</h2>
-      <p id="auth-intro" style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1rem;">Residents and office staff use separate sign-in paths.</p>
-      <div class="auth-kind-tabs" role="tablist" aria-label="Sign-in type">
-        <button type="button" class="auth-kind-tab is-active" data-auth-kind="resident" role="tab" aria-selected="true">Resident</button>
-        <button type="button" class="auth-kind-tab" data-auth-kind="office" role="tab" aria-selected="false">Office staff</button>
-      </div>
-      <p id="auth-kind-hint" class="auth-kind-hint">For owners, tenants, and residents — request portal access to your society.</p>
-      <form id="auth-form" autocomplete="on" style="display:flex; flex-direction:column; gap:0.75rem;">
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Email</label>
-          <input id="auth-email" name="email" type="email" autocomplete="username email" placeholder="you@domain.com" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
-        </div>
-        <div>
-          <label style="display:block; font-size:0.65rem; font-weight:900; color:var(--text-dim); text-transform:uppercase; margin-bottom:0.3rem;">Password</label>
-          <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" style="width:100%; padding:0.65rem; border:1px solid var(--border); border-radius:10px; font-weight:700;" />
-        </div>
-        <div id="auth-error" style="display:none; padding:0.6rem 0.7rem; border-radius:10px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-weight:800; font-size:0.8rem;"></div>
-        <button type="button" id="auth-login-btn" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.7rem;">Sign in</button>
-        <button type="button" id="auth-signup-btn" class="btn btn-outline" style="width:100%; justify-content:center; padding:0.7rem;">Create account</button>
-        <div id="auth-social-section" class="auth-social-section" hidden>
-          <div class="auth-divider" aria-hidden="true"><span>or continue with</span></div>
-          <div id="auth-social-buttons" class="auth-social-buttons" role="group" aria-label="Social sign-in"></div>
-        </div>
-      </form>
-    </div>
-  </div>
+  <!-- AUTH: dedicated /login page (login.html) — modal removed -->
 
   <!-- ADMIN MODALS -->
   <div class="modal-backdrop" id="admin-vendor-modal">

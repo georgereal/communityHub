@@ -95,7 +95,7 @@ export async function sendPortalInvite({ residentId, email }) {
     const { data: { user } } = await supabase.auth.getUser();
     const societyName = portalState.community?.name || 'your society';
     const flat = resident.unit_number || 'your flat';
-    const signupUrl = `${window.location.origin}${window.location.pathname}`;
+    const signupUrl = `${window.location.origin}/login`;
 
     if (!(resident.email || '').trim()) {
         const { error: updErr } = await supabase.from('residents')

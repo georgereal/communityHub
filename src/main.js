@@ -17,19 +17,13 @@ import {
 } from './registry.js';
 import { processFinances } from './finances.js';
 import {
-  getEnabledSocialProviders,
   NO_SOCIETY_ACCESS_RESIDENT_MESSAGE,
-  NO_SOCIETY_ACCESS_OFFICE_MESSAGE,
-  signInWithSocialProvider,
   waitForBootAuthSession,
 } from './socialAuth.js';
 import {
-  getAuthUserKind,
-  setAuthUserKind,
   clearAuthUserKind,
-  isOfficeAuthKind,
-  AUTH_KIND_LABELS,
 } from './authUserKind.js';
+import { goToLogin } from './authRedirect.js';
 import { ensureViewMounted, showView } from './views/viewShell.js';
 import { activateView } from './views/controllers.js';
 import { initStaffNotificationsUi, refreshStaffNotifications } from './staffNotifications.js';
@@ -91,20 +85,11 @@ void ensureAuthInitialized();
 window.openTransitionWizard = openTransitionWizard;
 
 const showAuth = (msg = '') => {
-  const modal = document.getElementById('auth-modal');
-  if (modal) modal.classList.add('active');
-  const err = document.getElementById('auth-error');
-  if (err) {
-    if (msg) { err.style.display = 'block'; err.textContent = msg; }
-    else { err.style.display = 'none'; err.textContent = ''; }
-  }
+  goToLogin(msg || '');
 };
 
 const hideAuth = () => {
-  const modal = document.getElementById('auth-modal');
-  if (modal) modal.classList.remove('active');
-  const err = document.getElementById('auth-error');
-  if (err) { err.style.display = 'none'; err.textContent = ''; }
+  // Auth lives on /login — nothing to dismiss in the app shell.
 };
 
 let authApplyInflight = null;
@@ -282,16 +267,15 @@ const applyAuthToUI = (session, options = {}) => {
 };
 
 
-const signOut = async (message = 'Signed out.') => {
+const signOut = async () => {
   await clearBackendSession();
   clearAuthUserKind();
   if (supabase) await supabase.auth.signOut();
   localStorage.removeItem('sentry_portal_v5_platinum');
-  showAuth(message);
+  showAuth();
 };
 
-const workspaceGateIntroMessage = () =>
-  (isOfficeAuthKind() ? NO_SOCIETY_ACCESS_OFFICE_MESSAGE : NO_SOCIETY_ACCESS_RESIDENT_MESSAGE);
+const workspaceGateIntroMessage = () => NO_SOCIETY_ACCESS_RESIDENT_MESSAGE;
 
 const hideWorkspaceGate = () => {
   const modal = document.getElementById('workspace-gate-modal');
@@ -452,68 +436,6 @@ const finishAuthSession = async (session) => {
   });
 
   return finishAuthInflight;
-};
-
-const AUTH_KIND_HINTS = {
-  resident: 'For owners, tenants, and residents — request portal access to your society.',
-  office: 'For association office, accounts, security, and staff — admin assigns your role after approval.',
-};
-
-const initAuthKindTabs = () => {
-  const tabs = document.querySelectorAll('[data-auth-kind]');
-  const hintEl = document.getElementById('auth-kind-hint');
-  if (!tabs.length) return;
-
-  const applyKind = (kind) => {
-    setAuthUserKind(kind);
-    tabs.forEach((tab) => {
-      const active = tab.dataset.authKind === kind;
-      tab.classList.toggle('is-active', active);
-      tab.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-    if (hintEl) hintEl.textContent = AUTH_KIND_HINTS[kind] || AUTH_KIND_HINTS.resident;
-  };
-
-  applyKind(getAuthUserKind());
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => applyKind(tab.dataset.authKind === 'office' ? 'office' : 'resident'));
-  });
-};
-
-const renderSocialAuthButtons = () => {
-  const section = document.getElementById('auth-social-section');
-  const container = document.getElementById('auth-social-buttons');
-  if (!section || !container) return;
-
-  const providers = supabase ? getEnabledSocialProviders() : [];
-  container.replaceChildren();
-  if (!providers.length) {
-    section.hidden = true;
-    return;
-  }
-
-  section.hidden = false;
-  providers.forEach((provider) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'auth-social-btn';
-    btn.dataset.provider = provider.id;
-    btn.setAttribute('aria-label', `Continue with ${provider.label}`);
-    btn.innerHTML = `<i class="${provider.iconClass}" aria-hidden="true"></i><span>${provider.label}</span>`;
-    btn.onclick = async () => {
-      btn.disabled = true;
-      try {
-        setAuthUserKind(getAuthUserKind());
-        const { error } = await signInWithSocialProvider(supabase, provider.id);
-        if (error) showAuth(error.message);
-      } catch (err) {
-        showAuth(err?.message || 'Social sign-in failed.');
-      } finally {
-        btn.disabled = false;
-      }
-    };
-    container.appendChild(btn);
-  });
 };
 
 const boot = async () => {
@@ -754,40 +676,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ignore
   }
 
-  // Auth handlers
-  const loginBtn = document.getElementById('auth-login-btn');
-  const signupBtn = document.getElementById('auth-signup-btn');
-  const emailEl = document.getElementById('auth-email');
-  const passEl = document.getElementById('auth-password');
-
-  const signIn = async () => {
-    if (!supabase) return showAuth('Supabase is not configured.');
-    const email = (emailEl?.value || '').trim();
-    const password = (passEl?.value || '').trim();
-    if (!email || !password) return showAuth('Email and password required.');
-    setAuthUserKind(getAuthUserKind());
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return showAuth(error.message);
-    await finishAuthSession(data.session);
-  };
-
-  const signUp = async () => {
-    if (!supabase) return showAuth('Supabase is not configured.');
-    const email = (emailEl?.value || '').trim();
-    const password = (passEl?.value || '').trim();
-    if (!email || !password) return showAuth('Email and password required.');
-    setAuthUserKind(getAuthUserKind());
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return showAuth(error.message);
-    if (!data.session) return showAuth('Account created. Please verify your email, then sign in.');
-    await finishAuthSession(data.session);
-  };
-
-  initAuthKindTabs();
-  if (loginBtn) loginBtn.onclick = signIn;
-  if (signupBtn) signupBtn.onclick = signUp;
-  renderSocialAuthButtons();
-
+  // Auth UI lives on /login — wire remaining app chrome only.
   initWorkspaceGate();
 
   if (supabase) {
@@ -800,6 +689,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         bootAuthHandled = false;
         invalidateWorkspaceAccess();
         await clearBackendSession();
+        clearAuthUserKind();
         showAuth();
         return;
       }

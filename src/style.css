@@ -3883,14 +3883,14 @@ header {
   padding: 1.25rem !important;
 }
 
-.auth-kind-tabs {
+.workspace-gate-kind-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.4rem;
   margin-bottom: 0.55rem;
 }
 
-.auth-kind-tab {
+.workspace-gate-kind-tab {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #fff;
@@ -3901,13 +3901,13 @@ header {
   cursor: pointer;
 }
 
-.auth-kind-tab.is-active {
+.workspace-gate-kind-tab.is-active {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, #fff);
   color: var(--text-main);
 }
 
-.auth-kind-hint {
+.workspace-gate-kind-hint {
   margin: 0 0 0.85rem;
   font-size: 0.78rem;
   line-height: 1.4;
