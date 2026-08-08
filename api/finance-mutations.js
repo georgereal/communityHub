@@ -1770,6 +1770,162 @@ async function deleteExpensePlanRecurringMutation(service, apartmentId, body) {
     return { ok: true, id };
 }
 
+const FDOC_PAGE_MAX = 100;
+const FDOC_PAGE_DEFAULT = 50;
+
+/** Escape `%` / `_` for PostgREST ilike values. */
+const escapeIlike = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+
+const notesPayFilter = (pay) => {
+    if (pay === 'cash') return { column: 'notes', op: 'ilike', value: '%Payment: Cash%' };
+    if (pay === 'cheque') return { column: 'notes', op: 'ilike', value: 'Cheque:%' };
+    if (pay === 'online') return { column: 'notes', op: 'ilike', value: '%Online%' };
+    if (pay === 'unpaid') return { column: 'notes', op: 'ilike', value: '%Payment: Unpaid%' };
+    return null;
+};
+
+const applyFinanceDocumentListFilters = (query, {
+    kind = 'all',
+    status = 'all',
+    pay = 'all',
+    q = '',
+    transactionIds = null,
+    ids = null,
+} = {}) => {
+    let qy = query.neq('status', 'void');
+    if (kind === 'IN' || kind === 'OUT') qy = qy.eq('kind', kind);
+    if (status === 'unpaid' || status === 'paid' || status === 'linked') qy = qy.eq('status', status);
+    const payFilter = notesPayFilter(pay);
+    if (payFilter) qy = qy.ilike(payFilter.column, payFilter.value);
+    const search = String(q || '').trim();
+    if (search) {
+        const like = `%${escapeIlike(search)}%`;
+        // Quote so commas in the search term do not break PostgREST `or`
+        const quoted = `"${like.replace(/"/g, '\\"')}"`;
+        qy = qy.or(
+            [
+                `vendor_name.ilike.${quoted}`,
+                `description.ilike.${quoted}`,
+                `cat.ilike.${quoted}`,
+                `sub_category.ilike.${quoted}`,
+                `notes.ilike.${quoted}`,
+            ].join(','),
+        );
+    }
+    if (Array.isArray(transactionIds) && transactionIds.length) {
+        qy = qy.in('transaction_id', transactionIds.filter(Boolean));
+    }
+    if (Array.isArray(ids) && ids.length) {
+        qy = qy.in('id', ids.filter(Boolean));
+    }
+    return qy;
+};
+
+async function listFinanceDocumentsMutation(service, apartmentId, body) {
+    const limit = Math.min(Math.max(parseInt(body.limit, 10) || FDOC_PAGE_DEFAULT, 1), FDOC_PAGE_MAX);
+    const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
+    const filters = {
+        kind: body.kind || 'all',
+        status: body.status || 'all',
+        pay: body.pay || 'all',
+        q: body.q || '',
+        transactionIds: body.transaction_ids || body.transactionIds || null,
+        ids: body.ids || body.document_ids || null,
+    };
+
+    let countQuery = applyFinanceDocumentListFilters(
+        service.from('finance_documents').select('id', { count: 'exact', head: true }).eq('apartment_id', apartmentId),
+        filters,
+    );
+    const { count, error: countErr } = await countQuery;
+    if (countErr) throw Object.assign(new Error(countErr.message), { status: 500 });
+
+    const total = count ?? 0;
+    let dataQuery = applyFinanceDocumentListFilters(
+        service.from('finance_documents').select('*').eq('apartment_id', apartmentId),
+        filters,
+    )
+        .order('doc_date', { ascending: false })
+        .order('id', { ascending: false })
+        .range(offset, offset + limit - 1);
+    const { data, error } = await dataQuery;
+    if (error) throw Object.assign(new Error(error.message), { status: 500 });
+
+    const documents = data || [];
+    return {
+        documents,
+        total,
+        offset,
+        limit,
+        hasMore: offset + documents.length < total,
+    };
+}
+
+/**
+ * Page-load aggregates for Bills KPIs / cash float / open bills.
+ * Cached on the client until mutation or hard refresh.
+ */
+async function financeDocumentsAggregatesMutation(service, apartmentId) {
+    const base = () => service.from('finance_documents').eq('apartment_id', apartmentId).neq('status', 'void');
+
+    const [slimRes, cashRes, openRes] = await Promise.all([
+        base().select('amount, status, kind'),
+        base()
+            .select('*')
+            .or('notes.ilike.%Payment: Cash%,notes.eq.cash,notes.eq.Cash'),
+        base()
+            .select('*')
+            .in('status', ['unpaid', 'paid', 'open']),
+    ]);
+
+    if (slimRes.error) throw Object.assign(new Error(slimRes.error.message), { status: 500 });
+    if (cashRes.error) throw Object.assign(new Error(cashRes.error.message), { status: 500 });
+    if (openRes.error) throw Object.assign(new Error(openRes.error.message), { status: 500 });
+
+    const slim = slimRes.data || [];
+    let unpaidOutAmt = 0;
+    let paidOutAmt = 0;
+    let linkedOutAmt = 0;
+    let unpaidOutCount = 0;
+    let paidOutCount = 0;
+    let linkedOutCount = 0;
+    for (const row of slim) {
+        const amt = roundMoney(row.amount);
+        if (row.kind !== 'OUT') continue;
+        const st = String(row.status || '').toLowerCase();
+        if (st === 'unpaid' || st === 'open') {
+            unpaidOutAmt += amt;
+            unpaidOutCount += 1;
+        } else if (st === 'paid') {
+            paidOutAmt += amt;
+            paidOutCount += 1;
+        } else if (st === 'linked') {
+            linkedOutAmt += amt;
+            linkedOutCount += 1;
+        }
+    }
+
+    const byId = new Map();
+    for (const doc of [...(cashRes.data || []), ...(openRes.data || [])]) {
+        if (doc?.id) byId.set(doc.id, doc);
+    }
+
+    return {
+        summary: {
+            total: slim.length,
+            unpaidOutAmt: roundMoney(unpaidOutAmt),
+            paidOutAmt: roundMoney(paidOutAmt),
+            linkedOutAmt: roundMoney(linkedOutAmt),
+            unpaidOutCount,
+            paidOutCount,
+            linkedOutCount,
+        },
+        documents: [...byId.values()],
+        cashDocumentIds: (cashRes.data || []).map((d) => d.id).filter(Boolean),
+        openDocumentIds: (openRes.data || []).map((d) => d.id).filter(Boolean),
+    };
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -1779,6 +1935,7 @@ export default async function handler(req, res) {
         const body = req.body || await readJsonBody(req);
         const action = body.action;
         const billsEntryActions = new Set(['saveFinanceDocument', 'importFinanceDocuments']);
+        const billsReadActions = new Set(['listFinanceDocuments', 'financeDocumentsAggregates']);
         const deleteActions = new Set([
             'deleteTransaction',
             'deleteTransactions',
@@ -1788,13 +1945,23 @@ export default async function handler(req, res) {
         ]);
         const auth = deleteActions.has(action)
             ? await requireApartmentCrud(req, body.apartment_id, 'accounts', 'delete', 'accounts.edit')
-            : billsEntryActions.has(action)
-                ? await requireAnyApartmentPermission(req, body.apartment_id, ['accounts.edit', 'accounts.bills_entry'])
+            : billsEntryActions.has(action) || billsReadActions.has(action)
+                ? await requireAnyApartmentPermission(req, body.apartment_id, [
+                    'accounts.view',
+                    'accounts.edit',
+                    'accounts.bills_entry',
+                ])
                 : await requireApartmentPermission(req, body.apartment_id, 'accounts.edit');
         const { apartmentId, service, user } = auth;
 
         let result;
         switch (action) {
+            case 'listFinanceDocuments':
+                result = await listFinanceDocumentsMutation(service, apartmentId, body);
+                break;
+            case 'financeDocumentsAggregates':
+                result = await financeDocumentsAggregatesMutation(service, apartmentId);
+                break;
             case 'saveTransaction':
                 result = await saveTransactionMutation(service, apartmentId, body);
                 break;

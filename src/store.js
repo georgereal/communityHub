@@ -185,7 +185,19 @@ function applyStatePatch(partial = {}) {
     if (partial.community) portalState.community = partial.community;
     if (partial.units) portalState.units = partial.units;
     if (partial.slots) portalState.slots = partial.slots;
-    if (partial.finances) portalState.finances = { ...portalState.finances, ...partial.finances };
+    if (partial.finances) {
+        const incoming = partial.finances;
+        const next = { ...portalState.finances, ...incoming };
+        // finance_documents are paginated client-side; hydrate may send [] — keep session cache
+        if (
+            Array.isArray(incoming.financeDocuments)
+            && incoming.financeDocuments.length === 0
+            && (portalState.finances.financeDocuments || []).length
+        ) {
+            next.financeDocuments = portalState.finances.financeDocuments;
+        }
+        portalState.finances = next;
+    }
     if (partial.admin) portalState.admin = { ...portalState.admin, ...partial.admin };
     if (partial.portal) portalState.portal = { ...portalState.portal, ...partial.portal };
     if (partial.operations) portalState.operations = { ...portalState.operations, ...partial.operations };

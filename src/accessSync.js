@@ -297,6 +297,11 @@ async function hydrateFromWorkspaceBoot(boot) {
     accessLocks.workspaceReady = true;
     accessLocks.lastWrittenLastApartmentId = boot.activeApartmentId;
 
+    try {
+        const { invalidateFinanceDocsCaches } = await import('./financeDocuments.js');
+        invalidateFinanceDocsCaches({ keepStore: false });
+    } catch { /* optional during early boot */ }
+
     persist();
     refreshAuthUiShell();
     applyNavPermissions(new Set(portalState.authPermissions || []));
@@ -413,6 +418,10 @@ export const setActiveApartment = async (apartmentId, { force = false } = {}) =>
             console.error('[access] setActiveApartment failed:', err?.message || err);
             portalState.access.activeApartmentId = apartmentId;
             resetLoadedDomains();
+            try {
+                const { invalidateFinanceDocsCaches } = await import('./financeDocuments.js');
+                invalidateFinanceDocsCaches({ keepStore: false });
+            } catch { /* ignore */ }
             const success = await pullState({ domain: 'core', force: true });
             if (success) {
                 accessLocks.readyApartmentId = apartmentId;

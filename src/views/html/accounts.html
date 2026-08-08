@@ -583,6 +583,16 @@
               <option value="unpaid">Unpaid only</option>
             </select>
             <div class="fdoc-filters__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-jump-bottom" title="Jump to oldest bills">
+                <i class="fa-solid fa-angles-down" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Jump to end</span>
+                <span class="fdoc-action-short">End</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fdoc-jump-top" hidden title="Back to newest bills">
+                <i class="fa-solid fa-angles-up" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Newest first</span>
+                <span class="fdoc-action-short">Top</span>
+              </button>
               <button type="button" class="btn btn-outline btn--small" id="fdoc-bulk-link" disabled title="Link selected">
                 <i class="fa-solid fa-link" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Link selected</span>
@@ -625,6 +635,7 @@
               </thead>
               <tbody id="fdoc-table-body"></tbody>
             </table>
+            <p id="fdoc-scroll-sentinel" class="fdoc-scroll-sentinel" hidden>Scroll for more</p>
           </div>
 
           <!-- Inline edit form removed: Add/Edit bill & receipt use the shared cash modal. -->

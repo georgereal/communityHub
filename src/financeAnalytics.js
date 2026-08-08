@@ -1264,34 +1264,43 @@ const wirePivotDrilldown = () => {
 };
 
 export const renderFinanceAnalytics = () => {
-    const settings = getSettings();
-    const months = buildMonthRange(settings.monthCount);
+    const run = async () => {
+        try {
+            const { ensureFinanceDocumentsAggregates } = await import('./financeDocuments.js');
+            await ensureFinanceDocumentsAggregates();
+        } catch (err) {
+            console.warn('[financeAnalytics] aggregates:', err?.message || err);
+        }
+        const settings = getSettings();
+        const months = buildMonthRange(settings.monthCount);
 
-    renderBalanceMetrics();
-    renderPlannedExpensesCard();
-    renderMonthlySummaryCard();
-    wireBalanceMetricClicks();
-    renderCombinedCategoryChart(
-        months,
-        settings.sheetOnly,
-        settings.pivotDimension,
-        settings.cashExpenseReporting,
-    );
-    renderProjectionSummary(
-        months,
-        settings.sheetOnly,
-        settings.projectMonths,
-        settings.cashExpenseReporting,
-    );
-    renderRaisedInvoicesPivot(months);
-    renderIncomePivot(months);
-    renderExpensePivot(
-        months,
-        settings.pivotDimension,
-        settings.sheetOnly,
-        settings.cashExpenseReporting,
-    );
-    wirePivotDrilldown();
+        renderBalanceMetrics();
+        renderPlannedExpensesCard();
+        renderMonthlySummaryCard();
+        wireBalanceMetricClicks();
+        renderCombinedCategoryChart(
+            months,
+            settings.sheetOnly,
+            settings.pivotDimension,
+            settings.cashExpenseReporting,
+        );
+        renderProjectionSummary(
+            months,
+            settings.sheetOnly,
+            settings.projectMonths,
+            settings.cashExpenseReporting,
+        );
+        renderRaisedInvoicesPivot(months);
+        renderIncomePivot(months);
+        renderExpensePivot(
+            months,
+            settings.pivotDimension,
+            settings.sheetOnly,
+            settings.cashExpenseReporting,
+        );
+        wirePivotDrilldown();
+    };
+    void run();
 };
 
 const wireBalanceMetricClicks = () => {

@@ -814,21 +814,22 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
         orderMeta,
     };
 
-    if (!txns.length) {
+    const paint = () => {
+        if (!txns.length) {
+            mountLedgerColumnsPicker(visibleColumns);
+            list.innerHTML = '<p class="maintenance-dues-empty">No transactions match your filters.</p>';
+            syncLedgerBulkBar();
+            return;
+        }
+
+        const vendorDatalist = (portalState.finances.vendors || [])
+            .map((v) => `<option value="${esc(v.name)}">`).join('');
+
+        const rows = txns.map((raw) => renderLedgerRow(raw, rowOpts)).join('');
+
         mountLedgerColumnsPicker(visibleColumns);
-        list.innerHTML = '<p class="maintenance-dues-empty">No transactions match your filters.</p>';
-        syncLedgerBulkBar();
-        return;
-    }
 
-    const vendorDatalist = (portalState.finances.vendors || [])
-        .map((v) => `<option value="${esc(v.name)}">`).join('');
-
-    const rows = txns.map((raw) => renderLedgerRow(raw, rowOpts)).join('');
-
-    mountLedgerColumnsPicker(visibleColumns);
-
-    list.innerHTML = `
+        list.innerHTML = `
       <datalist id="ledger-vendors">${vendorDatalist}</datalist>
       <div class="bank-recon-table-shell ledger-table-shell" id="ledger-table-shell">
         <div class="bank-recon-table-wrap" id="ledger-table-wrap">
@@ -858,8 +859,20 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
         </div>
       </div>`;
 
-    wireLedgerTableEvents();
-    syncLedgerBulkBar();
+        wireLedgerTableEvents();
+        syncLedgerBulkBar();
+    };
+
+    paint();
+    const txnIds = (txns || []).map((t) => t?.id).filter(Boolean);
+    if (txnIds.length) {
+        void import('./financeDocuments.js')
+            .then((m) => m.ensureFinanceDocsForTransactions(txnIds))
+            .then((docs) => {
+                if (docs?.length) paint();
+            })
+            .catch((err) => console.warn('[ledger] linked bills prefetch:', err?.message || err));
+    }
 };
 
 const renderExcludedRow = (t, { formatTxnDetailPlain }) => {

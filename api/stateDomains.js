@@ -164,7 +164,7 @@ async function fetchFinanceStateParallel(service, apartmentId) {
         service.from('bank_statement_lines').select('*').eq('apartment_id', apartmentId).order('line_date', { ascending: true }).order('line_order', { ascending: true }).order('source_row_index', { ascending: true }),
         service.from('bank_classification_rules').select('*').eq('apartment_id', apartmentId).order('priority', { ascending: false }).order('created_at', { ascending: true }),
         service.from('nobroker_invoices_raised').select('*').eq('apartment_id', apartmentId).order('billing_month', { ascending: false }),
-        service.from('finance_documents').select('*').eq('apartment_id', apartmentId).order('doc_date', { ascending: false }),
+        // finance_documents: paginated on Bills page (listFinanceDocuments) + aggregates cache — not full hydrate
         service.from('expense_plan_items').select('*').eq('apartment_id', apartmentId).order('plan_date', { ascending: true }),
         service.from('expense_plan_recurring').select('*').eq('apartment_id', apartmentId).order('title', { ascending: true }),
         service.from('chart_of_accounts').select('*').eq('apartment_id', apartmentId).order('code'),
@@ -173,7 +173,7 @@ async function fetchFinanceStateParallel(service, apartmentId) {
     ];
     const results = await Promise.all(queries);
     const [
-        t, ev, esc, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr, nbir, fdocs, epi, epr, coa, je, jl,
+        t, ev, esc, mi, ma, mch, mil, mpr, mbg, mbgu, mbb, mbbs, mrl, bsi, bsl, bcr, nbir, epi, epr, coa, je, jl,
     ] = results;
 
     return {
@@ -197,7 +197,8 @@ async function fetchFinanceStateParallel(service, apartmentId) {
             bankStatementLines: emptyArr(bsl),
             bankClassificationRules: emptyArr(bcr),
             nobrokerInvoicesRaised: emptyArr(nbir),
-            financeDocuments: emptyArr(fdocs),
+            // Loaded lazily via listFinanceDocuments / financeDocumentsAggregates
+            financeDocuments: [],
             expensePlanItems: emptyArr(epi),
             expensePlanRecurring: emptyArr(epr),
         },
@@ -244,20 +245,15 @@ export async function fetchFinanceState(service, apartmentId, userId) {
         };
     }
 
-    const docsFromChunk = financeChunk.finances?.financeDocuments;
-    if (!Array.isArray(docsFromChunk)) {
-        const fdocs = await service
-            .from('finance_documents')
-            .select('*')
-            .eq('apartment_id', apartmentId)
-            .order('doc_date', { ascending: false });
+    // Bills & receipts are paginated client-side — do not hydrate the full table here.
+    // Keep any docs already merged into state (aggregates / list pages) across soft reloads.
+    if (!Array.isArray(financeChunk.finances?.financeDocuments)) {
         financeChunk = {
             ...financeChunk,
             finances: {
                 ...(financeChunk.finances || {}),
-                financeDocuments: emptyArr(fdocs),
+                financeDocuments: [],
             },
-            errors: [...(financeChunk.errors || []), ...collectErrors([fdocs])],
         };
     }
 

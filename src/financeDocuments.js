@@ -122,6 +122,7 @@ export const focusOpenExpenseBills = () => {
   if (statusEl) statusEl.value = 'unpaid';
   if (payEl) payEl.value = 'all';
   if (searchEl) searchEl.value = '';
+  invalidateFinanceDocsListCache();
   renderFdocReportBanner();
   window.switchView?.('finance-docs');
   renderFinanceDocumentsPage();
@@ -142,6 +143,7 @@ export const focusOpenChequeBills = () => {
   if (statusEl) statusEl.value = 'paid';
   if (payEl) payEl.value = 'cheque';
   if (searchEl) searchEl.value = '';
+  invalidateFinanceDocsListCache();
   renderFdocReportBanner();
   window.switchView?.('finance-docs');
   renderFinanceDocumentsPage();
@@ -153,11 +155,25 @@ const applyDocLocally = (doc) => {
   const idx = list.findIndex((d) => d.id === doc.id);
   if (idx >= 0) list[idx] = doc;
   else list.unshift(doc);
+  // List page cache may be stale relative to mutations
+  listPageCache.clear();
+  const i = listState.items.findIndex((d) => d.id === doc.id);
+  if (i >= 0) listState.items[i] = doc;
+  else if (listState.mode === 'forward' && listState.nextOffset === listState.items.length) {
+    // New doc — show at top of current forward list
+    listState.items.unshift(doc);
+    listState.total = (listState.total || 0) + 1;
+  }
+  aggregatesCache = null;
 };
 
 const removeDocLocally = (id) => {
   portalState.finances.financeDocuments = (portalState.finances.financeDocuments || [])
     .filter((d) => d.id !== id);
+  listPageCache.clear();
+  listState.items = listState.items.filter((d) => d.id !== id);
+  if (listState.total > 0) listState.total -= 1;
+  aggregatesCache = null;
 };
 
 const attachmentKeyOf = (entry) => {
@@ -301,6 +317,318 @@ const filterState = {
 /** Report pivot drill-down applied on Bills (cash expenses matching cat / month). */
 let docsReportFilter = null;
 
+/** Page size for infinite-scroll list fetches. */
+const FDOC_PAGE_SIZE = 50;
+
+/** Aggregates (KPIs / cash float working set) — session cache until mutation or hard refresh. */
+let aggregatesCache = null;
+let aggregatesInflight = null;
+
+/** Infinite-scroll list controller + per-filter page cache. */
+const listPageCache = new Map();
+let searchDebounceTimer = null;
+let scrollObserver = null;
+
+const listState = {
+  filterKey: '',
+  items: [],
+  nextOffset: 0,
+  total: 0,
+  hasMore: true,
+  loading: false,
+  mode: 'forward', // 'forward' | 'tail'
+  settled: false,
+};
+
+const fdocFilterKey = () => {
+  const report = docsReportFilter
+    ? JSON.stringify({
+      type: docsReportFilter.type,
+      key: docsReportFilter.key,
+      year: docsReportFilter.year,
+      month: docsReportFilter.month,
+      transactionId: docsReportFilter.transactionId,
+      wallet: docsReportFilter.wallet,
+      dimension: docsReportFilter.dimension,
+    })
+    : '';
+  return [
+    filterState.kind,
+    filterState.status,
+    filterState.pay,
+    filterState.q.trim().toLowerCase(),
+    report,
+  ].join('|');
+};
+
+const mergeDocsIntoStore = (docs = []) => {
+  if (!portalState.finances.financeDocuments) portalState.finances.financeDocuments = [];
+  const list = portalState.finances.financeDocuments;
+  for (const doc of docs) {
+    if (!doc?.id) continue;
+    const idx = list.findIndex((d) => d.id === doc.id);
+    if (idx >= 0) list[idx] = doc;
+    else list.push(doc);
+  }
+};
+
+const invalidateFinanceDocsListCache = () => {
+  listPageCache.clear();
+  listState.filterKey = '';
+  listState.items = [];
+  listState.nextOffset = 0;
+  listState.total = 0;
+  listState.hasMore = true;
+  listState.mode = 'forward';
+  listState.settled = false;
+};
+
+export const invalidateFinanceDocsCaches = ({ keepStore = true } = {}) => {
+  aggregatesCache = null;
+  aggregatesInflight = null;
+  invalidateFinanceDocsListCache();
+  if (!keepStore) portalState.finances.financeDocuments = [];
+};
+
+export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) return null;
+  if (
+    !force
+    && aggregatesCache
+    && aggregatesCache.apartmentId === apartmentId
+  ) {
+    return aggregatesCache;
+  }
+  if (!force && aggregatesInflight) return aggregatesInflight;
+
+  aggregatesInflight = (async () => {
+    const result = await postFinanceMutation('financeDocumentsAggregates', { apartment_id: apartmentId });
+    mergeDocsIntoStore(result.documents || []);
+    aggregatesCache = {
+      apartmentId,
+      summary: result.summary || null,
+      cashDocumentIds: result.cashDocumentIds || [],
+      openDocumentIds: result.openDocumentIds || [],
+      fetchedAt: Date.now(),
+    };
+    return aggregatesCache;
+  })();
+
+  try {
+    return await aggregatesInflight;
+  } finally {
+    aggregatesInflight = null;
+  }
+}
+
+const fetchFinanceDocsPage = async (offset, { useCache = true } = {}) => {
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) {
+    return { documents: [], total: 0, offset, limit: FDOC_PAGE_SIZE, hasMore: false };
+  }
+  const key = `${fdocFilterKey()}@${offset}`;
+  if (useCache && listPageCache.has(key)) {
+    return listPageCache.get(key);
+  }
+  const result = await postFinanceMutation('listFinanceDocuments', {
+    apartment_id: apartmentId,
+    offset,
+    limit: FDOC_PAGE_SIZE,
+    kind: filterState.kind,
+    status: filterState.status,
+    pay: filterState.pay,
+    q: filterState.q,
+  });
+  const page = {
+    documents: result.documents || [],
+    total: result.total ?? 0,
+    offset: result.offset ?? offset,
+    limit: result.limit ?? FDOC_PAGE_SIZE,
+    hasMore: !!result.hasMore,
+  };
+  mergeDocsIntoStore(page.documents);
+  listPageCache.set(key, page);
+  return page;
+};
+
+/** Ensure first page (or current filter) is loaded for the Bills table. */
+export async function ensureFinanceDocumentsListPage({ reset = false } = {}) {
+  const key = fdocFilterKey();
+  if (reset || listState.filterKey !== key || listState.mode === 'tail') {
+    listState.filterKey = key;
+    listState.items = [];
+    listState.nextOffset = 0;
+    listState.total = 0;
+    listState.hasMore = true;
+    listState.mode = 'forward';
+    listState.settled = false;
+  }
+  if (listState.settled && listState.filterKey === key && listState.mode === 'forward') {
+    return listState;
+  }
+  if (listState.loading) return listState;
+  return loadMoreFinanceDocuments();
+}
+
+export async function loadMoreFinanceDocuments() {
+  if (listState.loading || listState.mode !== 'forward' || !listState.hasMore) {
+    return listState;
+  }
+  listState.loading = true;
+  try {
+    const page = await fetchFinanceDocsPage(listState.nextOffset);
+    listState.total = page.total;
+    listState.items = listState.items.concat(page.documents);
+    listState.nextOffset = listState.nextOffset + page.documents.length;
+    listState.hasMore = page.hasMore;
+    listState.filterKey = fdocFilterKey();
+    listState.settled = true;
+  } finally {
+    listState.loading = false;
+  }
+  return listState;
+}
+
+/** Jump to oldest page of the current filter (end of list). */
+export async function jumpFinanceDocumentsToBottom() {
+  listState.loading = true;
+  try {
+    // Need total — use cached page 0 or fetch it
+    let total = listState.total;
+    if (!total) {
+      const first = await fetchFinanceDocsPage(0);
+      total = first.total;
+    }
+    const offset = Math.max(0, total - FDOC_PAGE_SIZE);
+    const page = await fetchFinanceDocsPage(offset);
+    listState.mode = 'tail';
+    listState.filterKey = fdocFilterKey();
+    listState.items = page.documents;
+    listState.total = page.total;
+    listState.nextOffset = page.total;
+    listState.hasMore = false;
+  } finally {
+    listState.loading = false;
+  }
+  return listState;
+}
+
+export async function jumpFinanceDocumentsToTop() {
+  listState.mode = 'forward';
+  listState.filterKey = '';
+  await ensureFinanceDocumentsListPage({ reset: true });
+  return listState;
+}
+
+/** Prefetch docs linked to ledger rows (badges / open-bill actions). */
+export async function ensureFinanceDocsForTransactions(txnIds = [], { force = false } = {}) {
+  const ids = [...new Set((txnIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const known = new Set(
+    (portalState.finances.financeDocuments || [])
+      .filter((d) => d.transaction_id && d.status !== 'void')
+      .map((d) => d.transaction_id),
+  );
+  const missing = force ? ids : ids.filter((id) => !known.has(id));
+  if (!missing.length) {
+    return (portalState.finances.financeDocuments || []).filter(
+      (d) => ids.includes(d.transaction_id) && d.status !== 'void',
+    );
+  }
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) return [];
+  let offset = 0;
+  let hasMore = true;
+  const collected = [];
+  while (hasMore) {
+    const page = await postFinanceMutation('listFinanceDocuments', {
+      apartment_id: apartmentId,
+      transaction_ids: missing,
+      offset,
+      limit: FDOC_PAGE_SIZE,
+    });
+    const docs = page.documents || [];
+    collected.push(...docs);
+    mergeDocsIntoStore(docs);
+    hasMore = !!page.hasMore;
+    offset += docs.length;
+    if (!docs.length) break;
+  }
+  return collected;
+}
+
+/** Fetch a single doc by id into the store (focus / deep-link). */
+export async function ensureFinanceDocumentById(docId) {
+  if (!docId) return null;
+  const existing = (portalState.finances.financeDocuments || []).find((d) => d.id === docId);
+  if (existing) return existing;
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) return null;
+  const page = await postFinanceMutation('listFinanceDocuments', {
+    apartment_id: apartmentId,
+    ids: [docId],
+    offset: 0,
+    limit: 1,
+  });
+  const doc = (page.documents || [])[0] || null;
+  if (doc) mergeDocsIntoStore([doc]);
+  return doc;
+}
+
+const renderFdocListChrome = () => {
+  const meta = document.getElementById('fdoc-meta');
+  const jumpBtn = document.getElementById('fdoc-jump-bottom');
+  const topBtn = document.getElementById('fdoc-jump-top');
+  const sentinel = document.getElementById('fdoc-scroll-sentinel');
+  const summary = aggregatesCache?.summary;
+  const staffOnly = isStaffBillsOnly();
+  const loaded = listState.items.length;
+  const total = summary?.total ?? listState.total ?? loaded;
+
+  if (meta) {
+    if (staffOnly) {
+      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded} · add & upload only`;
+    } else if (summary) {
+      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`
+        + ` · unpaid ${formatMoney(summary.unpaidOutAmt)}`
+        + ` · paid ${formatMoney(summary.paidOutAmt)}`
+        + ` · linked ${formatMoney(summary.linkedOutAmt)}`;
+    } else {
+      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`;
+    }
+  }
+
+  if (jumpBtn) {
+    jumpBtn.hidden = listState.mode === 'tail' || total <= FDOC_PAGE_SIZE;
+    jumpBtn.disabled = !!listState.loading;
+  }
+  if (topBtn) {
+    topBtn.hidden = listState.mode !== 'tail';
+    topBtn.disabled = !!listState.loading;
+  }
+  if (sentinel) {
+    sentinel.hidden = listState.mode !== 'forward' || !listState.hasMore;
+    sentinel.textContent = listState.loading ? 'Loading…' : 'Scroll for more';
+  }
+};
+
+const wireFdocInfiniteScroll = () => {
+  const sentinel = document.getElementById('fdoc-scroll-sentinel');
+  if (!sentinel || scrollObserver) return;
+  scrollObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((e) => e.isIntersecting)) return;
+    if (listState.mode !== 'forward' || !listState.hasMore || listState.loading) return;
+    void loadMoreFinanceDocuments()
+      .then(() => {
+        paintFinanceDocumentsTable();
+        renderFdocListChrome();
+      })
+      .catch((err) => console.warn('[fdoc] load more failed:', err?.message || err));
+  }, { root: null, rootMargin: '200px', threshold: 0 });
+  scrollObserver.observe(sentinel);
+};
+
 const docMatchesReportFilter = (d, f) => {
   if (!f || !d) return true;
   if (f.type === 'OUT' && d.kind !== 'OUT') return false;
@@ -352,6 +680,7 @@ export const applyFinanceDocsReportFilter = (filter) => {
     if (payEl) payEl.value = 'cash';
     if (statusEl && docsReportFilter.transactionId) statusEl.value = 'linked';
   }
+  invalidateFinanceDocsListCache();
   renderFdocReportBanner();
   renderFinanceDocumentsPage();
 };
@@ -380,6 +709,13 @@ export const focusFinanceDocument = async (docId) => {
   if (payEl) payEl.value = 'all';
   if (searchEl) searchEl.value = '';
   renderFdocReportBanner();
+  try {
+    await ensureFinanceDocumentById(docId);
+    await ensureFinanceDocumentsAggregates();
+    await ensureFinanceDocumentsListPage({ reset: true });
+  } catch (err) {
+    console.warn('[fdoc] focus load failed:', err?.message || err);
+  }
   renderFinanceDocumentsPage();
   requestAnimationFrame(() => {
     const row = document.querySelector(`tr.fdoc-row[data-doc-id="${CSS.escape(docId)}"]`);
@@ -1027,6 +1363,9 @@ export const openAttachDocsToLedgerModal = (txnId) => {
   refreshLinkModalList();
   modal.hidden = false;
   setTimeout(() => searchEl?.focus(), 40);
+  void ensureFinanceDocumentsAggregates()
+    .then(() => refreshLinkModalList())
+    .catch((err) => console.warn('[fdoc] attach modal aggregates:', err?.message || err));
 };
 
 const refreshLinkModalList = () => {
@@ -1551,21 +1890,12 @@ export const cashBillsAsReportExpenses = () =>
     }));
 
 const filteredDocs = () => {
-  const q = filterState.q.trim().toLowerCase();
-  return getFinanceDocuments().filter((d) => {
+  // List rows come from paginated fetches (already filtered server-side for kind/status/pay/q).
+  // Report drill-down is applied client-side on the loaded pages.
+  return (listState.items.length ? listState.items : getFinanceDocuments()).filter((d) => {
+    if (d.status === 'void') return false;
     if (docsReportFilter && !docMatchesReportFilter(d, docsReportFilter)) return false;
-    if (filterState.kind !== 'all' && d.kind !== filterState.kind) return false;
-    if (filterState.status !== 'all' && bookStatus(d) !== filterState.status) return false;
-    if (filterState.pay !== 'all') {
-      const pay = paymentInfo(d).mode;
-      if (filterState.pay === 'cash' && pay !== 'cash') return false;
-      if (filterState.pay === 'cheque' && pay !== 'cheque') return false;
-      if (filterState.pay === 'online' && pay !== 'online') return false;
-      if (filterState.pay === 'unpaid' && pay !== 'unpaid') return false;
-    }
-    if (!q) return true;
-    const hay = [d.vendor_name, d.description, d.cat, d.sub_category, d.notes].join(' ').toLowerCase();
-    return hay.includes(q);
+    return true;
   });
 };
 
@@ -2081,33 +2411,15 @@ const renderFdocAttachmentIcons = (doc) => {
   </button>`;
 };
 
-export function renderFinanceDocumentsPage() {
+const paintFinanceDocumentsTable = () => {
   const body = document.getElementById('fdoc-table-body');
-  const meta = document.getElementById('fdoc-meta');
   if (!body) return;
 
   applyFinanceDocsStaffMode();
   const staffOnly = isStaffBillsOnly();
   const manage = canManageFinanceDocs();
 
-  renderFdocReportBanner();
-
   const docs = filteredDocs();
-  const all = getFinanceDocuments();
-  const unpaidAmt = round2(all.filter((d) => bookStatus(d) === 'unpaid' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const paidAmt = round2(all.filter((d) => bookStatus(d) === 'paid' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const linkedAmt = round2(all.filter((d) => bookStatus(d) === 'linked' && d.kind === 'OUT').reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-
-  if (meta) {
-    meta.textContent = staffOnly
-      ? `${all.length} bill(s)/receipt(s) · add & upload only`
-      : `${all.length} bill(s)/receipt(s) · unpaid ${formatMoney(unpaidAmt)} · paid ${formatMoney(paidAmt)} · linked ${formatMoney(linkedAmt)}`;
-  }
-
-  if (!staffOnly) {
-    renderFloatKpis(computeBillsCashFloatSummary());
-  }
-
   const selectAll = document.getElementById('fdoc-select-all');
   if (selectAll) {
     selectAll.checked = false;
@@ -2115,7 +2427,9 @@ export function renderFinanceDocumentsPage() {
   }
 
   if (!docs.length) {
-    body.innerHTML = `<tr><td colspan="9" class="fa-panel__hint">No bills or receipts yet. Use Add bill / Add receipt, or Import Excel (Expenses + Income sheets). Attachments go to private Cloudflare R2.</td></tr>`;
+    body.innerHTML = listState.loading
+      ? `<tr><td colspan="9" class="fa-panel__hint">Loading bills &amp; receipts…</td></tr>`
+      : `<tr><td colspan="9" class="fa-panel__hint">No bills or receipts yet. Use Add bill / Add receipt, or Import Excel (Expenses + Income sheets). Attachments go to private Cloudflare R2.</td></tr>`;
     syncBulkActionButtons();
     return;
   }
@@ -2171,6 +2485,39 @@ export function renderFinanceDocumentsPage() {
     </tr>`;
   }).join('');
   syncBulkActionButtons();
+};
+
+export function renderFinanceDocumentsPage() {
+  const body = document.getElementById('fdoc-table-body');
+  if (!body) return;
+
+  applyFinanceDocsStaffMode();
+  renderFdocReportBanner();
+  wireFdocInfiniteScroll();
+
+  const staffOnly = isStaffBillsOnly();
+  if (!staffOnly) {
+    // KPIs use aggregate working set (cash + open) merged into store
+    renderFloatKpis(computeBillsCashFloatSummary());
+  }
+
+  paintFinanceDocumentsTable();
+  renderFdocListChrome();
+
+  void (async () => {
+    try {
+      await ensureFinanceDocumentsAggregates();
+      if (!staffOnly) renderFloatKpis(computeBillsCashFloatSummary());
+      await ensureFinanceDocumentsListPage();
+      paintFinanceDocumentsTable();
+      renderFdocListChrome();
+    } catch (err) {
+      console.warn('[fdoc] page load failed:', err?.message || err);
+      if (body && !listState.items.length) {
+        body.innerHTML = `<tr><td colspan="9" class="fa-panel__hint">Could not load bills: ${esc(err?.message || 'error')}</td></tr>`;
+      }
+    }
+  })();
 }
 
 const fdocCatOptions = (isIncome) => buildCategoryOptions(isIncome);
@@ -2413,21 +2760,48 @@ export function initFinanceDocumentsPage() {
   }
   root.dataset.wired = '1';
 
+  const onFilterChange = () => {
+    invalidateFinanceDocsListCache();
+    renderFinanceDocumentsPage();
+  };
+
   document.getElementById('fdoc-filter-kind')?.addEventListener('change', (e) => {
     filterState.kind = e.target.value;
-    renderFinanceDocumentsPage();
+    onFilterChange();
   });
   document.getElementById('fdoc-filter-status')?.addEventListener('change', (e) => {
     filterState.status = e.target.value;
-    renderFinanceDocumentsPage();
+    onFilterChange();
   });
   document.getElementById('fdoc-filter-pay')?.addEventListener('change', (e) => {
     filterState.pay = e.target.value || 'all';
-    renderFinanceDocumentsPage();
+    onFilterChange();
   });
   document.getElementById('fdoc-search')?.addEventListener('input', (e) => {
     filterState.q = e.target.value || '';
-    renderFinanceDocumentsPage();
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(onFilterChange, 280);
+  });
+
+  document.getElementById('fdoc-jump-bottom')?.addEventListener('click', () => {
+    void withButtonBusy(document.getElementById('fdoc-jump-bottom'), 'Loading…', async () => {
+      await jumpFinanceDocumentsToBottom();
+      paintFinanceDocumentsTable();
+      renderFdocListChrome();
+      requestAnimationFrame(() => {
+        const rows = document.querySelectorAll('#fdoc-table-body tr.fdoc-row');
+        rows[rows.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      });
+    }).catch((err) => alert(err?.message || 'Could not jump to end of list.'));
+  });
+
+  document.getElementById('fdoc-jump-top')?.addEventListener('click', () => {
+    void withButtonBusy(document.getElementById('fdoc-jump-top'), 'Loading…', async () => {
+      await jumpFinanceDocumentsToTop();
+      paintFinanceDocumentsTable();
+      renderFdocListChrome();
+      document.getElementById('fdoc-table-body')?.closest('.fa-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch((err) => alert(err?.message || 'Could not return to newest bills.'));
   });
 
   document.getElementById('fdoc-select-all')?.addEventListener('change', (e) => {
