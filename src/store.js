@@ -112,8 +112,9 @@ export function applyBootPayload(boot = {}) {
             role: boot.moduleAccess.role || {},
         };
     }
-    if (boot.crudAccess) {
-        portalState.crudAccess = boot.crudAccess || {};
+    // Always apply boot CRUD map when provided (including derived defaults).
+    if (boot.crudAccess && typeof boot.crudAccess === 'object') {
+        portalState.crudAccess = boot.crudAccess;
     }
     if (boot.pageAccess) {
         portalState.pageAccess = {
@@ -168,6 +169,16 @@ async function afterDomainAccessLoads(activeApartmentId, uid) {
     } catch (pageErr) {
         console.warn('[store] page access load skipped:', pageErr?.message);
     }
+
+    try {
+        const { loadCrudAccessForRole } = await import('./rbacMatrix.js');
+        const roleKey = portalState.auth?.effectiveRoleKey
+            || (await import('./rbac.js')).v1RoleToV2Key(portalState.auth?.role);
+        await loadCrudAccessForRole(activeApartmentId, roleKey);
+        document.dispatchEvent(new CustomEvent('crud-access-loaded'));
+    } catch (crudErr) {
+        console.warn('[store] CRUD access load skipped:', crudErr?.message);
+    }
 }
 
 function applyStatePatch(partial = {}) {
@@ -187,36 +198,54 @@ function applyStatePatch(partial = {}) {
     }
 }
 
-export async function loadStateDomain(domain, { force = false } = {}) {
+export async function loadStateDomain(domain, { force = false, signal } = {}) {
     if (!supabase) return false;
     const activeApartmentId = portalState.access?.activeApartmentId;
     if (!activeApartmentId || isPlaceholderApartmentId(activeApartmentId)) return false;
 
+    if (signal?.aborted) return false;
     if (!force && loadedDomains.has(domain)) return true;
-    if (!force && domainLoadPromises.has(domain)) return domainLoadPromises.get(domain);
+    if (!force && domainLoadPromises.has(domain)) {
+        const existing = domainLoadPromises.get(domain);
+        if (signal) {
+            return Promise.race([
+                existing,
+                new Promise((_, reject) => {
+                    const onAbort = () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+                    if (signal.aborted) onAbort();
+                    else signal.addEventListener('abort', onAbort, { once: true });
+                }),
+            ]).catch((err) => {
+                if (err?.name === 'AbortError' || signal.aborted) return false;
+                throw err;
+            });
+        }
+        return existing;
+    }
     if (force) domainLoadPromises.delete(domain);
 
     const run = async () => {
         setActiveApartmentIdForApi(activeApartmentId);
         const partial = await withTimeout(
-            fetchApartmentState(activeApartmentId, domain),
+            fetchApartmentState(activeApartmentId, domain, { signal }),
             domain === 'finance' ? 90000 : 45000,
             `${domain} data load`,
         );
+        if (signal?.aborted) return false;
         if (partial.errors?.length) console.warn(`[store/${domain}] query warnings:`, partial.errors);
         applyStatePatch(partial);
         loadedDomains.add(domain);
         if (domain === 'core') {
-            // Avoid auth.getUser() here — it races workspace-boot and times out to Supabase directly.
             await afterDomainAccessLoads(activeApartmentId, portalState.auth?.id);
         }
-        if (domain === 'finance' || domain === 'admin') {
+        if (domain === 'finance' || domain === 'admin' || domain === 'operations' || domain === 'core') {
             document.dispatchEvent(new CustomEvent('domain-data-loaded', { detail: { domain } }));
         }
         return true;
     };
 
     const promise = run().catch((err) => {
+        if (err?.name === 'AbortError' || signal?.aborted) return false;
         console.error(`[store] Failed to load domain ${domain}:`, err);
         domainLoadPromises.delete(domain);
         return false;
@@ -232,13 +261,13 @@ export async function loadStateDomains(domains, opts = {}) {
     return results.every(Boolean);
 }
 
-export async function ensureRouteState(route) {
+export async function ensureRouteState(route, opts = {}) {
     let domains = domainsForRoute(route).filter((d) => !loadedDomains.has(d));
     if (!accessLocksAllowHeavy()) {
         domains = domains.filter((d) => d === 'core');
     }
     if (!domains.length) return true;
-    return loadStateDomains(domains);
+    return loadStateDomains(domains, opts);
 }
 
 function accessLocksAllowHeavy() {

@@ -35,8 +35,11 @@ import {
 } from './ledgerStatementContext.js';
 import { formatOcrRowDisplay } from './bankStatementLineUtils.js';
 import { isBankPettyFunding } from './cashFloat.js';
+import { canCrud } from './rbacMatrix.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+const canDeleteAccounts = () => canCrud('accounts', 'delete');
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
@@ -45,8 +48,71 @@ const linkedFinanceDocsForTxn = (txnId) =>
         (d) => d.transaction_id === txnId && d.status !== 'void',
     );
 
-/** Open the same Bills & receipts modal (read-only). If several are linked, pick one first. */
-export const openLinkedBillsForLedgerTxn = (txnId, { cashOutOnly = false } = {}) => {
+/** Open linked bill/receipt for edit, or create/link when none. */
+export const openBillReceiptForLedgerTxn = async (txnId, triggerBtn = null) => {
+    const docs = linkedFinanceDocsForTxn(txnId);
+    if (docs.length === 1) {
+        window.openFinanceDocumentEdit?.(docs[0]);
+        return;
+    }
+    if (docs.length > 1) {
+        openLinkedBillsForLedgerTxn(txnId, { edit: true });
+        return;
+    }
+
+    // None linked — choose create vs link existing
+    let modal = document.getElementById('ledger-bill-choice-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'ledger-bill-choice-modal';
+        modal.className = 'fdoc-link-modal';
+        modal.hidden = true;
+        modal.innerHTML = `
+          <div class="fdoc-link-modal__backdrop" data-bill-choice-close></div>
+          <div class="fdoc-link-modal__panel" role="dialog" aria-labelledby="ledger-bill-choice-title">
+            <div class="fdoc-link-modal__head">
+              <h3 id="ledger-bill-choice-title" class="fa-panel__title" style="margin:0;">Bill / receipt</h3>
+              <button type="button" class="btn btn-outline btn--small" data-bill-choice-close>Close</button>
+            </div>
+            <p class="fa-panel__hint">Link paperwork to this ledger line, or create a bill/receipt from it.</p>
+            <div class="fdoc-link-list">
+              <button type="button" class="fdoc-link-row" data-bill-choice="create">
+                <span class="fdoc-link-row__main">Create from this line</span>
+                <span class="fdoc-link-row__sub">Opens the bill/receipt form with amount, date, and category filled in</span>
+              </button>
+              <button type="button" class="fdoc-link-row" data-bill-choice="link">
+                <span class="fdoc-link-row__main">Link existing</span>
+                <span class="fdoc-link-row__sub">Pick an unlinked bill or receipt and attach it here</span>
+              </button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => {
+            if (e.target.closest('[data-bill-choice-close]')) {
+                modal.hidden = true;
+                return;
+            }
+            const choice = e.target.closest('[data-bill-choice]')?.dataset?.billChoice;
+            const id = modal.dataset.txnId;
+            if (!choice || !id) return;
+            modal.hidden = true;
+            if (choice === 'link') {
+                void import('./financeDocuments.js').then((m) => m.openAttachDocsToLedgerModal(id));
+                return;
+            }
+            void withButtonBusy(null, 'Creating…', async () => {
+                const { createFinanceDocumentFromLedgerTxn } = await import('./financeDocuments.js');
+                await createFinanceDocumentFromLedgerTxn(id, { openEditor: true });
+                refreshLedgerView();
+            }).catch((err) => alert(err?.message || 'Could not create bill/receipt.'));
+        });
+    }
+    modal.dataset.txnId = txnId;
+    modal.hidden = false;
+};
+
+/** Open the same Bills & receipts modal. If several are linked, pick one first. */
+export const openLinkedBillsForLedgerTxn = (txnId, { cashOutOnly = false, edit = false } = {}) => {
     let docs = linkedFinanceDocsForTxn(txnId);
     if (cashOutOnly) {
         docs = docs.filter((d) => {
@@ -62,7 +128,8 @@ export const openLinkedBillsForLedgerTxn = (txnId, { cashOutOnly = false } = {})
         return;
     }
     if (docs.length === 1) {
-        window.openFinanceDocumentView?.(docs[0]);
+        if (edit) window.openFinanceDocumentEdit?.(docs[0]);
+        else window.openFinanceDocumentView?.(docs[0]);
         return;
     }
 
@@ -91,11 +158,16 @@ export const openLinkedBillsForLedgerTxn = (txnId, { cashOutOnly = false } = {})
             const docId = e.target.closest('[data-open-doc]')?.dataset?.openDoc;
             if (docId) {
                 const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === docId);
+                const asEdit = modal.dataset.openEdit === '1';
                 modal.hidden = true;
-                if (doc) window.openFinanceDocumentView?.(doc);
+                if (!doc) return;
+                if (asEdit) window.openFinanceDocumentEdit?.(doc);
+                else window.openFinanceDocumentView?.(doc);
             }
         });
     }
+
+    modal.dataset.openEdit = edit ? '1' : '0';
 
     const title = document.getElementById('ledger-linked-bills-title');
     const hint = document.getElementById('ledger-linked-bills-hint');
@@ -107,7 +179,9 @@ export const openLinkedBillsForLedgerTxn = (txnId, { cashOutOnly = false } = {})
     if (hint) {
         hint.textContent = cashOutOnly
             ? 'These cash expenses are linked to this Petty Cash funding line. Click one to open.'
-            : 'Choose a bill/receipt to open in the same details form used on Bills & receipts.';
+            : (edit
+                ? 'Choose a bill/receipt to edit.'
+                : 'Choose a bill/receipt to open in the same details form used on Bills & receipts.');
     }
 
     const list = document.getElementById('ledger-linked-bills-list');
@@ -424,7 +498,7 @@ const renderCashBillPivotRow = (raw, { visibleColumns }) => {
         </span>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--desc">
-        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="1" placeholder="Description">${esc(detail)}</textarea>
+        <span class="ledger-desc-text">${esc(detail) || '—'}</span>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${drClass}">${dr}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${crClass}">${cr}</td>
@@ -443,7 +517,6 @@ const renderCashBillPivotRow = (raw, { visibleColumns }) => {
       <td class="bank-recon-table__cell bank-recon-table__cell--bills">—</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-row-save" data-txn="${esc(t.id)}" title="Save this row" aria-label="Save row" ${isDirty(t.id) ? '' : 'disabled'}><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-open-cash-bill" data-fdoc="${esc(docId)}" title="Open in Bills &amp; receipts" aria-label="Open in Bills"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></button>
         </div>
       </td>
@@ -485,10 +558,8 @@ const renderLedgerRow = (raw, {
             <span class="ledger-linked-bills-btn__count">${linkedDocs.length}</span>
           </button>`
         : '<span class="ledger-linked-bills-empty">—</span>';
-    const createBillLabel = isIncome ? 'Create receipt for attachments' : 'Create bill for attachments';
-    const createBillBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-create-fdoc-btn" data-txn="${t.id}" title="${createBillLabel}" aria-label="${createBillLabel}"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i></button>`;
     const detail = formatTxnDetail(t);
-    const descPlaceholder = !t.description && detail ? ` placeholder="${esc(detail)}"` : ' placeholder="Description"';
+    const descText = esc(t.description || detail || '—');
     const dr = !isIncome ? formatMoney(t.amount) : '—';
     const cr = isIncome ? formatMoney(t.amount) : '—';
     const drClass = !isIncome ? ' bank-recon-amt--out' : '';
@@ -533,7 +604,7 @@ const renderLedgerRow = (raw, {
         </span>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--desc">
-        <textarea class="bank-recon-cell-input bank-recon-cell-input--desc" data-field="description" rows="1"${descPlaceholder}>${esc(t.description || '')}</textarea>
+        <span class="ledger-desc-text" title="${descText}">${descText}</span>
       </td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${drClass}">${dr}</td>
       <td class="bank-recon-table__cell bank-recon-table__cell--num${crClass}">${cr}</td>
@@ -555,12 +626,13 @@ const renderLedgerRow = (raw, {
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
           ${receiptBtn}
-          ${createBillBtn}
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-row-save" data-txn="${t.id}" title="Save this row" aria-label="Save row" ${isDirty(t.id) ? '' : 'disabled'}><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
-          <button type="button" class="btn btn-outline btn--small btn--icon" onclick="window.editTxn('${t.id}')" title="Full edit" aria-label="Full edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-          <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-bill-btn" data-txn="${t.id}" title="Bill / receipt — create, link, or edit" aria-label="Bill or receipt"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon" onclick="window.editTxn('${t.id}')" title="Edit ledger line" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+          ${canDeleteAccounts()
+            ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+            : ''}
         </div>
       </td>
     </tr>`;
@@ -700,8 +772,6 @@ const saveLedgerClassifyRow = async (row) => {
         patch.exclude_from_reports = true;
     }
     markDirty(txnId, patch);
-    const rowSaveBtn = row.querySelector('.ledger-row-save');
-    if (rowSaveBtn) rowSaveBtn.disabled = false;
 
     row.dataset.classifySaving = '1';
     row.classList.add('ledger-txn-row--saving');
@@ -925,7 +995,11 @@ export const syncLedgerBulkBar = () => {
     }
     if (saveBtn && saveBtn.dataset.busy !== '1') saveBtn.disabled = dirtyCount === 0;
     if (applyBtn) applyBtn.disabled = selected.length === 0;
-    if (deleteBtn) deleteBtn.disabled = selected.length === 0;
+    if (deleteBtn) {
+        const allowDelete = canDeleteAccounts();
+        deleteBtn.hidden = !allowDelete;
+        deleteBtn.disabled = !allowDelete || selected.length === 0;
+    }
     const headerAll = document.getElementById('ledger-header-select-all');
     const checks = [...document.querySelectorAll('.ledger-row-check')];
     if (headerAll && checks.length) {
@@ -966,19 +1040,6 @@ const readRowPatch = (row) => {
         }
     }
     return patch;
-};
-
-const onRowFieldChange = (row) => {
-    const txnId = row?.dataset?.txnId;
-    if (!txnId) return;
-    const patch = readRowPatch(row);
-    if (!isCashBillLedgerId(txnId)
-        && (patch.cat === BANK_REJECT_CAT || defaultExcludeFromReports(patch.cat))) {
-        patch.exclude_from_reports = true;
-    }
-    markDirty(txnId, patch);
-    const saveBtn = row.querySelector('.ledger-row-save');
-    if (saveBtn) saveBtn.disabled = false;
 };
 
 const applyLocalTxnPatches = (updates) => {
@@ -1109,10 +1170,6 @@ const applyBulkToSelected = () => {
         }
         pendingEdits.set(id, patch);
         row?.classList.add('ledger-txn-row--dirty');
-        if (row) {
-            const saveBtn = row.querySelector('.ledger-row-save');
-            if (saveBtn) saveBtn.disabled = false;
-        }
     });
     syncLedgerBulkBar();
     setLedgerActivity(
@@ -1121,7 +1178,7 @@ const applyBulkToSelected = () => {
     );
 };
 
-const LEDGER_EVENTS_VERSION = 'ledger-events-v6';
+const LEDGER_EVENTS_VERSION = 'ledger-events-v8';
 
 export const wireLedgerTableEvents = () => {
     syncLedgerBulkBar();
@@ -1146,12 +1203,7 @@ export const wireLedgerTableEvents = () => {
         }
     };
 
-    list._ledgerOnInput = (e) => {
-        const row = e.target.closest('.ledger-txn-row');
-        if (row && e.target.matches('.bank-recon-cell-input--desc')) {
-            onRowFieldChange(row);
-        }
-    };
+    list._ledgerOnInput = () => {};
 
     list._ledgerOnClick = async (e) => {
         if (e.target.closest('.ledger-move-step')) {
@@ -1242,25 +1294,12 @@ export const wireLedgerTableEvents = () => {
             openLinkedBillsForLedgerTxn(linkedBillsBtn.dataset.txn);
             return;
         }
-
-        const createFdocBtn = e.target.closest('.ledger-create-fdoc-btn');
-        if (createFdocBtn && createFdocBtn.dataset.busy !== '1') {
+        const billBtn = e.target.closest('.ledger-bill-btn');
+        if (billBtn) {
             e.preventDefault();
-            const txnId = createFdocBtn.dataset.txn;
-            if (!txnId) return;
-            const raw = portalState.finances.txns.find((txn) => txn.id === txnId);
-            const kindLabel = raw?.type === 'IN' ? 'receipt' : 'bill';
-            if (!confirm(`Create a linked ${kindLabel} from this ledger entry?\n\nYou can upload supporting documents on the next screen.`)) return;
-            try {
-                await withButtonBusy(createFdocBtn, '…', async () => {
-                    const { createFinanceDocumentFromLedgerTxn } = await import('./financeDocuments.js');
-                    await createFinanceDocumentFromLedgerTxn(txnId);
-                    window.renderCashLedger?.();
-                    window.renderFinanceDocumentsPage?.();
-                });
-            } catch (err) {
-                alert(err?.message || `Could not create ${kindLabel}.`);
-            }
+            void withButtonBusy(billBtn, '…', async () => {
+                await openBillReceiptForLedgerTxn(billBtn.dataset.txn, billBtn);
+            }).catch((err) => alert(err?.message || 'Could not open bill/receipt.'));
             return;
         }
 
@@ -1278,22 +1317,6 @@ export const wireLedgerTableEvents = () => {
                 alert(err?.message || 'Could not exclude row.');
             }
             return;
-        }
-
-        const saveBtn = e.target.closest('.ledger-row-save');
-        if (!saveBtn || saveBtn.disabled || saveBtn.dataset.busy === '1') return;
-        const txnId = saveBtn.dataset.txn;
-        if (!txnId) return;
-        try {
-            await withButtonBusy(saveBtn, 'Saving…', async () => {
-                setLedgerBulkSaving(true, 'Saving row…');
-                const result = await saveLedgerPendingEdits([txnId]);
-                refreshAfterLedgerSave({ analytics: !!result.cashBillsUpdated });
-            });
-        } catch (err) {
-            alert(err?.message || 'Could not save row.');
-        } finally {
-            setLedgerBulkSaving(false);
         }
     };
 
@@ -1366,6 +1389,10 @@ export const initLedgerBulkBar = () => {
 
     document.getElementById('ledger-bulk-delete')?.addEventListener('click', async () => {
         const btn = document.getElementById('ledger-bulk-delete');
+        if (!canDeleteAccounts()) {
+            alert('You do not have permission to delete ledger entries.');
+            return;
+        }
         const ids = selectedTxnIds();
         if (!ids.length || btn?.dataset.busy === '1') return;
         const billIds = ids.filter((id) => isCashBillLedgerId(id));

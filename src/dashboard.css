@@ -53,10 +53,17 @@
   line-height: 1.15;
 }
 
-.dashboard-stat__sub {
-  font-size: 0.78rem;
+.dashboard-stat--loading .dashboard-stat__value {
   color: var(--text-dim);
   font-weight: 500;
+}
+
+.dashboard-empty--loading {
+  color: var(--text-dim);
+}
+
+.dashboard-empty--loading i {
+  margin-right: 0.4rem;
 }
 
 .dashboard-sync-banner {

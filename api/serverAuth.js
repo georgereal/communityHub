@@ -136,6 +136,75 @@ export async function requireApartmentPermission(req, apartmentIdRaw, permission
     return { user, authHeader, apartmentId, service };
 }
 
+/**
+ * Society CRUD matrix for a resource/action.
+ * Delete is opt-in via matrix; Create/Update fall back to *.edit when no matrix row exists.
+ */
+export async function userCanCrud(service, userId, apartmentId, resourceKey, action = 'read') {
+    try {
+        const { data: roles } = await service
+            .from('user_role_assignments')
+            .select('role_key, scope, apartment_id')
+            .eq('user_id', userId);
+
+        const systemAdmin = (roles || []).some((r) => r.scope === 'system' && r.role_key === 'system_admin');
+        if (systemAdmin) return true;
+
+        const aptRoleKeys = (roles || [])
+            .filter((r) => r.scope === 'apartment' && String(r.apartment_id) === String(apartmentId))
+            .map((r) => r.role_key);
+        if (aptRoleKeys.includes('society_admin') || aptRoleKeys.includes('system_admin')) return true;
+
+        const roleKey = aptRoleKeys[0];
+        if (!roleKey) {
+            if (action === 'delete') return false;
+            if (action === 'read') {
+                return userHasPermission(service, userId, apartmentId, `${resourceKey}.view`)
+                    || userHasPermission(service, userId, apartmentId, `${resourceKey}.edit`);
+            }
+            return userHasPermission(service, userId, apartmentId, `${resourceKey}.edit`);
+        }
+
+        const { data: rows } = await service
+            .from('society_role_crud_access')
+            .select('resource_key, can_create, can_read, can_update, can_delete')
+            .eq('apartment_id', apartmentId)
+            .eq('role_key', roleKey);
+
+        if (rows?.length) {
+            const row = rows.find((r) => r.resource_key === resourceKey);
+            if (row) {
+                const map = {
+                    create: row.can_create,
+                    read: row.can_read,
+                    update: row.can_update,
+                    delete: row.can_delete,
+                };
+                return !!map[action];
+            }
+        }
+
+        if (action === 'delete') return false;
+        if (action === 'read') {
+            return userHasPermission(service, userId, apartmentId, `${resourceKey}.view`)
+                || userHasPermission(service, userId, apartmentId, `${resourceKey}.edit`);
+        }
+        return userHasPermission(service, userId, apartmentId, `${resourceKey}.edit`);
+    } catch {
+        if (action === 'delete') return false;
+        return userHasPermission(service, userId, apartmentId, `${resourceKey}.edit`);
+    }
+}
+
+export async function requireApartmentCrud(req, apartmentIdRaw, resourceKey, action, fallbackPermission = 'accounts.edit') {
+    const auth = await requireApartmentPermission(req, apartmentIdRaw, fallbackPermission);
+    const allowed = await userCanCrud(auth.service, auth.user.id, auth.apartmentId, resourceKey, action);
+    if (!allowed) {
+        throw Object.assign(new Error(`Not permitted to ${action} ${resourceKey}.`), { status: 403 });
+    }
+    return auth;
+}
+
 /** Accept if the user has any of the listed permissions. */
 export async function requireAnyApartmentPermission(req, apartmentIdRaw, permissionKeys = ['accounts.edit']) {
     const keys = [...new Set((Array.isArray(permissionKeys) ? permissionKeys : [permissionKeys]).filter(Boolean))];

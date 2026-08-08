@@ -11,7 +11,7 @@ import {
     syncMaintenanceIncomeSection,
     validateMaintenanceAllocations,
 } from './maintenanceBilling.js';
-import { ACCOUNTS_SUBVIEW_ROUTES } from './navigation.js';
+import { ACCOUNTS_SUBVIEW_ROUTES, applyNavPermissions, getFinanceAccountsPages } from './navigation.js';
 import { hasClientPermission, isApartmentAdminUser } from './rbac.js';
 import { filesToBase64Payload, postFinanceMutation } from './financeApi.js';
 import { initLedgerExport } from './ledgerExport.js';
@@ -24,6 +24,8 @@ import {
     saveBankOpeningBalance,
 } from './bankReconciliation.js';
 import { withButtonBusy } from './buttonBusy.js';
+import { ACCOUNTS_PAGE_HELP, applyFinancePageHeader, wireFinancePageHelp } from './financePageHelp.js';
+import { canCrud } from './rbacMatrix.js';
 import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from './expenseCategories.js';
 
 const CAT_LABELS = CATEGORY_LABELS;
@@ -371,7 +373,7 @@ const syncBankWalletUI = () => {
 const syncExpenseWalletUI = () => syncBankWalletUI();
 
 const syncWalletPills = (containerId, wallet) => {
-    document.querySelectorAll(`#${containerId} .expense-wallet-pill`).forEach((btn) => {
+    document.querySelectorAll(`#${containerId} .expense-wallet-pill, #${containerId} .ledger-line-wallet__btn`).forEach((btn) => {
         const on = btn.dataset.wallet === wallet;
         btn.classList.toggle('active', on);
         const radio = btn.querySelector('input[type="radio"]');
@@ -382,7 +384,7 @@ const syncWalletPills = (containerId, wallet) => {
 const getActiveWallet = (containerId) => {
     const checked = document.querySelector(`#${containerId} input[type="radio"]:checked`);
     if (checked?.value) return checked.value;
-    return document.querySelector(`#${containerId} .expense-wallet-pill.active`)?.dataset.wallet || 'CASH';
+    return document.querySelector(`#${containerId} .expense-wallet-pill.active, #${containerId} .ledger-line-wallet__btn.active`)?.dataset.wallet || 'CASH';
 };
 
 const resetReceiptUI = (existingPaths = []) => {
@@ -402,10 +404,7 @@ const revokeReceiptPreviewUrls = () => {
     portalState.receiptPreviewObjectUrls = [];
 };
 
-const receiptPreviewHost = () => {
-    const isBill = portalState.cashSaveTarget === 'bill';
-    return document.getElementById(isBill ? 'cash-receipt-preview' : 'cash-ledger-receipt-preview');
-};
+const receiptPreviewHost = () => document.getElementById('cash-receipt-preview');
 
 const isAttachmentPdf = (label = '', key = '') =>
     /\.pdf$/i.test(String(label)) || /\.pdf$/i.test(String(key));
@@ -459,32 +458,20 @@ const hydrateSavedAttachmentThumbs = async (preview, items, gen) => {
 };
 
 const renderReceiptUI = () => {
+    const isBill = portalState.cashSaveTarget === 'bill';
+    // Ledger lines no longer host direct receipt uploads — bills & receipts hold attachments.
+    if (!isBill) {
+        revokeReceiptPreviewUrls();
+        return;
+    }
+
     const preview = receiptPreviewHost();
-    const list = document.getElementById(
-        portalState.cashSaveTarget === 'bill' ? 'cash-receipt-list' : 'cash-ledger-receipt-list',
-    );
-    // Hide the inactive host so bill vs ledger previews never stack
-    const otherPreview = document.getElementById(
-        portalState.cashSaveTarget === 'bill' ? 'cash-ledger-receipt-preview' : 'cash-receipt-preview',
-    );
-    const otherList = document.getElementById(
-        portalState.cashSaveTarget === 'bill' ? 'cash-ledger-receipt-list' : 'cash-receipt-list',
-    );
-    if (otherPreview) {
-        otherPreview.hidden = true;
-        otherPreview.innerHTML = '';
-    }
-    if (otherList) {
-        otherList.hidden = true;
-        otherList.innerHTML = '';
-    }
+    const list = document.getElementById('cash-receipt-list');
 
     revokeReceiptPreviewUrls();
     const gen = ++receiptPreviewRenderGen;
 
-    const isBill = portalState.cashSaveTarget === 'bill';
-    const keptBill = isBill ? (portalState.billKeepAttachments || []) : [];
-    const kept = isBill ? [] : (portalState.pendingReceiptPaths || []);
+    const keptBill = portalState.billKeepAttachments || [];
     const pending = portalState.pendingReceiptFiles || [];
     const items = [
         ...keptBill.map((att, i) => {
@@ -499,13 +486,6 @@ const renderReceiptUI = () => {
                 billKey: key,
             };
         }),
-        ...kept.map((path, i) => ({
-            key: `saved-${i}-${path}`,
-            label: receiptFileName(path),
-            kind: isPdfPath(path) ? 'pdf' : 'image',
-            saved: true,
-            path,
-        })),
         ...pending.map((file, i) => ({
             key: `new-${i}-${file.name}-${file.size}`,
             label: file.name,
@@ -550,9 +530,6 @@ const renderReceiptUI = () => {
         if (item.billKey) {
             viewAttr = `data-view-bill-key="${encodeURIComponent(item.billKey)}"`;
             removeAttr = `data-remove-bill-key="${encodeURIComponent(item.billKey)}"`;
-        } else if (item.saved) {
-            viewAttr = `data-view-path="${encodeURIComponent(item.path)}"`;
-            removeAttr = `data-remove-saved="${encodeURIComponent(item.path)}"`;
         } else {
             viewAttr = `data-view-file="${encodeURIComponent(item.label)}::${item.file?.size || 0}"`;
             removeAttr = `data-remove-file="${encodeURIComponent(item.label)}::${item.file?.size || 0}"`;
@@ -571,15 +548,9 @@ const renderReceiptUI = () => {
         </article>`;
     }).join('');
 
-    preview.querySelectorAll('[data-view-path]').forEach((el) => {
-        el.addEventListener('click', (e) => {
-            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
-            window.viewReceipt(decodeURIComponent(el.dataset.viewPath));
-        });
-    });
     preview.querySelectorAll('[data-view-bill-key]').forEach((el) => {
         el.addEventListener('click', (e) => {
-            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
+            if (e.target.closest('[data-remove-bill-key], [data-remove-file]')) return;
             void viewBillAttachment(
                 decodeURIComponent(el.dataset.viewBillKey),
                 portalState.billKeepAttachments || [],
@@ -588,28 +559,19 @@ const renderReceiptUI = () => {
     });
     preview.querySelectorAll('[data-view-file]').forEach((el) => {
         el.addEventListener('click', (e) => {
-            if (e.target.closest('[data-remove-saved], [data-remove-bill-key], [data-remove-file]')) return;
+            if (e.target.closest('[data-remove-bill-key], [data-remove-file]')) return;
             const token = decodeURIComponent(el.dataset.viewFile);
             const [name, sizeStr] = token.split('::');
             const size = parseInt(sizeStr, 10);
             const file = (portalState.pendingReceiptFiles || []).find((f) => f.name === name && f.size === size);
             if (file) {
-                // Open full gallery with all pending + kept so arrows work across files
                 const gallery = [
-                    ...(isBill ? (portalState.billKeepAttachments || []) : (portalState.pendingReceiptPaths || [])),
+                    ...(portalState.billKeepAttachments || []),
                     ...(portalState.pendingReceiptFiles || []),
                 ];
                 const start = gallery.findIndex((g) => g === file || (g instanceof File && g.name === file.name && g.size === file.size));
                 void window.viewAttachmentGallery?.(gallery, start >= 0 ? start : 0);
             }
-        });
-    });
-    preview.querySelectorAll('[data-remove-saved]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const path = decodeURIComponent(btn.dataset.removeSaved);
-            portalState.pendingReceiptPaths = (portalState.pendingReceiptPaths || []).filter((p) => p !== path);
-            renderReceiptUI();
         });
     });
     preview.querySelectorAll('[data-remove-bill-key]').forEach((btn) => {
@@ -846,7 +808,6 @@ export const initExpenseModal = () => {
     };
     wireReceiptFileInput('cash-bill');
     wireReceiptFileInput('cash-bill-camera');
-    wireReceiptFileInput('cash-bill-ledger');
 
     const wireBankProofInput = (inputId) => {
         const input = document.getElementById(inputId);
@@ -1447,6 +1408,7 @@ export const saveCashData = async () => {
         const existing = portalState.editingFinanceDocId
             ? (portalState.finances.financeDocuments || []).find((d) => d.id === portalState.editingFinanceDocId)
             : null;
+        const linkTxnId = portalState.linkBillToTxnId || existing?.transaction_id || null;
         const keepAttachments = Array.isArray(portalState.billKeepAttachments)
             ? [...portalState.billKeepAttachments]
             : [];
@@ -1470,9 +1432,9 @@ export const saveCashData = async () => {
                     description: [desc, vendor_invoice ? `Inv ${vendor_invoice}` : null].filter(Boolean).join(' · ') || null,
                     sub_category,
                     notes,
-                    transaction_id: existing?.transaction_id || null,
+                    transaction_id: linkTxnId,
                     source: existing?.source || 'manual',
-                    status: existing?.transaction_id
+                    status: linkTxnId
                         ? 'linked'
                         : (payMode === 'unpaid' ? 'unpaid' : 'paid'),
                 },
@@ -1487,13 +1449,19 @@ export const saveCashData = async () => {
                 if (idx >= 0) list[idx] = result.document;
                 else list.unshift(result.document);
             }
+            const linkedFromLedger = !!portalState.linkBillToTxnId;
             portalState.pendingReceiptFiles = [];
             portalState.pendingReceiptPaths = [];
             portalState.billKeepAttachments = [];
             portalState.editingFinanceDocId = null;
+            portalState.linkBillToTxnId = null;
             document.getElementById('cash-modal').classList.remove('active');
             portalState.cashSaveTarget = 'ledger';
-            if (typeof window.switchView === 'function') {
+            if (linkedFromLedger) {
+                if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
+                const { renderFinanceDocumentsPage } = await import('./financeDocuments.js');
+                renderFinanceDocumentsPage();
+            } else if (typeof window.switchView === 'function') {
                 window.switchView('finance-docs');
             } else {
                 const { renderFinanceDocumentsPage } = await import('./financeDocuments.js');
@@ -1565,7 +1533,8 @@ export const saveCashData = async () => {
             keepBankProofPaths: bank_proof_urls,
             removeReceiptPaths: removedPaths,
             removeBankProofPaths: removedBankPaths,
-            newReceiptFiles: !isIncome ? await filesToBase64Payload(portalState.pendingReceiptFiles || []) : [],
+            // Direct ledger receipt uploads removed — attachments live on linked bills/receipts.
+            newReceiptFiles: [],
             newBankProofFiles: wallet === 'BANK' ? await filesToBase64Payload(portalState.pendingBankProofFiles || []) : [],
         });
 
@@ -1774,7 +1743,6 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     const receiptHint = document.getElementById('cash-receipt-hint');
     const billPay = document.getElementById('bill-payment-section');
     const billDocs = document.getElementById('bill-documents-section');
-    const ledgerReceipt = document.getElementById('ledger-receipt-section');
     const expenseInvoiceWrap = document.getElementById('expense-invoice-wrap');
     const billInvoiceWrap = document.getElementById('bill-invoice-wrap');
     const incomeBillInvoiceWrap = document.getElementById('income-bill-invoice-wrap');
@@ -1792,8 +1760,11 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     if (bankSection && isBill) bankSection.hidden = true;
     if (incomeWallet) incomeWallet.hidden = !!isBill;
     if (incomeBank && isBill) incomeBank.hidden = true;
-    if (excludeWrap) excludeWrap.hidden = !!isBill || !isApartmentAdminUser();
-    if (ledgerReceipt) ledgerReceipt.hidden = !!isBill;
+    if (excludeWrap) {
+        excludeWrap.hidden = !!isBill || !isApartmentAdminUser();
+        if (isBill) excludeWrap.style.display = 'none';
+        else excludeWrap.style.removeProperty('display');
+    }
     if (expenseInvoiceWrap) expenseInvoiceWrap.hidden = !!isBill;
     if (billInvoiceWrap) billInvoiceWrap.hidden = !(isBill && !isIncome);
     if (incomeBillInvoiceWrap) incomeBillInvoiceWrap.hidden = !(isBill && isIncome);
@@ -1821,7 +1792,6 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
         if (isIncome) {
             payTitle.textContent = 'Money received?';
             payDesc.textContent = 'Mark how funds arrived, or leave unpaid if this is only an acknowledgement for now.';
-            // Relabel pills for income
             const unpaidBtn = billPay?.querySelector('[data-bill-pay="unpaid"]');
             const cashBtn = billPay?.querySelector('[data-bill-pay="cash"]');
             const chequeBtn = billPay?.querySelector('[data-bill-pay="cheque"]');
@@ -1848,9 +1818,7 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
         billInvoiceLabel.innerHTML = 'Invoice # <span class="expense-optional">(optional)</span>';
     }
     if (receiptHint) {
-        receiptHint.textContent = isBill
-            ? 'Images or PDFs · invoice and payment proof'
-            : 'Upload one or more images or PDFs linked to this ledger entry.';
+        receiptHint.textContent = 'Images or PDFs · invoice and payment proof';
     }
 
     if (!isBill) {
@@ -1888,6 +1856,7 @@ window.openExpense = (wallet = 'CASH', { asBill = true } = {}) => {
     if (!modal) return;
     portalState.editingTxnId = null;
     portalState.editingFinanceDocId = null;
+    portalState.linkBillToTxnId = null;
     portalState.cashModalMode = 'expense';
     portalState.cashSaveTarget = asBill ? 'bill' : 'ledger';
 
@@ -1921,6 +1890,7 @@ window.openIncome = (wallet = 'CASH', { asBill = true } = {}) => {
     if (!modal) return;
     portalState.editingTxnId = null;
     portalState.editingFinanceDocId = null;
+    portalState.linkBillToTxnId = null;
     portalState.cashModalMode = 'income';
     portalState.cashSaveTarget = asBill ? 'bill' : 'ledger';
 
@@ -1957,6 +1927,7 @@ window.openFinanceDocumentEdit = (doc, { readOnly = false } = {}) => {
     const isIncome = doc.kind === 'IN';
     portalState.editingTxnId = null;
     portalState.editingFinanceDocId = doc.id;
+    portalState.linkBillToTxnId = null;
     portalState.cashModalMode = isIncome ? 'income' : 'expense';
     portalState.cashSaveTarget = 'bill';
     portalState.billModalReadOnly = !!readOnly;
@@ -2091,31 +2062,107 @@ const populateLedgerLineCatDatalist = (isIncome) => {
     dl.innerHTML = cats.map((c) => `<option value="${categoryDisplayLabel(c)}"></option>`).join('');
 };
 
-const openLedgerLineModal = (mode = 'expense') => {
+const openLedgerLineModal = (mode = 'expense', txn = null) => {
     const modal = document.getElementById('ledger-line-modal');
     if (!modal) return;
-    const isIncome = mode === 'income';
+    const isIncome = mode === 'income' || txn?.type === 'IN';
     portalState.ledgerLineMode = isIncome ? 'income' : 'expense';
-    document.getElementById('ledger-line-title').textContent = isIncome ? 'Record ledger income' : 'Add ledger expense';
-    document.getElementById('ledger-line-desc').textContent = isIncome
-        ? 'Passbook credit / income line. Use Bills & receipts for supporting documents.'
-        : 'Passbook debit / expense line. Use Bills & receipts for vendor bills and uploads.';
-    document.getElementById('ledger-line-amt').value = '';
-    document.getElementById('ledger-line-date').value = todayISO();
-    document.getElementById('ledger-line-desc-input').value = '';
-    document.getElementById('ledger-line-bank-ref').value = '';
-    document.getElementById('ledger-line-exclude-reports').checked = false;
-    document.getElementById('ledger-line-cat').value = isIncome
-        ? labelForCat('Other Income')
-        : labelForCat('Other');
+    portalState.editingTxnId = txn?.id || null;
+
+    const editing = !!txn?.id;
+    document.getElementById('ledger-line-title').textContent = editing
+        ? (isIncome ? 'Edit income' : 'Edit expense')
+        : (isIncome ? 'Record ledger income' : 'Add ledger expense');
+    document.getElementById('ledger-line-desc').textContent = editing
+        ? 'Update this passbook line. Bills & receipts use the invoice button on the row.'
+        : (isIncome
+            ? 'Passbook credit. Bills & receipts use the invoice button on the row.'
+            : 'Passbook debit. Bills & receipts use the invoice button on the row.');
+    document.getElementById('ledger-line-save-btn').textContent = editing ? 'Save changes' : 'Save ledger line';
+
+    document.getElementById('ledger-line-amt').value = txn ? (txn.amount ?? '') : '';
+    document.getElementById('ledger-line-date').value = txn?.date
+        ? new Date(txn.date).toISOString().slice(0, 10)
+        : todayISO();
+    document.getElementById('ledger-line-desc-input').value = txn?.description || '';
+    document.getElementById('ledger-line-bank-ref').value = txn?.bank_reference || '';
+    document.getElementById('ledger-line-exclude-reports').checked = !!txn?.exclude_from_reports;
+    document.getElementById('ledger-line-cat').value = labelForCat(
+        txn?.cat || (isIncome ? 'Other Income' : 'Other'),
+    );
     populateLedgerLineCatDatalist(isIncome);
-    syncWalletPills('ledger-line-wallet-pills', 'BANK');
+    const wallet = txn?.wallet || 'BANK';
+    syncWalletPills('ledger-line-wallet-pills', wallet);
     const refWrap = document.getElementById('ledger-line-bank-ref-wrap');
-    if (refWrap) refWrap.hidden = false;
-    const excludeWrap = document.querySelector('#ledger-line-modal .expense-form__exclude-reports');
+    if (refWrap) refWrap.hidden = wallet !== 'BANK';
+    const excludeEl = document.getElementById('ledger-line-exclude-reports');
+    const excludeWrap = excludeEl?.closest('.ledger-line-form__exclude');
     if (excludeWrap) excludeWrap.hidden = !isApartmentAdminUser();
+    if (excludeEl && !isApartmentAdminUser()) excludeEl.checked = false;
+    const billBtn = document.getElementById('ledger-line-bill-btn');
+    if (billBtn) billBtn.hidden = !editing;
     modal.classList.add('active');
     setTimeout(() => document.getElementById('ledger-line-amt')?.focus(), 50);
+};
+
+/** Open Add bill / Add receipt form; on save it links to the ledger line being edited. */
+const openBillReceiptFromLedgerLine = () => {
+    const txnId = portalState.editingTxnId;
+    if (!txnId) {
+        alert('Save the ledger line first, then add a bill or receipt.');
+        return;
+    }
+    const isIncome = portalState.ledgerLineMode === 'income';
+    const wallet = getActiveWallet('ledger-line-wallet-pills');
+    const amt = document.getElementById('ledger-line-amt')?.value || '';
+    const dateVal = document.getElementById('ledger-line-date')?.value || todayISO();
+    const catLabel = document.getElementById('ledger-line-cat')?.value || '';
+    const narration = document.getElementById('ledger-line-desc-input')?.value || '';
+    const bankRef = document.getElementById('ledger-line-bank-ref')?.value || '';
+
+    document.getElementById('ledger-line-modal')?.classList.remove('active');
+
+    if (isIncome) {
+        window.openIncome(wallet === 'BANK' ? 'BANK' : 'CASH', { asBill: true });
+        portalState.linkBillToTxnId = txnId;
+        document.getElementById('cash-modal-title').textContent = 'Add receipt';
+        document.getElementById('cash-modal-desc').textContent = 'Save to link this receipt to the ledger line.';
+        document.getElementById('income-amt').value = amt;
+        document.getElementById('income-date').value = dateVal;
+        document.getElementById('income-desc').value = narration;
+        document.getElementById('income-cat-input').value = catLabel || labelForCat('Other Income');
+        const cat = resolveCategory(catLabel, INCOME_CATS);
+        document.getElementById('cash-cat-select').value = cat;
+        syncMaintenanceIncomeSection(cat);
+        syncIncomeExtraSection(cat);
+        if (wallet === 'BANK' && bankRef) {
+            syncBillPaymentUI('online', { onlineRef: bankRef, paidOn: dateVal });
+        } else if (wallet === 'CASH') {
+            syncBillPaymentUI('cash', { paidOn: dateVal });
+        } else {
+            syncBillPaymentUI('cheque', { chequeNo: bankRef, paidOn: dateVal });
+        }
+    } else {
+        window.openExpense(wallet === 'BANK' ? 'BANK' : 'CASH', { asBill: true });
+        portalState.linkBillToTxnId = txnId;
+        document.getElementById('cash-modal-title').textContent = 'Add bill';
+        document.getElementById('cash-modal-desc').textContent = 'Save to link this bill to the ledger line.';
+        document.getElementById('cash-amt').value = amt;
+        document.getElementById('cash-date').value = dateVal;
+        document.getElementById('cash-desc').value = narration;
+        document.getElementById('expense-cat-input').value = catLabel || labelForCat('Other');
+        const cat = resolveCategory(catLabel, EXPENSE_CATS);
+        document.getElementById('cash-cat-select').value = cat;
+        populateSubCatDatalist(cat);
+        if (wallet === 'BANK' && bankRef) {
+            syncBillPaymentUI('cheque', { chequeNo: bankRef, paidOn: dateVal });
+        } else if (wallet === 'CASH') {
+            syncBillPaymentUI('cash', { paidOn: dateVal });
+        } else {
+            syncBillPaymentUI('unpaid');
+        }
+    }
+    setBillModalReadOnly(false);
 };
 
 window.openLedgerExpense = () => openLedgerLineModal('expense');
@@ -2141,35 +2188,46 @@ export const saveLedgerLineData = async () => {
     const apartment_id = portalState.access?.activeApartmentId;
     if (!apartment_id) return alert('No active apartment selected.');
 
+    const editingId = portalState.editingTxnId;
+    const existing = editingId
+        ? (portalState.finances.txns || []).find((t) => t.id === editingId)
+        : null;
+
     try {
         const result = await postFinanceMutation('saveTransaction', {
             apartment_id,
             transaction: {
-                id: crypto.randomUUID(),
+                id: editingId || crypto.randomUUID(),
                 apartment_id,
                 amount: amt,
                 cat,
+                sub_category: existing?.sub_category || null,
+                vendor_name: existing?.vendor_name || null,
+                vendor_invoice: existing?.vendor_invoice || null,
                 description: desc,
                 wallet,
                 type: isIncome ? 'IN' : 'OUT',
                 date: new Date(`${dateStr}T12:00:00`).toISOString(),
-                bank_payment_type: wallet === 'BANK' ? 'NEFT' : null,
+                bank_payment_type: wallet === 'BANK'
+                    ? (existing?.bank_payment_type || 'NEFT')
+                    : null,
                 bank_reference,
                 exclude_from_reports: excludeFromReports,
-                receipt_urls: [],
-                bank_proof_urls: [],
+                receipt_urls: existing ? getReceiptPaths(existing) : [],
+                bank_proof_urls: existing && wallet === 'BANK' ? getBankProofPaths(existing) : [],
             },
             allocations: [],
-            keepReceiptPaths: [],
-            keepBankProofPaths: [],
+            keepReceiptPaths: existing ? getReceiptPaths(existing) : [],
+            keepBankProofPaths: existing && wallet === 'BANK' ? getBankProofPaths(existing) : [],
             removeReceiptPaths: [],
-            removeBankProofPaths: [],
+            removeBankProofPaths: existing && wallet !== 'BANK' ? getBankProofPaths(existing) : [],
             newReceiptFiles: [],
             newBankProofFiles: [],
         });
         if (result.transaction) applySavedTransactionLocally(result.transaction);
         processFinances();
         renderCashLedger();
+        portalState.editingTxnId = null;
         document.getElementById('ledger-line-modal')?.classList.remove('active');
     } catch (err) {
         alert(err?.message || 'Could not save ledger line.');
@@ -2179,23 +2237,60 @@ window.saveLedgerLineData = saveLedgerLineData;
 
 export const syncAccountsHeaderActions = (sv) => {
     const bills = sv === 'finance-docs';
-    const ledger = sv === 'ledger' || sv === 'bank-recon' || sv === 'activity';
-    const standalone = sv === 'expense-plan';
+    const ledger = sv === 'ledger' || sv === 'bank-recon';
+    const standalone = sv === 'activity';
     document.querySelectorAll('[data-accounts-actions]').forEach((el) => {
         const kind = el.dataset.accountsActions;
         if (kind === 'bills') el.hidden = !bills;
         else if (kind === 'ledger') el.hidden = !ledger;
     });
-    // Staff with bills_entry only: keep Add bill/receipt; hide Bank Sync.
-    const staffOnly = hasClientPermission('accounts.bills_entry') && !hasClientPermission('accounts.edit');
-    const bankSync = document.querySelector('#accounts-header-actions [onclick*="openBankSnapshot"]');
-    if (bankSync) bankSync.hidden = staffOnly || standalone;
+    // Bank Sync is ledger/admin — hide unless the user can view/edit accounts (fail closed).
+    const canUseBankSync = hasClientPermission('accounts.edit') || hasClientPermission('accounts.view');
+    const bankSync = document.getElementById('btn-accounts-bank-sync')
+        || document.querySelector('#accounts-header-actions [onclick*="openBankSnapshot"]');
+    if (bankSync) bankSync.hidden = standalone || !canUseBankSync;
 
-    // Expense plan is a Finance sidebar page — not part of the Income & Expenses tab strip.
+    // Activity Log is Administration — hide the Finance tab strip there.
     const tabs = document.querySelector('.accounts-subview-tabs');
     if (tabs) tabs.hidden = standalone;
-    const title = document.querySelector('#view-accounts .ledger-page-header__title h2');
-    if (title) title.textContent = standalone ? 'Expense plan' : 'Income & Expenses';
+
+    const help = ACCOUNTS_PAGE_HELP[sv] || ACCOUNTS_PAGE_HELP.ledger;
+    applyFinancePageHeader({
+        titleId: 'accounts-page-title',
+        descId: 'accounts-page-desc',
+        help: standalone
+            ? ACCOUNTS_PAGE_HELP.activity
+            : help,
+    });
+    // Close help when switching tabs so content isn't stale under the wrong title.
+    const helpPop = document.getElementById('accounts-page-help');
+    const helpBtn = document.getElementById('accounts-page-help-btn');
+    if (helpPop && !helpPop.hidden) {
+        helpPop.hidden = true;
+        helpBtn?.setAttribute('aria-expanded', 'false');
+    }
+};
+window.syncAccountsHeaderActions = syncAccountsHeaderActions;
+
+const escTabLabel = (s) => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+/** Build top tabs from the same Finance nav list as the sidebar. */
+export const renderAccountsSubviewTabs = (activeSubview = 'ledger') => {
+    const nav = document.querySelector('.accounts-subview-tabs');
+    if (!nav) return;
+    const pages = getFinanceAccountsPages();
+    nav.innerHTML = pages.map((page) => {
+        const active = page.subview === activeSubview;
+        return `
+          <button type="button"${active ? ' class="active" aria-current="page"' : ''} data-accounts-subview="${page.subview}">
+            <i class="fa-solid ${page.icon}" aria-hidden="true"></i>
+            <span>${escTabLabel(page.label)}</span>
+          </button>`;
+    }).join('');
 };
 
 const wireAccountsHeaderActionButtons = () => {
@@ -2209,6 +2304,9 @@ const wireAccountsHeaderActionButtons = () => {
     document.getElementById('ledger-line-save-btn')?.addEventListener('click', () => {
         void withButtonBusy(document.getElementById('ledger-line-save-btn'), 'Saving…', saveLedgerLineData);
     });
+    document.getElementById('ledger-line-bill-btn')?.addEventListener('click', () => {
+        openBillReceiptFromLedgerLine();
+    });
     document.getElementById('ledger-line-wallet-pills')?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-wallet]');
         if (!btn) return;
@@ -2219,6 +2317,10 @@ const wireAccountsHeaderActionButtons = () => {
 };
 
 export const delTxn = async (id) => {
+    if (!canCrud('accounts', 'delete')) {
+        alert('You do not have permission to delete ledger entries.');
+        return;
+    }
     if (confirm('Delete Record?')) {
         await postFinanceMutation('deleteTransaction', {
             apartment_id: portalState.access?.activeApartmentId,
@@ -2236,61 +2338,10 @@ export const delTxn = async (id) => {
 window.delTxn = delTxn;
 
 window.editTxn = (id) => {
-    const t = portalState.finances.txns.find(x => x.id == id);
+    const t = portalState.finances.txns.find((x) => x.id == id);
     if (!t) return;
-    portalState.editingTxnId = id;
-    portalState.cashSaveTarget = 'ledger';
-    const isIncome = t.type === 'IN';
-    portalState.cashModalMode = isIncome ? 'income' : 'expense';
-    const dateVal = t.date ? new Date(t.date).toISOString().slice(0, 10) : todayISO();
-
-    if (isIncome) {
-        document.getElementById('expense-form-view').style.display = 'none';
-        document.getElementById('income-form-view').style.display = 'grid';
-        document.getElementById('cash-modal-title').textContent = 'Edit Income';
-        document.getElementById('cash-modal-desc').textContent = 'Update this passbook ledger line.';
-        document.getElementById('save-cash-btn').textContent = 'Save Changes';
-        document.getElementById('income-amt').value = t.amount;
-        document.getElementById('income-desc').value = t.description || '';
-        document.getElementById('income-date').value = dateVal;
-        document.getElementById('income-cat-input').value = labelForCat(t.cat);
-        syncWalletPills('income-wallet-pills', t.wallet || 'CASH');
-        syncBankTypePills(t.bank_payment_type || 'CHEQUE');
-        document.getElementById('income-bank-ref').value = t.bank_reference || '';
-        document.getElementById('txn-exclude-reports').checked = !!t.exclude_from_reports;
-        resetBankProofUI(getBankProofPaths(t));
-        syncBankWalletUI();
-        resetReceiptUI([]);
-        syncMaintenanceIncomeSection(t.cat, id);
-        syncIncomeExtraSection(t.cat, t);
-    } else {
-        document.getElementById('expense-form-view').style.display = 'grid';
-        document.getElementById('income-form-view').style.display = 'none';
-        document.getElementById('cash-modal-title').textContent = 'Edit Expense';
-        document.getElementById('cash-modal-desc').textContent = 'Update this passbook ledger line.';
-        document.getElementById('save-cash-btn').textContent = 'Save Changes';
-        document.getElementById('cash-amt').value = t.amount;
-        document.getElementById('cash-desc').value = t.description || '';
-        document.getElementById('expense-vendor-input').value = t.vendor_name || '';
-        document.getElementById('expense-invoice-input').value = t.vendor_invoice || '';
-        document.getElementById('cash-date').value = dateVal;
-        document.getElementById('expense-cat-input').value = labelForCat(t.cat);
-        document.getElementById('expense-subcat-input').value = t.sub_category || '';
-        populateSubCatDatalist(t.cat);
-        syncWalletPills('expense-wallet-pills', t.wallet || 'CASH');
-        syncBankTypePills(t.bank_payment_type || 'CHEQUE');
-        document.getElementById('expense-bank-ref').value = t.bank_reference || '';
-        document.getElementById('txn-exclude-reports').checked = !!t.exclude_from_reports;
-        resetBankProofUI(getBankProofPaths(t));
-        syncExpenseWalletUI();
-        resetReceiptUI(getReceiptPaths(t));
-    }
-
-    document.getElementById('cash-cat-select').value = t.cat;
-    document.getElementById('cash-wallet-select').value = t.wallet || 'CASH';
-    applyCashModalChrome({ isIncome, isBill: false });
-    setBillModalReadOnly(false);
-    document.getElementById('cash-modal').classList.add('active');
+    // Ledger edit uses the lean passbook modal — not the bill/receipt form.
+    openLedgerLineModal(t.type === 'IN' ? 'income' : 'expense', t);
 };
 
 const ROUTE_TO_ACCOUNTS_SUBVIEW = Object.fromEntries(
@@ -2299,12 +2350,20 @@ const ROUTE_TO_ACCOUNTS_SUBVIEW = Object.fromEntries(
 
 export const syncAccountsSubViewTabs = (route) => {
     const subview = ROUTE_TO_ACCOUNTS_SUBVIEW[route] || 'ledger';
+    const nav = document.querySelector('.accounts-subview-tabs');
+    if (nav && !nav.querySelector('[data-accounts-subview]')) {
+        renderAccountsSubviewTabs(subview);
+        wireAccountsSubviewTabClicks();
+    }
     document.querySelectorAll('[data-accounts-subview]').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.accountsSubview === subview);
+        const active = btn.dataset.accountsSubview === subview;
+        btn.classList.toggle('active', active);
+        if (active) btn.setAttribute('aria-current', 'page');
+        else btn.removeAttribute('aria-current');
     });
 };
 
-export const initAccountsSubViewTabs = () => {
+const wireAccountsSubviewTabClicks = () => {
     document.querySelectorAll('[data-accounts-subview]').forEach((btn) => {
         if (btn.dataset.wired) return;
         btn.dataset.wired = '1';
@@ -2313,10 +2372,52 @@ export const initAccountsSubViewTabs = () => {
             if (route && typeof window.switchView === 'function') window.switchView(route);
         });
     });
+};
+
+export const initAccountsSubViewTabs = () => {
+    renderAccountsSubviewTabs('ledger');
+    wireAccountsSubviewTabClicks();
+    // Tabs are lazy-mounted with the accounts view — re-apply after they exist so
+    // the strip matches sidebar permission filtering (e.g. bills_entry-only roles).
+    applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
     initLedgerTableControls();
     initLedgerBulkBar();
     wireAccountsHeaderActionButtons();
+    wireFinancePageHelp({
+        btnId: 'accounts-page-help-btn',
+        popoverId: 'accounts-page-help',
+        getHelp: () => {
+            const active = document.querySelector('[data-accounts-subview].active')?.dataset?.accountsSubview;
+            const tabsHidden = document.querySelector('.accounts-subview-tabs')?.hidden;
+            if (tabsHidden) return ACCOUNTS_PAGE_HELP.activity;
+            return ACCOUNTS_PAGE_HELP[active] || ACCOUNTS_PAGE_HELP.ledger;
+        },
+    });
     syncAccountsHeaderActions('ledger');
+
+    if (!document.documentElement.dataset.crudAccessLedgerWired) {
+        document.documentElement.dataset.crudAccessLedgerWired = '1';
+        document.addEventListener('crud-access-loaded', () => {
+            if (!document.getElementById('view-accounts') && !document.getElementById('view-invoices')) return;
+            void (async () => {
+                try {
+                    const { syncLedgerBulkBar } = await import('./ledgerTable.js');
+                    syncLedgerBulkBar();
+                } catch { /* ignore */ }
+                window.renderCashLedger?.();
+                try {
+                    const { renderFinanceDocumentsPage } = await import('./financeDocuments.js');
+                    if (document.getElementById('subview-finance-docs')) renderFinanceDocumentsPage();
+                } catch { /* ignore */ }
+                try {
+                    const { renderExpensePlanPage } = await import('./expensePlan.js');
+                    if (document.getElementById('subview-expense-plan')) renderExpensePlanPage();
+                } catch { /* ignore */ }
+                window.renderBankReconciliation?.();
+                window.renderInvoicesPage?.();
+            })();
+        });
+    }
 };
 
 const populateLedgerCategoryFilter = () => {

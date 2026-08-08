@@ -311,7 +311,7 @@ export function createApiSupabaseClient(realClient) {
     };
 }
 
-export async function fetchApartmentState(apartmentId, domain = 'core') {
+export async function fetchApartmentState(apartmentId, domain = 'core', { signal } = {}) {
     const params = new URLSearchParams({
         apartment_id: apartmentId,
         domain,
@@ -319,6 +319,7 @@ export async function fetchApartmentState(apartmentId, domain = 'core') {
     const res = await fetch(`/api/state?${params}`, {
         method: 'GET',
         ...API_FETCH_OPTS,
+        signal,
     });
     const { ok, json, error } = await readApiJson(res);
     if (!ok) throw new Error(json?.error || error || 'State load failed.');

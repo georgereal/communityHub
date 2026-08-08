@@ -50,6 +50,15 @@ export async function ensureViewMounted(viewId) {
             }
         }
 
+        // Lazy HTML (e.g. accounts tab strip) is missing at boot — re-apply after mount.
+        try {
+            const { applyNavPermissions } = await import('../navigation.js');
+            const { portalState, supabase } = await import('../store.js');
+            applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
+        } catch (err) {
+            console.warn(`[viewShell] Permission refresh failed for ${viewId}:`, err);
+        }
+
         return section;
     })();
 

@@ -7,6 +7,7 @@ import { postFinanceMutation } from './financeApi.js';
 import { withButtonBusy } from './buttonBusy.js';
 import { getBookBalanceSummary } from './financeAnalytics.js';
 import { hasClientPermission } from './rbac.js';
+import { canCrud } from './rbacMatrix.js';
 import { wireClassifyCombobox, setClassifyInputState } from './classifyCombobox.js';
 
 const formatMoney = (n) =>
@@ -30,28 +31,35 @@ let editingItemId = null;
 let editingRecurringId = null;
 
 const canEditPlan = () => hasClientPermission('accounts.edit');
+const canDeletePlan = () => canCrud('accounts', 'delete');
 
 const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
   if (!canEditPlan()) return '';
+  const del = canDeletePlan()
+    ? `<button type="button" class="btn btn-outline btn--small btn--icon" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
+      <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+    </button>`
+    : '';
   return `<td class="eplan-actions">
     <button type="button" class="btn btn-outline btn--small btn--icon" ${editAttr}="${esc(editValue)}" title="Edit" aria-label="Edit">
       <i class="fa-solid fa-pen" aria-hidden="true"></i>
     </button>
-    <button type="button" class="btn btn-outline btn--small btn--icon" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
-      <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-    </button>
+    ${del}
   </td>`;
 };
 
 const detailActionsHtml = ({ editAttr, editValue, delAttr, delValue, delLabel }) => {
   if (!canEditPlan()) return '';
+  const del = canDeletePlan()
+    ? `<button type="button" class="btn btn-outline btn--small btn--danger" ${delAttr}="${esc(delValue)}">
+      <i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${esc(delLabel || 'Delete')}
+    </button>`
+    : '';
   return `<div class="eplan-detail__actions">
     <button type="button" class="btn btn-outline btn--small" ${editAttr}="${esc(editValue)}">
       <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
     </button>
-    <button type="button" class="btn btn-outline btn--small btn--danger" ${delAttr}="${esc(delValue)}">
-      <i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${esc(delLabel || 'Delete')}
-    </button>
+    ${del}
   </div>`;
 };
 
@@ -721,6 +729,10 @@ export const initExpensePlanPage = () => {
     if (delItem) {
       e.preventDefault();
       e.stopPropagation();
+      if (!canDeletePlan()) {
+        alert('You do not have permission to delete expense plan items.');
+        return;
+      }
       const id = delItem.getAttribute('data-eplan-del-item');
       if (!id || !confirm('Remove this planned item?')) return;
       void withButtonBusy(delItem, '…', async () => {
@@ -738,6 +750,10 @@ export const initExpensePlanPage = () => {
     if (delRec) {
       e.preventDefault();
       e.stopPropagation();
+      if (!canDeletePlan()) {
+        alert('You do not have permission to delete expense plan templates.');
+        return;
+      }
       const id = delRec.getAttribute('data-eplan-del-recurring');
       if (!id || !confirm('Delete this recurring template? Future planned occurrences will disappear.')) return;
       void withButtonBusy(delRec, '…', async () => {

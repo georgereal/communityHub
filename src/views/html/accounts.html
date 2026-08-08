@@ -1,7 +1,17 @@
       <section id="view-accounts" class="content-view">
         <header class="ledger-page-header ledger-page-header--compact">
           <div class="header-title ledger-page-header__title">
-            <h2>Income & Expenses</h2>
+            <div class="page-heading">
+              <h2 id="accounts-page-title">Income & Expenses</h2>
+              <button type="button" class="page-help-btn" id="accounts-page-help-btn"
+                aria-expanded="false" aria-controls="accounts-page-help"
+                title="How to use this page">
+                <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                <span class="visually-hidden">Help</span>
+              </button>
+              <div id="accounts-page-help" class="page-help-popover" hidden role="dialog" aria-label="Page help"></div>
+            </div>
+            <p id="accounts-page-desc" class="ledger-page-header__subtitle">Cash and bank passbook for this society.</p>
           </div>
           <div class="ledger-page-header__actions" id="accounts-header-actions">
             <div class="accounts-header-actions-group" data-accounts-actions="ledger">
@@ -28,7 +38,7 @@
                 <span class="fdoc-action-short">Receipt</span>
               </button>
             </div>
-            <button class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
+            <button id="btn-accounts-bank-sync" class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
               <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
               <span class="fdoc-action-full">Bank Sync</span>
               <span class="fdoc-action-short">Sync</span>
@@ -36,14 +46,7 @@
           </div>
         </header>
 
-        <nav class="accounts-subview-tabs accounts-subview-tabs--compact" aria-label="Income and expenses views">
-          <button type="button" class="active" data-accounts-subview="ledger">Ledger</button>
-          <button type="button" data-accounts-subview="finance-docs">Bills &amp; receipts</button>
-          <button type="button" data-accounts-subview="reports">Financial Reports</button>
-          <button type="button" data-accounts-subview="invoices-raised">Invoices Raised</button>
-          <button type="button" data-accounts-subview="bank-recon">Bank Reconciliation</button>
-          <button type="button" data-accounts-subview="activity">Activity Log</button>
-        </nav>
+        <nav class="accounts-subview-tabs accounts-subview-tabs--compact" aria-label="Income and expenses views"></nav>
 
         <div id="subview-ledger" class="ledger-subview">
           <div class="ledger-kpi-bar" aria-label="Account balances">
@@ -760,7 +763,7 @@
             <div class="raised-page-toolbar__left">
               <div>
                 <h3 class="fa-panel__title" style="margin:0;">Invoices raised</h3>
-                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">Full Excel row in DB. Type in the filter row under each column — amounts support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</p>
+                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">Data from invoices raised in tools like NoBroker or MyGate — upload Excel and filter for financial tracking. Amount filters support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</p>
               </div>
               <p id="raised-page-meta" class="raised-page-meta"></p>
             </div>

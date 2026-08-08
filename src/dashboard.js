@@ -1,14 +1,16 @@
 /**
- * Staff dashboard — society overview, action items, quick actions.
+ * Staff dashboard — progressive section loads after slim workspace boot.
+ * Navigation abort cancels in-flight core / summary / ops pulls.
  */
 import './dashboard.css';
-import { portalState, isDomainLoaded } from './store.js';
+import { portalState, isDomainLoaded, loadStateDomain } from './store.js';
 import { hasClientPermission } from './rbac.js';
 import { isModuleEnabled } from './moduleAccess.js';
 import { invoiceBalance, invoiceStatus } from './maintenanceBilling.js';
 import { effectiveAllocationType } from './registry.js';
 import { getActiveLedgerTxns, getLedgerBankBalance } from './ledgerBalance.js';
 import { readApiJson } from './apiJson.js';
+import { isNavigationCurrent } from './accessLocks.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
@@ -30,6 +32,7 @@ const esc = (s) => String(s ?? '')
 /** Cached lightweight finance KPIs from /api/dashboard-summary (not full finance domain). */
 let dashboardSummaryCache = { apartmentId: null, at: 0, summary: null, promise: null };
 let dashboardApartmentDataAt = 0;
+let dashboardRenderGeneration = 0;
 
 export function clearDashboardSummaryCache() {
     dashboardSummaryCache = { apartmentId: null, at: 0, summary: null, promise: null };
@@ -45,11 +48,11 @@ export function seedDashboardSummary(apartmentId, summary) {
     };
 }
 
-async function fetchDashboardSummary({ force = false } = {}) {
+async function fetchDashboardSummary({ force = false, signal } = {}) {
     const apartmentId = portalState.access?.activeApartmentId;
     if (!apartmentId) return null;
+    if (signal?.aborted) return null;
 
-    // Prefer in-memory finance domain when already loaded (Accounts / Billing visited).
     if (!force && isDomainLoaded('finance')) {
         return {
             billing: computeBillingStats(),
@@ -71,9 +74,18 @@ async function fetchDashboardSummary({ force = false } = {}) {
     dashboardSummaryCache.apartmentId = apartmentId;
     dashboardSummaryCache.promise = (async () => {
         const params = new URLSearchParams({ apartment_id: apartmentId });
+        const headers = {};
+        try {
+            const { supabase } = await import('./store.js');
+            const { data } = await supabase?.auth.getSession() || {};
+            const token = data?.session?.access_token;
+            if (token) headers.Authorization = `Bearer ${token}`;
+        } catch { /* cookie fallback */ }
         const res = await fetch(`/api/dashboard-summary?${params}`, {
             method: 'GET',
             credentials: 'include',
+            headers,
+            signal,
         });
         const { ok, json, error } = await readApiJson(res);
         if (!ok) throw new Error(json?.error || error || 'Dashboard summary failed.');
@@ -87,6 +99,7 @@ async function fetchDashboardSummary({ force = false } = {}) {
         return summary;
     })().catch((err) => {
         dashboardSummaryCache.promise = null;
+        if (err?.name === 'AbortError' || signal?.aborted) return null;
         console.warn('[dashboard] summary load failed:', err?.message || err);
         return null;
     });
@@ -227,12 +240,9 @@ function syncStatusInfo(syncFromSummary = null) {
     return { status, at, message: s.last_sync_message || '' };
 }
 
-async function buildActionItems(parking, billing, ops, syncInfo) {
+function buildActionItems(parking, billing, ops, syncInfo) {
     const items = [];
     const can = (perm) => hasClientPermission(perm);
-
-    // Skip extra audit round-trips on first paint — action items stay finance/ops based.
-    // Vehicle/activity audit badges refresh when those pages are opened.
 
     if ((parking.overlimitCars + parking.overlimitBikes) > 0 && can('vehicle_registry.view')) {
         items.push({
@@ -365,12 +375,16 @@ function buildQuickActions() {
     return actions;
 }
 
-function statCard(label, value, { tone = '', sub = '' } = {}) {
-    return `<div class="dashboard-stat metric-card">
+function statCard(label, value, { tone = '', sub = '', loading = false } = {}) {
+    return `<div class="dashboard-stat metric-card${loading ? ' dashboard-stat--loading' : ''}">
       <span class="label">${esc(label)}</span>
-      <span class="value dashboard-stat__value${tone ? ` value--${tone}` : ''}">${esc(value)}</span>
+      <span class="value dashboard-stat__value${tone ? ` value--${tone}` : ''}">${loading ? '…' : esc(value)}</span>
       ${sub ? `<span class="dashboard-stat__sub">${esc(sub)}</span>` : ''}
     </div>`;
+}
+
+function skeletonCard(label) {
+    return statCard(label, '…', { loading: true, sub: 'Loading…' });
 }
 
 function renderActionItem(item) {
@@ -384,111 +398,155 @@ function renderActionItem(item) {
     </button>`;
 }
 
-export async function renderDashboard() {
+function wireDashboardClicks(root) {
+    root.querySelectorAll('[data-dash-route]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const route = btn.dataset.dashRoute;
+            if (route) window.switchView?.(route);
+        });
+    });
+    root.querySelectorAll('[data-dash-action="expense-cash"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            window.switchView?.('finance-ledger');
+            window.openExpense?.('CASH');
+        });
+    });
+}
+
+function stillActive(signal, generation) {
+    if (signal?.aborted) return false;
+    if (generation != null && !isNavigationCurrent(generation)) return false;
+    if (generation != null && generation !== dashboardRenderGeneration) return false;
+    return !!document.getElementById('view-dashboard')?.classList.contains('active');
+}
+
+function paintGlance(el, { parking, billing, finance, ops, financeReady, parkingReady, opsReady }) {
+    if (!el) return;
+    const occupancy = !parkingReady
+        ? '…'
+        : (parking.occupancyPct == null ? '—' : `${parking.occupancyPct}%`);
+
+    el.innerHTML = `
+      <h3 class="dashboard-section__title">At a glance</h3>
+      <div class="dashboard-stats">
+        ${hasClientPermission('vehicle_registry.view')
+        ? (parkingReady
+            ? statCard('Active vehicles', `${parking.cars + parking.bikes}`, {
+                sub: `${parking.cars} cars · ${parking.bikes} bikes`,
+            })
+            : skeletonCard('Active vehicles'))
+        : ''}
+        ${hasClientPermission('vehicle_registry.view')
+        ? (parkingReady
+            ? statCard('Parking occupancy', occupancy, {
+                tone: parking.occupancyPct != null && parking.occupancyPct > 90 ? 'danger' : 'accent',
+            })
+            : skeletonCard('Parking occupancy'))
+        : ''}
+        ${hasClientPermission('accounts.view')
+        ? (financeReady
+            ? statCard('Outstanding dues', formatMoney(billing.outstanding), {
+                tone: billing.outstanding > 0 ? 'danger' : 'success',
+                sub: `${billing.openCount} open invoice(s)`,
+            })
+            : skeletonCard('Outstanding dues'))
+        : ''}
+        ${hasClientPermission('accounts.view')
+        ? (financeReady
+            ? statCard('MTD collections', formatMoney(finance.monthIn), {
+                tone: 'success',
+                sub: `Expenses ${formatMoney(finance.monthOut)}`,
+            })
+            : skeletonCard('MTD collections'))
+        : ''}
+        ${hasClientPermission('apartment_mgmt.view')
+        ? (opsReady
+            ? statCard('Open tickets', String(ops.openTickets), {
+                tone: ops.openTickets > 0 ? 'danger' : '',
+            })
+            : skeletonCard('Open tickets'))
+        : ''}
+        ${hasClientPermission('accounts.view')
+        ? (financeReady
+            ? statCard('Bank balance', finance.bankBalance != null ? formatMoney(finance.bankBalance) : '—', {
+                sub: finance.bankNeedsOpening
+                    ? 'Set opening balance in Bank Reconciliation'
+                    : (finance.bankAsOf ? `Balance as on ${formatAsOn(finance.bankAsOf)}` : ''),
+            })
+            : skeletonCard('Bank balance'))
+        : ''}
+        ${hasClientPermission('accounts.view')
+        ? (financeReady
+            ? statCard('Petty cash', formatMoney(finance.cashBalance))
+            : skeletonCard('Petty cash'))
+        : ''}
+      </div>`;
+}
+
+function paintActions(el, items, loading) {
+    if (!el) return;
+    el.innerHTML = `
+      <h3 class="dashboard-section__title">Needs attention</h3>
+      ${loading
+        ? `<p class="dashboard-empty dashboard-empty--loading"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Checking action items…</p>`
+        : (items.length
+            ? `<div class="dashboard-action-list">${items.map(renderActionItem).join('')}</div>`
+            : `<p class="dashboard-empty"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> All caught up — nothing urgent right now.</p>`)}`;
+    if (!loading) wireDashboardClicks(el);
+}
+
+function paintSync(el, syncInfo) {
+    if (!el) return;
+    if (!(syncInfo && hasClientPermission('setup.view'))) {
+        el.hidden = true;
+        el.innerHTML = '';
+        return;
+    }
+    el.hidden = false;
+    el.className = `dashboard-section dashboard-sync-banner dashboard-sync-banner--${esc(String(syncInfo.status).toLowerCase())}`;
+    el.innerHTML = `
+      <i class="fa-solid fa-table" aria-hidden="true"></i>
+      <div>
+        <strong>Spreadsheet sync · ${esc(syncInfo.status)}</strong>
+        <span>Last run ${esc(syncInfo.at)}${syncInfo.message ? ` — ${esc(syncInfo.message.slice(0, 120))}` : ''}</span>
+      </div>
+      <button type="button" class="btn btn-outline btn--small" data-dash-route="admin-sync">Open sync</button>`;
+    wireDashboardClicks(el);
+}
+
+export async function renderDashboard({ signal, generation } = {}) {
     const root = document.getElementById('dashboard-root');
     if (!root) return;
 
+    dashboardRenderGeneration = generation ?? (dashboardRenderGeneration + 1);
+    const gen = dashboardRenderGeneration;
     const aptName = getActiveApartmentName();
-    const parking = computeParkingStats();
-    const ops = computeOpsStats();
     const wantsFinance = hasClientPermission('accounts.view') || hasClientPermission('setup.view');
-
-    if (wantsFinance && !isDomainLoaded('finance') && !dashboardSummaryCache.summary) {
-        root.innerHTML = `
-          <header class="dashboard-header">
-            <div class="dashboard-header__title">
-              <p class="dashboard-header__eyebrow">Dashboard</p>
-              <h2 class="page-title">${esc(aptName)}</h2>
-              <p class="dashboard-header__subtitle">${parking.units} unit(s) in workspace · Loading summary…</p>
-            </div>
-          </header>
-          <p class="dashboard-empty">Fetching dashboard totals…</p>`;
-    }
-
-    const summary = wantsFinance ? await fetchDashboardSummary() : null;
-    const billing = summary?.billing || { outstanding: 0, openCount: 0, flatsWithDues: 0 };
-    const finance = summary?.finance || {
-        monthIn: 0,
-        monthOut: 0,
-        cashBalance: 0,
-        bankBalance: null,
-        bankAsOf: null,
-        bankNeedsOpening: false,
-    };
-    const financeReady = !!summary;
-    const syncInfo = syncStatusInfo(summary?.sync);
-    const actions = await buildActionItems(parking, billing, ops, syncInfo);
+    const wantsParking = hasClientPermission('vehicle_registry.view');
+    const wantsOps = hasClientPermission('apartment_mgmt.view') || hasClientPermission('apartment_mgmt.edit');
     const quickActions = buildQuickActions();
 
-    const occupancy = parking.occupancyPct == null ? '—' : `${parking.occupancyPct}%`;
-    const lastPull = summary?.meta?.at || portalState.lastPullMeta?.at;
-    const lastPullLabel = lastPull
-        ? new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
-        : null;
+    const parkingReady = isDomainLoaded('core');
+    const parking = parkingReady ? computeParkingStats() : {
+        units: 0, cars: 0, bikes: 0, overlimitCars: 0, overlimitBikes: 0, occupancyPct: null, baseCapacity: 0,
+    };
 
     root.innerHTML = `
       <header class="dashboard-header">
         <div class="dashboard-header__title">
           <p class="dashboard-header__eyebrow">Dashboard</p>
           <h2 class="page-title">${esc(aptName)}</h2>
-          <p class="dashboard-header__subtitle">
-            ${parking.units} unit(s) in workspace
-            ${lastPullLabel ? ` · Data refreshed ${esc(lastPullLabel)}` : ''}
+          <p class="dashboard-header__subtitle" data-dash-subtitle>
+            ${parkingReady ? `${parking.units} unit(s) in workspace` : 'Loading society data…'}
           </p>
         </div>
       </header>
 
-      <section class="dashboard-section" aria-label="Summary">
-        <h3 class="dashboard-section__title">At a glance</h3>
-        <div class="dashboard-stats">
-          ${hasClientPermission('vehicle_registry.view') ? statCard('Active vehicles', `${parking.cars + parking.bikes}`, {
-        sub: `${parking.cars} cars · ${parking.bikes} bikes`,
-    }) : ''}
-          ${hasClientPermission('vehicle_registry.view') ? statCard('Parking occupancy', occupancy, {
-        tone: parking.occupancyPct != null && parking.occupancyPct > 90 ? 'danger' : 'accent',
-    }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Outstanding dues', financeReady ? formatMoney(billing.outstanding) : '—', {
-        tone: financeReady && billing.outstanding > 0 ? 'danger' : (financeReady ? 'success' : ''),
-        sub: financeReady ? `${billing.openCount} open invoice(s)` : 'Could not load summary',
-    }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('MTD collections', financeReady ? formatMoney(finance.monthIn) : '—', {
-        tone: financeReady ? 'success' : '',
-        sub: financeReady ? `Expenses ${formatMoney(finance.monthOut)}` : 'Could not load summary',
-    }) : ''}
-          ${hasClientPermission('apartment_mgmt.view') ? statCard('Open tickets', String(ops.openTickets), {
-        tone: ops.openTickets > 0 ? 'danger' : '',
-    }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Bank balance', financeReady && finance.bankBalance != null ? formatMoney(finance.bankBalance) : '—', {
-        sub: !financeReady
-            ? 'Could not load summary'
-            : (finance.bankNeedsOpening
-                ? 'Set opening balance in Bank Reconciliation'
-                : (finance.bankAsOf ? `Balance as on ${formatAsOn(finance.bankAsOf)}` : '')),
-    }) : ''}
-          ${hasClientPermission('accounts.view') ? statCard('Petty cash', financeReady ? formatMoney(finance.cashBalance) : '—', {
-        sub: financeReady ? '' : 'Could not load summary',
-    }) : ''}
-        </div>
-      </section>
-
-      ${syncInfo && hasClientPermission('setup.view') ? `
-      <section class="dashboard-section dashboard-sync-banner dashboard-sync-banner--${esc(String(syncInfo.status).toLowerCase())}">
-        <i class="fa-solid fa-table" aria-hidden="true"></i>
-        <div>
-          <strong>Spreadsheet sync · ${esc(syncInfo.status)}</strong>
-          <span>Last run ${esc(syncInfo.at)}${syncInfo.message ? ` — ${esc(syncInfo.message.slice(0, 120))}` : ''}</span>
-        </div>
-        <button type="button" class="btn btn-outline btn--small" data-dash-route="admin-sync">Open sync</button>
-      </section>` : ''}
+      <section class="dashboard-section" aria-label="Summary" data-dash-glance></section>
+      <section class="dashboard-section dashboard-sync-banner" data-dash-sync hidden></section>
 
       <div class="dashboard-columns">
-        <section class="dashboard-section dashboard-section--actions" aria-label="Needs attention">
-          <h3 class="dashboard-section__title">Needs attention</h3>
-          ${actions.length
-        ? `<div class="dashboard-action-list">${actions.map(renderActionItem).join('')}</div>`
-        : `<p class="dashboard-empty"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> All caught up — nothing urgent right now.</p>`}
-        </section>
-
+        <section class="dashboard-section dashboard-section--actions" aria-label="Needs attention" data-dash-actions></section>
         <section class="dashboard-section" aria-label="Quick actions">
           <h3 class="dashboard-section__title">Quick actions</h3>
           <div class="dashboard-quick-actions">
@@ -501,19 +559,82 @@ export async function renderDashboard() {
         </section>
       </div>`;
 
-    root.querySelectorAll('[data-dash-route]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const route = btn.dataset.dashRoute;
-            if (route) window.switchView?.(route);
-        });
-    });
+    wireDashboardClicks(root);
 
-    root.querySelectorAll('[data-dash-action="expense-cash"]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            window.switchView?.('finance-ledger');
-            window.openExpense?.('CASH');
-        });
-    });
+    const glanceEl = root.querySelector('[data-dash-glance]');
+    const actionsEl = root.querySelector('[data-dash-actions]');
+    const syncEl = root.querySelector('[data-dash-sync]');
+    const subtitleEl = root.querySelector('[data-dash-subtitle]');
+
+    let state = {
+        parking,
+        parkingReady,
+        billing: { outstanding: 0, openCount: 0, flatsWithDues: 0 },
+        finance: {
+            monthIn: 0, monthOut: 0, cashBalance: 0,
+            bankBalance: null, bankAsOf: null, bankNeedsOpening: false,
+        },
+        financeReady: false,
+        ops: { openTickets: 0, transitions: 0, draftNotices: 0, pendingEmails: 0 },
+        opsReady: !wantsOps,
+        syncInfo: null,
+    };
+
+    const refreshSections = () => {
+        if (!stillActive(signal, gen)) return;
+        paintGlance(glanceEl, state);
+        const items = buildActionItems(state.parking, state.billing, state.ops, state.syncInfo);
+        const actionsLoading = (wantsParking && !state.parkingReady)
+            || (wantsFinance && !state.financeReady)
+            || (wantsOps && !state.opsReady);
+        paintActions(actionsEl, items, actionsLoading);
+        paintSync(syncEl, state.syncInfo);
+    };
+
+    refreshSections();
+
+    const tasks = [];
+
+    // Units / parking from core domain
+    tasks.push((async () => {
+        await loadStateDomain('core', { signal });
+        if (!stillActive(signal, gen)) return;
+        state.parkingReady = isDomainLoaded('core');
+        state.parking = computeParkingStats();
+        if (subtitleEl) {
+            subtitleEl.textContent = `${state.parking.units} unit(s) in workspace`;
+        }
+        refreshSections();
+    })());
+
+    if (wantsFinance) {
+        tasks.push((async () => {
+            const summary = await fetchDashboardSummary({ signal });
+            if (!stillActive(signal, gen)) return;
+            if (summary?.billing) state.billing = summary.billing;
+            if (summary?.finance) state.finance = summary.finance;
+            state.syncInfo = syncStatusInfo(summary?.sync);
+            state.financeReady = !!summary;
+            const lastPull = summary?.meta?.at;
+            if (lastPull && subtitleEl && state.parkingReady) {
+                const label = new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                subtitleEl.textContent = `${state.parking.units} unit(s) in workspace · Data refreshed ${label}`;
+            }
+            refreshSections();
+        })());
+    }
+
+    if (wantsOps) {
+        tasks.push((async () => {
+            await loadStateDomain('operations', { signal });
+            if (!stillActive(signal, gen)) return;
+            state.ops = computeOpsStats();
+            state.opsReady = true;
+            refreshSections();
+        })());
+    }
+
+    await Promise.allSettled(tasks);
 }
 
 export function initDashboard() {

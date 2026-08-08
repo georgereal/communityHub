@@ -38,7 +38,7 @@ function emptyCrud() {
     return { create: false, read: false, update: false, delete: false };
 }
 
-/** Default CRUD from platform role_permissions (.view → R, .edit → C/U/D). */
+/** Default CRUD from platform role_permissions (.view → R, .edit → C/U; Delete is opt-in via matrix). */
 export function defaultCrudFromPermKeys(resourceKey, permKeys = []) {
     const set = new Set(permKeys || []);
     const view = set.has(`${resourceKey}.view`);
@@ -51,7 +51,8 @@ export function defaultCrudFromPermKeys(resourceKey, permKeys = []) {
         create: edit,
         read: view || edit,
         update: edit,
-        delete: edit,
+        // Delete must be granted in society_role_crud_access (Roles → CRUD → D).
+        delete: false,
     };
 }
 
@@ -310,6 +311,10 @@ export async function loadCrudAccessForRole(apartmentId, roleKey) {
     if (stored && Object.keys(stored).length) {
         portalState.crudAccess = stored;
         return stored;
+    }
+    // Browser RLS may hide the matrix from non-rbac roles. Keep a boot/service-loaded map.
+    if (portalState.crudAccess && Object.keys(portalState.crudAccess).length) {
+        return portalState.crudAccess;
     }
     const permKeys = await fetchRolePermissionKeys(roleKey);
     const derived = {};

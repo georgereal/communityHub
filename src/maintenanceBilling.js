@@ -64,6 +64,10 @@ import { clearResidentsCache } from './residents.js';
 import { logActivity, renderInvoiceActivityHistory } from './activityAudit.js';
 import { deriveBlockFromFlat } from './parkingImport.js';
 import { withButtonBusy } from './buttonBusy.js';
+import { INVOICE_PAGE_HELP, applyFinancePageHeader, wireFinancePageHelp } from './financePageHelp.js';
+import { canCrud } from './rbacMatrix.js';
+
+const canDeleteAccounts = () => canCrud('accounts', 'delete');
 
 let pendingLineOverrides = {};
 let pendingPenaltyOverrides = {};
@@ -1151,6 +1155,10 @@ export async function createMaintenanceInvoice({ unitNumber, periodLabel, dueDat
 }
 
 export async function deleteMaintenanceInvoice(id, { confirm: askConfirm = true, silent = false } = {}) {
+    if (!canDeleteAccounts()) {
+        if (!silent) alert('You do not have permission to delete invoices.');
+        return { ok: false, reason: 'forbidden' };
+    }
     if (!supabase) return { ok: false, reason: 'no_client' };
     const inv = portalState.finances.maintenanceInvoices.find((i) => i.id === id);
     if (!inv) return { ok: false, reason: 'missing' };
@@ -1315,7 +1323,9 @@ const syncInvoiceListBulkBar = () => {
             : (n ? `${n} selected` : '0 selected');
     }
     if (deleteBtn) {
-        deleteBtn.disabled = deletable.length === 0;
+        const allowDelete = canDeleteAccounts();
+        deleteBtn.hidden = !allowDelete;
+        deleteBtn.disabled = !allowDelete || deletable.length === 0;
         deleteBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected${deletable.length ? ` (${deletable.length})` : ''}`;
     }
     if (clearBtn) clearBtn.disabled = n === 0;
@@ -1331,6 +1341,10 @@ const syncInvoiceListBulkBar = () => {
 };
 
 const deleteSelectedInvoices = async () => {
+    if (!canDeleteAccounts()) {
+        alert('You do not have permission to delete invoices.');
+        return;
+    }
     if (!supabase) return;
     const apartmentId = portalState.access?.activeApartmentId;
     if (!apartmentId) return;
@@ -1613,10 +1627,10 @@ export const renderInvoiceList = () => {
               data-inv-action="pdf" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-file-pdf"></i></button>
             <button type="button" class="btn btn-outline btn--small" title="View details"
               data-inv-action="view" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-eye"></i></button>
-            <button type="button" class="btn btn-outline btn--small btn--danger" title="${hasPayments ? 'Has payments applied' : 'Delete'}"
+            ${canDeleteAccounts() ? `<button type="button" class="btn btn-outline btn--small btn--danger" title="${hasPayments ? 'Has payments applied' : 'Delete'}"
               data-inv-action="delete" data-id="${escAttr(inv.id)}" ${hasPayments ? 'disabled' : ''}>
               <i class="fa-solid fa-trash-can"></i>
-            </button>
+            </button>` : ''}
           </div>`;
         list.appendChild(row);
     });
@@ -1694,8 +1708,23 @@ export const switchInvoiceSubView = (sv) => {
     document.querySelectorAll('[data-invoice-subview]').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.invoiceSubview === sv);
     });
-    const desc = document.getElementById('invoice-subview-desc');
-    if (desc) desc.textContent = INVOICE_SUBVIEW_LABELS[sv] || '';
+
+    const help = INVOICE_PAGE_HELP[sv];
+    applyFinancePageHeader({
+        titleId: 'invoices-page-title',
+        descId: 'invoices-page-desc',
+        help: help || {
+            title: 'Maintenance Billing',
+            blurb: INVOICE_SUBVIEW_LABELS[sv] || '',
+            steps: [],
+        },
+    });
+    const helpPop = document.getElementById('invoices-page-help');
+    const helpBtn = document.getElementById('invoices-page-help-btn');
+    if (helpPop && !helpPop.hidden) {
+        helpPop.hidden = true;
+        helpBtn?.setAttribute('aria-expanded', 'false');
+    }
 
     renderInvoicesPage();
 };
@@ -2218,6 +2247,11 @@ export const initMaintenanceBilling = () => {
     initDuesAgingUi();
     renderBlockFilterSelect('billing-block-filter', () => renderInvoicesPage());
     initBlockFilterListener(() => renderInvoicesPage());
+    wireFinancePageHelp({
+        btnId: 'invoices-page-help-btn',
+        popoverId: 'invoices-page-help',
+        getHelp: () => INVOICE_PAGE_HELP[activeInvoiceSubView] || INVOICE_PAGE_HELP['pending-dues'],
+    });
 
     document.getElementById('pending-dues-filter')?.addEventListener('input', renderPendingDues);
     document.getElementById('invoice-list-filter')?.addEventListener('input', renderInvoiceList);
@@ -2285,6 +2319,10 @@ export const initMaintenanceBilling = () => {
         } else if (action === 'view') {
             viewInvoiceDetail(id);
         } else if (action === 'delete') {
+            if (!canDeleteAccounts()) {
+                alert('You do not have permission to delete invoices.');
+                return;
+            }
             deleteMaintenanceInvoice(id).catch((err) => alert(err?.message || 'Delete failed.'));
         }
     });

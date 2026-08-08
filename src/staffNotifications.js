@@ -153,11 +153,7 @@ export async function getReviewerUserIds(apartmentId, excludeUserId = null) {
     return [...ids];
 }
 
-const activityLogRoute = () => {
-    if (routeIsAllowed('property-activity')) return 'property-activity';
-    if (routeIsAllowed('finance-activity')) return 'finance-activity';
-    return 'property-activity';
-};
+const activityLogRoute = () => 'admin-activity';
 
 const navigateForNotification = async (note) => {
     if (note.access_request_id) {
@@ -169,7 +165,7 @@ const navigateForNotification = async (note) => {
             openSetupSection('people');
             return;
         }
-        alert('Open Administration → Society Profile to review pending access requests.');
+        alert('Open Administration → Society settings to review pending access requests.');
         return;
     }
     if (note.activity_audit_log_id) {

@@ -475,7 +475,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/accessRequests.js | Access request handling |
 | src/accessSync.js | Access user directory sync |
 | src/activityAudit.js | Activity audit log page |
-| src/admin.js | Setup subview switching & admin helpers |
+| src/admin.js | Society settings tabs, setup subviews & admin CRUD |
 | src/allocation.js | Parking slot allocation |
 | src/apiJson.js | API JSON request helpers |
 | src/authClient.js | Auth client & session handling |
@@ -509,6 +509,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/financeApi.js | Finance API client |
 | src/financeDocuments.js | Bills & receipts document management |
 | src/financeMobile.css | Mobile finance styles |
+| src/financePageHelp.js | Finance page blurbs + help popovers |
 | src/financeReportsExport.js | Export finance reports (Excel) |
 | src/finances.js | Cash & bank ledger engine + processFinances |
 | src/flatPicker.js | Flat (units) picker helper |
@@ -617,7 +618,6 @@ and an optional `subview`.
 | ops-amenities | Amenities | operations | amenities |
 | ops-visitors | Visitors | operations | visitors |
 | ops-payroll | Staff & Payroll | operations | payroll |
-| property-activity | Activity Log | accounts | activity |
 | finance-ledger | Ledger | accounts | ledger |
 | finance-docs | Bills & receipts | accounts | finance-docs |
 | finance-expense-plan | Expense plan | accounts | expense-plan |
@@ -627,17 +627,17 @@ and an optional `subview`.
 | finance-billing-batches | Billing Batches | invoices | batches |
 | finance-billing-aging | Aging Report | invoices | aging |
 | finance-bank-recon | Bank Reconciliation | accounts | bank-recon |
-| finance-activity | Activity Log | accounts | activity |
-| finance-reports | Reports & Reconciliation | accounts | reports |
+| finance-reports | Financial reports | accounts | reports |
 | finance-invoices-raised | Invoices Raised | accounts | invoices-raised |
 | admin-access | Roles | access-control | — |
-| admin-society | Society Profile | setup | society |
-| admin-bank | Bank Account | setup | bank |
-| admin-vendors | Vendors | setup | vendors |
-| admin-subcats | Sub-categories | setup | subcats |
-| admin-staff | Staff Directory | setup | staff |
-| admin-connections | External Connections | setup | connections |
-| admin-sync | Spreadsheet Sync | setup | sync |
+| admin-society | Society settings (Profile tab) | setup | society |
+| admin-activity | Activity Log | accounts | activity |
+| admin-bank | Bank account (Society settings tab) | setup | bank |
+| admin-vendors | Vendors (Society settings tab) | setup | vendors |
+| admin-subcats | Sub-categories (Society settings tab) | setup | subcats |
+| admin-staff | Staff directory (Society settings tab) | setup | staff |
+| admin-connections | External connections (Society settings tab) | setup | connections |
+| admin-sync | Spreadsheet sync (Society settings tab) | setup | sync |
 | admin-portfolio | Portfolio Rollup | portfolio | — |
 | admin-email | Email Outbox | email | — |
 
@@ -712,7 +712,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | supabaseRest.js | Supabase REST helper |
 | sync.js | Scheduled sync (Vercel cron) |
 | vercelRequest.js | Vercel request helper |
-| workspace-boot.js | Workspace boot helper |
+| workspace-boot.js | Slim login boot (profile, RBAC, module/page access) — no core/summary |
 
 ---
 
@@ -850,6 +850,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 | `supabase_page_access.sql` | Supabase SQL migration (run manually in SQL Editor) |
 | `supabase_property_manager_permissions.sql` | Supabase SQL migration (run manually in SQL Editor) |
 | `supabase_society_role_rbac.sql` | Supabase SQL migration (run manually in SQL Editor) |
+| `docs/scripts/sql/supabase_society_role_crud_read_fix.sql` | Allow society members to read role CRUD/module matrices |
 | `supabase_user_directory_rls.sql` | Supabase SQL migration (run manually in SQL Editor) |
 | `supabase_visitor_approvals.sql` | Supabase SQL migration (run manually in SQL Editor) |
 

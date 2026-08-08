@@ -1,13 +1,13 @@
 /** Per-view activation — dynamic imports keep feature code out of the initial bundle. */
 
-export async function activateView(route, page) {
+export async function activateView(route, page, { signal, generation } = {}) {
     const view = page.view;
     const sub = page.subview || '';
 
     switch (view) {
         case 'dashboard': {
             const { renderDashboard } = await import('../dashboard.js');
-            await renderDashboard();
+            await renderDashboard({ signal, generation });
             break;
         }
         case 'registry': {

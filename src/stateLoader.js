@@ -7,8 +7,8 @@ export const STATE_DOMAINS = ['core', 'property', 'finance', 'operations', 'secu
 
 /** Domains loaded when entering each top-level view (via ensureRouteState). */
 const VIEW_DOMAINS = {
-    // Dashboard KPIs: core units + /api/dashboard-summary. Ops counts load lazily.
-    dashboard: ['core'],
+    // Dashboard: core + ops load progressively from renderDashboard (cancellable).
+    dashboard: [],
     registry: ['property'],
     accounts: ['finance', 'admin'],
     invoices: ['finance'],
@@ -28,8 +28,7 @@ const VIEW_DOMAINS = {
 };
 
 const ROUTE_DOMAIN_OVERRIDES = {
-    'property-activity': ['operations'],
-    'finance-activity': ['operations'],
+    'admin-activity': ['operations'],
     'admin-settings': ['admin'],
     'admin-sync': ['admin', 'finance'],
 };

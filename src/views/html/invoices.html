@@ -1,10 +1,19 @@
 <section id="view-invoices" class="content-view">
-        <header>
-          <div class="header-title">
-            <h2>Maintenance Billing</h2>
-            <p>Raise flat invoices, track dues, and reconcile maintenance collections</p>
+        <header class="invoice-page-header">
+          <div class="header-title invoice-page-header__title">
+            <div class="page-heading">
+              <h2 id="invoices-page-title">Maintenance Billing</h2>
+              <button type="button" class="page-help-btn" id="invoices-page-help-btn"
+                aria-expanded="false" aria-controls="invoices-page-help"
+                title="How to use this page">
+                <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                <span class="visually-hidden">Help</span>
+              </button>
+              <div id="invoices-page-help" class="page-help-popover" hidden role="dialog" aria-label="Page help"></div>
+            </div>
+            <p id="invoices-page-desc" class="invoice-page-header__subtitle">Raise flat invoices, track dues, and reconcile maintenance collections.</p>
           </div>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; justify-content: flex-end;">
+          <div class="invoice-page-header__actions">
             <button class="btn btn-primary" type="button" onclick="window.openRaiseInvoiceModal()">
               <i class="fa-solid fa-file-circle-plus"></i> <span>Raise Invoices</span>
             </button>
@@ -60,7 +69,6 @@
           <button type="button" data-invoice-subview="batches">Billing Runs</button>
           <button type="button" data-invoice-subview="aging">Aging</button>
         </nav>
-        <p id="invoice-subview-desc" class="invoice-subview-desc"></p>
 
         <div id="invoice-subview-pending" class="invoice-subview">
           <div class="invoice-toolbar">

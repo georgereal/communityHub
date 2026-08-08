@@ -81,7 +81,7 @@ import {
   setActiveApartment,
   syncAccessFromSupabase,
 } from './accessSync.js';
-import { isApartmentSelectSuppressed, invalidateWorkspaceAccess, withApartmentSelectSuppressed, withApartmentSelectSuppressedAsync } from './accessLocks.js';
+import { isApartmentSelectSuppressed, invalidateWorkspaceAccess, withApartmentSelectSuppressed, withApartmentSelectSuppressedAsync, beginNavigation, isNavigationCurrent } from './accessLocks.js';
 
 const loadAccessRequestGate = () => import('./accessRequests.js').then((m) => m.initAccessRequestWorkspaceGate());
 
@@ -628,7 +628,7 @@ const boot = async () => {
     removeBootLoader();
   }
 
-  // Navigate only after heavy domains are allowed so finance/admin load before first paint.
+  // Navigate after boot gate opens — dashboard loads domains progressively.
   if (enterAppAfterBoot) {
     const route = resolveRoute(window.location.hash.slice(1), portalState.auth?.role);
     await withApartmentSelectSuppressedAsync(() => window.switchView(route));
@@ -674,27 +674,41 @@ const switchViewInner = async (v) => {
     return;
   }
 
+  const { signal, generation } = beginNavigation();
   const { page } = meta;
+  const isDashboard = page.view === 'dashboard';
   document.body.classList.add('route-loading');
   try {
-    await ensureRouteState(route);
     await ensureViewMounted(page.view);
+    if (signal.aborted || !isNavigationCurrent(generation)) return;
+
     showView(page.view);
     if (window.location.hash.slice(1) !== route) {
       applyingRouteHash = true;
       window.location.hash = `#${route}`;
-      // hashchange is async — keep the guard until after it would fire.
       queueMicrotask(() => {
         setTimeout(() => { applyingRouteHash = false; }, 0);
       });
     }
     updateNavActiveState(route);
     updateNavBreadcrumb(route);
-    await activateView(route, page);
+
+    if (isDashboard) {
+      // Paint shell immediately; sections pull core/summary/ops async (cancellable).
+      void ensureRouteState(route, { signal });
+      await activateView(route, page, { signal, generation });
+    } else {
+      await ensureRouteState(route, { signal });
+      if (signal.aborted || !isNavigationCurrent(generation)) return;
+      await activateView(route, page, { signal, generation });
+    }
   } catch (err) {
+    if (err?.name === 'AbortError' || signal.aborted) return;
     console.warn('[nav] View activation failed:', err?.message || err);
   } finally {
-    document.body.classList.remove('route-loading');
+    if (isNavigationCurrent(generation)) {
+      document.body.classList.remove('route-loading');
+    }
   }
 };
 

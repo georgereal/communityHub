@@ -8,7 +8,6 @@ import {
     isPlaceholderApartmentId,
     withTimeout,
     resetLoadedDomains,
-    getLoadedDomains,
     applyBootPayload,
 } from './store.js';
 import { renderAccessMappings, ensureAccessState } from './mainBoot.js';
@@ -57,18 +56,26 @@ async function fetchWorkspaceBoot(apartmentHint = null) {
         if (hint) params.set('apartment_id', hint);
         const qs = params.toString();
         const headers = {};
+        let token = null;
         try {
             const { data } = await supabase.auth.getSession();
-            const token = data?.session?.access_token;
-            if (token) headers.Authorization = `Bearer ${token}`;
-        } catch { /* cookie-only fallback */ }
+            token = data?.session?.access_token || null;
+        } catch { /* ignore */ }
+        if (!token) {
+            // Avoid a 30–60s hanging 401 on the server when HMR boots before auth is ready.
+            throw Object.assign(new Error('Sign in required.'), { status: 401 });
+        }
+        headers.Authorization = `Bearer ${token}`;
         const res = await fetch(`/api/workspace-boot${qs ? `?${qs}` : ''}`, {
             method: 'GET',
             credentials: 'include',
             headers,
         });
         const { ok, json, error } = await readApiJson(res);
-        if (!ok) throw new Error(json?.error || error || 'Workspace boot failed.');
+        if (!ok) throw Object.assign(
+            new Error(json?.error || error || 'Workspace boot failed.'),
+            { status: res.status },
+        );
         return json;
     })().finally(() => {
         if (accessLocks.workspaceBootInflightKey === key) {
@@ -280,6 +287,9 @@ async function hydrateFromWorkspaceBoot(boot) {
     applyAuthFromBoot(boot);
     seedRoleAssignmentsCache(boot.profile?.id || portalState.auth?.id, boot.roleAssignments || []);
     applyBootPayload(boot);
+    if (boot.crudAccess && Object.keys(boot.crudAccess).length) {
+        document.dispatchEvent(new CustomEvent('crud-access-loaded'));
+    }
 
     if (boot.summary) seedDashboardSummary(boot.activeApartmentId, boot.summary);
 
@@ -296,10 +306,45 @@ async function hydrateFromWorkspaceBoot(boot) {
     document.dispatchEvent(new CustomEvent('module-access-loaded'));
 
     scheduleOnceNotifications(boot.activeApartmentId);
+    schedulePostBootAccessLoads(boot.activeApartmentId, boot.profile?.id || portalState.auth?.id);
 
     if (document.getElementById('view-dashboard')?.classList.contains('active')) {
         void renderDashboard();
     }
+}
+
+/** Module / page / CRUD maps — not on the boot critical path. */
+function schedulePostBootAccessLoads(apartmentId, userId) {
+    if (!apartmentId) return;
+    deferAfterFirstPaint(() => {
+        void (async () => {
+            try {
+                const { loadModuleAccess } = await import('./moduleAccess.js');
+                await loadModuleAccess(apartmentId, userId || null);
+                document.dispatchEvent(new CustomEvent('module-access-loaded'));
+            } catch (err) {
+                console.warn('[access] module access deferred load skipped:', err?.message || err);
+            }
+            try {
+                const { loadUserPageAccess } = await import('./pageAccess.js');
+                const roleKey = portalState.auth?.effectiveRoleKey
+                    || v1RoleToV2Key(portalState.auth?.role);
+                await loadUserPageAccess(apartmentId, userId, roleKey);
+                applyNavPermissions(new Set(portalState.authPermissions || []));
+            } catch (err) {
+                console.warn('[access] page access deferred load skipped:', err?.message || err);
+            }
+            try {
+                const { loadCrudAccessForRole } = await import('./rbacMatrix.js');
+                const roleKey = portalState.auth?.effectiveRoleKey
+                    || v1RoleToV2Key(portalState.auth?.role);
+                await loadCrudAccessForRole(apartmentId, roleKey);
+                document.dispatchEvent(new CustomEvent('crud-access-loaded'));
+            } catch (err) {
+                console.warn('[access] CRUD access deferred load skipped:', err?.message || err);
+            }
+        })();
+    });
 }
 
 export const setActiveApartment = async (apartmentId, { force = false } = {}) => {
@@ -311,14 +356,14 @@ export const setActiveApartment = async (apartmentId, { force = false } = {}) =>
     // If society sync is already hydrating, wait for it instead of starting a second boot.
     if (accessLocks.syncAccessInflight) {
         try { await accessLocks.syncAccessInflight; } catch { /* ignore */ }
-        if (accessLocks.readyApartmentId === apartmentId && getLoadedDomains().includes('core')) {
+        if (accessLocks.readyApartmentId === apartmentId && accessLocks.workspaceReady) {
             return true;
         }
     }
 
     const alreadyReady = accessLocks.readyApartmentId === apartmentId
-        && getLoadedDomains().includes('core');
-    // Same-apartment "force" from select churn is a no-op once core is loaded.
+        && accessLocks.workspaceReady;
+    // Same-apartment "force" from select churn is a no-op once workspace is ready.
     if (alreadyReady && (!force || apartmentId === portalState.access?.activeApartmentId)) {
         return true;
     }
@@ -328,7 +373,7 @@ export const setActiveApartment = async (apartmentId, { force = false } = {}) =>
     }
     if (accessLocks.setActiveInflight) {
         try { await accessLocks.setActiveInflight; } catch { /* ignore */ }
-        if (accessLocks.readyApartmentId === apartmentId && getLoadedDomains().includes('core')) {
+        if (accessLocks.readyApartmentId === apartmentId && accessLocks.workspaceReady) {
             return true;
         }
     }
@@ -395,11 +440,10 @@ export const setActiveApartment = async (apartmentId, { force = false } = {}) =>
 export const syncAccessFromSupabase = async (profileOverride = null) => {
     if (!supabase) return false;
 
-    // Sticky only when core is actually in memory (HMR can leave ready flags without domains).
+    // Sticky when RBAC/workspace is ready — core/dashboard data loads async after login.
     if (
         accessLocks.workspaceReady
         && accessLocks.readyApartmentId
-        && getLoadedDomains().includes('core')
         && !profileOverride?.__force
     ) {
         return true;

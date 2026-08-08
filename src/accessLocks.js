@@ -20,6 +20,8 @@ for (const [key, value] of Object.entries({
     allowHeavyDomains: false,
     notificationsForApt: null,
     directoryForApt: null,
+    navAbortController: null,
+    routeGeneration: 0,
 })) {
     if (!(key in accessLocks)) accessLocks[key] = value;
 }
@@ -75,4 +77,21 @@ export function beginApartmentSwitch(apartmentId) {
     accessLocks.directoryForApt = null;
     accessLocks.lastWrittenLastApartmentId = null;
     void apartmentId;
+}
+
+/** Abort prior route/dashboard loads when the user navigates away. */
+export function beginNavigation() {
+    try {
+        accessLocks.navAbortController?.abort();
+    } catch { /* ignore */ }
+    accessLocks.navAbortController = new AbortController();
+    accessLocks.routeGeneration = (accessLocks.routeGeneration || 0) + 1;
+    return {
+        signal: accessLocks.navAbortController.signal,
+        generation: accessLocks.routeGeneration,
+    };
+}
+
+export function isNavigationCurrent(generation) {
+    return generation === accessLocks.routeGeneration;
 }

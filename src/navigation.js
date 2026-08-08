@@ -12,18 +12,11 @@ const OPERATIONS_ROUTES = [
 ];
 
 const TREASURY_ROUTES = [
-    'finance-ledger', 'finance-docs', 'finance-expense-plan', 'finance-bank-recon', 'finance-activity', 'finance-reports', 'finance-invoices-raised',
+    'finance-ledger', 'finance-docs', 'finance-expense-plan', 'finance-bank-recon', 'finance-reports', 'finance-invoices-raised',
 ];
 
-export const ACCOUNTS_SUBVIEW_ROUTES = {
-    ledger: 'finance-ledger',
-    'finance-docs': 'finance-docs',
-    'expense-plan': 'finance-expense-plan',
-    reports: 'finance-reports',
-    'invoices-raised': 'finance-invoices-raised',
-    'bank-recon': 'finance-bank-recon',
-    activity: 'finance-activity',
-};
+/** Filled after NAV_MODULES — Income & Expenses tabs share this with the Finance sidebar. */
+export let ACCOUNTS_SUBVIEW_ROUTES = {};
 
 export const NAV_MODULES = [
     {
@@ -80,7 +73,6 @@ export const NAV_MODULES = [
             { route: 'ops-amenities' },
             { route: 'ops-visitors' },
             { route: 'ops-payroll' },
-            { route: 'property-activity' },
         ],
         pages: [
             {
@@ -164,15 +156,6 @@ export const NAV_MODULES = [
                 subview: 'payroll',
                 permission: 'accounts.edit',
             },
-            {
-                route: 'property-activity',
-                label: 'Activity Log',
-                icon: 'fa-clock-rotate-left',
-                view: 'accounts',
-                subview: 'activity',
-                permission: 'apartment_mgmt.view',
-                altPermissions: ['accounts.view', 'rbac.view'],
-            },
         ],
     },
     {
@@ -180,6 +163,7 @@ export const NAV_MODULES = [
         label: 'Finance',
         icon: 'fa-coins',
         navEntries: [
+            { route: 'finance-reports' },
             {
                 tabbed: true,
                 label: 'Invoices',
@@ -196,12 +180,19 @@ export const NAV_MODULES = [
             { route: 'finance-ledger' },
             { route: 'finance-docs' },
             { route: 'finance-expense-plan' },
-            { route: 'finance-reports' },
             { route: 'finance-invoices-raised' },
             { route: 'finance-bank-recon' },
-            { route: 'finance-activity' },
         ],
         pages: [
+            {
+                route: 'finance-reports',
+                label: 'Financial reports',
+                icon: 'fa-chart-line',
+                view: 'accounts',
+                subview: 'reports',
+                permission: 'accounts.view',
+                legacy: ['treasury-reports'],
+            },
             {
                 route: 'finance-ledger',
                 label: 'Ledger',
@@ -283,25 +274,6 @@ export const NAV_MODULES = [
                 permission: 'accounts.edit',
             },
             {
-                route: 'finance-activity',
-                label: 'Activity Log',
-                icon: 'fa-clock-rotate-left',
-                view: 'accounts',
-                subview: 'activity',
-                permission: 'accounts.view',
-                altPermissions: ['rbac.view', 'apartment_mgmt.view'],
-                hideFromNav: true,
-            },
-            {
-                route: 'finance-reports',
-                label: 'Reports & Reconciliation',
-                icon: 'fa-chart-line',
-                view: 'accounts',
-                subview: 'reports',
-                permission: 'accounts.view',
-                legacy: ['treasury-reports'],
-            },
-            {
                 route: 'finance-invoices-raised',
                 label: 'Invoices Raised',
                 icon: 'fa-file-invoice',
@@ -315,6 +287,27 @@ export const NAV_MODULES = [
         id: 'admin',
         label: 'Administration',
         icon: 'fa-gear',
+        navEntries: [
+            { route: 'admin-access' },
+            {
+                tabbed: true,
+                label: 'Society settings',
+                icon: 'fa-building-user',
+                defaultRoute: 'admin-society',
+                routes: [
+                    'admin-society',
+                    'admin-bank',
+                    'admin-vendors',
+                    'admin-subcats',
+                    'admin-staff',
+                    'admin-connections',
+                    'admin-sync',
+                ],
+            },
+            { route: 'admin-activity' },
+            { route: 'admin-portfolio' },
+            { route: 'admin-email' },
+        ],
         pages: [
             {
                 route: 'admin-access',
@@ -325,21 +318,33 @@ export const NAV_MODULES = [
             },
             {
                 route: 'admin-society',
-                label: 'Society Profile',
+                label: 'Profile',
                 icon: 'fa-building-user',
                 view: 'setup',
                 subview: 'society',
-                // Society Administrator (+ system) only — not Office Bearer
-                permission: 'rbac.edit',
+                // Office Bearer (setup.edit) + Society Admin (rbac.edit)
+                permission: 'setup.edit',
+                altPermissions: ['rbac.edit'],
                 legacy: ['admin-settings', 'setup'],
             },
             {
+                route: 'admin-activity',
+                label: 'Activity Log',
+                icon: 'fa-clock-rotate-left',
+                view: 'accounts',
+                subview: 'activity',
+                permission: 'rbac.view',
+                altPermissions: ['setup.edit'],
+                legacy: ['finance-activity', 'property-activity'],
+            },
+            {
                 route: 'admin-bank',
-                label: 'Bank Account',
+                label: 'Bank account',
                 icon: 'fa-building-columns',
                 view: 'setup',
                 subview: 'bank',
                 permission: 'setup.edit',
+                hideFromNav: true,
             },
             {
                 route: 'admin-vendors',
@@ -348,6 +353,7 @@ export const NAV_MODULES = [
                 view: 'setup',
                 subview: 'vendors',
                 permission: 'setup.edit',
+                hideFromNav: true,
             },
             {
                 route: 'admin-subcats',
@@ -356,30 +362,35 @@ export const NAV_MODULES = [
                 view: 'setup',
                 subview: 'subcats',
                 permission: 'setup.edit',
+                hideFromNav: true,
             },
             {
                 route: 'admin-staff',
-                label: 'Staff Directory',
+                label: 'Staff directory',
                 icon: 'fa-users-gear',
                 view: 'setup',
                 subview: 'staff',
                 permission: 'setup.edit',
+                hideFromNav: true,
             },
             {
                 route: 'admin-connections',
-                label: 'External Connections',
+                label: 'External connections',
                 icon: 'fa-plug',
                 view: 'setup',
                 subview: 'connections',
                 permission: 'setup.edit',
+                hideFromNav: true,
             },
             {
                 route: 'admin-sync',
-                label: 'Spreadsheet Sync',
+                label: 'Spreadsheet sync',
                 icon: 'fa-table-columns',
                 view: 'setup',
                 subview: 'sync',
                 permission: 'accounts.edit',
+                altPermissions: ['setup.edit'],
+                hideFromNav: true,
             },
             {
                 route: 'admin-portfolio',
@@ -399,6 +410,47 @@ export const NAV_MODULES = [
         ],
     },
 ];
+
+/** Setup page tabs — same routes as Administration → Society settings. */
+export const SETUP_SUBVIEW_ROUTES = {
+    society: 'admin-society',
+    bank: 'admin-bank',
+    vendors: 'admin-vendors',
+    subcats: 'admin-subcats',
+    staff: 'admin-staff',
+    connections: 'admin-connections',
+    sync: 'admin-sync',
+};
+
+export function getSetupTabPages() {
+    const mod = NAV_MODULES.find((m) => m.id === 'admin');
+    if (!mod) return [];
+    const entry = (mod.navEntries || []).find((e) => e.tabbed && e.routes?.includes('admin-society'));
+    const routes = entry?.routes || Object.values(SETUP_SUBVIEW_ROUTES);
+    const byRoute = new Map(mod.pages.map((p) => [p.route, p]));
+    return routes.map((r) => byRoute.get(r)).filter((p) => p?.view === 'setup' && p.subview);
+}
+/**
+ * Finance sidebar pages that live in the Income & Expenses shell (`view: accounts`).
+ * Order follows `finance.navEntries` so the top tab strip stays in sync with the sidebar
+ * (Invoices is a separate view and is intentionally excluded).
+ */
+export function getFinanceAccountsPages() {
+    const mod = NAV_MODULES.find((m) => m.id === 'finance');
+    if (!mod) return [];
+    const byRoute = new Map(mod.pages.map((p) => [p.route, p]));
+    const ordered = [];
+    for (const entry of mod.navEntries || []) {
+        if (entry.tabbed) continue;
+        const page = byRoute.get(entry.route);
+        if (page?.view === 'accounts' && page.subview) ordered.push(page);
+    }
+    return ordered;
+}
+
+ACCOUNTS_SUBVIEW_ROUTES = Object.fromEntries(
+    getFinanceAccountsPages().map((page) => [page.subview, page.route]),
+);
 
 export function buildPageCatalog() {
     return NAV_MODULES.flatMap((mod) =>
@@ -495,8 +547,8 @@ export const pageIsVisible = (page, permSet, _offline = false, navModuleId = nul
     const set = permSet instanceof Set ? permSet : (permSet ? new Set(permSet) : null);
     // Empty / unresolved permissions → deny (least privilege; never "show everything")
     if (!set?.size) return false;
-    // Society Profile + Roles are Society Admin only — page-access grants cannot unlock them
-    if (page.route === 'admin-society' || page.route === 'admin-access') {
+    // Roles is Society Admin only — page-access grants cannot unlock it
+    if (page.route === 'admin-access') {
         const role = portalState.auth?.effectiveRoleKey;
         const isSocietyAdmin = portalState.auth?.isSystemAdmin === true
             || role === 'society_admin'
@@ -585,8 +637,22 @@ export const applyNavPermissions = (permSet, offline = false) => {
         if (!btn) return;
         const meta = findPage(route);
         const show = meta && pageIsVisible(meta.page, permSet, offline, meta.module.id);
-        btn.style.display = show ? '' : 'none';
+        btn.style.display = show ? 'inline-flex' : 'none';
     });
+
+    Object.entries(SETUP_SUBVIEW_ROUTES).forEach(([subview, route]) => {
+        const btn = document.querySelector(`[data-setup-subview="${subview}"]`);
+        if (!btn) return;
+        const meta = findPage(route);
+        const show = meta && pageIsVisible(meta.page, permSet, offline, meta.module.id);
+        btn.style.display = show ? 'inline-flex' : 'none';
+    });
+
+    // Refresh accounts header (Bank Sync etc.) once permissions + lazy tabs are present.
+    if (document.getElementById('view-accounts') && typeof window.syncAccountsHeaderActions === 'function') {
+        const active = document.querySelector('[data-accounts-subview].active');
+        window.syncAccountsHeaderActions(active?.dataset?.accountsSubview || 'ledger');
+    }
 };
 
 export const updateNavActiveState = (route) => {
@@ -683,7 +749,17 @@ export const initNavInteraction = (onNavigate) => {
         const pageBtn = e.target.closest('.nav-page-btn');
         if (pageBtn?.dataset?.route) {
             document.body.classList.remove('nav-expanded');
-            onNavigate?.(pageBtn.dataset.route);
+            const tabRoutes = pageBtn.dataset.tabRoutes?.split(',').filter(Boolean) || [];
+            let route = pageBtn.dataset.route;
+            if (tabRoutes.length) {
+                const perms = new Set(portalState.authPermissions || []);
+                const firstVisible = tabRoutes.find((r) => {
+                    const meta = findPage(r);
+                    return meta && pageIsVisible(meta.page, perms, false, meta.module.id);
+                });
+                if (firstVisible) route = firstVisible;
+            }
+            onNavigate?.(route);
             return;
         }
 

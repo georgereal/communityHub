@@ -7,11 +7,47 @@ import { renderLedgerSyncPanel, renderAdminSyncPanel } from './ledgerSpreadsheet
 import { renderExternalConnectionsAdmin } from './externalConnections.js';
 import { closeSyncLogDrawer, teardownSyncLogDrawer } from './ledgerSyncLog.js';
 import { withButtonBusy, bindBusyClick } from './buttonBusy.js';
+import {
+    SETUP_SUBVIEW_ROUTES,
+    getSetupTabPages,
+    applyNavPermissions,
+} from './navigation.js';
 
 import { EXPENSE_CATS } from './expenseCategories.js';
 const STAFF_ROLES = ['Manager', 'Security Guard', 'Housekeeping', 'Maintenance', 'Accounts', 'Other'];
 
 const SETUP_SUBVIEWS = ['society', 'bank', 'vendors', 'subcats', 'staff', 'connections', 'sync'];
+const SETUP_SUBVIEW_COPY = {
+    society: {
+        title: 'Society settings',
+        subtitle: 'Identity, access, and portal settings for this society',
+    },
+    bank: {
+        title: 'Society settings',
+        subtitle: 'Official bank account for collections and vendor payments',
+    },
+    vendors: {
+        title: 'Society settings',
+        subtitle: 'Vendors used on expenses and bills',
+    },
+    subcats: {
+        title: 'Society settings',
+        subtitle: 'Expense sub-categories for ledger and bills',
+    },
+    staff: {
+        title: 'Society settings',
+        subtitle: 'Staff directory for this society',
+    },
+    connections: {
+        title: 'Society settings',
+        subtitle: 'External integrations and API connections',
+    },
+    sync: {
+        title: 'Society settings',
+        subtitle: 'Spreadsheet import and export for the ledger',
+    },
+};
+
 let editingVendorId = null;
 let editingSubCatId = null;
 let editingStaffId = null;
@@ -20,12 +56,74 @@ const apartmentId = () => portalState.access?.activeApartmentId;
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
+const syncSetupPageHeader = (view) => {
+    const copy = SETUP_SUBVIEW_COPY[view] || SETUP_SUBVIEW_COPY.society;
+    const titleEl = document.querySelector('#view-setup .setup-page-header h2');
+    const subEl = document.getElementById('setup-page-subtitle');
+    if (titleEl) titleEl.textContent = copy.title;
+    if (subEl) subEl.textContent = copy.subtitle;
+};
+
+export const renderSetupSubviewTabs = (activeSubview = 'society') => {
+    const nav = document.querySelector('.setup-subview-tabs');
+    if (!nav) return;
+    const pages = getSetupTabPages();
+    nav.innerHTML = pages.map((page) => {
+        const active = page.subview === activeSubview;
+        return `
+          <button type="button"${active ? ' class="active" aria-current="page"' : ''} data-setup-subview="${page.subview}">
+            <i class="fa-solid ${page.icon}" aria-hidden="true"></i>
+            <span>${esc(page.label)}</span>
+          </button>`;
+    }).join('');
+};
+
+const wireSetupSubviewTabClicks = () => {
+    document.querySelectorAll('[data-setup-subview]').forEach((btn) => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+            const route = SETUP_SUBVIEW_ROUTES[btn.dataset.setupSubview];
+            if (route && typeof window.switchView === 'function') window.switchView(route);
+        });
+    });
+};
+
+const ROUTE_TO_SETUP_SUBVIEW = Object.fromEntries(
+    Object.entries(SETUP_SUBVIEW_ROUTES).map(([subview, route]) => [route, subview]),
+);
+
+export const syncSetupSubViewTabs = (routeOrSubview = 'society') => {
+    const subview = SETUP_SUBVIEWS.includes(routeOrSubview)
+        ? routeOrSubview
+        : (ROUTE_TO_SETUP_SUBVIEW[routeOrSubview] || 'society');
+    const nav = document.querySelector('.setup-subview-tabs');
+    if (nav && !nav.querySelector('[data-setup-subview]')) {
+        renderSetupSubviewTabs(subview);
+        wireSetupSubviewTabClicks();
+    }
+    document.querySelectorAll('[data-setup-subview]').forEach((btn) => {
+        const active = btn.dataset.setupSubview === subview;
+        btn.classList.toggle('active', active);
+        if (active) btn.setAttribute('aria-current', 'page');
+        else btn.removeAttribute('aria-current');
+    });
+};
+
+export const initSetupSubViewTabs = () => {
+    renderSetupSubviewTabs('society');
+    wireSetupSubviewTabClicks();
+    applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
+};
+
 export const switchSetupSubView = (id = 'society') => {
     const view = SETUP_SUBVIEWS.includes(id) ? id : 'society';
     SETUP_SUBVIEWS.forEach((key) => {
         const el = document.getElementById(`setup-subview-${key}`);
         if (el) el.hidden = key !== view;
     });
+    syncSetupPageHeader(view);
+    syncSetupSubViewTabs(view);
     if (view === 'bank') renderBankAdmin();
     if (view === 'vendors') renderVendorsAdmin();
     if (view === 'subcats') renderSubCatsAdmin();
@@ -43,6 +141,7 @@ export const switchSetupSubView = (id = 'society') => {
 window.switchSetupSubView = switchSetupSubView;
 
 export const initSetupAdmin = () => {
+    initSetupSubViewTabs();
     bindBusyClick(document.getElementById('admin-bank-save'), 'Saving…', saveBankAccount);
     bindBusyClick(document.getElementById('admin-vendor-save'), 'Saving…', saveVendor);
     bindBusyClick(document.getElementById('admin-subcat-save'), 'Saving…', saveSubCategory);
@@ -51,7 +150,10 @@ export const initSetupAdmin = () => {
 };
 
 export const renderSetupAdmin = () => {
-    switchSetupSubView(document.querySelector('.setup-tab--active')?.dataset.setupTab || 'society');
+    const active = document.querySelector('[data-setup-subview].active')?.dataset?.setupSubview
+        || document.querySelector('.setup-tab--active')?.dataset.setupTab
+        || 'society';
+    switchSetupSubView(active);
 };
 
 // --- Bank account ---

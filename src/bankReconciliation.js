@@ -23,12 +23,12 @@ import {
     prepareImportedStatementLines,
 } from './bankStatementOrdering.js';
 import { bankLineAmount, bankLineFingerprint, bankLineType, formatOcrRowDisplay } from './bankStatementLineUtils.js';
+import { canCrud } from './rbacMatrix.js';
 import {
     analyzePassbookJobLines,
     IMPORT_LINE_STATUS,
     IMPORT_LINE_STATUS_LABEL,
 } from './passbookJobImportAnalysis.js';
-
 import {
     EXPENSE_CATS,
     INCOME_CATS,
@@ -52,6 +52,8 @@ import {
     sortClassificationRules,
     suggestRuleMatchText,
 } from './bankClassificationRules.js';
+
+const canDeleteAccounts = () => canCrud('accounts', 'delete');
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
 
@@ -1660,7 +1662,7 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
         <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-post" disabled title="Post selected rows that have category filled">
           <i class="fa-solid fa-check-double" aria-hidden="true"></i> Post selected
         </button>
-        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-delete" disabled>
+        <button type="button" class="btn btn-outline btn--small" id="bank-recon-bulk-delete" disabled ${canDeleteAccounts() ? '' : 'hidden'}>
           <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
         </button>
         <details class="bank-recon-height-picker">
@@ -1763,7 +1765,9 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
             <div class="bank-recon-row-actions">
               <span class="bank-recon-row-status" hidden aria-live="polite"></span>
               <button type="button" class="btn btn-outline btn--small btn--icon bank-ignore-btn" data-line="${line.id}" title="Ignore line" aria-label="Ignore"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></button>
-              <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-line="${line.id}" title="Delete line" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+              ${canDeleteAccounts()
+                ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-line="${line.id}" title="Delete line" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+                : ''}
             </div>
           </td>
         </tr>`;
@@ -1832,7 +1836,9 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
           <td class="bank-recon-table__cell bank-recon-table__cell--actions">
             <div class="bank-recon-row-actions">
               ${line.match_status === 'MATCHED' ? `<button type="button" class="btn btn-outline btn--small bank-edit-btn" data-line="${line.id}" title="Return to work queue to re-classify or re-match">Edit</button>` : ''}
-              <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-line="${line.id}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+              ${canDeleteAccounts()
+                ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-line="${line.id}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+                : ''}
             </div>
           </td>
         </tr>`;
@@ -2026,7 +2032,9 @@ const renderLedgerTable = (ledgerTxns) => {
             <button type="button" class="btn btn-primary btn--small bank-recon-ledger-auto-match" data-txn="${t.id}" ${suggested ? '' : 'disabled'} title="${suggested ? 'Match best statement line' : 'No auto-match found (±' + tol + ' days, same amount)'}">Match</button>
             <button type="button" class="btn btn-outline btn--small bank-recon-ledger-to-statement" data-txn="${t.id}" title="Return to unmatched statement lines (removes this ledger entry)"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> To statements</button>
             <button type="button" class="btn btn-outline btn--small bank-recon-ledger-edit" data-txn="${t.id}" title="Edit in ledger">Edit</button>
-            <button type="button" class="btn btn-outline btn--small btn--danger bank-recon-ledger-delete" data-txn="${t.id}" title="Delete ledger entry">Delete</button>
+            ${canDeleteAccounts()
+              ? `<button type="button" class="btn btn-outline btn--small btn--danger bank-recon-ledger-delete" data-txn="${t.id}" title="Delete ledger entry">Delete</button>`
+              : ''}
           </div>
         </td>
       </tr>`;
@@ -2240,7 +2248,11 @@ const syncBulkSelectionUi = (root) => {
         if (cb?.checked) postableSelected += 1;
     });
 
-    if (bulkDeleteBtn) bulkDeleteBtn.disabled = selected.length === 0;
+    if (bulkDeleteBtn) {
+        const allowDelete = canDeleteAccounts();
+        bulkDeleteBtn.hidden = !allowDelete;
+        bulkDeleteBtn.disabled = !allowDelete || selected.length === 0;
+    }
     if (bulkPostBtn) bulkPostBtn.disabled = postableSelected === 0;
     if (postAllBtn) {
         postAllBtn.disabled = postableAll === 0;

@@ -1,12 +1,10 @@
 /**
- * One-shot workspace boot — profile, society access, roles, permissions,
- * module/page access, core state, and dashboard summary in a single request.
+ * Slim workspace boot — profile, apartments, roles, permissions only.
+ * Module/page/society access maps load async after login (see accessSync).
  */
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { getQueryParam } from './vercelRequest.js';
-import { fetchCoreState } from './stateDomains.js';
-import { buildDashboardSummary } from './dashboard-summary.js';
 
 /** Prefer higher-privilege society role when multiple assignments exist. */
 function primaryRoleFromAssignments(assignments = []) {
@@ -26,56 +24,25 @@ function primaryRoleFromAssignments(assignments = []) {
     return assignments[0].role_key;
 }
 
-function logBoot(userId, apartmentId, ms, error) {
+function logBoot(userId, apartmentId, ms, error, phases = null) {
+    let errorText = null;
+    if (error != null) {
+        if (typeof error === 'string') errorText = error;
+        else if (error?.message) errorText = String(error.message);
+        else {
+            try { errorText = JSON.stringify(error); } catch { errorText = String(error); }
+        }
+    }
     console.log(JSON.stringify({
         ts: new Date().toISOString(),
         layer: 'api/workspace-boot',
         userId,
         apartmentId,
         ms,
-        ok: !error,
-        error: error || null,
+        ok: !errorText,
+        error: errorText,
+        phases,
     }));
-}
-
-async function getService(req) {
-    const { authHeader } = await requireSession(req);
-    try {
-        return createServiceClient();
-    } catch {
-        return createUserClient(authHeader);
-    }
-}
-
-function emptyArr(result) {
-    return result?.error ? [] : (result?.data || []);
-}
-
-async function resolveApartmentPool(service, uid, profile) {
-    const { data: mappings, error: mapError } = await service
-        .from('user_apartments')
-        .select('apartment_id')
-        .eq('user_id', uid);
-    if (mapError) throw Object.assign(new Error(mapError.message), { status: 500 });
-
-    const mappedIds = [...new Set((mappings || []).map((m) => m.apartment_id).filter(Boolean))];
-    let pool = [];
-    if (mappedIds.length) {
-        const { data, error } = await service.from('apartments').select('id, name').in('id', mappedIds);
-        if (error) throw Object.assign(new Error(error.message), { status: 500 });
-        pool = (data || []).filter((a) => a.name !== '__SYSTEM__');
-    }
-
-    if (!pool.length && profile?.role === 'admin') {
-        const { data, error } = await service.from('apartments').select('id, name').order('name');
-        if (error) throw Object.assign(new Error(error.message), { status: 500 });
-        pool = (data || []).filter((a) => a.name !== '__SYSTEM__');
-    }
-
-    return {
-        apartments: pool,
-        apartmentIds: mappedIds.length ? mappedIds : pool.map((a) => a.id),
-    };
 }
 
 function pickActiveId(pool, preferredIds = []) {
@@ -101,7 +68,6 @@ async function loadPermissionsForRoles(service, roles, apartmentId) {
         return { isSystemAdmin: false, permissions: [], effectiveRoleKey: null };
     }
 
-    // Single primary society role — never union permissions from every assignment
     const effectiveRoleKey = primaryRoleFromAssignments(aptRoles);
     const { data: rp } = await service
         .from('role_permissions')
@@ -115,43 +81,167 @@ async function loadPermissionsForRoles(service, roles, apartmentId) {
     };
 }
 
+function apartmentsFromMappings(rows = []) {
+    const pool = [];
+    const seen = new Set();
+    for (const row of rows) {
+        const apt = row.apartments;
+        const id = apt?.id || row.apartment_id;
+        if (!id || seen.has(id)) continue;
+        const name = apt?.name;
+        if (name === '__SYSTEM__') continue;
+        seen.add(id);
+        pool.push({ id, name: name || id });
+    }
+    return pool;
+}
+
+const CRUD_RESOURCE_KEYS = [
+    'vehicle_registry',
+    'apartment_mgmt',
+    'accounts',
+    'security',
+    'portal',
+    'setup',
+    'rbac',
+];
+
+function fullCrudMap() {
+    const map = {};
+    for (const key of CRUD_RESOURCE_KEYS) {
+        map[key] = { create: true, read: true, update: true, delete: true };
+    }
+    // Gate / portal stay non-destructive by default even for full admins in the matrix UI.
+    map.security = { create: true, read: true, update: true, delete: false };
+    map.portal = { create: true, read: true, update: true, delete: false };
+    return map;
+}
+
+function deriveCrudFromPermissionKeys(permKeys = []) {
+    const set = new Set(permKeys || []);
+    const map = {};
+    for (const key of CRUD_RESOURCE_KEYS) {
+        const view = set.has(`${key}.view`);
+        const edit = set.has(`${key}.edit`);
+        if (key === 'portal' || key === 'security') {
+            map[key] = { create: view, read: view, update: view, delete: false };
+            continue;
+        }
+        map[key] = {
+            create: edit,
+            read: view || edit,
+            update: edit,
+            delete: false,
+        };
+    }
+    return map;
+}
+
+async function loadCrudAccessMap(service, apartmentId, roleKey, isSystemAdmin, permissionKeys = []) {
+    if (isSystemAdmin || roleKey === 'system_admin' || roleKey === 'society_admin') {
+        return fullCrudMap();
+    }
+    if (!apartmentId || !roleKey) return deriveCrudFromPermissionKeys(permissionKeys);
+
+    const { data, error } = await service
+        .from('society_role_crud_access')
+        .select('resource_key, can_create, can_read, can_update, can_delete')
+        .eq('apartment_id', apartmentId)
+        .eq('role_key', roleKey);
+    if (error) {
+        console.warn('[workspace-boot] CRUD matrix read failed:', error.message);
+        return deriveCrudFromPermissionKeys(permissionKeys);
+    }
+    if (!data?.length) {
+        // No society overrides yet — delete stays off until Roles → CRUD grants it.
+        return deriveCrudFromPermissionKeys(permissionKeys);
+    }
+
+    const map = deriveCrudFromPermissionKeys(permissionKeys);
+    data.forEach((row) => {
+        map[row.resource_key] = {
+            create: !!row.can_create,
+            read: !!row.can_read,
+            update: !!row.can_update,
+            delete: !!row.can_delete,
+        };
+    });
+    return map;
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
     const started = Date.now();
+    const phases = {};
     let userId = null;
     let apartmentId = null;
 
     try {
-        const { user } = await requireSession(req);
+        const tAuth = Date.now();
+        const { user, authHeader } = await requireSession(req);
         userId = user.id;
-        const service = await getService(req);
+        let service;
+        try {
+            service = createServiceClient();
+        } catch {
+            service = createUserClient(authHeader);
+        }
+        phases.auth = Date.now() - tAuth;
+
         const hintApartmentId = getQueryParam(req, 'apartment_id') || null;
 
-        const { data: profile, error: profileErr } = await service
-            .from('profiles')
-            .select('id, full_name, email, role, last_apartment_id')
-            .eq('id', user.id)
-            .maybeSingle();
-        if (profileErr) throw Object.assign(new Error(profileErr.message), { status: 500 });
-
-        const { apartments, apartmentIds } = await resolveApartmentPool(service, user.id, profile);
-        apartmentId = pickActiveId(apartments, [
-            hintApartmentId,
-            profile?.last_apartment_id,
+        // One round-trip wave: profile + memberships (with apartment names) + roles.
+        const tIdent = Date.now();
+        const [profileRes, mapRes, rolesRes] = await Promise.all([
+            service
+                .from('profiles')
+                .select('id, full_name, email, role, last_apartment_id')
+                .eq('id', user.id)
+                .maybeSingle(),
+            service
+                .from('user_apartments')
+                .select('apartment_id, apartments(id, name)')
+                .eq('user_id', user.id),
+            service
+                .from('user_role_assignments')
+                .select('role_key, apartment_id, scope')
+                .eq('user_id', user.id),
         ]);
+        phases.identity = Date.now() - tIdent;
+
+        if (profileRes.error) throw Object.assign(new Error(profileRes.error.message), { status: 500 });
+        if (mapRes.error) throw Object.assign(new Error(mapRes.error.message), { status: 500 });
+        if (rolesRes.error) throw Object.assign(new Error(rolesRes.error.message), { status: 500 });
+
+        const profile = profileRes.data || null;
+        const roleAssignments = rolesRes.data || [];
+        let apartments = apartmentsFromMappings(mapRes.data || []);
+        let apartmentIds = [...new Set((mapRes.data || []).map((m) => m.apartment_id).filter(Boolean))];
+
+        // Admin fallback: list all societies only when membership join returned nothing.
+        if (!apartments.length && profile?.role === 'admin') {
+            const tPool = Date.now();
+            const { data, error } = await service.from('apartments').select('id, name').order('name');
+            phases.pool = Date.now() - tPool;
+            if (error) throw Object.assign(new Error(error.message), { status: 500 });
+            apartments = (data || []).filter((a) => a.name !== '__SYSTEM__');
+            apartmentIds = apartments.map((a) => a.id);
+        }
+
+        apartmentId = pickActiveId(apartments, [hintApartmentId, profile?.last_apartment_id]);
 
         if (!apartments.length || !apartmentId) {
-            logBoot(userId, null, Date.now() - started);
+            logBoot(userId, null, Date.now() - started, null, phases);
             return res.status(200).json({
                 ok: true,
                 profile: profile || null,
                 apartments: [],
                 activeApartmentId: null,
                 apartmentIds: [],
-                roleAssignments: [],
+                roleAssignments,
                 permissions: [],
                 isSystemAdmin: false,
                 effectiveRoleKey: null,
@@ -163,105 +253,26 @@ export default async function handler(req, res) {
             });
         }
 
-        const [
-            rolesRes,
-            modAptRes,
-            modUserRes,
-            pageUserRes,
-            core,
-            summary,
-        ] = await Promise.all([
-            service
-                .from('user_role_assignments')
-                .select('role_key, apartment_id, scope')
-                .eq('user_id', user.id),
-            service
-                .from('apartment_module_settings')
-                .select('module_key, enabled')
-                .eq('apartment_id', apartmentId),
-            service
-                .from('user_module_access')
-                .select('module_key, enabled')
-                .eq('apartment_id', apartmentId)
-                .eq('user_id', user.id),
-            service
-                .from('user_page_overrides')
-                .select('route, access')
-                .eq('user_id', user.id)
-                .eq('apartment_id', apartmentId),
-            fetchCoreState(service, apartmentId),
-            buildDashboardSummary(service, apartmentId),
-        ]);
-
-        if (rolesRes.error) throw Object.assign(new Error(rolesRes.error.message), { status: 500 });
-
-        const roleAssignments = rolesRes.data || [];
+        const tPerms = Date.now();
         const permInfo = await loadPermissionsForRoles(service, roleAssignments, apartmentId);
+        phases.permissions = Date.now() - tPerms;
 
-        let societyRoleMap = {};
-        let roleModuleMap = {};
-        let crudAccess = {};
-        if (permInfo.effectiveRoleKey && permInfo.effectiveRoleKey !== 'system_admin') {
-            const [societyPagesRes, roleModsRes, roleCrudRes] = await Promise.all([
-                service
-                    .from('society_role_page_access')
-                    .select('route, allowed')
-                    .eq('apartment_id', apartmentId)
-                    .eq('role_key', permInfo.effectiveRoleKey),
-                service
-                    .from('society_role_module_access')
-                    .select('module_key, enabled')
-                    .eq('apartment_id', apartmentId)
-                    .eq('role_key', permInfo.effectiveRoleKey),
-                service
-                    .from('society_role_crud_access')
-                    .select('resource_key, can_create, can_read, can_update, can_delete')
-                    .eq('apartment_id', apartmentId)
-                    .eq('role_key', permInfo.effectiveRoleKey),
-            ]);
-            emptyArr(societyPagesRes).forEach((row) => {
-                societyRoleMap[row.route] = row.allowed;
-            });
-            emptyArr(roleModsRes).forEach((row) => {
-                roleModuleMap[row.module_key] = row.enabled !== false;
-            });
-            emptyArr(roleCrudRes).forEach((row) => {
-                crudAccess[row.resource_key] = {
-                    create: !!row.can_create,
-                    read: !!row.can_read,
-                    update: !!row.can_update,
-                    delete: !!row.can_delete,
-                };
-            });
-        } else if (permInfo.effectiveRoleKey === 'system_admin' || permInfo.isSystemAdmin) {
-            roleModuleMap = {
-                home: true, portal: true, security: true, property: true, finance: true, admin: true,
-            };
+        const tCrud = Date.now();
+        const crudAccess = await loadCrudAccessMap(
+            service,
+            apartmentId,
+            permInfo.effectiveRoleKey,
+            permInfo.isSystemAdmin,
+            permInfo.permissions,
+        );
+        phases.crudAccess = Date.now() - tCrud;
+
+        // Fire-and-forget last-apartment write.
+        if (profile && profile.last_apartment_id !== apartmentId && apartmentId) {
+            void service.from('profiles').update({ last_apartment_id: apartmentId }).eq('id', user.id);
         }
 
-        const normalizeModules = (rows) => {
-            const map = {};
-            (rows || []).forEach((r) => {
-                map[r.module_key] = !!r.enabled;
-            });
-            return map;
-        };
-
-        const userPageMap = {};
-        emptyArr(pageUserRes).forEach((row) => {
-            userPageMap[row.route] = row.access;
-        });
-
-        // Persist last apartment only when it actually changed (service client — not /api/db).
-        if (
-            profile
-            && profile.last_apartment_id !== apartmentId
-            && apartmentId
-        ) {
-            await service.from('profiles').update({ last_apartment_id: apartmentId }).eq('id', user.id);
-        }
-
-        logBoot(userId, apartmentId, Date.now() - started);
+        logBoot(userId, apartmentId, Date.now() - started, null, phases);
         return res.status(200).json({
             ok: true,
             profile: profile || {
@@ -278,23 +289,22 @@ export default async function handler(req, res) {
             permissions: permInfo.permissions,
             isSystemAdmin: permInfo.isSystemAdmin,
             effectiveRoleKey: permInfo.effectiveRoleKey,
+            // Module/page maps still load async after boot (accessSync.schedulePostBootAccessLoads).
             moduleAccess: {
-                apartment: modAptRes.error ? {} : normalizeModules(modAptRes.data),
-                user: modUserRes.error ? {} : normalizeModules(modUserRes.data),
-                role: roleModuleMap,
-            },
-            pageAccess: {
-                user: userPageMap,
-                societyRole: permInfo.effectiveRoleKey
-                    ? { [permInfo.effectiveRoleKey]: societyRoleMap }
+                apartment: {},
+                user: {},
+                role: permInfo.isSystemAdmin || permInfo.effectiveRoleKey === 'system_admin'
+                    ? { home: true, portal: true, security: true, property: true, finance: true, admin: true }
                     : {},
             },
+            pageAccess: { user: {}, societyRole: {} },
             crudAccess,
-            core,
-            summary,
+            core: null,
+            summary: null,
         });
     } catch (err) {
-        logBoot(userId, apartmentId, Date.now() - started, err.message);
-        return res.status(err.status || 500).json({ error: err.message || 'Workspace boot failed.' });
+        const message = err?.message || (typeof err === 'string' ? err : 'Workspace boot failed.');
+        logBoot(userId, apartmentId, Date.now() - started, message, phases);
+        return res.status(err.status || 500).json({ error: message });
     }
 }

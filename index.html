@@ -368,16 +368,6 @@
           <textarea id="cash-desc" class="expense-desc expense-textarea" rows="2"
             placeholder="Work done, payment terms, or other details"></textarea>
         </div>
-
-        <div class="expense-form__section expense-form__section--receipt" id="ledger-receipt-section">
-          <label class="expense-label">Receipt <span class="expense-optional">(optional)</span></label>
-          <div class="expense-receipt-box">
-            <input type="file" id="cash-bill-ledger" accept="image/*,.pdf,application/pdf" multiple />
-            <p class="expense-receipt-hint" id="cash-ledger-receipt-hint">Upload one or more images or PDFs. Stored and linked to this ledger entry.</p>
-            <div id="cash-ledger-receipt-preview" class="expense-attach-preview" hidden></div>
-            <ul id="cash-ledger-receipt-list" class="expense-receipt-list" hidden></ul>
-          </div>
-        </div>
       </div>
 
       <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
@@ -561,51 +551,67 @@
 
   <!-- Lean passbook / ledger line entry (fewer fields than Bills & receipts) -->
   <div class="modal-backdrop" id="ledger-line-modal">
-    <div class="modal-content expense-modal" style="max-width: 440px;">
-      <div class="expense-modal__header">
+    <div class="modal-content ledger-line-modal">
+      <div class="ledger-line-modal__header">
         <div>
           <h2 id="ledger-line-title">Add ledger expense</h2>
-          <p id="ledger-line-desc">Correct or add a passbook ledger line. Bills and receipts belong under Bills &amp; receipts.</p>
+          <p id="ledger-line-desc">Passbook line only. Bills &amp; receipts use the invoice button on the row.</p>
         </div>
-        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+        <button type="button" class="btn btn-outline ledger-line-modal__close" aria-label="Close"
           onclick="document.getElementById('ledger-line-modal').classList.remove('active')">&times;</button>
       </div>
-      <div class="expense-form" style="display:grid; gap:0.75rem; padding: 0 1.15rem 0.5rem;">
-        <div>
-          <span class="expense-label">Wallet</span>
-          <div class="expense-wallet-pills expense-wallet-pills--compact" id="ledger-line-wallet-pills" role="group">
-            <button type="button" class="expense-wallet-pill" data-wallet="CASH"><i class="fa-solid fa-wallet"></i> Petty Cash</button>
-            <button type="button" class="expense-wallet-pill active" data-wallet="BANK"><i class="fa-solid fa-building-columns"></i> Bank</button>
+
+      <div class="ledger-line-form">
+        <div class="ledger-line-form__field">
+          <span class="ledger-line-form__label" id="ledger-line-wallet-label">Wallet</span>
+          <div class="ledger-line-wallet" id="ledger-line-wallet-pills" role="group" aria-labelledby="ledger-line-wallet-label">
+            <button type="button" class="ledger-line-wallet__btn" data-wallet="CASH">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i> Petty Cash
+            </button>
+            <button type="button" class="ledger-line-wallet__btn active" data-wallet="BANK">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> Bank
+            </button>
           </div>
         </div>
-        <div>
-          <label class="expense-label" for="ledger-line-amt">Amount (₹)</label>
-          <input type="number" id="ledger-line-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+
+        <div class="ledger-line-form__row">
+          <div class="ledger-line-form__field">
+            <label class="ledger-line-form__label" for="ledger-line-amt">Amount (₹)</label>
+            <input type="number" id="ledger-line-amt" class="ledger-line-form__input ledger-line-form__input--amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+          </div>
+          <div class="ledger-line-form__field">
+            <label class="ledger-line-form__label" for="ledger-line-date">Date</label>
+            <input type="date" id="ledger-line-date" class="ledger-line-form__input" />
+          </div>
         </div>
-        <div>
-          <label class="expense-label" for="ledger-line-date">Date</label>
-          <input type="date" id="ledger-line-date" class="expense-date" />
-        </div>
-        <div>
-          <label class="expense-label" for="ledger-line-cat">Category</label>
-          <input type="text" id="ledger-line-cat" class="expense-combobox" list="ledger-line-cat-datalist" placeholder="Type to search…" autocomplete="off" />
+
+        <div class="ledger-line-form__field">
+          <label class="ledger-line-form__label" for="ledger-line-cat">Category</label>
+          <input type="text" id="ledger-line-cat" class="ledger-line-form__input" list="ledger-line-cat-datalist" placeholder="Type to search…" autocomplete="off" />
           <datalist id="ledger-line-cat-datalist"></datalist>
         </div>
-        <div>
-          <label class="expense-label" for="ledger-line-desc-input">Narration <span class="expense-optional">(optional)</span></label>
-          <input type="text" id="ledger-line-desc-input" class="expense-combobox" placeholder="Passbook narration" />
+
+        <div class="ledger-line-form__field">
+          <label class="ledger-line-form__label" for="ledger-line-desc-input">Narration <span class="ledger-line-form__optional">optional</span></label>
+          <input type="text" id="ledger-line-desc-input" class="ledger-line-form__input" placeholder="Passbook narration" />
         </div>
-        <div id="ledger-line-bank-ref-wrap">
-          <label class="expense-label" for="ledger-line-bank-ref">Bank reference <span class="expense-optional">(optional)</span></label>
-          <input type="text" id="ledger-line-bank-ref" class="expense-combobox" placeholder="Cheque / UPI / NEFT ref" />
+
+        <div class="ledger-line-form__field" id="ledger-line-bank-ref-wrap">
+          <label class="ledger-line-form__label" for="ledger-line-bank-ref">Bank reference <span class="ledger-line-form__optional">optional</span></label>
+          <input type="text" id="ledger-line-bank-ref" class="ledger-line-form__input" placeholder="Cheque / UPI / NEFT ref" />
         </div>
-        <label class="expense-form__exclude-reports" style="margin:0;">
+
+        <label class="ledger-line-form__exclude" for="ledger-line-exclude-reports">
           <input type="checkbox" id="ledger-line-exclude-reports" />
           <span>Exclude from income/expense reports</span>
         </label>
       </div>
-      <div class="expense-modal__footer">
-        <div class="expense-modal__footer-actions">
+
+      <div class="ledger-line-modal__footer">
+        <button class="btn btn-outline" type="button" id="ledger-line-bill-btn" hidden>
+          <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Bill / receipt
+        </button>
+        <div class="ledger-line-modal__footer-actions">
           <button class="btn btn-outline" type="button"
             onclick="document.getElementById('ledger-line-modal').classList.remove('active')">Cancel</button>
           <button class="btn btn-primary" type="button" id="ledger-line-save-btn">Save ledger line</button>

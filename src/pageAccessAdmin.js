@@ -150,7 +150,7 @@ function crudMatrixHtml(state) {
     </table>
   </div>
   <p class="page-access-hint page-access-hint--footer">
-    C = Create, R = Read, U = Update, D = Delete. Until finer checks ship everywhere, Read maps to <code>*.view</code> and Create/Update/Delete map to <code>*.edit</code> for API gates.
+    C = Create, R = Read, U = Update, D = Delete. Delete is off by default — tick D and Save to allow trash actions (e.g. Finance ledger). Society Administrators always keep full access.
   </p>`;
 }
 
@@ -231,7 +231,7 @@ export async function renderPageAccessAdmin({ reload = true } = {}) {
         <h2 class="page-access-title">Roles</h2>
         <p class="page-access-hint">
           RBAC for <strong>${esc(aptName)}</strong>: modules, pages (and sub-pages), and CRUD per role.
-          Columns are roles — compare and edit in one table. Assign users in Society Profile → User Access Directory.
+          Columns are roles — compare and edit in one table. Assign users in Society settings → Profile → User Access Directory.
         </p>
       </div>
       <button type="button" class="btn btn-primary" id="rbac-save-all">

@@ -26,6 +26,7 @@ import {
   isExactListMatch,
 } from './classifyCombobox.js';
 import { hasClientPermission } from './rbac.js';
+import { canCrud } from './rbacMatrix.js';
 
 const formatMoney = (n) =>
   `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -36,6 +37,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** Full bills management (link, delete, float, deposit). */
 export const canManageFinanceDocs = () => hasClientPermission('accounts.edit');
+export const canDeleteFinanceDocs = () => canCrud('accounts', 'delete');
 
 /** Add / upload / view bills (includes staff entry). */
 export const canEnterFinanceDocs = () =>
@@ -53,10 +55,12 @@ const applyFinanceDocsStaffMode = () => {
   const kpis = document.getElementById('fdoc-float-kpis');
   if (funding) funding.hidden = staffOnly;
   if (kpis) kpis.hidden = staffOnly;
-  ['fdoc-bulk-link', 'fdoc-deposit-wallet', 'fdoc-sync-cats', 'fdoc-bulk-delete'].forEach((id) => {
+  ['fdoc-bulk-link', 'fdoc-deposit-wallet', 'fdoc-sync-cats'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.hidden = staffOnly;
   });
+  const bulkDel = document.getElementById('fdoc-bulk-delete');
+  if (bulkDel) bulkDel.hidden = staffOnly || !canDeleteFinanceDocs();
   const checkCol = root.querySelector('.fdoc-check-col');
   if (checkCol) checkCol.hidden = staffOnly;
 };
@@ -426,9 +430,10 @@ const editing = {
 
 const linkPicker = {
   docIds: [],
-  mode: 'cash', // 'cash' | 'cheque' | 'cash-deposit'
+  mode: 'cash', // 'cash' | 'cheque' | 'cash-deposit' | 'attach-to-txn'
   search: '',
   includeWalletFloat: true,
+  txnId: null,
 };
 
 const fillCatOptions = (kind) => {
@@ -908,9 +913,133 @@ const syncDepositWalletToggle = () => {
   cb.checked = !!linkPicker.includeWalletFloat;
 };
 
+/** Unlinked bills/receipts eligible to attach to a known ledger row. */
+const unlinkedDocsForLedgerAttach = (txnId, query = '') => {
+  const txn = (portalState.finances.txns || []).find((t) => t.id === txnId);
+  const preferKind = txn?.type === 'IN' ? 'IN' : 'OUT';
+  const q = String(query || '').trim().toLowerCase();
+  const txnAmt = Math.abs(parseFloat(txn?.amount) || 0);
+
+  return (portalState.finances.financeDocuments || [])
+    .filter((d) => {
+      if (!d || d.status === 'void') return false;
+      if (bookStatus(d) === 'linked' || d.transaction_id) return false;
+      return true;
+    })
+    .map((d) => {
+      const amt = Math.abs(parseFloat(d.amount) || 0);
+      const kindScore = d.kind === preferKind ? 2 : 0;
+      const amtScore = txnAmt > 0 && Math.abs(amt - txnAmt) < 0.02 ? 3 : 0;
+      const hay = [
+        d.vendor_name,
+        d.description,
+        d.notes,
+        categoryDisplayLabel(d.cat),
+        d.doc_date,
+        String(d.amount || ''),
+      ].join(' ').toLowerCase();
+      const searchHit = !q || hay.includes(q);
+      return { d, score: kindScore + amtScore, searchHit };
+    })
+    .filter((x) => x.searchHit)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(b.d.doc_date || '').localeCompare(String(a.d.doc_date || ''));
+    })
+    .map((x) => x.d)
+    .slice(0, 60);
+};
+
+const renderAttachDocCandidateRows = (docs) => {
+  if (!docs.length) {
+    return '<p class="fa-panel__hint" style="margin:0.5rem 0;">No unlinked bills or receipts match. Create one from this ledger line, or clear the search.</p>';
+  }
+  return docs.map((d) => {
+    const date = d.doc_date
+      ? new Date(`${String(d.doc_date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'short', year: '2-digit',
+      })
+      : '—';
+    const status = bookStatus(d);
+    return `<button type="button" class="fdoc-link-row" data-link-doc="${esc(d.id)}">
+      <span class="fdoc-link-row__main">${esc(date)} · ${d.kind === 'IN' ? 'Receipt' : 'Bill'} · ${esc(categoryDisplayLabel(d.cat))} · ${formatMoney(d.amount)}</span>
+      <span class="fdoc-link-row__sub">${esc(d.vendor_name || d.description || '—')} · ${esc(status)}</span>
+    </button>`;
+  }).join('');
+};
+
+const refreshAfterLedgerDocLink = () => {
+  renderFinanceDocumentsPage();
+  window.renderCashLedger?.();
+  window.refreshLedgerLinkedDocsPanel?.();
+};
+
+const linkDocToKnownTxn = async (docId) => {
+  const txnId = linkPicker.txnId;
+  if (!txnId || !docId) return;
+  const result = await postFinanceMutation('linkFinanceDocuments', {
+    transaction_id: txnId,
+    document_ids: [docId],
+    sync_categories: true,
+  });
+  (result.documents || []).forEach(applyDocLocally);
+  if (result.transaction) applySavedTransactionLocally(result.transaction);
+  closeLinkModal();
+  refreshAfterLedgerDocLink();
+};
+
+/**
+ * From a ledger row: pick an existing unlinked bill/receipt and link it here.
+ */
+export const openAttachDocsToLedgerModal = (txnId) => {
+  if (!txnId) return;
+  if (!canManageFinanceDocs()) {
+    alert('You do not have permission to link bills or receipts.');
+    return;
+  }
+  ensureLinkModalWired();
+  const modal = document.getElementById('fdoc-link-modal');
+  const hint = document.getElementById('fdoc-link-hint');
+  const searchWrap = document.getElementById('fdoc-link-search-wrap');
+  const searchEl = document.getElementById('fdoc-link-search');
+  const titleEl = document.getElementById('fdoc-link-title');
+  if (!modal) {
+    alert('Open Bills & receipts once to load linking tools, then try again.');
+    return;
+  }
+
+  linkPicker.docIds = [];
+  linkPicker.mode = 'attach-to-txn';
+  linkPicker.txnId = txnId;
+  linkPicker.search = '';
+  linkPicker.includeWalletFloat = true;
+
+  if (titleEl) titleEl.textContent = 'Link bill or receipt';
+  if (hint) {
+    hint.textContent = 'Pick an unlinked bill or receipt for this ledger line. Prefer matching amount and type.';
+  }
+  if (searchWrap) searchWrap.hidden = false;
+  if (searchEl) {
+    searchEl.value = '';
+    searchEl.placeholder = 'Search vendor, amount, date, category…';
+  }
+  syncDepositWalletToggle();
+  refreshLinkModalList();
+  modal.hidden = false;
+  setTimeout(() => searchEl?.focus(), 40);
+};
+
 const refreshLinkModalList = () => {
   const list = document.getElementById('fdoc-link-list');
   if (!list) return;
+
+  if (linkPicker.mode === 'attach-to-txn') {
+    list.innerHTML = renderAttachDocCandidateRows(
+      unlinkedDocsForLedgerAttach(linkPicker.txnId, linkPicker.search),
+    );
+    return;
+  }
+
   if (linkPicker.mode !== 'cash-deposit' && !linkPicker.docIds.length) return;
 
   const docs = linkPicker.docIds
@@ -945,6 +1074,7 @@ const closeLinkModal = () => {
   linkPicker.search = '';
   linkPicker.mode = 'cash';
   linkPicker.includeWalletFloat = true;
+  linkPicker.txnId = null;
   const searchEl = document.getElementById('fdoc-link-search');
   if (searchEl) searchEl.value = '';
   syncDepositWalletToggle();
@@ -1070,6 +1200,7 @@ const linkSelectedDocsToTxn = async (txnId) => {
     closeLinkModal();
     renderFinanceDocumentsPage();
     window.renderCashLedger?.();
+    window.refreshLedgerLinkedDocsPanel?.();
     if (overflow.length) {
       alert(
         `Linked ${fit.length} bill(s) to this bucket.\n`
@@ -1124,6 +1255,7 @@ const linkSelectedDocsToTxn = async (txnId) => {
     closeLinkModal();
     renderFinanceDocumentsPage();
     window.renderCashLedger?.();
+    window.refreshLedgerLinkedDocsPanel?.();
     return;
   }
 
@@ -1138,6 +1270,7 @@ const linkSelectedDocsToTxn = async (txnId) => {
   closeLinkModal();
   renderFinanceDocumentsPage();
   window.renderCashLedger?.();
+  window.refreshLedgerLinkedDocsPanel?.();
 };
 
 const isBlankExcelCell = (val) => {
@@ -1884,7 +2017,9 @@ const syncBulkActionButtons = () => {
 
   const delBtn = document.getElementById('fdoc-bulk-delete');
   if (delBtn) {
-    delBtn.disabled = selectedIds.length === 0;
+    const allowDelete = canDeleteFinanceDocs();
+    delBtn.hidden = isStaffBillsOnly() || !allowDelete;
+    delBtn.disabled = !allowDelete || selectedIds.length === 0;
     const count = selectedIds.length ? ` (${selectedIds.length})` : '';
     const full = `Delete selected${count}`;
     delBtn.title = full;
@@ -1910,6 +2045,10 @@ const selectedOpenCashReceiptIds = () =>
   });
 
 const bulkDeleteSelectedDocs = async () => {
+  if (!canDeleteFinanceDocs()) {
+    alert('You do not have permission to delete bills or receipts.');
+    return;
+  }
   const ids = selectedDocIds();
   if (!ids.length) return;
   if (!confirm(`Delete ${ids.length} bill(s)/receipt(s)? This cannot be undone.`)) return;
@@ -2000,7 +2139,7 @@ export function renderFinanceDocumentsPage() {
           ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`
           : '')
       : '';
-    const delBtn = manage
+    const delBtn = manage && canDeleteFinanceDocs()
       ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
       : '';
     const pay = paymentInfo(d);
@@ -2231,9 +2370,43 @@ const syncSelectedCategories = async () => {
   );
 };
 
+/** Wire link-modal controls once so ledger edit can open them without visiting Bills first. */
+const ensureLinkModalWired = () => {
+  const modal = document.getElementById('fdoc-link-modal');
+  if (!modal || modal.dataset.linkWired === '1') return;
+  modal.dataset.linkWired = '1';
+
+  document.getElementById('fdoc-link-close')?.addEventListener('click', closeLinkModal);
+  document.getElementById('fdoc-link-backdrop')?.addEventListener('click', closeLinkModal);
+  document.getElementById('fdoc-link-search')?.addEventListener('input', (e) => {
+    linkPicker.search = e.target.value || '';
+    refreshLinkModalList();
+  });
+  document.getElementById('fdoc-link-wallet-float')?.addEventListener('change', (e) => {
+    linkPicker.includeWalletFloat = !!e.target.checked;
+    refreshLinkModalList();
+  });
+  document.getElementById('fdoc-link-list')?.addEventListener('click', (e) => {
+    const docBtn = e.target.closest('[data-link-doc]');
+    if (docBtn && linkPicker.mode === 'attach-to-txn') {
+      const docId = docBtn.dataset?.linkDoc;
+      if (!docId) return;
+      void linkDocToKnownTxn(docId).catch((err) => alert(err?.message || 'Link failed.'));
+      return;
+    }
+    const btn = e.target.closest('[data-link-txn]');
+    if (!btn || btn.disabled || btn.classList.contains('fdoc-link-row--disabled')) return;
+    const txnId = btn.dataset?.linkTxn;
+    if (!txnId) return;
+    if (!linkPicker.docIds.length && linkPicker.mode !== 'cash-deposit') return;
+    void linkSelectedDocsToTxn(txnId).catch((err) => alert(err?.message || 'Link failed.'));
+  });
+};
+
 export function initFinanceDocumentsPage() {
   const root = document.getElementById('subview-finance-docs');
   if (!root) return;
+  ensureLinkModalWired();
   if (root.dataset.wired) {
     renderFinanceDocumentsPage();
     return;
@@ -2362,6 +2535,7 @@ export function initFinanceDocumentsPage() {
           (result.documents || []).forEach(applyDocLocally);
           renderFinanceDocumentsPage();
           window.renderCashLedger?.();
+          window.refreshLedgerLinkedDocsPanel?.();
         })
         .catch((err) => alert(err?.message || 'Unlink failed.'));
       return;
@@ -2394,6 +2568,10 @@ export function initFinanceDocumentsPage() {
     }
     const delId = e.target.closest('[data-fdoc-del]')?.dataset?.fdocDel;
     if (delId) {
+      if (!canDeleteFinanceDocs()) {
+        alert('You do not have permission to delete bills or receipts.');
+        return;
+      }
       if (!confirm('Delete this bill / receipt?')) return;
       void postFinanceMutation('deleteFinanceDocument', { document_id: delId })
         .then(() => {
@@ -2411,25 +2589,6 @@ export function initFinanceDocumentsPage() {
       const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === row.dataset.docId);
       if (doc) window.openFinanceDocumentView?.(doc);
     }
-  });
-
-  document.getElementById('fdoc-link-close')?.addEventListener('click', closeLinkModal);
-  document.getElementById('fdoc-link-backdrop')?.addEventListener('click', closeLinkModal);
-  document.getElementById('fdoc-link-search')?.addEventListener('input', (e) => {
-    linkPicker.search = e.target.value || '';
-    refreshLinkModalList();
-  });
-  document.getElementById('fdoc-link-wallet-float')?.addEventListener('change', (e) => {
-    linkPicker.includeWalletFloat = !!e.target.checked;
-    refreshLinkModalList();
-  });
-  document.getElementById('fdoc-link-list')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-link-txn]');
-    if (!btn || btn.disabled || btn.classList.contains('fdoc-link-row--disabled')) return;
-    const txnId = btn.dataset?.linkTxn;
-    if (!txnId) return;
-    if (!linkPicker.docIds.length && linkPicker.mode !== 'cash-deposit') return;
-    void linkSelectedDocsToTxn(txnId).catch((err) => alert(err?.message || 'Link failed.'));
   });
 
   document.getElementById('fdoc-funding-table')?.addEventListener('click', (e) => {
@@ -2645,6 +2804,8 @@ export async function createFinanceDocumentFromLedgerTxn(txnId, { openEditor = t
   const doc = result.document;
   if (!doc?.id) throw new Error('Could not create bill/receipt.');
   applyDocLocally(doc);
+  window.refreshLedgerLinkedDocsPanel?.();
+  window.renderCashLedger?.();
 
   if (openEditor) {
     // Prefer the shared bill/receipt modal so attachments can be uploaded immediately.

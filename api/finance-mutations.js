@@ -1,4 +1,4 @@
-import { requireApartmentPermission, requireAnyApartmentPermission } from './serverAuth.js';
+import { requireApartmentPermission, requireAnyApartmentPermission, requireApartmentCrud } from './serverAuth.js';
 import { prepareImportedStatementLines, computeRunningBalances } from '../src/bankStatementOrdering.js';
 import { inferExpenseCategory, BANK_REJECT_CAT } from '../src/expenseCategories.js';
 import { findMatchingRule } from '../src/bankClassificationRules.js';
@@ -1779,9 +1779,18 @@ export default async function handler(req, res) {
         const body = req.body || await readJsonBody(req);
         const action = body.action;
         const billsEntryActions = new Set(['saveFinanceDocument', 'importFinanceDocuments']);
-        const auth = billsEntryActions.has(action)
-            ? await requireAnyApartmentPermission(req, body.apartment_id, ['accounts.edit', 'accounts.bills_entry'])
-            : await requireApartmentPermission(req, body.apartment_id, 'accounts.edit');
+        const deleteActions = new Set([
+            'deleteTransaction',
+            'deleteTransactions',
+            'deleteFinanceDocument',
+            'deleteExpensePlanItem',
+            'deleteExpensePlanRecurring',
+        ]);
+        const auth = deleteActions.has(action)
+            ? await requireApartmentCrud(req, body.apartment_id, 'accounts', 'delete', 'accounts.edit')
+            : billsEntryActions.has(action)
+                ? await requireAnyApartmentPermission(req, body.apartment_id, ['accounts.edit', 'accounts.bills_entry'])
+                : await requireApartmentPermission(req, body.apartment_id, 'accounts.edit');
         const { apartmentId, service, user } = auth;
 
         let result;
