@@ -1545,6 +1545,19 @@
   #bank-recon-lines td.bank-recon-table__cell--type { grid-area: type; justify-self: end; align-self: start; }
   #bank-recon-lines td.bank-recon-table__cell--desc { grid-area: desc; }
   #bank-recon-lines td.bank-recon-table__cell--classify { grid-area: classify; }
+
+  #bank-recon-lines .bank-recon-classify-actions {
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+  }
+
+  #bank-recon-lines .bank-recon-classify-actions .bank-recon-classify-combobox,
+  #bank-recon-lines .bank-recon-classify-actions .bank-recon-vendor-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
   #bank-recon-lines td.bank-recon-table__cell--match { grid-area: match; }
   #bank-recon-lines td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
 

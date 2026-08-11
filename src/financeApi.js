@@ -1,13 +1,20 @@
-import { portalState } from './store.js';
+import { portalState, supabase } from './store.js';
 import { readApiJson } from './apiJson.js';
 
 export async function postFinanceMutation(action, payload = {}) {
     const apartment_id = payload.apartment_id || portalState.access?.activeApartmentId;
     if (!apartment_id) throw new Error('No active apartment selected.');
 
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+        const sessionRes = await supabase?.auth?.getSession?.();
+        const token = sessionRes?.data?.session?.access_token;
+        if (token) headers.Authorization = `Bearer ${token}`;
+    } catch { /* cookie session may still work */ }
+
     const res = await fetch('/api/finance-mutations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         credentials: 'include',
         body: JSON.stringify({
             action,

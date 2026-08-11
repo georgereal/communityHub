@@ -10,8 +10,9 @@ const userByToken = new Map();
 /** Coalesce concurrent getUser calls for the same token (HMR / boot stampede). */
 const inflightUserByToken = new Map();
 const USER_CACHE_TTL_MS = 60_000;
-const GET_USER_TIMEOUT_MS = 8_000;
+const GET_USER_TIMEOUT_MS = 12_000;
 let warnedBadJwtSecret = false;
+let warnedMissingJwtSecret = false;
 
 function serverClientOptions(authHeader = '') {
     return {
@@ -144,31 +145,25 @@ function userFromVerifiedJwt(token, jwtSecret) {
 
 async function fetchUserFromAuthApi(token) {
     // Prefer service-role getUser(jwt) — one shared client, no per-request anon client.
+    // No per-call timeout here: callers race against GET_USER_TIMEOUT_MS while this
+    // promise stays in inflightUserByToken until it settles (avoids Auth stampedes).
     try {
         const service = createServiceClient();
-        const { data, error } = await withTimeout(
-            service.auth.getUser(token),
-            GET_USER_TIMEOUT_MS,
-            'Auth validation',
-        );
+        const { data, error } = await service.auth.getUser(token);
         const user = data?.user || null;
         if (!error && user) return { user, error: null };
         if (error) {
             return { user: null, error: error.message || 'Sign in required.' };
         }
     } catch (err) {
-        if (err?.status === 401 || /timed out/i.test(String(err?.message || ''))) {
-            return { user: null, error: err?.message || 'Sign in required.' };
-        }
         // Fall through to anon client if service key missing / unexpected.
+        if (!/SUPABASE_SERVICE_ROLE_KEY/i.test(String(err?.message || ''))) {
+            // Keep going — anon path may still work.
+        }
     }
 
     const userClient = createUserClient(`Bearer ${token}`);
-    const { data, error } = await withTimeout(
-        userClient.auth.getUser(token),
-        GET_USER_TIMEOUT_MS,
-        'Auth validation',
-    );
+    const { data, error } = await userClient.auth.getUser(token);
     const user = data?.user || null;
     if (error || !user) {
         return { user: null, error: error?.message || 'Sign in required.' };
@@ -191,6 +186,13 @@ export async function getUserFromAuthHeader(authHeader) {
     }
 
     const { jwtSecret } = getSupabaseEnv();
+    if (!jwtSecret && !warnedMissingJwtSecret) {
+        warnedMissingJwtSecret = true;
+        console.warn(
+            '[serverSupabase] SUPABASE_JWT_SECRET is not set. Every /api call validates the session via Auth getUser() '
+            + '(slow / can time out under load). Set Project Settings → API → JWT Secret (Legacy HS256) in .env.local and Vercel.',
+        );
+    }
     const localUser = userFromVerifiedJwt(token, jwtSecret);
     if (localUser) {
         userByToken.set(token, { user: localUser, expiresAt: now + USER_CACHE_TTL_MS });
@@ -215,7 +217,8 @@ export async function getUserFromAuthHeader(authHeader) {
     }
 
     try {
-        return await pending;
+        // Time out the caller, not the shared fetch — so retries coalesce on the same getUser.
+        return await withTimeout(pending, GET_USER_TIMEOUT_MS, 'Auth validation');
     } catch (err) {
         return { user: null, error: err?.message || 'Sign in required.' };
     }

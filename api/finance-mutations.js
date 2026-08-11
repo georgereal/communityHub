@@ -1864,23 +1864,68 @@ async function listFinanceDocumentsMutation(service, apartmentId, body) {
 /**
  * Page-load aggregates for Bills KPIs / cash float / open bills.
  * Cached on the client until mutation or hard refresh.
+ *
+ * Must include every cash doc + every doc linked to Petty Cash funding lines —
+ * the float −Bills column is computed client-side from this working set
+ * (full finance_documents are no longer hydrated with /api/state).
  */
 async function financeDocumentsAggregatesMutation(service, apartmentId) {
     const base = () => service.from('finance_documents').eq('apartment_id', apartmentId).neq('status', 'void');
 
-    const [slimRes, cashRes, openRes] = await Promise.all([
+    // Funding bucket ids (bank Petty Cash / explicit cash-float marks).
+    let fundingIds = [];
+    {
+        let fundingQ = await service
+            .from('transactions')
+            .select('id, cat, wallet, type, is_cash_float, exclude_from_cash_float')
+            .eq('apartment_id', apartmentId)
+            .eq('type', 'OUT');
+        if (fundingQ.error && /is_cash_float|exclude_from_cash_float/i.test(fundingQ.error.message)) {
+            fundingQ = await service
+                .from('transactions')
+                .select('id, cat, wallet, type')
+                .eq('apartment_id', apartmentId)
+                .eq('type', 'OUT');
+        }
+        if (fundingQ.error) {
+            throw Object.assign(new Error(fundingQ.error.message), { status: 500 });
+        }
+        fundingIds = [...new Set(
+            (fundingQ.data || [])
+                .filter((t) => {
+                    if (t.exclude_from_cash_float) return false;
+                    if (t.is_cash_float) return true;
+                    return String(t.wallet || '').toUpperCase() === 'BANK'
+                        && String(t.cat || '').trim().toLowerCase() === 'petty cash';
+                })
+                .map((r) => r.id)
+                .filter(Boolean),
+        )];
+    }
+
+    // Use .ilike() (not raw .or with spaces) — PostgREST `.or('notes.ilike.%Payment: Cash%')`
+    // breaks on the space and returned an empty cash working set after lazy-load.
+    const queries = [
         base().select('amount, status, kind'),
-        base()
-            .select('*')
-            .or('notes.ilike.%Payment: Cash%,notes.eq.cash,notes.eq.Cash'),
-        base()
-            .select('*')
-            .in('status', ['unpaid', 'paid', 'open']),
-    ]);
+        base().select('*').ilike('notes', '%Payment: Cash%'),
+        base().select('*').in('status', ['unpaid', 'paid', 'open']),
+    ];
+    if (fundingIds.length) {
+        // Chunk in case of many funding lines (PostgREST URL limits).
+        for (let i = 0; i < fundingIds.length; i += 80) {
+            queries.push(base().select('*').in('transaction_id', fundingIds.slice(i, i + 80)));
+        }
+    }
+
+    const results = await Promise.all(queries);
+    const [slimRes, cashRes, openRes, ...fundingLinkedRes] = results;
 
     if (slimRes.error) throw Object.assign(new Error(slimRes.error.message), { status: 500 });
     if (cashRes.error) throw Object.assign(new Error(cashRes.error.message), { status: 500 });
     if (openRes.error) throw Object.assign(new Error(openRes.error.message), { status: 500 });
+    for (const res of fundingLinkedRes) {
+        if (res.error) throw Object.assign(new Error(res.error.message), { status: 500 });
+    }
 
     const slim = slimRes.data || [];
     let unpaidOutAmt = 0;
@@ -1906,8 +1951,47 @@ async function financeDocumentsAggregatesMutation(service, apartmentId) {
     }
 
     const byId = new Map();
-    for (const doc of [...(cashRes.data || []), ...(openRes.data || [])]) {
+    for (const doc of [
+        ...(cashRes.data || []),
+        ...(openRes.data || []),
+        ...fundingLinkedRes.flatMap((r) => r.data || []),
+    ]) {
         if (doc?.id) byId.set(doc.id, doc);
+    }
+
+    // Legacy bare "cash" / "Cash" notes (avoid space-broken .or with the Payment: Cash filter).
+    const legacyCash = await base().select('*').or('notes.eq.cash,notes.eq.Cash');
+    if (!legacyCash.error) {
+        for (const doc of legacyCash.data || []) {
+            if (doc?.id) byId.set(doc.id, doc);
+        }
+    }
+
+    const isCashNotes = (notes) => {
+        const n = String(notes || '');
+        return /Payment:\s*Cash/i.test(n) || n.trim().toLowerCase() === 'cash';
+    };
+
+    /** Per funding-line cash bill totals — source of truth for Petty Cash −Bills (avoid client store races). */
+    const fundingBillTotals = {};
+    let linkedCashAmt = 0;
+    let linkedCashCount = 0;
+    let openCashAmt = 0;
+    let openCashCount = 0;
+    for (const doc of byId.values()) {
+        if (doc.kind !== 'OUT' || !isCashNotes(doc.notes)) continue;
+        const amt = roundMoney(doc.amount);
+        const st = String(doc.status || '').toLowerCase();
+        const linked = st === 'linked' || !!doc.transaction_id;
+        if (linked && doc.transaction_id) {
+            linkedCashAmt += amt;
+            linkedCashCount += 1;
+            const key = String(doc.transaction_id);
+            fundingBillTotals[key] = roundMoney((fundingBillTotals[key] || 0) + amt);
+        } else if (st === 'paid' || st === 'open') {
+            openCashAmt += amt;
+            openCashCount += 1;
+        }
     }
 
     return {
@@ -1919,10 +2003,16 @@ async function financeDocumentsAggregatesMutation(service, apartmentId) {
             unpaidOutCount,
             paidOutCount,
             linkedOutCount,
+            linkedCashAmt: roundMoney(linkedCashAmt),
+            linkedCashCount,
+            openCashAmt: roundMoney(openCashAmt),
+            openCashCount,
         },
         documents: [...byId.values()],
         cashDocumentIds: (cashRes.data || []).map((d) => d.id).filter(Boolean),
         openDocumentIds: (openRes.data || []).map((d) => d.id).filter(Boolean),
+        fundingTransactionIds: fundingIds,
+        fundingBillTotals,
     };
 }
 

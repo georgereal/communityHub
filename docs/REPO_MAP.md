@@ -172,8 +172,6 @@
 │   ├── authRedirect.js
 │   ├── authShell.js
 │   ├── authUserKind.js
-│   ├── login.css
-│   ├── loginPage.js
 │   ├── bankClassificationRules.js
 │   ├── bankReconciliation.js
 │   ├── bankStatementLineUtils.js
@@ -229,6 +227,8 @@
 │   ├── ledgerTable.js
 │   ├── ledgerTransform.js
 │   ├── ledgerTxnLocal.js
+│   ├── login.css
+│   ├── loginPage.js
 │   ├── main.js
 │   ├── mainBoot.js
 │   ├── maintenanceBilling.js
@@ -311,7 +311,7 @@
 
 ```
 
-**Scale:** ~147 JavaScript modules, ~10 CSS files, ~15 HTML entry pages.
+**Scale:** ~149 JavaScript modules, ~11 CSS files, ~15 HTML entry pages.
 
 ---
 
@@ -365,8 +365,6 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ├── authRedirect.js
 ├── authShell.js
 ├── authUserKind.js
-├── login.css
-├── loginPage.js
 ├── bankClassificationRules.js
 ├── bankReconciliation.js
 ├── bankStatementLineUtils.js
@@ -422,6 +420,8 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ├── ledgerTable.js
 ├── ledgerTransform.js
 ├── ledgerTxnLocal.js
+├── login.css
+├── loginPage.js
 ├── main.js
 ├── mainBoot.js
 ├── maintenanceBilling.js
@@ -489,10 +489,8 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/allocation.js | Parking slot allocation |
 | src/apiJson.js | API JSON request helpers |
 | src/authClient.js | Auth client & session handling |
-| src/authRedirect.js | /login ↔ app redirects + flash messages |
+| src/authRedirect.js | auth Redirect |
 | src/authShell.js | Auth UI shell |
-| src/loginPage.js | Dedicated /login page logic |
-| src/login.css | Dedicated /login page styles |
 | src/authUserKind.js | auth User Kind |
 | src/bankClassificationRules.js | Bank statement classification rules |
 | src/bankReconciliation.js | Bank reconciliation UI |
@@ -549,6 +547,8 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/ledgerTable.js | Ledger table rendering |
 | src/ledgerTransform.js | Ledger row transform helpers |
 | src/ledgerTxnLocal.js | Local (offline) ledger transactions |
+| src/login.css | login |
+| src/loginPage.js | login Page |
 | src/main.js | Entry point / primary boot sequence & view coordination |
 | src/mainBoot.js | Shared boot helpers (access mappings, resident rendering, apartment options) |
 | src/maintenanceBilling.js | Maintenance billing engine + invoices page |
@@ -875,7 +875,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 | --- | --- |
 | AGENTS.md | Repo config / entry point |
 | index.html | Repo config / entry point |
-| login.html | Dedicated sign-in page |
+| login.html | Repo config / entry point |
 | microsoft-auth.html | Repo config / entry point |
 | package.json | Repo config / entry point |
 | vercel.json | Repo config / entry point |
@@ -890,9 +890,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
   partitioned read-only domains via `stateLoader.js` / `stateDomains.js`.
 - **Data access:** browser → Supabase client (`src/dbClient.js`) and/or Vercel `/api/*` endpoints; admin/finance
   mutations go through `api/finance-mutations.js`. Spreadsheet sync via `api/ledger*`, Excel push via Microsoft Graph.
-- **Auth:** dedicated `/login` page (`login.html` + `src/loginPage.js`) styled like DentalPractice’s
-  staff login; `authClient.js` + `socialAuth.js` (Google/Microsoft); MSAL callback (`microsoft-auth.html`,
-  `ms-callback.js`). Unauthenticated app boot redirects to `/login`.
+- **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
 - **RBAC & access:** `rbac.js` / `rbacMatrix.js` (roles/permissions), `moduleAccess*`, `pageAccess*`, `accessSync.js`.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.

@@ -63,7 +63,7 @@ export const ACCOUNTS_PAGE_HELP = {
         steps: [
             'Set History, Pivot by, Forecast, and Match dates in the toolbar; download Excel when you need a shareable pack.',
             'Toggle Bank Petty Cash vs Cash bills by category to change how cash expenses appear in stacks.',
-            'Read balance metrics first, then open Planned expenses and Monthly summary panels.',
+            'Read balance metrics first, then open the Cash position and Monthly summary panels.',
             'Use Bank reconciliation from the toolbar when statement matching needs attention.',
         ],
         tips: [

@@ -13092,20 +13092,20 @@ header {
 
 .bank-recon-classify-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   min-width: 0;
 }
 
 .bank-recon-classify-actions .bank-recon-classify-combobox {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 1 8rem;
+  min-width: 7rem;
 }
 
 .bank-recon-classify-actions .bank-recon-vendor-input {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 1 8rem;
+  min-width: 7rem;
 }
 
 #bank-recon-rules-modal.modal-backdrop {
@@ -14972,6 +14972,8 @@ textarea.bank-recon-cell-input {
 .bank-recon-table__cell--classify .bank-recon-vendor-input {
   font-size: 0.72rem;
   padding: 0.28rem 0.35rem;
+  border-color: var(--border);
+  background: #fff;
 }
 
 .bank-recon-classify-combobox__menu {
@@ -15016,6 +15018,7 @@ textarea.bank-recon-cell-input {
 
 .bank-recon-post-classify {
   margin-top: 0.2rem;
+  flex: 1 1 100%;
   width: 100%;
 }
 
@@ -16763,6 +16766,10 @@ textarea.bank-recon-cell-input {
   .fa-insight-row .fa-planned__metrics {
     grid-template-columns: 1fr;
   }
+
+  .fa-insight-row .fa-cash-sheet {
+    font-size: 0.8rem;
+  }
 }
 
 .fa-collapsible-panel {
@@ -16899,6 +16906,98 @@ textarea.bank-recon-cell-input {
   color: #b91c1c;
 }
 
+.fa-cash-sheet {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.55rem 0 0.75rem;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fa-cash-sheet td {
+  padding: 0.42rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: baseline;
+}
+
+.fa-cash-sheet tr:last-child td {
+  border-bottom: none;
+}
+
+.fa-cash-sheet__ref {
+  width: 1.6rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+
+.fa-cash-sheet__label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.fa-cash-sheet__hint {
+  display: inline;
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.fa-cash-sheet__formula {
+  display: inline-block;
+  margin-left: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  font-variant-numeric: normal;
+  letter-spacing: 0.02em;
+}
+
+.fa-cash-sheet__amt {
+  text-align: right;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--text);
+  width: 7.5rem;
+}
+
+.fa-cash-sheet__amt--out {
+  color: #b91c1c;
+}
+
+.fa-cash-sheet__row--deduct td {
+  background: transparent;
+}
+
+.fa-cash-sheet__row--total td {
+  padding-top: 0.65rem;
+  border-top: 2px solid var(--text);
+  border-bottom: none;
+  font-size: 0.95rem;
+}
+
+.fa-cash-sheet__row--total .fa-cash-sheet__label {
+  font-weight: 800;
+}
+
+.fa-cash-sheet__row--total .fa-cash-sheet__amt {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.fa-cash-sheet__total--ok .fa-cash-sheet__amt {
+  color: var(--success);
+}
+
+.fa-cash-sheet__total--tight .fa-cash-sheet__amt {
+  color: #d97706;
+}
+
+.fa-cash-sheet__total--short .fa-cash-sheet__amt {
+  color: #b91c1c;
+}
+
 .fa-planned__buckets {
   display: flex;
   flex-wrap: wrap;
@@ -16949,6 +17048,16 @@ textarea.bank-recon-cell-input {
 @media (max-width: 767px) {
   .fa-planned__metrics {
     grid-template-columns: 1fr;
+  }
+
+  .fa-cash-sheet__amt {
+    width: auto;
+  }
+
+  .fa-cash-sheet__hint {
+    display: block;
+    margin-left: 0;
+    margin-top: 0.1rem;
   }
 }
 
@@ -17766,6 +17875,11 @@ textarea.bank-recon-cell-input {
 
 .fdoc-status--paid {
   color: #c2410c;
+  font-weight: 600;
+}
+
+.fdoc-status--cheque-ready {
+  color: #b45309;
   font-weight: 600;
 }
 

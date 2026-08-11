@@ -22,7 +22,7 @@ import {
     isBankPettyFunding,
     isCashDeskSpend,
 } from './cashFloat.js';
-import { cashBillsAsReportExpenses, getOpenExpenseDocuments, getOpenChequeExpenseDocuments, getCashWalletLeft, isChequeFinanceDocument } from './financeDocuments.js';
+import { cashBillsAsReportExpenses, getOpenExpenseDocuments, getChequeReadyExpenseDocuments, getOpenChequeExpenseDocuments, getCashWalletLeft, isChequeFinanceDocument } from './financeDocuments.js';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -53,8 +53,9 @@ export const isLedgerChequePayment = (t) => {
 };
 
 /**
- * Pending cheques for book balance:
- * - open cheque bills (issued, not linked to ledger)
+ * Pending commitments for book balance:
+ * - unpaid expense bills
+ * - cheque-ready bills (cheque given, not linked)
  * - unmatched bank ledger cheque OUTs (posted, not yet on statement)
  */
 export const getPendingChequesSummary = () => {
@@ -702,8 +703,8 @@ const renderBalanceMetrics = () => {
         : 'Import a statement in Bank Reconciliation';
 
     const pendingSub = [
-        pending.openCount ? `${pending.openCount} open bill${pending.openCount === 1 ? '' : 's'}` : null,
-        pending.unclearedCount ? `${pending.unclearedCount} uncleared` : null,
+        pending.openCount ? `${pending.openCount} unlinked bill${pending.openCount === 1 ? '' : 's'}` : null,
+        pending.unclearedCount ? `${pending.unclearedCount} uncleared ledger` : null,
     ].filter(Boolean).join(' · ') || 'None outstanding';
 
     const varianceCard = passbookVariance != null && Math.abs(passbookVariance) >= 1
@@ -726,8 +727,8 @@ const renderBalanceMetrics = () => {
         <span class="value">${formatMoney(cash)}</span>
         <span class="fa-metric__sub">Wallet Left (Bills &amp; receipts)</span>
       </div>
-      <div class="metric-card fa-metric metric-card--clickable" data-goto-pending-cheques title="Open cheque bills and uncleared ledger cheques">
-        <span class="label">Pending cheques</span>
+      <div class="metric-card fa-metric metric-card--clickable" data-goto-pending-cheques title="Open cheque-ready and unpaid bills">
+        <span class="label">Open commitments</span>
         <span class="value">${formatMoney(pending.total)}</span>
         <span class="fa-metric__sub">${pendingSub}</span>
       </div>
@@ -744,9 +745,9 @@ const renderBalanceMetrics = () => {
           : formatMoney(cash)}</span>
         <div class="fa-metric__tip" id="fa-book-balance-tip" hidden role="tooltip">
           <strong>Book balance</strong> = bank statement
-          − pending cheques (open cheque bills + uncleared ledger cheques)
+          − open commitments (unpaid bills + cheque ready / unlinked + uncleared ledger cheques)
           + petty cash (Wallet Left).
-          Bank stays the passbook figure; Total is what you have after committed cheques.
+          Bank stays the passbook figure; Total is what you have after those commitments.
         </div>
       </div>
       <div class="metric-card fa-metric metric-card--clickable" data-goto-bank-recon title="Review unmatched statement lines">
@@ -767,38 +768,63 @@ const monthKeyFromDate = (iso) => {
     return m ? `${m[1]}-${m[2]}` : '';
 };
 
-const summarizePlannedExpenses = () => {
-    const docs = getOpenExpenseDocuments();
+/**
+ * Split commitments so each rupee is counted once:
+ * - Cheque ready: cheque given / noted, not yet linked (+ uncleared ledger cheque OUTs)
+ * - Unpaid: unpaid open bills (no cheque yet)
+ * Available = bank + petty cash − (cheque ready + unpaid).
+ */
+const getCashCommitmentBreakdown = () => {
+    const { cash, bankBalance, hasBank, pending } = getBookBalanceSummary();
+
+    const chequeBills = getChequeReadyExpenseDocuments();
+    const unpaidBills = getOpenExpenseDocuments().filter((d) => !isChequeFinanceDocument(d));
+    const chequeBillsAmt = round2(chequeBills.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+    const unpaidAmt = round2(unpaidBills.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+    const chequesAmt = round2(chequeBillsAmt + pending.unclearedAmt);
+
+    const funds = hasBank ? round2((bankBalance || 0) + cash) : cash;
+    const commitments = round2(chequesAmt + unpaidAmt);
+    const available = round2(funds - commitments);
+
     const today = new Date();
     today.setHours(12, 0, 0, 0);
     const todayIso = today.toISOString().slice(0, 10);
     const thisMonthKey = monthKeyFromDate(todayIso);
-
     let overdue = 0;
     let thisMonth = 0;
     let later = 0;
     const byCat = new Map();
-
-    docs.forEach((d) => {
+    unpaidBills.forEach((d) => {
         const amt = round2(parseFloat(d.amount) || 0);
         const dateStr = String(d.doc_date || '').slice(0, 10);
         if (dateStr && dateStr < todayIso) overdue += amt;
         else if (monthKeyFromDate(dateStr) === thisMonthKey) thisMonth += amt;
         else later += amt;
-
         const key = normalizeCategoryKey(d.cat || 'Other') || 'Other';
         byCat.set(key, round2((byCat.get(key) || 0) + amt));
     });
-
     const topCats = [...byCat.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
         .map(([key, amount]) => ({ key, label: categoryDisplayLabel(key), amount }));
 
     return {
-        docs,
-        count: docs.length,
-        total: round2(overdue + thisMonth + later),
+        cash,
+        bankBalance,
+        hasBank,
+        chequeBills,
+        unpaidBills,
+        uncleared: pending.uncleared,
+        chequeBillsAmt,
+        unclearedAmt: pending.unclearedAmt,
+        chequesAmt,
+        chequesCount: chequeBills.length + pending.unclearedCount,
+        unpaidAmt,
+        unpaidCount: unpaidBills.length,
+        funds,
+        commitments,
+        available,
         overdue: round2(overdue),
         thisMonth: round2(thisMonth),
         later: round2(later),
@@ -806,99 +832,84 @@ const summarizePlannedExpenses = () => {
     };
 };
 
-/** Planned expenses vs balance — collapsed by default. */
+/** Cash position worksheet — bank/petty cash less each commitment once. */
 const renderPlannedExpensesCard = () => {
     const el = document.getElementById('fa-planned-expenses');
     if (!el) return;
     const wasOpen = el.open;
 
-    const planned = summarizePlannedExpenses();
-    // Open cheque bills are already in book Total — don't subtract them again.
-    const openNonCheque = planned.docs.filter((d) => !isChequeFinanceDocument(d));
-    const plannedRemaining = round2(
-        openNonCheque.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0),
-    );
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
-    const todayIso = today.toISOString().slice(0, 10);
-    const thisMonthKey = monthKeyFromDate(todayIso);
-    let overdue = 0;
-    let thisMonth = 0;
-    let later = 0;
-    openNonCheque.forEach((d) => {
-        const amt = round2(parseFloat(d.amount) || 0);
-        const dateStr = String(d.doc_date || '').slice(0, 10);
-        if (dateStr && dateStr < todayIso) overdue += amt;
-        else if (monthKeyFromDate(dateStr) === thisMonthKey) thisMonth += amt;
-        else later += amt;
-    });
-    overdue = round2(overdue);
-    thisMonth = round2(thisMonth);
-    later = round2(later);
+    const s = getCashCommitmentBreakdown();
+    const afterClass = s.available < -0.009
+        ? 'fa-cash-sheet__total--short'
+        : (s.hasBank && s.available < s.funds * 0.15 ? 'fa-cash-sheet__total--tight' : 'fa-cash-sheet__total--ok');
 
-    const byCat = new Map();
-    openNonCheque.forEach((d) => {
-        const key = normalizeCategoryKey(d.cat || 'Other') || 'Other';
-        byCat.set(key, round2((byCat.get(key) || 0) + (parseFloat(d.amount) || 0)));
-    });
-    const topCats = [...byCat.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([key, amount]) => ({ key, label: categoryDisplayLabel(key), amount }));
-
-    const { book: current, hasBank, pending, bankBalance, cash } = getBookBalanceSummary();
-    const after = round2(current - plannedRemaining);
-    const afterClass = after < -0.009 ? 'fa-planned__after--short' : (after < current * 0.15 ? 'fa-planned__after--tight' : 'fa-planned__after--ok');
-
-    const catChips = topCats.length
-        ? topCats.map((c) =>
+    const catChips = s.topCats.length
+        ? s.topCats.map((c) =>
             `<span class="fa-planned__chip"><strong>${c.label}</strong> ${formatMoney(c.amount)}</span>`,
         ).join('')
-        : '<span class="fa-planned__chip fa-planned__chip--muted">No open expense bills yet</span>';
+        : '<span class="fa-planned__chip fa-planned__chip--muted">No unpaid open bills</span>';
 
-    const chequeNote = pending.total > 0.009
-        ? ` Pending cheques ${formatMoney(pending.total)} already deducted from book balance.`
-        : '';
+    const chequeSub = [
+        s.chequeBills.length ? `${s.chequeBills.length} cheque ready` : null,
+        s.uncleared.length ? `${s.uncleared.length} uncleared ledger` : null,
+    ].filter(Boolean).join(' · ') || 'None';
+
+    const bankCell = s.hasBank ? formatMoney(s.bankBalance) : '—';
+    const formula = s.hasBank ? 'A + B − (C + D)' : 'B − (C + D)';
 
     el.innerHTML = `
       <summary class="fa-collapsible-panel__summary">
-        <span class="fa-collapsible-panel__title">Planned expenses vs balance</span>
-        <span class="fa-collapsible-panel__meta">Planned ${formatMoney(plannedRemaining)} · After ${formatMoney(after)} · ${openNonCheque.length} open</span>
+        <span class="fa-collapsible-panel__title">Cash position</span>
+        <span class="fa-collapsible-panel__meta">Available ${formatMoney(s.available)} · Commitments ${formatMoney(s.commitments)}</span>
       </summary>
       <div class="fa-collapsible-panel__body">
         <div class="fa-panel__head fa-panel__head--row">
           <p class="fa-panel__hint" style="margin:0;">
-            Open (unlinked) non-cheque bills from <strong>Bills &amp; receipts</strong>.${chequeNote}
+            Each commitment once. <strong>Cheque ready</strong> = cheque given, not yet linked to bank.
+            Available = bank + petty cash − cheque ready − unpaid.
           </p>
           <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
             <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Review open bills
           </button>
         </div>
-        <div class="fa-planned__metrics">
-          <div class="fa-planned__metric">
-            <span class="fa-planned__label">Book balance</span>
-            <span class="fa-planned__value">${formatMoney(current)}</span>
-            <span class="fa-planned__sub">${hasBank
-              ? `${formatMoney(bankBalance)} − ${formatMoney(pending.total)} + ${formatMoney(cash)}`
-              : formatMoney(cash)}</span>
-          </div>
-          <div class="fa-planned__metric">
-            <span class="fa-planned__label">Planned spend</span>
-            <span class="fa-planned__value fa-planned__value--out">${formatMoney(plannedRemaining)}</span>
-            <span class="fa-planned__sub">${openNonCheque.length} open bill${openNonCheque.length === 1 ? '' : 's'}${pending.openCount ? ` · ${pending.openCount} cheque in Total` : ''}</span>
-          </div>
-          <div class="fa-planned__metric ${afterClass}">
-            <span class="fa-planned__label">After planned</span>
-            <span class="fa-planned__value">${formatMoney(after)}</span>
-            <span class="fa-planned__sub">${after < -0.009 ? 'Shortfall if remaining open bills clear' : 'Left if remaining open bills clear'}</span>
-          </div>
-        </div>
+        <table class="fa-cash-sheet" aria-label="Cash position worksheet">
+          <tbody>
+            <tr>
+              <td class="fa-cash-sheet__ref">A</td>
+              <td class="fa-cash-sheet__label">Bank account balance</td>
+              <td class="fa-cash-sheet__amt">${bankCell}</td>
+            </tr>
+            <tr>
+              <td class="fa-cash-sheet__ref">B</td>
+              <td class="fa-cash-sheet__label">Petty cash <span class="fa-cash-sheet__hint">Wallet Left</span></td>
+              <td class="fa-cash-sheet__amt">${formatMoney(s.cash)}</td>
+            </tr>
+            <tr class="fa-cash-sheet__row--deduct">
+              <td class="fa-cash-sheet__ref">C</td>
+              <td class="fa-cash-sheet__label">Cheque ready (unlinked) <span class="fa-cash-sheet__hint">${chequeSub}</span></td>
+              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.chequesAmt > 0.009 ? `−${formatMoney(s.chequesAmt)}` : formatMoney(0)}</td>
+            </tr>
+            <tr class="fa-cash-sheet__row--deduct">
+              <td class="fa-cash-sheet__ref">D</td>
+              <td class="fa-cash-sheet__label">Unpaid bills <span class="fa-cash-sheet__hint">${s.unpaidCount} open</span></td>
+              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.unpaidAmt > 0.009 ? `−${formatMoney(s.unpaidAmt)}` : formatMoney(0)}</td>
+            </tr>
+            <tr class="fa-cash-sheet__row--total ${afterClass}">
+              <td class="fa-cash-sheet__ref" aria-hidden="true"></td>
+              <td class="fa-cash-sheet__label">
+                Available
+                <span class="fa-cash-sheet__formula">${formula}</span>
+              </td>
+              <td class="fa-cash-sheet__amt">${formatMoney(s.available)}</td>
+            </tr>
+          </tbody>
+        </table>
         <div class="fa-planned__buckets">
-          <span><strong>Overdue</strong> ${formatMoney(overdue)}</span>
-          <span><strong>This month</strong> ${formatMoney(thisMonth)}</span>
-          <span><strong>Later</strong> ${formatMoney(later)}</span>
+          <span><strong>Overdue</strong> ${formatMoney(s.overdue)}</span>
+          <span><strong>This month</strong> ${formatMoney(s.thisMonth)}</span>
+          <span><strong>Later</strong> ${formatMoney(s.later)}</span>
         </div>
-        <div class="fa-planned__cats" aria-label="Top planned categories">${catChips}</div>
+        <div class="fa-planned__cats" aria-label="Top unpaid bill categories">${catChips}</div>
       </div>`;
 
     el.open = wasOpen;

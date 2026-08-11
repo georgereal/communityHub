@@ -101,11 +101,47 @@ export const getOpenExpenseDocuments = () =>
 export const isChequeFinanceDocument = (doc) =>
   /^Cheque:\s*.+/i.test(String(doc?.notes || '').trim());
 
-/** Paid cheque expenses — issued but not yet linked to a bank ledger line. */
+/**
+ * Cheque ready — cheque written/given, not yet linked to a bank ledger line.
+ * (UI label; DB status remains `paid` until linked.)
+ */
+export const isChequeReadyFinanceDocument = (d) => {
+  if (!d || d.kind !== 'OUT') return false;
+  const st = bookStatus(d);
+  if (st === 'linked' || st === 'void') return false;
+  return isChequeFinanceDocument(d);
+};
+
+export const getChequeReadyExpenseDocuments = () =>
+  getFinanceDocuments().filter(isChequeReadyFinanceDocument);
+
+/**
+ * Open commitments for book balance:
+ * - unpaid expense bills
+ * - cheque-ready bills (cheque given, not linked)
+ * Uncleared ledger cheque OUTs are added separately in analytics.
+ */
+export const isPendingChequeExpenseDocument = (d) => {
+  if (!d || d.kind !== 'OUT') return false;
+  const st = bookStatus(d);
+  if (st === 'linked' || st === 'void') return false;
+  return isChequeFinanceDocument(d) || st === 'unpaid';
+};
+
+/** @deprecated name — unlinked cheque-ready + unpaid expenses. */
 export const getOpenChequeExpenseDocuments = () =>
-  getFinanceDocuments().filter(
-    (d) => d.kind === 'OUT' && bookStatus(d) === 'paid' && isChequeFinanceDocument(d),
-  );
+  getFinanceDocuments().filter(isPendingChequeExpenseDocument);
+
+/** Display label for book status (cheque unlinked → “Cheque ready”, not “Paid”). */
+export const bookStatusLabel = (doc) => {
+  const st = bookStatus(doc);
+  if (st === 'linked') return 'Linked';
+  if (st === 'void') return 'Void';
+  if (st === 'unpaid') return 'Unpaid';
+  if (st === 'paid' && isChequeFinanceDocument(doc)) return 'Cheque ready';
+  if (st === 'paid') return 'Paid';
+  return st || '—';
+};
 
 /** Bills & receipts filtered to unpaid expenses. */
 export const focusOpenExpenseBills = () => {
@@ -128,20 +164,20 @@ export const focusOpenExpenseBills = () => {
   renderFinanceDocumentsPage();
 };
 
-/** Paid cheque bills on Bills & receipts (issued, not linked to bank yet). */
+/** Cheque-ready + unpaid expense bills on Bills & receipts. */
 export const focusOpenChequeBills = () => {
-  docsReportFilter = null;
+  docsReportFilter = { pendingCheques: true, type: 'OUT', label: 'Cheque ready & unpaid (unlinked)' };
   filterState.kind = 'OUT';
-  filterState.status = 'paid';
-  filterState.pay = 'cheque';
+  filterState.status = 'all';
+  filterState.pay = 'all';
   filterState.q = '';
   const kindEl = document.getElementById('fdoc-filter-kind');
   const statusEl = document.getElementById('fdoc-filter-status');
   const payEl = document.getElementById('fdoc-filter-pay');
   const searchEl = document.getElementById('fdoc-search');
   if (kindEl) kindEl.value = 'OUT';
-  if (statusEl) statusEl.value = 'paid';
-  if (payEl) payEl.value = 'cheque';
+  if (statusEl) statusEl.value = 'all';
+  if (payEl) payEl.value = 'all';
   if (searchEl) searchEl.value = '';
   invalidateFinanceDocsListCache();
   renderFdocReportBanner();
@@ -323,6 +359,8 @@ const FDOC_PAGE_SIZE = 50;
 /** Aggregates (KPIs / cash float working set) — session cache until mutation or hard refresh. */
 let aggregatesCache = null;
 let aggregatesInflight = null;
+/** Bump when float total math changes so stale session caches (e.g. doubled −Bills) refresh. */
+const FLOAT_TOTALS_VERSION = 2;
 
 /** Infinite-scroll list controller + per-filter page cache. */
 const listPageCache = new Map();
@@ -350,6 +388,7 @@ const fdocFilterKey = () => {
       transactionId: docsReportFilter.transactionId,
       wallet: docsReportFilter.wallet,
       dimension: docsReportFilter.dimension,
+      pendingCheques: !!docsReportFilter.pendingCheques,
     })
     : '';
   return [
@@ -390,6 +429,95 @@ export const invalidateFinanceDocsCaches = ({ keepStore = true } = {}) => {
   if (!keepStore) portalState.finances.financeDocuments = [];
 };
 
+const buildFundingBillTotalsFromDocs = (docs = []) => {
+  const totals = {};
+  let linkedCashAmt = 0;
+  let linkedCashCount = 0;
+  let openCashAmt = 0;
+  let openCashCount = 0;
+  const seen = new Set();
+  for (const d of docs) {
+    if (!d || d.status === 'void' || d.kind !== 'OUT') continue;
+    const id = d.id ? String(d.id) : '';
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    const notes = String(d.notes || '');
+    const isCash = /Payment:\s*Cash/i.test(notes) || notes.trim().toLowerCase() === 'cash';
+    if (!isCash) continue;
+    const amt = round2(parseFloat(d.amount) || 0);
+    const st = String(d.status || '').toLowerCase();
+    const linked = st === 'linked' || !!d.transaction_id;
+    if (linked && d.transaction_id) {
+      const key = String(d.transaction_id);
+      totals[key] = round2((totals[key] || 0) + amt);
+      linkedCashAmt = round2(linkedCashAmt + amt);
+      linkedCashCount += 1;
+    } else if (st === 'paid' || st === 'open') {
+      openCashAmt = round2(openCashAmt + amt);
+      openCashCount += 1;
+    }
+  }
+  return { totals, linkedCashAmt, linkedCashCount, openCashAmt, openCashCount };
+};
+
+/** Load every cash expense bill (paginated) so Petty Cash −Bills does not depend on a partial store. */
+async function ensureCashDocsForFloat() {
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) return [];
+  const all = [];
+  let offset = 0;
+  for (let guard = 0; guard < 40; guard += 1) {
+    const result = await postFinanceMutation('listFinanceDocuments', {
+      apartment_id: apartmentId,
+      offset,
+      limit: 100,
+      kind: 'OUT',
+      status: 'all',
+      pay: 'cash',
+      q: '',
+    });
+    const docs = result.documents || [];
+    mergeDocsIntoStore(docs);
+    all.push(...docs);
+    if (!result.hasMore || !docs.length) break;
+    offset += docs.length;
+  }
+  return all;
+}
+
+/** Page unpaid + cheque-ready bills so cash position / book balance are not cash-only after lazy-load. */
+async function ensureCommitmentDocsForBalance() {
+  const apartmentId = portalState.access?.activeApartmentId;
+  if (!apartmentId) return [];
+  const queries = [
+    { kind: 'OUT', status: 'unpaid', pay: 'all' },
+    { kind: 'OUT', status: 'paid', pay: 'cheque' },
+  ];
+  const all = [];
+  for (const filter of queries) {
+    let offset = 0;
+    for (let guard = 0; guard < 40; guard += 1) {
+      const result = await postFinanceMutation('listFinanceDocuments', {
+        apartment_id: apartmentId,
+        offset,
+        limit: 100,
+        kind: filter.kind,
+        status: filter.status,
+        pay: filter.pay,
+        q: '',
+      });
+      const docs = result.documents || [];
+      mergeDocsIntoStore(docs);
+      all.push(...docs);
+      if (!result.hasMore || !docs.length) break;
+      offset += docs.length;
+    }
+  }
+  return all;
+}
+
 export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
   const apartmentId = portalState.access?.activeApartmentId;
   if (!apartmentId) return null;
@@ -397,19 +525,59 @@ export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
     !force
     && aggregatesCache
     && aggregatesCache.apartmentId === apartmentId
+    && aggregatesCache.floatReady
+    && aggregatesCache.floatVersion === FLOAT_TOTALS_VERSION
+    && aggregatesCache.commitmentsReady
   ) {
     return aggregatesCache;
   }
   if (!force && aggregatesInflight) return aggregatesInflight;
 
   aggregatesInflight = (async () => {
-    const result = await postFinanceMutation('financeDocumentsAggregates', { apartment_id: apartmentId });
-    mergeDocsIntoStore(result.documents || []);
+    let result = {};
+    try {
+      result = await postFinanceMutation('financeDocumentsAggregates', { apartment_id: apartmentId });
+      mergeDocsIntoStore(result.documents || []);
+    } catch (err) {
+      console.warn('[fdoc] aggregates failed, falling back to cash list:', err?.message || err);
+    }
+
+    // Always page cash bills — works even when production aggregates lack fundingBillTotals.
+    await ensureCashDocsForFloat();
+    // Always page unpaid + cheque-ready — cash-position / pending commitments need them.
+    await ensureCommitmentDocsForBalance();
+    // Sum from the deduped in-memory store only (never concat the same docs twice).
+    const fromStore = buildFundingBillTotalsFromDocs(portalState.finances.financeDocuments || []);
+    const serverTotals = result.fundingBillTotals && typeof result.fundingBillTotals === 'object'
+      ? result.fundingBillTotals
+      : null;
+    // Prefer freshly built store totals when both exist — avoids stale/doubled server caches.
+    const fundingBillTotals = Object.keys(fromStore.totals).length
+      ? fromStore.totals
+      : (serverTotals || {});
+
+    const summary = {
+      ...(result.summary || {}),
+      linkedCashAmt: fromStore.linkedCashAmt || result.summary?.linkedCashAmt || 0,
+      linkedCashCount: fromStore.linkedCashCount || result.summary?.linkedCashCount || 0,
+      openCashAmt: fromStore.openCashAmt || result.summary?.openCashAmt || 0,
+      openCashCount: fromStore.openCashCount || result.summary?.openCashCount || 0,
+    };
+
     aggregatesCache = {
       apartmentId,
-      summary: result.summary || null,
-      cashDocumentIds: result.cashDocumentIds || [],
+      summary,
+      cashDocumentIds: result.cashDocumentIds
+        || (portalState.finances.financeDocuments || [])
+          .filter((d) => d.kind === 'OUT' && /Payment:\s*Cash/i.test(String(d.notes || '')))
+          .map((d) => d.id)
+          .filter(Boolean),
       openDocumentIds: result.openDocumentIds || [],
+      fundingBillTotals,
+      fundingTransactionIds: result.fundingTransactionIds || Object.keys(fundingBillTotals),
+      floatReady: true,
+      commitmentsReady: true,
+      floatVersion: FLOAT_TOTALS_VERSION,
       fetchedAt: Date.now(),
     };
     return aggregatesCache;
@@ -592,7 +760,7 @@ const renderFdocListChrome = () => {
     } else if (summary) {
       meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`
         + ` · unpaid ${formatMoney(summary.unpaidOutAmt)}`
-        + ` · paid ${formatMoney(summary.paidOutAmt)}`
+        + ` · cheque ready / paid ${formatMoney(summary.paidOutAmt)}`
         + ` · linked ${formatMoney(summary.linkedOutAmt)}`;
     } else {
       meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`;
@@ -631,6 +799,7 @@ const wireFdocInfiniteScroll = () => {
 
 const docMatchesReportFilter = (d, f) => {
   if (!f || !d) return true;
+  if (f.pendingCheques) return isPendingChequeExpenseDocument(d);
   if (f.type === 'OUT' && d.kind !== 'OUT') return false;
   if (f.type === 'IN' && d.kind !== 'IN') return false;
   if (paymentInfo(d).mode !== 'cash') return false;
@@ -728,6 +897,7 @@ export const focusFinanceDocument = async (docId) => {
 
 const describeDocsReportFilter = (f) => {
   if (!f) return '';
+  if (f.pendingCheques) return f.label || 'Cheque ready & unpaid (unlinked bills)';
   const parts = [f.type === 'IN' ? 'Income' : 'Expense', 'cash bills'];
   if (f.transactionId) {
     parts.push(f.label || 'linked to Petty Cash bucket');
@@ -894,9 +1064,12 @@ const isFundingLedgerTxn = (t) => {
 
 const linkedCashTotalForTxn = (txnId) => {
   if (!txnId) return 0;
+  const key = String(txnId);
+  const fromAgg = aggregatesCache?.fundingBillTotals?.[key];
+  if (fromAgg != null && Number.isFinite(Number(fromAgg))) return round2(Number(fromAgg));
   return round2(
     getFinanceDocuments()
-      .filter((d) => d.transaction_id === txnId && d.kind === 'OUT' && paymentInfo(d).mode === 'cash')
+      .filter((d) => String(d.transaction_id || '') === key && d.kind === 'OUT' && paymentInfo(d).mode === 'cash')
       .reduce((s, d) => s + (parseFloat(d.amount) || 0), 0),
   );
 };
@@ -1296,10 +1469,9 @@ const renderAttachDocCandidateRows = (docs) => {
         day: '2-digit', month: 'short', year: '2-digit',
       })
       : '—';
-    const status = bookStatus(d);
     return `<button type="button" class="fdoc-link-row" data-link-doc="${esc(d.id)}">
       <span class="fdoc-link-row__main">${esc(date)} · ${d.kind === 'IN' ? 'Receipt' : 'Bill'} · ${esc(categoryDisplayLabel(d.cat))} · ${formatMoney(d.amount)}</span>
-      <span class="fdoc-link-row__sub">${esc(d.vendor_name || d.description || '—')} · ${esc(status)}</span>
+      <span class="fdoc-link-row__sub">${esc(d.vendor_name || d.description || '—')} · ${esc(bookStatusLabel(d))}</span>
     </button>`;
   }).join('');
 };
@@ -1859,7 +2031,8 @@ const paymentInfo = (doc) => {
   if (/Payment:\s*Online/i.test(notes)) {
     return { mode: 'online', label: withDate('Online'), short: 'Online', paidOn };
   }
-  if (/^Payment:\s*Cash$/im.test(notes) || notes.toLowerCase() === 'cash') {
+  // Match finances.js parseBillPaymentFromNotes — allow Paid on / extra lines after Cash.
+  if (/Payment:\s*Cash/i.test(notes) || notes.toLowerCase() === 'cash') {
     return { mode: 'cash', label: withDate('Cash'), short: 'Cash', paidOn };
   }
   if (/Payment:\s*Unpaid/i.test(notes) || !notes) {
@@ -1936,8 +2109,17 @@ const computeBillsCashFloatSummary = () => {
 
   const linkedCash = cashOut.filter((d) => bookStatus(d) === 'linked' && d.transaction_id);
   const openCash = cashOut.filter((d) => bookStatus(d) === 'paid');
-  const linkedAmt = round2(linkedCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const openAmt = round2(openCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  // Prefer server aggregates — client store may only hold a page of bills after lazy-load.
+  const aggLinkedAmt = aggregatesCache?.summary?.linkedCashAmt;
+  const aggOpenAmt = aggregatesCache?.summary?.openCashAmt;
+  const linkedAmt = aggLinkedAmt != null && Number.isFinite(Number(aggLinkedAmt))
+    ? round2(Number(aggLinkedAmt))
+    : round2(linkedCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  const openAmt = aggOpenAmt != null && Number.isFinite(Number(aggOpenAmt))
+    ? round2(Number(aggOpenAmt))
+    : round2(openCash.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
+  const linkedCount = aggregatesCache?.summary?.linkedCashCount ?? linkedCash.length;
+  const openCount = aggregatesCache?.summary?.openCashCount ?? openCash.length;
 
   const receiptsAmt = round2(cashIn.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
   const deposited = cashIn.filter((d) => bookStatus(d) === 'linked' && d.transaction_id);
@@ -1970,9 +2152,9 @@ const computeBillsCashFloatSummary = () => {
     bankFunded,
     fundingCount: allFunding.length,
     linkedAmt,
-    linkedCount: linkedCash.length,
+    linkedCount,
     openAmt,
-    openCount: openCash.length,
+    openCount,
     receiptsAmt,
     receiptsCount: cashIn.length,
     depositedAmt,
@@ -2441,11 +2623,15 @@ const paintFinanceDocumentsTable = () => {
       })
       : '—';
     const status = bookStatus(d);
-    const linkLabel = status === 'linked'
-      ? `<span class="fdoc-status fdoc-status--linked" title="${esc(txnLabel(d.transaction_id))}">Linked</span>`
+    const statusText = bookStatusLabel(d);
+    const statusClass = status === 'linked'
+      ? 'fdoc-status--linked'
       : status === 'paid'
-        ? `<span class="fdoc-status fdoc-status--paid">Paid</span>`
-        : `<span class="fdoc-status fdoc-status--unpaid">Unpaid</span>`;
+        ? (isChequeFinanceDocument(d) ? 'fdoc-status--cheque-ready' : 'fdoc-status--paid')
+        : 'fdoc-status--unpaid';
+    const linkLabel = status === 'linked'
+      ? `<span class="fdoc-status ${statusClass}" title="${esc(txnLabel(d.transaction_id))}">${esc(statusText)}</span>`
+      : `<span class="fdoc-status ${statusClass}">${esc(statusText)}</span>`;
     const linkBtn = manage
       ? (status === 'linked'
         ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
@@ -2506,9 +2692,12 @@ export function renderFinanceDocumentsPage() {
 
   void (async () => {
     try {
-      await ensureFinanceDocumentsAggregates();
+      await ensureFinanceDocumentsAggregates({
+        force: aggregatesCache?.floatVersion !== FLOAT_TOTALS_VERSION,
+      });
       if (!staffOnly) renderFloatKpis(computeBillsCashFloatSummary());
       await ensureFinanceDocumentsListPage();
+      if (!staffOnly) renderFloatKpis(computeBillsCashFloatSummary());
       paintFinanceDocumentsTable();
       renderFdocListChrome();
     } catch (err) {
