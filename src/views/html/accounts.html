@@ -682,9 +682,17 @@
           </div>
           <section id="eplan-summary" class="ledger-kpi-bar" aria-label="Expense plan summary"></section>
 
+          <section class="fa-panel eplan-main eplan-pivot-panel" style="margin-top:0.75rem;">
+            <div class="eplan-section-head">
+              <h4 class="fdoc-funding-section-title" style="margin:0;">Planned by month</h4>
+              <span id="eplan-pivot-meta" class="eplan-section-meta"></span>
+            </div>
+            <div id="eplan-month-pivot" class="fa-table-wrap"></div>
+          </section>
+
           <section class="fa-panel eplan-main" style="margin-top:0.75rem;">
             <div class="eplan-section-head">
-              <h4 class="fdoc-funding-section-title" style="margin:0;">Planned expenses</h4>
+              <h4 class="fdoc-funding-section-title" style="margin:0;">Detail list</h4>
               <span id="eplan-timeline-meta" class="eplan-section-meta"></span>
             </div>
             <div id="eplan-timeline" class="fa-table-wrap"></div>
@@ -749,7 +757,6 @@
                       <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
                     </div>
                   </label>
-                  <label><span>Amount</span><input type="number" id="eplan-rec-amount" class="expense-combobox" step="1" min="0" placeholder="0" /></label>
                   <label><span>Every</span>
                     <select id="eplan-rec-cadence" class="expense-combobox">
                       <option value="monthly">Month</option>
@@ -757,9 +764,30 @@
                       <option value="yearly">Year</option>
                     </select>
                   </label>
-                  <label><span>On day</span><input type="number" id="eplan-rec-day" class="expense-combobox" min="1" max="28" value="1" title="Day of month the spend falls" /></label>
-                  <label><span>Due day</span><input type="number" id="eplan-rec-due-day" class="expense-combobox" min="1" max="28" value="1" title="Complete by this day of the month" /></label>
-                  <label><span>Starts</span><input type="date" id="eplan-rec-start" class="expense-combobox" /></label>
+                  <label><span>Term (periods)</span>
+                    <input type="number" id="eplan-rec-term" class="expense-combobox" min="1" max="120" placeholder="e.g. 12" title="How many times it recurs. Leave blank for ongoing." />
+                  </label>
+                  <label><span>On day</span><input type="number" id="eplan-rec-day" class="expense-combobox" min="1" max="28" value="1" title="Default day used for due dates; plan dates follow Starts" /></label>
+                  <label><span>Due day</span><input type="number" id="eplan-rec-due-day" class="expense-combobox" min="1" max="28" value="1" title="Complete by this day of each period month" /></label>
+                  <label><span>Starts</span><input type="date" id="eplan-rec-start" class="expense-combobox" title="First period is this date; later periods step by cadence" /></label>
+                  <label class="eplan-form-span"><span>Amount mode</span>
+                    <select id="eplan-rec-amount-mode" class="expense-combobox">
+                      <option value="per_period">Same amount each period</option>
+                      <option value="total_split">Total — split equally across term</option>
+                      <option value="manual">Manual amount per period</option>
+                    </select>
+                  </label>
+                  <label id="eplan-rec-amount-wrap"><span id="eplan-rec-amount-label">Amount each period</span>
+                    <input type="number" id="eplan-rec-amount" class="expense-combobox" step="1" min="0" placeholder="0" />
+                  </label>
+                </div>
+                <p id="eplan-rec-split-hint" class="fa-panel__hint eplan-rec-split-hint" hidden></p>
+                <div id="eplan-rec-periods" class="eplan-rec-periods" hidden>
+                  <div class="eplan-rec-periods__head">
+                    <span>Period schedule</span>
+                    <span id="eplan-rec-periods-sum" class="eplan-section-meta"></span>
+                  </div>
+                  <div id="eplan-rec-periods-list" class="eplan-rec-periods__list"></div>
                 </div>
                 <div class="eplan-modal-actions">
                   <button type="button" class="btn btn-primary" id="eplan-rec-save">Save recurring</button>

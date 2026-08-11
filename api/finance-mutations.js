@@ -1710,6 +1710,18 @@ async function saveExpensePlanRecurringMutation(service, apartmentId, userId, bo
     const dueDay = dueDayRaw == null || dueDayRaw === ''
         ? day
         : Math.min(28, Math.max(1, parseInt(dueDayRaw, 10) || day));
+    const amountMode = ['per_period', 'total_split', 'manual'].includes(body.amount_mode)
+        ? body.amount_mode
+        : 'per_period';
+    const termRaw = body.term_count;
+    const termCount = termRaw == null || termRaw === ''
+        ? null
+        : Math.min(120, Math.max(1, parseInt(termRaw, 10) || 0));
+    let periodAmounts = null;
+    if (Array.isArray(body.period_amounts)) {
+        periodAmounts = body.period_amounts.map((v) => roundMoney(v));
+    }
+
     const row = {
         apartment_id: apartmentId,
         title: String(body.title || '').trim(),
@@ -1724,12 +1736,21 @@ async function saveExpensePlanRecurringMutation(service, apartmentId, userId, bo
         start_date: body.start_date,
         end_date: body.end_date || null,
         active: body.active !== false,
+        term_count: termCount,
+        amount_mode: amountMode,
+        total_amount: body.total_amount == null || body.total_amount === ''
+            ? null
+            : roundMoney(body.total_amount),
+        period_amounts: periodAmounts,
         updated_at: new Date().toISOString(),
     };
     if (!row.title) throw Object.assign(new Error('title is required.'), { status: 400 });
     if (!row.start_date) throw Object.assign(new Error('start_date is required.'), { status: 400 });
     if (!['monthly', 'quarterly', 'yearly'].includes(row.cadence)) {
         throw Object.assign(new Error('cadence must be monthly, quarterly, or yearly.'), { status: 400 });
+    }
+    if ((amountMode === 'total_split' || amountMode === 'manual') && !termCount) {
+        throw Object.assign(new Error('term_count is required for total_split or manual amounts.'), { status: 400 });
     }
 
     const save = async (payload) => {
@@ -1750,7 +1771,21 @@ async function saveExpensePlanRecurringMutation(service, apartmentId, userId, bo
     };
 
     let { data, error } = await save(row);
-    if (error && /due_day_of_month/i.test(error.message)) {
+    // Graceful fallbacks when newer columns are not migrated yet.
+    if (error && /term_count|amount_mode|total_amount|period_amounts/i.test(error.message)) {
+        const {
+            term_count: _t,
+            amount_mode: _m,
+            total_amount: _a,
+            period_amounts: _p,
+            ...core
+        } = row;
+        ({ data, error } = await save(core));
+        if (error && /due_day_of_month/i.test(error.message)) {
+            const { due_day_of_month: _drop, ...withoutDue } = core;
+            ({ data, error } = await save(withoutDue));
+        }
+    } else if (error && /due_day_of_month/i.test(error.message)) {
         const { due_day_of_month: _drop, ...withoutDue } = row;
         ({ data, error } = await save(withoutDue));
     }

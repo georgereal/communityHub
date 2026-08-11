@@ -49,12 +49,14 @@ export const ACCOUNTS_PAGE_HELP = {
         blurb: 'Planned spends over a horizon versus current book balance — spot shortfalls early.',
         steps: [
             'Pick a horizon (3 / 6 / 12 months) in the toolbar.',
-            'Review the summary KPIs and the planned-expenses timeline.',
+            'Review the by-month pivot and the detail list; expand Recurring templates to manage repeating plans.',
             'Click a row for detail; expand Recurring templates to manage repeating plans.',
+            'Add recurring with a term (periods): same amount each time, total split equally, or manual per period.',
             'Add one-off or recurring items when those actions are available for your role.',
         ],
         tips: [
             'Use this with Financial reports to compare plan versus actual category spend.',
+            'Total split needs a term length — e.g. ₹1,20,000 over 12 months → ₹10,000 each.',
         ],
     },
     reports: {

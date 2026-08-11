@@ -768,13 +768,48 @@ const monthKeyFromDate = (iso) => {
     return m ? `${m[1]}-${m[2]}` : '';
 };
 
+const CASH_POS_SCENARIO_KEY = 'fa-cash-position-scenario';
+
+const defaultCashPosScenario = () => ({
+    includePlanned: true,
+    includeManualIncome: true,
+    manualIncome: 0,
+    plannedMonths: 6,
+});
+
+const loadCashPosScenario = () => {
+    try {
+        const raw = sessionStorage.getItem(CASH_POS_SCENARIO_KEY);
+        if (!raw) return defaultCashPosScenario();
+        const parsed = JSON.parse(raw);
+        return {
+            includePlanned: parsed.includePlanned !== false,
+            includeManualIncome: parsed.includeManualIncome !== false,
+            manualIncome: Math.max(0, round2(parseFloat(parsed.manualIncome) || 0)),
+            plannedMonths: [3, 6, 12].includes(Number(parsed.plannedMonths))
+                ? Number(parsed.plannedMonths)
+                : 6,
+        };
+    } catch {
+        return defaultCashPosScenario();
+    }
+};
+
+const saveCashPosScenario = (scenario) => {
+    try {
+        sessionStorage.setItem(CASH_POS_SCENARIO_KEY, JSON.stringify(scenario));
+    } catch {
+        /* ignore quota */
+    }
+};
+
 /**
  * Split commitments so each rupee is counted once:
  * - Cheque ready: cheque given / noted, not yet linked (+ uncleared ledger cheque OUTs)
  * - Unpaid: unpaid open bills (no cheque yet)
- * Available = bank + petty cash − (cheque ready + unpaid).
+ * Scenario rows (optional): planned expense-plan spend, manual expected income/savings.
  */
-const getCashCommitmentBreakdown = () => {
+const getCashCommitmentBreakdown = (scenario = loadCashPosScenario(), planned = null) => {
     const { cash, bankBalance, hasBank, pending } = getBookBalanceSummary();
 
     const chequeBills = getChequeReadyExpenseDocuments();
@@ -783,9 +818,16 @@ const getCashCommitmentBreakdown = () => {
     const unpaidAmt = round2(unpaidBills.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
     const chequesAmt = round2(chequeBillsAmt + pending.unclearedAmt);
 
+    const plannedAmt = round2(planned?.total || 0);
+    const plannedCount = planned?.count || 0;
+    const manualIncome = Math.max(0, round2(scenario.manualIncome || 0));
+
     const funds = hasBank ? round2((bankBalance || 0) + cash) : cash;
-    const commitments = round2(chequesAmt + unpaidAmt);
-    const available = round2(funds - commitments);
+    const hardCommitments = round2(chequesAmt + unpaidAmt);
+    const plannedInCalc = scenario.includePlanned ? plannedAmt : 0;
+    const incomeInCalc = scenario.includeManualIncome ? manualIncome : 0;
+    const commitments = round2(hardCommitments + plannedInCalc);
+    const available = round2(funds + incomeInCalc - commitments);
 
     const today = new Date();
     today.setHours(12, 0, 0, 0);
@@ -822,7 +864,14 @@ const getCashCommitmentBreakdown = () => {
         chequesCount: chequeBills.length + pending.unclearedCount,
         unpaidAmt,
         unpaidCount: unpaidBills.length,
+        plannedAmt,
+        plannedCount,
+        plannedMonths: scenario.plannedMonths,
+        manualIncome,
+        includePlanned: !!scenario.includePlanned,
+        includeManualIncome: !!scenario.includeManualIncome,
         funds,
+        hardCommitments,
         commitments,
         available,
         overdue: round2(overdue),
@@ -832,13 +881,32 @@ const getCashCommitmentBreakdown = () => {
     };
 };
 
-/** Cash position worksheet — bank/petty cash less each commitment once. */
-const renderPlannedExpensesCard = () => {
+const buildCashFormula = (s) => {
+    const add = ['A', 'B'];
+    if (s.includeManualIncome) add.push('F');
+    const sub = ['C', 'D'];
+    if (s.includePlanned) sub.push('E');
+    const left = add.join(' + ');
+    const right = sub.length === 1 ? sub[0] : `(${sub.join(' + ')})`;
+    return `${left} − ${right}`;
+};
+
+/** Cash position worksheet — bank/petty cash ± scenario rows. */
+const renderPlannedExpensesCard = async () => {
     const el = document.getElementById('fa-planned-expenses');
     if (!el) return;
     const wasOpen = el.open;
+    const scenario = loadCashPosScenario();
 
-    const s = getCashCommitmentBreakdown();
+    let planned = { total: 0, count: 0, months: scenario.plannedMonths };
+    try {
+        const { getExpensePlanHorizonSummary } = await import('./expensePlan.js');
+        planned = getExpensePlanHorizonSummary(scenario.plannedMonths);
+    } catch (err) {
+        console.warn('[financeAnalytics] expense plan summary:', err?.message || err);
+    }
+
+    const s = getCashCommitmentBreakdown(scenario, planned);
     const afterClass = s.available < -0.009
         ? 'fa-cash-sheet__total--short'
         : (s.hasBank && s.available < s.funds * 0.15 ? 'fa-cash-sheet__total--tight' : 'fa-cash-sheet__total--ok');
@@ -855,22 +923,28 @@ const renderPlannedExpensesCard = () => {
     ].filter(Boolean).join(' · ') || 'None';
 
     const bankCell = s.hasBank ? formatMoney(s.bankBalance) : '—';
-    const formula = s.hasBank ? 'A + B − (C + D)' : 'B − (C + D)';
+    const formula = buildCashFormula(s);
+    const plannedOut = s.includePlanned && s.plannedAmt > 0.009;
+    const incomeIn = s.includeManualIncome && s.manualIncome > 0.009;
 
     el.innerHTML = `
       <summary class="fa-collapsible-panel__summary">
         <span class="fa-collapsible-panel__title">Cash position</span>
-        <span class="fa-collapsible-panel__meta">Available ${formatMoney(s.available)} · Commitments ${formatMoney(s.commitments)}</span>
+        <span class="fa-collapsible-panel__meta">Available ${formatMoney(s.available)} · Hard ${formatMoney(s.hardCommitments)}</span>
       </summary>
       <div class="fa-collapsible-panel__body">
         <div class="fa-panel__head fa-panel__head--row">
           <p class="fa-panel__hint" style="margin:0;">
-            Each commitment once. <strong>Cheque ready</strong> = cheque given, not yet linked to bank.
-            Available = bank + petty cash − cheque ready − unpaid.
+            Play with the scenario: toggle planned spend and expected income. Hard commitments (C–D) always count.
           </p>
-          <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
-            <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Review open bills
-          </button>
+          <div class="fa-cash-sheet__actions">
+            <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-plan">
+              <i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Expense plan
+            </button>
+            <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
+              <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Open bills
+            </button>
+          </div>
         </div>
         <table class="fa-cash-sheet" aria-label="Cash position worksheet">
           <tbody>
@@ -894,6 +968,41 @@ const renderPlannedExpensesCard = () => {
               <td class="fa-cash-sheet__label">Unpaid bills <span class="fa-cash-sheet__hint">${s.unpaidCount} open</span></td>
               <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.unpaidAmt > 0.009 ? `−${formatMoney(s.unpaidAmt)}` : formatMoney(0)}</td>
             </tr>
+            <tr class="fa-cash-sheet__row--scenario${s.includePlanned ? ' fa-cash-sheet__row--deduct' : ' fa-cash-sheet__row--off'}">
+              <td class="fa-cash-sheet__ref">E</td>
+              <td class="fa-cash-sheet__label">
+                <label class="fa-cash-sheet__check">
+                  <input type="checkbox" id="fa-cash-include-planned" ${s.includePlanned ? 'checked' : ''} />
+                  <span>Planned expenditures</span>
+                </label>
+                <span class="fa-cash-sheet__hint">
+                  Expense plan ·
+                  <select id="fa-cash-planned-months" class="fa-cash-sheet__select" title="Horizon for planned spend">
+                    <option value="3" ${s.plannedMonths === 3 ? 'selected' : ''}>3 mo</option>
+                    <option value="6" ${s.plannedMonths === 6 ? 'selected' : ''}>6 mo</option>
+                    <option value="12" ${s.plannedMonths === 12 ? 'selected' : ''}>12 mo</option>
+                  </select>
+                  · ${s.plannedCount} item${s.plannedCount === 1 ? '' : 's'}
+                </span>
+              </td>
+              <td class="fa-cash-sheet__amt ${plannedOut ? 'fa-cash-sheet__amt--out' : ''}">${
+                plannedOut ? `−${formatMoney(s.plannedAmt)}` : formatMoney(s.plannedAmt)
+              }</td>
+            </tr>
+            <tr class="fa-cash-sheet__row--scenario${s.includeManualIncome ? ' fa-cash-sheet__row--add' : ' fa-cash-sheet__row--off'}">
+              <td class="fa-cash-sheet__ref">F</td>
+              <td class="fa-cash-sheet__label">
+                <label class="fa-cash-sheet__check">
+                  <input type="checkbox" id="fa-cash-include-income" ${s.includeManualIncome ? 'checked' : ''} />
+                  <span>Expected income / savings</span>
+                </label>
+                <span class="fa-cash-sheet__hint">Manual — invoices due, deposits, etc.</span>
+              </td>
+              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--input">
+                <span class="fa-cash-sheet__prefix">+</span>
+                <input type="number" id="fa-cash-manual-income" class="fa-cash-sheet__income" min="0" step="1" value="${s.manualIncome || ''}" placeholder="0" ${s.includeManualIncome ? '' : 'disabled'} />
+              </td>
+            </tr>
             <tr class="fa-cash-sheet__row--total ${afterClass}">
               <td class="fa-cash-sheet__ref" aria-hidden="true"></td>
               <td class="fa-cash-sheet__label">
@@ -905,20 +1014,49 @@ const renderPlannedExpensesCard = () => {
           </tbody>
         </table>
         <div class="fa-planned__buckets">
-          <span><strong>Overdue</strong> ${formatMoney(s.overdue)}</span>
+          <span><strong>Overdue bills</strong> ${formatMoney(s.overdue)}</span>
           <span><strong>This month</strong> ${formatMoney(s.thisMonth)}</span>
           <span><strong>Later</strong> ${formatMoney(s.later)}</span>
+          ${incomeIn ? `<span><strong>Income in play</strong> ${formatMoney(s.manualIncome)}</span>` : ''}
         </div>
         <div class="fa-planned__cats" aria-label="Top unpaid bill categories">${catChips}</div>
       </div>`;
 
     el.open = wasOpen;
 
+    const persistAndRefresh = () => {
+        const next = {
+            includePlanned: !!el.querySelector('#fa-cash-include-planned')?.checked,
+            includeManualIncome: !!el.querySelector('#fa-cash-include-income')?.checked,
+            manualIncome: Math.max(0, round2(parseFloat(el.querySelector('#fa-cash-manual-income')?.value || '0') || 0)),
+            plannedMonths: parseInt(el.querySelector('#fa-cash-planned-months')?.value || '6', 10) || 6,
+        };
+        saveCashPosScenario(next);
+        void renderPlannedExpensesCard();
+    };
+
+    el.querySelector('#fa-cash-include-planned')?.addEventListener('change', persistAndRefresh);
+    el.querySelector('#fa-cash-include-income')?.addEventListener('change', persistAndRefresh);
+    el.querySelector('#fa-cash-planned-months')?.addEventListener('change', persistAndRefresh);
+    el.querySelector('#fa-cash-manual-income')?.addEventListener('change', persistAndRefresh);
+    el.querySelector('#fa-cash-manual-income')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            persistAndRefresh();
+        }
+    });
+
     el.querySelector('#fa-planned-open-bills')?.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
         const { focusOpenExpenseBills } = await import('./financeDocuments.js');
         focusOpenExpenseBills();
+    }, { once: true });
+
+    el.querySelector('#fa-planned-open-plan')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.switchView?.('expense-plan');
     }, { once: true });
 };
 
@@ -1286,7 +1424,7 @@ export const renderFinanceAnalytics = () => {
         const months = buildMonthRange(settings.monthCount);
 
         renderBalanceMetrics();
-        renderPlannedExpensesCard();
+        await renderPlannedExpensesCard();
         renderMonthlySummaryCard();
         wireBalanceMetricClicks();
         renderCombinedCategoryChart(
