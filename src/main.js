@@ -63,6 +63,8 @@ import {
     updateNavActiveState,
     updateNavBreadcrumb,
 } from './navigation.js';
+import { wireUiModeToggle, remapRouteForMode, getUiMode, isNewUi } from './uiMode.js';
+import { restoreMpaNavPref, wireHoverSidebar, syncHamburgerToHoverNav, applyMpaNavCollapsed } from './appShell/navPref.js';
 import { withButtonBusy } from './buttonBusy.js';
 import {
   deferAfterFirstPaint,
@@ -571,7 +573,7 @@ let routingGuard = false;
 
 const switchViewInner = async (v) => {
   if (routingGuard) return;
-  const route = resolveRoute(v, portalState.auth?.role);
+  const route = remapRouteForMode(resolveRoute(v, portalState.auth?.role), getUiMode());
   const fallback = findFirstAllowedRoute(portalState.auth?.role);
   if (!routeIsAllowed(route, !supabase)) {
     if (route === fallback) {
@@ -675,7 +677,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   ensureNavBackdrop();
 
   const mobileNavToggle = document.getElementById('mobile-nav-toggle');
-  if (mobileNavToggle) {
+  if (mobileNavToggle && !isNewUi()) {
     mobileNavToggle.onclick = () => {
       document.body.classList.toggle('nav-expanded');
     };
@@ -683,7 +685,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Allow ESC to close the off-canvas nav quickly.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') document.body.classList.remove('nav-expanded');
+    if (e.key !== 'Escape') return;
+    if (isNewUi()) {
+      applyMpaNavCollapsed(true, { persist: !window.matchMedia('(max-width: 820px)').matches });
+    } else {
+      document.body.classList.remove('nav-expanded');
+    }
   });
 
   // On mobile, keep heavy sections collapsed by default (desktop stays open via HTML).
@@ -922,7 +929,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const navToggle = document.getElementById('nav-toggle');
-  if (navToggle) {
+  if (navToggle && !isNewUi()) {
     navToggle.onclick = () => {
       document.body.classList.toggle('nav-expanded');
     };
@@ -1036,6 +1043,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));
   applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
+  wireUiModeToggle();
+  if (isNewUi()) {
+    restoreMpaNavPref();
+    wireHoverSidebar();
+    syncHamburgerToHoverNav();
+  }
+  document.addEventListener('ui-mode-nav-refresh', () => {
+    renderNavModules();
+    applyPermissionsToNav(portalState.authPermissions);
+  });
 
   document.querySelectorAll('a.brand-home-link').forEach((el) => {
     if (el.dataset.wired === '1') return;

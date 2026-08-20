@@ -15,6 +15,8 @@
 ├── .github
 │   └── workflows
 │       └── repo-map-check.yml
+├── admin
+│   └── index.html
 ├── api
 │   ├── finance
 │   │   └── [...path].js
@@ -195,6 +197,25 @@
 │   ├── verify-build-chunks.mjs
 │   └── verify-vercel-api.mjs
 ├── src
+│   ├── adminApp
+│   │   ├── components
+│   │   │   ├── PageHeader.jsx
+│   │   │   └── SummaryStrip.jsx
+│   │   ├── pages
+│   │   │   ├── BankPage.jsx
+│   │   │   ├── CategoriesPage.jsx
+│   │   │   ├── IntegrationsPage.jsx
+│   │   │   ├── PeoplePage.jsx
+│   │   │   ├── SocietyPage.jsx
+│   │   │   ├── StaffPage.jsx
+│   │   │   └── VendorsPage.jsx
+│   │   ├── admin-app.css
+│   │   ├── api.js
+│   │   ├── App.jsx
+│   │   ├── boot.js
+│   │   ├── main.jsx
+│   │   ├── mount.jsx
+│   │   └── pages.js
 │   ├── appShell
 │   │   ├── html
 │   │   │   └── layout.html
@@ -469,6 +490,7 @@
 │   ├── style.css
 │   ├── syncCodeEditor.js
 │   ├── transitionFees.js
+│   ├── uiMode.js
 │   ├── unitDirectory.js
 │   ├── unitTransitions.js
 │   ├── vehicleAudit.js
@@ -508,7 +530,7 @@
 
 ```
 
-**Scale:** ~259 JavaScript modules, ~15 CSS files, ~28 HTML entry pages.
+**Scale:** ~263 JavaScript modules, ~16 CSS files, ~28 HTML entry pages.
 
 ---
 
@@ -520,6 +542,25 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ### Directory tree
 
 ```
+├── adminApp
+│   ├── components
+│   │   ├── PageHeader.jsx
+│   │   └── SummaryStrip.jsx
+│   ├── pages
+│   │   ├── BankPage.jsx
+│   │   ├── CategoriesPage.jsx
+│   │   ├── IntegrationsPage.jsx
+│   │   ├── PeoplePage.jsx
+│   │   ├── SocietyPage.jsx
+│   │   ├── StaffPage.jsx
+│   │   └── VendorsPage.jsx
+│   ├── admin-app.css
+│   ├── api.js
+│   ├── App.jsx
+│   ├── boot.js
+│   ├── main.jsx
+│   ├── mount.jsx
+│   └── pages.js
 ├── appShell
 │   ├── html
 │   │   └── layout.html
@@ -794,6 +835,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ├── style.css
 ├── syncCodeEditor.js
 ├── transitionFees.js
+├── uiMode.js
 ├── unitDirectory.js
 ├── unitTransitions.js
 ├── vehicleAudit.js
@@ -832,7 +874,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/buttonBusy.js | Busy-state button helper |
 | src/cashFloat.js | Cash float management |
 | src/classifyCombobox.js | Classification combobox |
-| src/classifyOptions.js | Classification options |
+| src/classifyOptions.js | Shared category/sub-category lists for Finance-New + Admin-New (catalog + Mongo usage) |
 | src/counter.js | Counter helper |
 | src/dashboard.css | Dashboard styles |
 | src/dashboard.js | Dashboard render |
@@ -921,6 +963,7 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 | src/style.css | Global styles |
 | src/syncCodeEditor.js | Sync code editor |
 | src/transitionFees.js | Transition fee computation |
+| src/uiMode.js | Classic vs New UI mode |
 | src/unitDirectory.js | Unit directory (block/bhk/area) |
 | src/unitTransitions.js | Move-in / move-out transition wizard |
 | src/vehicleAudit.js | Vehicle audit log & badge refresh |
@@ -983,9 +1026,15 @@ and an optional `subview`.
 | fn-billing-aging | Aging Report | finance-new-invoices | aging |
 | fn-bank-recon | Bank Reconciliation | finance-new-accounts | bank-recon |
 | fn-invoices-raised | Invoices Raised | finance-new-accounts | invoices-raised |
+| an-society | Society profile | admin-new | — |
+| an-people | People & access | admin-new | — |
+| an-vendors | Vendors | admin-new | — |
+| an-categories | Sub-categories | admin-new | — |
+| an-staff | Staff directory | admin-new | — |
+| an-integrations | Integrations | admin-new | — |
 | admin-access | Roles | access-control | — |
-| admin-society | Profile | setup | society |
 | admin-activity | Activity Log | accounts | activity |
+| admin-society | Profile | setup | society |
 | admin-bank | Bank account | setup | bank |
 | admin-vendors | Vendors | setup | vendors |
 | admin-subcats | Sub-categories | setup | subcats |
@@ -1090,7 +1139,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | --- | --- |
 | accountsAuth.js | Accounts/session auth endpoint |
 | auth-session.js | Auth session endpoint |
-| dashboard-summary.js | Dashboard KPIs from Mongo (dues, ledger, property units) |
+| dashboard-summary.js | Dashboard summary endpoint |
 | db.js | DB access (Supabase) |
 | dbAccess.js | DB access helpers |
 | evolyxConnection.js | Evolyx external connection |
@@ -1294,10 +1343,6 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - **RBAC & access:** `rbac.js` / `rbacMatrix.js` (roles/permissions), `moduleAccess*`, `pageAccess*`, `accessSync.js`.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.
-- **Mongo on Vercel:** Finance-New is `api/finance-rest.js` (rewrite `/api/finance/*`). Property-New is
-  `api/property-rest.js` (rewrite `/api/property/*`); handlers live in `api/propertyMongo/routes/` and are
-  not separate functions. `api/mongoClient.js` keeps one client per isolate (`maxPoolSize: 1`).
-  Dashboard glance KPIs load from `/api/dashboard-summary` (Mongo), not the Postgres finance/core domains.
 
 ---
 

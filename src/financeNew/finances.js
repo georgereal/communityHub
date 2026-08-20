@@ -21,7 +21,8 @@ import {
 import { withButtonBusy } from '../buttonBusy.js';
 import { ACCOUNTS_PAGE_HELP, applyFinancePageHeader, wireFinancePageHelp } from '../financePageHelp.js';
 import { canCrud } from '../rbacMatrix.js';
-import { EXPENSE_CATS, SUB_CAT_SUGGESTIONS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from '../expenseCategories.js';
+import { EXPENSE_CATS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from '../expenseCategories.js';
+import { buildCategoryOptions, buildSubCategoryOptions } from '../classifyOptions.js';
 import { getCashWalletLeft } from './financeDocuments.js';
 
 async function loadMaintenanceBilling() {
@@ -128,31 +129,34 @@ const isPdfPath = (path) => /\.pdf$/i.test(path || '');
 const isPdfFile = (file) =>
     file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || '');
 
-const resolveCategory = (raw, allowedKeys) => {
+const resolveCategory = (raw, isIncome) => {
+    const income = isIncome === true || isIncome === INCOME_CATS;
+    const allowedKeys = buildCategoryOptions(income);
     const t = String(raw ?? '').trim();
-    if (!t) return allowedKeys[0];
+    if (!t) return income ? INCOME_CATS[0] : EXPENSE_CATS[0];
     if (allowedKeys.includes(t)) return t;
     const byLabel = Object.entries(CAT_LABELS).find(
         ([key, label]) => allowedKeys.includes(key) && label.toLowerCase() === t.toLowerCase(),
     );
     if (byLabel) return byLabel[0];
-    const partial = allowedKeys.find((key) =>
-        key.toLowerCase().includes(t.toLowerCase()) ||
-        (CAT_LABELS[key] || '').toLowerCase().includes(t.toLowerCase()),
+    const exact = allowedKeys.find((key) =>
+        key.toLowerCase() === t.toLowerCase()
+        || categoryDisplayLabel(key).toLowerCase() === t.toLowerCase(),
     );
-    return partial || allowedKeys[0];
+    if (exact) return exact;
+    return t;
 };
 
 const populateCategoryDatalists = () => {
     const expenseList = document.getElementById('expense-cat-datalist');
     const incomeList = document.getElementById('income-cat-datalist');
     if (expenseList) {
-        expenseList.innerHTML = EXPENSE_CATS.map((key) =>
+        expenseList.innerHTML = buildCategoryOptions(false).map((key) =>
             `<option value="${labelForCat(key)}"></option>`,
         ).join('');
     }
     if (incomeList) {
-        incomeList.innerHTML = INCOME_CATS.map((key) =>
+        incomeList.innerHTML = buildCategoryOptions(true).map((key) =>
             `<option value="${labelForCat(key)}"></option>`,
         ).join('');
     }
@@ -161,11 +165,7 @@ const populateCategoryDatalists = () => {
 const populateSubCatDatalist = (catKey) => {
     const list = document.getElementById('expense-subcat-datalist');
     if (!list) return;
-    const defaults = SUB_CAT_SUGGESTIONS[catKey] || SUB_CAT_SUGGESTIONS.Other;
-    const saved = (fnFinances().subCategories || [])
-        .filter((row) => row.category === catKey)
-        .map((row) => row.name);
-    const suggestions = [...new Set([...defaults, ...saved])].sort((a, b) => a.localeCompare(b));
+    const suggestions = buildSubCategoryOptions(catKey);
     list.innerHTML = suggestions.map((s) => `<option value="${s}"></option>`).join('');
 };
 
@@ -254,7 +254,7 @@ export const syncIncomeExtraSection = (catKey, txn = null) => {
 export const refreshExpenseReferences = async () => {
     // Finance-New: vendors/subcats live in Mongo finance_config (already hydrated).
     populateVendorDatalist();
-    const cat = resolveCategory(document.getElementById('expense-cat-input')?.value, EXPENSE_CATS);
+    const cat = resolveCategory(document.getElementById('expense-cat-input')?.value, false);
     populateSubCatDatalist(cat);
 };
 
@@ -795,7 +795,7 @@ export const initExpenseModal = () => {
     if (catInput && !catInput.dataset.wired) {
         catInput.dataset.wired = '1';
         catInput.addEventListener('change', () => {
-            const cat = resolveCategory(catInput.value, EXPENSE_CATS);
+            const cat = resolveCategory(catInput.value, false);
             populateSubCatDatalist(cat);
         });
     }
@@ -804,7 +804,7 @@ export const initExpenseModal = () => {
     if (incomeCatInput && !incomeCatInput.dataset.wired) {
         incomeCatInput.dataset.wired = '1';
         const syncIncomeSections = () => {
-            const cat = resolveCategory(incomeCatInput.value, INCOME_CATS);
+            const cat = resolveCategory(incomeCatInput.value, true);
             syncMaintenanceIncomeSection(cat, portalState.editingTxnId);
             syncIncomeExtraSection(cat);
         };
@@ -843,6 +843,14 @@ export const initExpenseModal = () => {
     };
     wireBankProofInput('cash-bank-proof');
     wireBankProofInput('cash-income-bank-proof');
+
+    const saveBtn = document.getElementById('save-cash-btn');
+    if (saveBtn && !saveBtn.dataset.saveWired) {
+        saveBtn.dataset.saveWired = '1';
+        saveBtn.addEventListener('click', () => {
+            void withButtonBusy(saveBtn, 'Saving…', saveCashData);
+        });
+    }
 
     if (!initExpenseModal._escWired) {
         initExpenseModal._escWired = true;
@@ -940,6 +948,8 @@ export const renderCashLedger = () => {
     setLedgerViewRefresh(renderCashLedger);
     const list = document.getElementById('fn-cash-ledger-items');
     if (!list) return;
+    populateLedgerCategoryFilter();
+    initLedgerBulkBar();
 
     renderLedgerPivotBanner();
     const active = getActiveLedgerTxns([...fnFinances().txns]);
@@ -1384,7 +1394,7 @@ export const saveCashData = async () => {
 
     const amt = parseFloat(amtEl?.value);
     let desc = descEl?.value?.trim() || null;
-    const cat = resolveCategory(catInput?.value, isIncome ? INCOME_CATS : EXPENSE_CATS);
+    const cat = resolveCategory(catInput?.value, isIncome);
     if (isIncome && cat === 'Maintenance Collection' && saveTarget === 'ledger') {
         const unitNumber = document.getElementById('maintenance-unit-input')?.value?.trim();
         if (unitNumber && !String(desc || '').toUpperCase().includes(unitNumber.toUpperCase())) {
@@ -1492,15 +1502,10 @@ export const saveCashData = async () => {
             portalState.linkBillToTxnId = null;
             document.getElementById('cash-modal').classList.remove('active');
             portalState.cashSaveTarget = 'ledger';
-            if (linkedFromLedger) {
-                if (typeof window.renderCashLedger === 'function') window.renderCashLedger();
-                const { renderFinanceDocumentsPage } = await import('./financeDocuments.js');
-                renderFinanceDocumentsPage();
-            } else if (typeof window.switchView === 'function') {
-                window.switchView('finance-docs');
-            } else {
-                const { renderFinanceDocumentsPage } = await import('./financeDocuments.js');
-                renderFinanceDocumentsPage();
+            const { refreshFinanceDocumentsAfterSave } = await import('./financeDocuments.js');
+            refreshFinanceDocumentsAfterSave(result.document);
+            if (linkedFromLedger && typeof window.renderCashLedger === 'function') {
+                window.renderCashLedger();
             }
         } catch (err) {
             alert(err?.message || 'Could not save bill / receipt.');
@@ -1898,6 +1903,8 @@ bindFinanceNewWindow('openExpense', (wallet = 'CASH', { asBill = true } = {}) =>
     portalState.linkBillToTxnId = null;
     portalState.cashModalMode = 'expense';
     portalState.cashSaveTarget = asBill ? 'bill' : 'ledger';
+    populateCategoryDatalists();
+    populateVendorDatalist();
 
     document.getElementById('expense-form-view').style.display = 'grid';
     document.getElementById('income-form-view').style.display = 'none';
@@ -1932,6 +1939,8 @@ bindFinanceNewWindow('openIncome', (wallet = 'CASH', { asBill = true } = {}) => 
     portalState.linkBillToTxnId = null;
     portalState.cashModalMode = 'income';
     portalState.cashSaveTarget = asBill ? 'bill' : 'ledger';
+    populateCategoryDatalists();
+    populateVendorDatalist();
 
     document.getElementById('expense-form-view').style.display = 'none';
     document.getElementById('income-form-view').style.display = 'grid';
@@ -2097,7 +2106,7 @@ bindFinanceNewWindow('openCash', (direction = 'OUT', wallet = 'CASH') => {
 const populateLedgerLineCatDatalist = (isIncome) => {
     const dl = document.getElementById('ledger-line-cat-datalist');
     if (!dl) return;
-    const cats = isIncome ? INCOME_CATS : EXPENSE_CATS;
+    const cats = buildCategoryOptions(isIncome);
     dl.innerHTML = cats.map((c) => `<option value="${categoryDisplayLabel(c)}"></option>`).join('');
 };
 
@@ -2170,7 +2179,7 @@ const openBillReceiptFromLedgerLine = () => {
         document.getElementById('income-date').value = dateVal;
         document.getElementById('income-desc').value = narration;
         document.getElementById('income-cat-input').value = catLabel || labelForCat('Other Income');
-        const cat = resolveCategory(catLabel, INCOME_CATS);
+        const cat = resolveCategory(catLabel, true);
         document.getElementById('cash-cat-select').value = cat;
         syncMaintenanceIncomeSection(cat);
         syncIncomeExtraSection(cat);
@@ -2190,7 +2199,7 @@ const openBillReceiptFromLedgerLine = () => {
         document.getElementById('cash-date').value = dateVal;
         document.getElementById('cash-desc').value = narration;
         document.getElementById('expense-cat-input').value = catLabel || labelForCat('Other');
-        const cat = resolveCategory(catLabel, EXPENSE_CATS);
+        const cat = resolveCategory(catLabel, false);
         document.getElementById('cash-cat-select').value = cat;
         populateSubCatDatalist(cat);
         if (wallet === 'BANK' && bankRef) {
@@ -2214,7 +2223,7 @@ export const saveLedgerLineData = async () => {
     const desc = document.getElementById('ledger-line-desc-input')?.value?.trim() || null;
     const cat = resolveCategory(
         document.getElementById('ledger-line-cat')?.value,
-        isIncome ? INCOME_CATS : EXPENSE_CATS,
+        isIncome,
     );
     const wallet = getActiveWallet('ledger-line-wallet-pills');
     const bank_reference = wallet === 'BANK'
@@ -2476,14 +2485,17 @@ export const initAccountsSubViewTabs = () => {
 
 const populateLedgerCategoryFilter = () => {
     const sel = document.getElementById('fn-ledger-cat-filter');
-    if (!sel || sel.dataset.populated) return;
-    sel.dataset.populated = '1';
+    if (!sel) return;
+    const prev = sel.value;
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const income = buildCategoryOptions(true);
+    const expense = buildCategoryOptions(false);
     sel.innerHTML = [
         '<option value="">All categories</option>',
-        `<optgroup label="Income">${INCOME_CATS.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
-        `<optgroup label="Expenses">${EXPENSE_CATS.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+        `<optgroup label="Income">${income.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+        `<optgroup label="Expenses">${expense.map((c) => `<option value="${esc(c)}">${esc(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
     ].join('');
+    if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 };
 
 const initLedgerSearch = () => {

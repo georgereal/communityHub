@@ -18,12 +18,13 @@ export const CATEGORY_LABELS = {
     'Bank Reject': 'Bank Reject',
     Reconcile: 'Bank Reconciliation',
     'Other Income': 'Other Income',
-    Other: 'Miscellaneous',
+    Other: 'Other',
 };
 
 /** Legacy / alternate stored values → canonical key. */
 const CATEGORY_ALIASES = {
     'Petty Cash Top-up': 'Petty Inflow',
+    Miscellaneous: 'Other',
 };
 
 const LABEL_TO_KEY = Object.fromEntries(

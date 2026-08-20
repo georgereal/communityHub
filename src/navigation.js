@@ -5,6 +5,8 @@
 import { isModuleEnabled } from './moduleAccess.js';
 import { portalState } from './store.js';
 import { pageAccessBlocksRoute } from './pageAccessResolve.js';
+import { getUiMode, isNewUi } from './uiMode.js';
+import { applyMpaNavCollapsed, isMpaNavCollapsedPref } from './appShell/navPref.js';
 
 const OPERATIONS_ROUTES = [
     'ops-helpdesk', 'ops-transitions', 'ops-notices', 'ops-assets',
@@ -21,13 +23,15 @@ export let ACCOUNTS_SUBVIEW_ROUTES = {};
 export const NAV_MODULES = [
     {
         id: 'home',
-        label: 'Home',
+        label: 'Dashboard',
         icon: 'fa-house',
+        tabbed: true,
+        defaultRoute: 'dashboard',
         pages: [
             {
                 route: 'dashboard',
                 label: 'Dashboard',
-                icon: 'fa-gauge-high',
+                icon: 'fa-house',
                 view: 'dashboard',
                 permission: 'vehicle_registry.view',
                 altPermissions: ['apartment_mgmt.view', 'accounts.view', 'security.view', 'setup.view'],
@@ -438,6 +442,85 @@ export const NAV_MODULES = [
         ],
     },
     {
+        id: 'admin-new',
+        label: 'Administration',
+        icon: 'fa-gear',
+        accessModuleId: 'admin',
+        navEntries: [
+            { route: 'an-society' },
+            { route: 'an-people' },
+            { route: 'an-staff' },
+            { route: 'an-integrations' },
+            { route: 'admin-access' },
+            { route: 'admin-activity' },
+        ],
+        pages: [
+            {
+                route: 'an-society',
+                label: 'Society profile',
+                icon: 'fa-building',
+                view: 'admin-new',
+                permission: 'setup.edit',
+                altPermissions: ['rbac.edit'],
+            },
+            {
+                route: 'an-people',
+                label: 'People & access',
+                icon: 'fa-user-shield',
+                view: 'admin-new',
+                permission: 'setup.edit',
+                altPermissions: ['rbac.edit'],
+            },
+            {
+                route: 'an-vendors',
+                label: 'Vendors',
+                icon: 'fa-truck-field',
+                view: 'admin-new',
+                permission: 'setup.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'an-categories',
+                label: 'Sub-categories',
+                icon: 'fa-tags',
+                view: 'admin-new',
+                permission: 'setup.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'an-staff',
+                label: 'Staff directory',
+                icon: 'fa-users-gear',
+                view: 'admin-new',
+                permission: 'setup.edit',
+            },
+            {
+                route: 'an-integrations',
+                label: 'Integrations',
+                icon: 'fa-plug',
+                view: 'admin-new',
+                permission: 'setup.edit',
+                altPermissions: ['accounts.edit'],
+            },
+            {
+                route: 'admin-access',
+                label: 'Roles',
+                icon: 'fa-user-lock',
+                view: 'access-control',
+                permission: 'rbac.edit',
+            },
+            {
+                route: 'admin-activity',
+                label: 'Activity Log',
+                icon: 'fa-clock-rotate-left',
+                view: 'accounts',
+                subview: 'activity',
+                permission: 'rbac.view',
+                altPermissions: ['setup.edit'],
+            },
+        ],
+    },
+    {
         id: 'admin',
         label: 'Administration',
         icon: 'fa-gear',
@@ -565,6 +648,77 @@ export const NAV_MODULES = [
     },
 ];
 
+const OPS_NAV_ROUTES = OPERATIONS_ROUTES;
+
+export function isNavHeading(mod) {
+    return Boolean(mod?.navHeading);
+}
+
+/**
+ * Sidebar modules for the current UI mode.
+ * New: Mongo Property + Finance on top; classic screens sit under an Old heading
+ * (property ops, resident portal, security gate). Administration stays last.
+ * Classic: original Property + Finance SPA.
+ */
+export function getNavModules() {
+    const mode = getUiMode();
+    const property = NAV_MODULES.find((m) => m.id === 'property');
+    const opsPages = (property?.pages || []).filter((p) => OPS_NAV_ROUTES.includes(p.route));
+    const opsEntries = (property?.navEntries || []).filter((e) => e.route && OPS_NAV_ROUTES.includes(e.route));
+    const byId = (id) => NAV_MODULES.find((m) => m.id === id);
+
+    if (mode === 'classic') {
+        return NAV_MODULES.filter((mod) => mod.id !== 'property-new' && mod.id !== 'finance-new' && mod.id !== 'admin-new');
+    }
+
+    const out = [];
+    for (const mod of NAV_MODULES) {
+        if (mod.id === 'property' || mod.id === 'finance') continue;
+        if (mod.id === 'portal' || mod.id === 'security' || mod.id === 'admin') continue;
+        if (mod.id === 'property-new') {
+            out.push({ ...mod, label: 'Property' });
+            continue;
+        }
+        if (mod.id === 'finance-new') {
+            out.push({ ...mod, label: 'Finance' });
+            continue;
+        }
+        out.push(mod);
+    }
+
+    const adminNew = byId('admin-new');
+    const opsDataPages = (adminNew?.pages || []).filter((p) => ['an-vendors', 'an-categories'].includes(p.route));
+    const opsDataEntries = opsDataPages.map((p) => ({ route: p.route }));
+
+    out.push({ navHeading: 'Old', id: '_old-heading' });
+    if (opsPages.length || opsDataPages.length) {
+        out.push({
+            id: 'old-ops',
+            accessModuleId: 'property',
+            label: 'Operations',
+            icon: 'fa-toolbox',
+            classicIsland: true,
+            oldGroup: true,
+            navEntries: [...opsEntries, ...opsDataEntries],
+            pages: [...opsPages, ...opsDataPages.map((p) => ({ ...p, hideFromNav: false }))],
+        });
+    }
+    ['portal', 'security'].forEach((id) => {
+        const mod = byId(id);
+        if (mod) out.push({ ...mod, classicIsland: true, oldGroup: true });
+    });
+    return out;
+}
+
+export function routeIsClassicIsland(route) {
+    if (OPS_NAV_ROUTES.includes(route)) return true;
+    const meta = findPage(route);
+    const id = meta?.module?.id;
+    if (id === 'portal' || id === 'security' || id === 'admin') return true;
+    if (id === 'admin-new' && String(route || '').startsWith('admin-')) return true;
+    return false;
+}
+
 /** Setup page tabs — same routes as Administration → Society settings. */
 export const SETUP_SUBVIEW_ROUTES = {
     society: 'admin-society',
@@ -676,9 +830,11 @@ export function findFirstAllowedRoute(role = portalState.auth?.role) {
     const raw = portalState.authPermissions;
     // Unresolved or empty → no invented access; still try portal if that role, else dashboard for alert path
     const perms = Array.isArray(raw) && raw.length ? new Set(raw) : new Set();
-    for (const mod of NAV_MODULES) {
+    for (const mod of getNavModules()) {
+        if (isNavHeading(mod) || !mod.pages?.length) continue;
+        const accessId = mod.accessModuleId || mod.id;
         for (const page of mod.pages) {
-            if (pageIsVisible(page, perms, false, mod.id)) return page.route;
+            if (pageIsVisible(page, perms, false, accessId)) return page.route;
         }
     }
     return DEFAULT_ROUTE;
@@ -753,15 +909,16 @@ const navEntryIsVisible = (entry, mod, permSet, offline) => {
     if (entry.tabbed) {
         return entry.routes.some((r) => {
             const page = mod.pages.find((p) => p.route === r);
-            return page && pageIsVisible(page, permSet, offline, mod.id);
+            return page && pageIsVisible(page, permSet, offline, mod.accessModuleId || mod.id);
         });
     }
     const page = mod.pages.find((p) => p.route === entry.route);
-    return page && pageIsVisible(page, permSet, offline, mod.id);
+    return page && pageIsVisible(page, permSet, offline, mod.accessModuleId || mod.id);
 };
 
 const syncModuleExpansion = (route) => {
-    NAV_MODULES.forEach((mod) => {
+    getNavModules().forEach((mod) => {
+        if (isNavHeading(mod)) return;
         const modEl = document.querySelector(`.nav-module[data-module="${mod.id}"]`);
         if (!modEl) return;
         if (mod.tabbed) {
@@ -777,12 +934,14 @@ const syncModuleExpansion = (route) => {
 };
 
 export const applyNavPermissions = (permSet, offline = false) => {
-    NAV_MODULES.forEach((mod) => {
+    getNavModules().forEach((mod) => {
+        if (isNavHeading(mod)) return;
         const modEl = document.querySelector(`.nav-module[data-module="${mod.id}"]`);
         if (!modEl) return;
+        const accessId = mod.accessModuleId || mod.id;
 
         if (mod.tabbed) {
-            const show = mod.pages.some((page) => pageIsVisible(page, permSet, offline, mod.id));
+            const show = mod.pages.some((page) => pageIsVisible(page, permSet, offline, accessId));
             modEl.style.display = show ? 'block' : 'none';
             return;
         }
@@ -798,6 +957,15 @@ export const applyNavPermissions = (permSet, offline = false) => {
         });
 
         modEl.style.display = visiblePages ? 'block' : 'none';
+    });
+
+    document.querySelectorAll('[data-nav-heading]').forEach((el) => {
+        const any = getNavModules().some((mod) => {
+            if (!mod.oldGroup) return false;
+            const modEl = document.querySelector(`.nav-module[data-module="${mod.id}"]`);
+            return modEl && modEl.style.display !== 'none';
+        });
+        el.style.display = any ? '' : 'none';
     });
 
     Object.entries(ACCOUNTS_SUBVIEW_ROUTES).forEach(([subview, route]) => {
@@ -830,7 +998,8 @@ export const updateNavActiveState = (route) => {
         btn.classList.toggle('active', active);
     });
 
-    NAV_MODULES.forEach((mod) => {
+    getNavModules().forEach((mod) => {
+        if (isNavHeading(mod)) return;
         const modEl = document.querySelector(`.nav-module[data-module="${mod.id}"]`);
         if (!modEl) return;
         const entries = getModuleNavEntries(mod);
@@ -846,15 +1015,29 @@ export const updateNavActiveState = (route) => {
 
 export const updateNavBreadcrumb = (route) => {
     const meta = findPage(route);
+    const shown = getNavModules().find((m) => m.pages.some((p) => p.route === route));
     const moduleEl = document.getElementById('topbar-nav-module');
     const pageEl = document.getElementById('topbar-nav-page');
+    const chev = document.querySelector('.topbar-breadcrumb > .fa-chevron-right');
+    const showPage = (text) => {
+        if (pageEl) {
+            pageEl.textContent = text || '';
+            pageEl.hidden = !text;
+        }
+        if (chev) chev.style.display = text ? '' : 'none';
+    };
     if (!meta) {
         if (moduleEl) moduleEl.textContent = 'Property';
-        if (pageEl) pageEl.textContent = 'Parking & Vehicles';
+        showPage('Parking & Vehicles');
         return;
     }
-    if (moduleEl) moduleEl.textContent = meta.module.label;
-    if (pageEl) pageEl.textContent = meta.page.label;
+    if (shown?.tabbed) {
+        if (moduleEl) moduleEl.textContent = shown.label;
+        showPage('');
+        return;
+    }
+    if (moduleEl) moduleEl.textContent = shown?.label || meta.module.label;
+    showPage(meta.page.label);
 };
 
 const renderNavPageButtons = (mod) => {
@@ -872,12 +1055,17 @@ const renderNavPageButtons = (mod) => {
         }
         const page = mod.pages.find((p) => p.route === entry.route);
         if (!page) return '';
+        const island = getUiMode() !== 'classic' && routeIsClassicIsland(page.route);
+        const islandHint = island ? ' title="Classic screen (Supabase)"' : '';
+        const islandMark = island
+            ? ' <span class="nav-island-dot" title="Classic (Supabase)" aria-hidden="true"></span>'
+            : '';
         return `
-            <button type="button" class="nav-page-btn"
+            <button type="button" class="nav-page-btn${island ? ' nav-page-btn--island' : ''}"
               data-route="${page.route}"
-              data-nav-route="${page.route}">
+              data-nav-route="${page.route}"${islandHint}>
               <i class="fa-solid ${page.icon}" aria-hidden="true"></i>
-              <span>${page.label}</span>
+              <span>${page.label}</span>${islandMark}
             </button>`;
     }).join('');
 };
@@ -886,15 +1074,20 @@ export const renderNavModules = () => {
     const container = document.getElementById('nav-modules');
     if (!container) return;
 
-    container.innerHTML = NAV_MODULES.map((mod) => {
+    container.innerHTML = getNavModules().map((mod) => {
+        if (isNavHeading(mod)) {
+            return `<p class="nav-old-heading" data-nav-heading="old">${mod.navHeading}</p>`;
+        }
         const entryRoute = mod.tabbed ? (mod.defaultRoute || mod.pages[0]?.route) : null;
+        const islandTitle = mod.classicIsland ? ` title="${mod.label} (classic · Supabase)"` : '';
         return `
-      <div class="nav-module${mod.tabbed ? ' nav-module--tabbed' : ''}" data-module="${mod.id}">
+      <div class="nav-module${mod.tabbed ? ' nav-module--tabbed' : ''}${mod.classicIsland ? ' nav-module--island' : ''}" data-module="${mod.id}">
         <button type="button" class="nav-module-toggle" aria-expanded="false"
           ${entryRoute ? `data-route="${entryRoute}"` : ''}
-          ${mod.tabbed ? '' : `aria-controls="nav-sub-${mod.id}"`}>
+          ${mod.tabbed ? '' : `aria-controls="nav-sub-${mod.id}"`}${islandTitle}>
           <span class="nav-module-toggle__lead">
             <i class="fa-solid ${mod.icon}" aria-hidden="true"></i>
+            ${mod.classicIsland && getUiMode() !== 'classic' ? '<span class="nav-island-dot nav-island-dot--mod" title="Classic (Supabase)" aria-hidden="true"></span>' : ''}
             <span class="nav-module-toggle__label">${mod.label}</span>
           </span>
           ${mod.tabbed ? '' : '<i class="fa-solid fa-chevron-down nav-module-toggle__chevron" aria-hidden="true"></i>'}
@@ -916,7 +1109,14 @@ export const initNavInteraction = (onNavigate) => {
     container.addEventListener('click', (e) => {
         const pageBtn = e.target.closest('.nav-page-btn');
         if (pageBtn?.dataset?.route) {
-            document.body.classList.remove('nav-expanded');
+            if (isNewUi()) {
+                const mobile = window.matchMedia('(max-width: 820px)').matches;
+                if (mobile || isMpaNavCollapsedPref()) {
+                    applyMpaNavCollapsed(true, { persist: !mobile });
+                }
+            } else {
+                document.body.classList.remove('nav-expanded');
+            }
             const tabRoutes = pageBtn.dataset.tabRoutes?.split(',').filter(Boolean) || [];
             let route = pageBtn.dataset.route;
             if (tabRoutes.length) {
@@ -935,7 +1135,14 @@ export const initNavInteraction = (onNavigate) => {
         if (!toggle) return;
 
         if (toggle.dataset?.route) {
-            document.body.classList.remove('nav-expanded');
+            if (isNewUi()) {
+                const mobile = window.matchMedia('(max-width: 820px)').matches;
+                if (mobile || isMpaNavCollapsedPref()) {
+                    applyMpaNavCollapsed(true, { persist: !mobile });
+                }
+            } else {
+                document.body.classList.remove('nav-expanded');
+            }
             onNavigate?.(toggle.dataset.route);
             return;
         }
@@ -944,8 +1151,9 @@ export const initNavInteraction = (onNavigate) => {
         if (!modEl) return;
 
         if (!document.body.classList.contains('nav-expanded')) {
-            document.body.classList.add('nav-expanded');
-            NAV_MODULES.forEach((mod) => {
+            if (isNewUi()) applyMpaNavCollapsed(false, { persist: false });
+            else document.body.classList.add('nav-expanded');
+            getNavModules().forEach((mod) => {
                 const el = document.querySelector(`.nav-module[data-module="${mod.id}"]`);
                 if (!el) return;
                 const open = mod.id === modEl.dataset.module;

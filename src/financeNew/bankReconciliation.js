@@ -41,10 +41,12 @@ import {
     annotateStatementLineBalances,
     getCalculatedBankBalance,
     getPassbookClosingBalance,
+    getPostedPassbookBalance,
     getStatementClosingBalance,
     getBankBalanceReconciliation,
     getUnmatchedBankLines,
 } from './bankStatementQueries.js';
+import { getLedgerBankBalance } from './ledgerBalance.js';
 
 export {
     getMatchedTransactionIds,
@@ -54,13 +56,12 @@ export {
     annotateStatementLineBalances,
     getCalculatedBankBalance,
     getPassbookClosingBalance,
+    getPostedPassbookBalance,
     getStatementClosingBalance,
     getBankBalanceReconciliation,
     getUnmatchedBankLines,
 };
 import {
-    EXPENSE_CATS,
-    INCOME_CATS,
     BANK_REJECT_CAT,
     defaultExcludeFromReports,
 } from '../expenseCategories.js';
@@ -839,7 +840,7 @@ const renderFilterBar = (scope, { mismatchCount = 0, showStatus = false, showTyp
             <input type="checkbox" class="bank-recon-filter-mismatch" data-filter-scope="${scope}" ${f.mismatchOnly ? 'checked' : ''} />
             <span>Mismatches only</span>
           </label>
-          <span class="bank-recon-filter-mismatch-meta" title="Calculated running balance ≠ statement/passbook balance on the row">
+          <span class="bank-recon-filter-mismatch-meta" title="${scope === 'work' ? 'Unmatched row: ledger running calc ≠ passbook on this row' : 'Posted row: historical statement-order calc ≠ passbook'}">
             ${mismatchCount} mismatch${mismatchCount === 1 ? '' : 'es'}
           </span>
           <button type="button" class="btn btn-outline btn--small bank-recon-mismatch-nav" data-filter-scope="${scope}" data-mismatch-dir="-1" ${mismatchCount ? '' : 'disabled'} title="Previous mismatch">
@@ -1641,6 +1642,53 @@ const renderClassifyCell = (line, isIncome) => {
       </div>`;
 };
 
+const isoDay = (value) => (value ? String(value).slice(0, 10) : null);
+
+const getWorkReconSnapshot = (unmatchedRaw = null) => {
+    const source = unmatchedRaw
+        || annotateStatementLineBalances().filter((l) => l.match_status === 'UNMATCHED');
+    const workLines = annotateWorkLinesFromLedger(source);
+    const workMismatchCount = workLines.filter((l) => l.passbookMismatch).length;
+    const ledgerBank = getLedgerBankBalance();
+    const postedPassbook = getPostedPassbookBalance(ledgerBank.asOf);
+    const calcAsOf = isoDay(ledgerBank.asOf);
+    const passbookAsOf = isoDay(postedPassbook?.asOf);
+    const sameAsOf = !!(calcAsOf && passbookAsOf && calcAsOf === passbookAsOf);
+    const closingDiff = ledgerBank.balance != null && postedPassbook
+        ? ledgerBank.balance - postedPassbook.balance
+        : null;
+    const closingGap = closingDiff != null && Math.abs(closingDiff) > 0.01;
+    return {
+        workLines,
+        workMismatchCount,
+        ledgerBank,
+        postedPassbook,
+        calcAsOf,
+        passbookAsOf,
+        sameAsOf,
+        closingDiff,
+        closingGap,
+    };
+};
+
+const annotateWorkLinesFromLedger = (unmatched) => {
+    const ledger = getLedgerBankBalance();
+    if (ledger.balance == null) return unmatched;
+    const imports = bankStatementImportById();
+    const ordered = [...unmatched].sort((a, b) => compareLineOrder(a, b, imports));
+    let running = ledger.balance;
+    const byId = new Map();
+    for (const line of ordered) {
+        running += parseFloat(line.credit || 0) - parseFloat(line.debit || 0);
+        const passbook = passbookRowBalance(line);
+        byId.set(line.id, {
+            computedBalance: running,
+            passbookMismatch: passbook != null && Math.abs(running - passbook) > 0.01,
+        });
+    }
+    return unmatched.map((line) => (byId.has(line.id) ? { ...line, ...byId.get(line.id) } : line));
+};
+
 const renderBalanceCells = (line, visibleColumns) => {
     const showJoined = !!visibleColumns?.passbookBalance || !!visibleColumns?.calculatedBalance;
     if (!showJoined) return '';
@@ -1650,7 +1698,7 @@ const renderBalanceCells = (line, visibleColumns) => {
     const passbookLabel = passbookValue != null ? formatMoney(passbookValue) : '—';
     const calcLabel = line.computedBalance != null ? formatMoney(line.computedBalance) : null;
     const calcHtml = calcLabel != null
-        ? `<span class="ledger-passbook-calc${needsOpening ? ' ledger-passbook-calc--stale' : ''}" title="Calculated running balance from opening + movements">( ${esc(calcLabel)} )</span>`
+        ? `<span class="ledger-passbook-calc${needsOpening ? ' ledger-passbook-calc--stale' : ''}" title="Ledger calculated + unmatched rows in order through this line">( ${esc(calcLabel)} )</span>`
         : (needsOpening
             ? '<span class="ledger-passbook-calc ledger-passbook-calc--stale" title="Set opening balance to calculate">( set opening )</span>'
             : '');
@@ -1671,7 +1719,6 @@ const renderBalanceCells = (line, visibleColumns) => {
 
 const updateOpeningBalanceTabMeta = () => {
     const opening = getBankOpeningConfig();
-    const recon = getBankBalanceReconciliation();
     const hasOpening = opening.amount != null && opening.date;
     const hintEl = document.getElementById('fn-bank-recon-opening-tab-hint');
     const badgeEl = document.getElementById('fn-bank-recon-opening-tab-badge');
@@ -1688,21 +1735,32 @@ const updateOpeningBalanceTabMeta = () => {
         badgeEl.hidden = false;
         return;
     }
-    if (recon.mismatchCount > 0 || (recon.passbook && recon.hasDiscrepancy)) {
+    const snap = getWorkReconSnapshot();
+    if (snap.workMismatchCount > 0) {
         badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--warn';
-        badgeEl.textContent = recon.mismatchCount > 0 ? 'Mismatch' : 'Review';
-        badgeEl.title = recon.mismatchCount > 0
-            ? `${recon.mismatchCount} row(s) where calculated running balance ≠ statement/passbook balance`
-            : (recon.hasDiscrepancy
-                ? `Closing calculated ${formatMoney(recon.calculated.balance)} ≠ passbook ${formatMoney(recon.passbook.balance)}`
-                : 'Review balances');
+        badgeEl.textContent = 'Mismatch';
+        badgeEl.title = `${snap.workMismatchCount} unmatched row(s) where calculated ≠ passbook`;
         badgeEl.hidden = false;
         return;
     }
-    if (recon.passbook && !recon.hasDiscrepancy) {
+    if (snap.closingGap && snap.sameAsOf) {
+        badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--warn';
+        badgeEl.textContent = 'Review';
+        badgeEl.title = `Ledger ${formatMoney(snap.ledgerBank.balance)} ≠ passbook ${formatMoney(snap.postedPassbook.balance)} as of ${formatDisplayDate(snap.calcAsOf)}`;
+        badgeEl.hidden = false;
+        return;
+    }
+    if (snap.closingGap && !snap.sameAsOf) {
+        badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--warn';
+        badgeEl.textContent = 'Dates differ';
+        badgeEl.title = `Ledger as of ${formatDisplayDate(snap.calcAsOf)} vs posted passbook ${formatDisplayDate(snap.passbookAsOf)}`;
+        badgeEl.hidden = false;
+        return;
+    }
+    if (snap.postedPassbook && !snap.closingGap) {
         badgeEl.className = 'bank-recon-opening-panel__badge bank-recon-opening-panel__badge--ok';
         badgeEl.textContent = 'In balance';
-        badgeEl.title = 'Calculated closing balance matches the latest passbook/statement balance';
+        badgeEl.title = 'Ledger calculated matches passbook on the last posted statement line';
         badgeEl.hidden = false;
         return;
     }
@@ -1712,26 +1770,30 @@ const updateOpeningBalanceTabMeta = () => {
 
 const renderOpeningBalancePanel = () => {
     const opening = getBankOpeningConfig();
-    const recon = getBankBalanceReconciliation();
     const hasOpening = opening.amount != null && opening.date;
     const showJoinedHint = (bankReconVisibleColumns.passbookBalance || bankReconVisibleColumns.calculatedBalance) && !hasOpening;
 
+    const snap = getWorkReconSnapshot();
     let statusHtml = '';
     if (!hasOpening) {
-        statusHtml = '<p class="bank-recon-balance-panel__hint"><strong>Mismatch</strong> means the calculated running balance (opening + credits − debits) does not equal the statement/passbook balance on a row. Set opening balance and date below first.</p>';
+        statusHtml = '<p class="bank-recon-balance-panel__hint"><strong>Mismatch</strong> on a work row means that row’s calculated amount (ledger + unmatched lines through that row) does not equal the passbook balance on the same row. Set opening balance and date below first.</p>';
         if (showJoinedHint) {
             statusHtml += '<p class="bank-recon-balance-panel__hint bank-recon-balance-panel__hint--emphasis">The <strong>Passbook / calc</strong> column shows statement balance with calculated in parentheses once opening is saved.</p>';
         }
-    } else if (recon.passbook && recon.hasDiscrepancy) {
-        statusHtml = `<p class="bank-recon-balance-panel__alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Overall discrepancy of <strong>${formatMoney(Math.abs(recon.diff))}</strong> — calculated ${formatMoney(recon.calculated.balance)} vs passbook ${formatMoney(recon.passbook.balance)}. Use <strong>Mismatches only</strong> / <strong>Next</strong> on the tables below to jump to rows.</p>`;
-    } else if (recon.passbook && !recon.hasDiscrepancy) {
-        statusHtml = '<p class="bank-recon-balance-panel__ok"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Calculated balance matches the latest passbook closing balance.</p>';
-    } else if (recon.calculated.balance != null) {
-        statusHtml = `<p class="bank-recon-balance-panel__hint">Calculated balance is ${formatMoney(recon.calculated.balance)}${recon.calculated.asOf ? ` as of ${formatDisplayDate(recon.calculated.asOf)}` : ''}. Import statements with a Balance column (or passbook OCR) to compare row-by-row.</p>`;
+    } else if (snap.workMismatchCount > 0) {
+        statusHtml = `<p class="bank-recon-balance-panel__alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <strong>${snap.workMismatchCount}</strong> unmatched work row(s) where calculated ≠ passbook. Use <strong>Mismatches only</strong> on the work table.</p>`;
+    } else if (snap.closingGap && snap.sameAsOf) {
+        statusHtml = `<p class="bank-recon-balance-panel__alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Closing gap of <strong>${formatMoney(Math.abs(snap.closingDiff))}</strong> on ${formatDisplayDate(snap.calcAsOf)} — ledger ${formatMoney(snap.ledgerBank.balance)} vs last posted passbook ${formatMoney(snap.postedPassbook.balance)}.</p>`;
+    } else if (snap.closingGap && !snap.sameAsOf) {
+        statusHtml = `<p class="bank-recon-balance-panel__hint">Posted-books comparison could not use the same date (ledger ${formatDisplayDate(snap.calcAsOf)}, passbook ${formatDisplayDate(snap.passbookAsOf)}).</p>`;
+    } else if (snap.postedPassbook && !snap.closingGap) {
+        statusHtml = '<p class="bank-recon-balance-panel__ok"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Ledger calculated matches passbook on the last posted statement line.</p>';
+    } else if (snap.ledgerBank.balance != null) {
+        statusHtml = `<p class="bank-recon-balance-panel__hint">Ledger calculated is ${formatMoney(snap.ledgerBank.balance)}${snap.calcAsOf ? ` as of ${formatDisplayDate(snap.calcAsOf)}` : ''}. Import statements with a Balance column (or passbook OCR) to compare row-by-row.</p>`;
     }
 
-    const mismatchNote = recon.mismatchCount > 0
-        ? `<button type="button" class="bank-recon-balance-panel__mismatch-count bank-recon-mismatch-jump" data-filter-scope="auto" title="Filter tables to mismatched rows and jump to the first one">${recon.mismatchCount} row(s) with balance mismatch — click to find</button>`
+    const mismatchNote = snap.workMismatchCount > 0
+        ? `<button type="button" class="bank-recon-balance-panel__mismatch-count bank-recon-mismatch-jump" data-filter-scope="work" title="Filter the work table to mismatched rows">${snap.workMismatchCount} unmatched row(s) with balance mismatch — click to find</button>`
         : '';
 
     return `
@@ -1751,6 +1813,7 @@ const renderOpeningBalancePanel = () => {
 };
 
 const renderStatementTable = (unmatched, visibleColumns = {}) => {
+    unmatched = annotateWorkLinesFromLedger(unmatched);
     const workMismatchCount = unmatched.filter((l) => l.passbookMismatch).length;
     const filtered = filterWorkLines(unmatched);
     const showJoined = !!visibleColumns.passbookBalance || !!visibleColumns.calculatedBalance;
@@ -1804,7 +1867,7 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
       </div>`;
 
     const header = `
-      <p class="bank-recon-work-hint">For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. Use <strong>Rules</strong> above, then <strong>Post all ready</strong>. Drag the table corner to resize, or use <strong>Height</strong>.</p>
+      <p class="bank-recon-work-hint">Calculated (parentheses) starts from the <strong>ledger</strong> bank balance, then adds unmatched rows in order. For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. Use <strong>Rules</strong> above, then <strong>Post all ready</strong>. Drag the table corner to resize, or use <strong>Height</strong>.</p>
       ${filterBarHtml}
       ${bulkBarHtml}`;
 
@@ -1911,7 +1974,7 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
               <th class="bank-recon-table__th--desc">${renderSortHeader('Description', 'description')}</th>
               <th class="bank-recon-table__th--num bank-recon-amt--out">${renderSortHeader('Debit', 'debit', 'bank-recon-sort-btn--num')}</th>
               <th class="bank-recon-table__th--num bank-recon-amt--in">${renderSortHeader('Credit', 'credit', 'bank-recon-sort-btn--num')}</th>
-              ${showJoined ? `<th class="bank-recon-table__th--num"${balanceHeaderHint}>${renderSortHeader('Passbook / calc', 'balance', 'bank-recon-sort-btn--num')}</th>` : ''}
+              ${showJoined ? `<th class="bank-recon-table__th--num bank-recon-table__th--passbook"${balanceHeaderHint}>${renderSortHeader('Passbook / calc', 'balance', 'bank-recon-sort-btn--num')}</th>` : ''}
               <th class="bank-recon-table__th--type">${renderSortHeader('Type', 'type')}</th>
               <th class="bank-recon-table__th--classify">Category / vendor</th>
               <th class="bank-recon-table__th--match">Match ledger</th>
@@ -1987,7 +2050,7 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
         <div class="bank-recon-processed__head">
           <div>
             <h4 class="bank-recon-processed__title">Matched &amp; ignored <span class="bank-recon-processed__count">(${rows.length})</span></h4>
-            <p class="bank-recon-processed__hint">Reconciled lines are read-only here. Use Edit to return a matched line to the work queue, or select rows for bulk return / delete. <strong>Mismatch</strong> = calculated ≠ passbook/statement balance on that row.</p>
+            <p class="bank-recon-processed__hint">Posted/ignored lines. Mismatches here are historical (statement-order calc vs passbook) and are not counted on the work queue above.</p>
           </div>
           <button type="button" class="btn btn-outline btn--small bank-recon-processed-recalc-btn" title="Recalculate Calculated balance for all statement lines (including matched)">
             <i class="fa-solid fa-calculator" aria-hidden="true"></i> Recalculate
@@ -2031,7 +2094,7 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
                 <th>Date</th>
                 <th>Description</th>
                 <th class="bank-recon-table__th--num">Amount</th>
-                ${showJoined ? '<th class="bank-recon-table__th--num" title="Passbook/statement balance; calculated in parentheses">Passbook / calc</th>' : ''}
+                ${showJoined ? '<th class="bank-recon-table__th--num bank-recon-table__th--passbook" title="Passbook/statement balance; calculated in parentheses">Passbook / calc</th>' : ''}
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -2735,8 +2798,23 @@ const refreshRuleFormCategoryList = () => {
     const datalist = document.getElementById('bank-recon-rule-categories');
     const typeSel = document.getElementById('bank-recon-rule-type');
     if (!datalist || !typeSel) return;
-    const cats = typeSel.value === 'IN' ? INCOME_CATS : EXPENSE_CATS;
+    const isIncome = typeSel.value === 'IN';
+    const cats = buildCategoryOptions(isIncome);
     datalist.innerHTML = cats.map((c) => `<option value="${esc(c)}"></option>`).join('');
+
+    const subInput = document.getElementById('bank-recon-rule-sub');
+    if (!subInput) return;
+    let subList = document.getElementById('bank-recon-rule-subcats');
+    if (!subList) {
+        subList = document.createElement('datalist');
+        subList.id = 'bank-recon-rule-subcats';
+        subInput.setAttribute('list', 'bank-recon-rule-subcats');
+        subInput.after(subList);
+    }
+    const cat = document.getElementById('bank-recon-rule-category')?.value?.trim() || '';
+    subList.innerHTML = isIncome
+        ? ''
+        : buildSubCategoryOptions(cat).map((s) => `<option value="${esc(s)}"></option>`).join('');
 };
 
 const syncRuleFormExpenseFields = () => {
@@ -3152,10 +3230,11 @@ export const renderBankReconciliation = () => {
 
     const annotated = annotateStatementLineBalances();
     const lines = fnFinances().bankStatementLines || [];
-    const unmatched = annotated.filter((l) => l.match_status === 'UNMATCHED');
+    const unmatchedRaw = annotated.filter((l) => l.match_status === 'UNMATCHED');
     const matched = annotated.filter((l) => l.match_status === 'MATCHED');
     const ignored = annotated.filter((l) => l.match_status === 'IGNORED');
-    const recon = getBankBalanceReconciliation();
+    const snap = getWorkReconSnapshot(unmatchedRaw);
+    const unmatched = snap.workLines;
     const visibleColumns = getVisibleBalanceColumns();
 
     if (openingPanelEl) {
@@ -3181,27 +3260,34 @@ export const renderBankReconciliation = () => {
         setActiveBankReconTab('opening');
     } else if (activeBankReconTab) {
         setActiveBankReconTab(activeBankReconTab);
-    } else if (recon.hasDiscrepancy || recon.mismatchCount > 0) {
+    } else if (snap.workMismatchCount > 0 || (snap.closingGap && snap.sameAsOf)) {
         setActiveBankReconTab('opening');
     }
 
     if (statsEl) {
-        const calcValue = recon.calculated.balance != null ? formatMoney(recon.calculated.balance) : '—';
-        const calcSub = recon.calculated.balance != null
-            ? `opening + ${recon.calculated.lineCount} line(s)${recon.calculated.asOf ? ` · ${formatDisplayDate(recon.calculated.asOf)}` : ''}`
+        const ledgerBank = snap.ledgerBank;
+        const calcValue = ledgerBank.balance != null ? formatMoney(ledgerBank.balance) : '—';
+        const asOfLabel = snap.sameAsOf ? snap.calcAsOf : (snap.passbookAsOf || snap.calcAsOf);
+        const calcSub = ledgerBank.balance != null
+            ? `posted books${asOfLabel ? ` · ${formatDisplayDate(asOfLabel)}` : ''} · ${ledgerBank.txnCount} BANK ${ledgerBank.txnCount === 1 ? 'entry' : 'entries'}`
             : 'set opening balance';
-        const passbookBlock = recon.passbook
-            ? `<div class="bank-recon-kpi bank-recon-kpi--passbook${recon.hasDiscrepancy ? ' bank-recon-kpi--warn-border' : ''}">
+        const passbookWarn = snap.closingGap && snap.sameAsOf;
+        const passbookBlock = snap.postedPassbook
+            ? `<div class="bank-recon-kpi bank-recon-kpi--passbook${passbookWarn ? ' bank-recon-kpi--warn-border' : ''}">
                 <span class="bank-recon-kpi__label">Passbook</span>
-                <span class="bank-recon-kpi__value">${formatMoney(recon.passbook.balance)}</span>
-                <span class="bank-recon-kpi__sub">last in order · ${formatDisplayDate(recon.passbook.asOf)}</span>
+                <span class="bank-recon-kpi__value">${formatMoney(snap.postedPassbook.balance)}</span>
+                <span class="bank-recon-kpi__sub">posted books${asOfLabel ? ` · ${formatDisplayDate(asOfLabel)}` : ''}</span>
               </div>`
             : '';
-        const varianceBlock = recon.diff != null
-            ? `<div class="bank-recon-kpi bank-recon-kpi--var${recon.hasDiscrepancy ? ' bank-recon-kpi--danger' : ' bank-recon-kpi--ok'}">
+        const varianceSub = !snap.sameAsOf && snap.postedPassbook
+            ? `dates ${formatDisplayDate(snap.calcAsOf)} / ${formatDisplayDate(snap.passbookAsOf)}`
+            : (snap.closingGap ? 'posted books — review' : 'posted books');
+        const varianceDanger = snap.closingGap && snap.sameAsOf;
+        const varianceBlock = snap.closingDiff != null
+            ? `<div class="bank-recon-kpi bank-recon-kpi--var${varianceDanger ? ' bank-recon-kpi--danger' : ''}">
                 <span class="bank-recon-kpi__label">Variance</span>
-                <span class="bank-recon-kpi__value">${recon.diff >= 0 ? '+' : ''}${formatMoney(recon.diff)}</span>
-                <span class="bank-recon-kpi__sub">${recon.hasDiscrepancy ? 'needs review' : 'in balance'}</span>
+                <span class="bank-recon-kpi__value">${snap.closingDiff >= 0 ? '+' : ''}${formatMoney(snap.closingDiff)}</span>
+                <span class="bank-recon-kpi__sub">${varianceSub}</span>
               </div>`
             : '';
         const statusParts = [
@@ -3212,13 +3298,13 @@ export const renderBankReconciliation = () => {
         if (ignored.length) {
             statusParts.push(`<span class="bank-recon-stat"><strong>${ignored.length}</strong> ignored</span>`);
         }
-        if (recon.mismatchCount > 0) {
-            statusParts.push(`<button type="button" class="bank-recon-stat bank-recon-stat--warn bank-recon-mismatch-jump" data-filter-scope="auto"><strong>${recon.mismatchCount}</strong> balance mismatch${recon.mismatchCount === 1 ? '' : 'es'}</button>`);
+        if (snap.workMismatchCount > 0) {
+            statusParts.push(`<button type="button" class="bank-recon-stat bank-recon-stat--warn bank-recon-mismatch-jump" data-filter-scope="work"><strong>${snap.workMismatchCount}</strong> work mismatch${snap.workMismatchCount === 1 ? '' : 'es'}</button>`);
         }
         statsEl.innerHTML = `
           <div class="bank-recon-kpi-bar" role="group" aria-label="Reconciliation summary">
             <div class="bank-recon-kpi-cluster">
-              <div class="bank-recon-kpi bank-recon-kpi--calc${recon.calculated.balance == null ? ' bank-recon-kpi--warn' : ''}">
+              <div class="bank-recon-kpi bank-recon-kpi--calc${ledgerBank.balance == null ? ' bank-recon-kpi--warn' : ''}">
                 <span class="bank-recon-kpi__label">Calculated</span>
                 <span class="bank-recon-kpi__value">${calcValue}</span>
                 <span class="bank-recon-kpi__sub">${calcSub}</span>
@@ -3778,6 +3864,8 @@ export const initBankReconciliationUi = () => {
         if (e.target?.id === 'bank-recon-rules-modal') closeClassificationRulesModal();
     });
     document.getElementById('bank-recon-rule-type')?.addEventListener('change', syncRuleFormExpenseFields);
+    document.getElementById('bank-recon-rule-category')?.addEventListener('input', refreshRuleFormCategoryList);
+    document.getElementById('bank-recon-rule-category')?.addEventListener('change', refreshRuleFormCategoryList);
     document.getElementById('bank-recon-rules-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('bank-recon-rule-save');

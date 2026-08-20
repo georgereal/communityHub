@@ -20,7 +20,7 @@ function loginPathRewritePlugin() {
 
 /** SPA fallback for MPA React apps (deep links in Vite dev). */
 function mpaSpaFallbackPlugin() {
-  const prefixes = ['/residents', '/parking', '/units'];
+  const prefixes = ['/residents', '/parking', '/units', '/admin'];
   return {
     name: 'mpa-spa-fallback',
     configureServer(server) {
@@ -84,6 +84,7 @@ export default defineConfig(({ mode }) => {
           residents: resolve(__dirname, 'residents/index.html'),
           parking: resolve(__dirname, 'parking/index.html'),
           units: resolve(__dirname, 'units/index.html'),
+          admin: resolve(__dirname, 'admin/index.html'),
         },
         output: {
           entryFileNames: 'assets/[name]-[hash].js',

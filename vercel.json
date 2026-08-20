@@ -41,7 +41,15 @@
       "destination": "/units/index.html"
     },
     {
-      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/).*)",
+      "source": "/admin",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/|admin/).*)",
       "destination": "/index.html"
     }
   ],

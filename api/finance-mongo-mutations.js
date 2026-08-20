@@ -11,6 +11,15 @@ import {
 import { readJsonBody } from './vercelRequest.js';
 import { getMongoDb } from './mongoClient.js';
 import { logMongoApi } from './mongoLog.js';
+import {
+    isR2Configured,
+    r2PutObject,
+    r2DeleteObjects,
+    buildFinanceDocObjectKey,
+    extForRecordMime,
+    attachmentObjectKey,
+    isAllowedFinanceDocObjectKey,
+} from './r2Storage.js';
 
 const VIEW_PERMS = ['accounts.view', 'accounts.edit', 'accounts.bills_entry'];
 const BILLS_WRITE = ['accounts.edit', 'accounts.bills_entry'];
@@ -18,6 +27,75 @@ const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const apt = (apartmentId) => ({ apartment_id: apartmentId });
 const nowIso = () => new Date().toISOString();
 const uid = () => crypto.randomUUID();
+
+function normalizeKeptAttachments(kept = []) {
+    return (kept || [])
+        .map((entry) => {
+            if (entry && typeof entry === 'object' && entry.key) {
+                const key = String(entry.key).trim();
+                if (!isAllowedFinanceDocObjectKey(key)) return null;
+                const purpose = String(entry.purpose || '').toLowerCase() === 'payment' ? 'payment' : 'bill';
+                return {
+                    key,
+                    contentType: String(entry.contentType || 'application/octet-stream'),
+                    originalName: String(entry.originalName || '').slice(0, 512),
+                    bytes: Number(entry.bytes) || 0,
+                    uploadedAt: entry.uploadedAt || nowIso(),
+                    purpose,
+                };
+            }
+            const key = attachmentObjectKey(entry);
+            if (!key || !isAllowedFinanceDocObjectKey(key)) return null;
+            return {
+                key,
+                contentType: 'application/octet-stream',
+                originalName: key.split('/').pop() || key,
+                bytes: 0,
+                uploadedAt: nowIso(),
+                purpose: 'bill',
+            };
+        })
+        .filter(Boolean);
+}
+
+async function uploadFinanceDocFilesToR2(apartmentId, files = [], { kind } = {}) {
+    if (!files.length) return [];
+    if (!isR2Configured()) {
+        throw Object.assign(
+            new Error('Object storage is not configured (set R2 credentials and bucket).'),
+            { status: 503 },
+        );
+    }
+    const uploaded = [];
+    for (const file of files) {
+        const mime = String(file.mimeType || 'application/octet-stream').toLowerCase();
+        const ext = extForRecordMime(mime);
+        if (!ext) {
+            throw Object.assign(
+                new Error('Only images (JPEG, PNG, WebP, GIF) or PDF files are supported for document attachments.'),
+                { status: 400 },
+            );
+        }
+        const body = Buffer.from(String(file.base64 || ''), 'base64');
+        const key = buildFinanceDocObjectKey({
+            orgName: apartmentId,
+            kind: kind === 'IN' ? 'IN' : 'OUT',
+            mimeOrExt: mime,
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await r2PutObject({ key, body, contentType: mime });
+        const purpose = String(file.purpose || '').toLowerCase() === 'payment' ? 'payment' : 'bill';
+        uploaded.push({
+            key,
+            contentType: mime,
+            originalName: String(file.name || '').slice(0, 512),
+            bytes: body.length,
+            uploadedAt: nowIso(),
+            purpose,
+        });
+    }
+    return uploaded;
+}
 
 async function ensureConfig(db, apartmentId) {
     const col = db.collection('finance_config');
@@ -408,6 +486,33 @@ function resolveVoucherStatus(doc, transactionId) {
     return 'unpaid';
 }
 
+function paymentNotesFromLedgerTxn(txn) {
+    if (!txn) return null;
+    const wallet = String(txn.wallet || '').toUpperCase();
+    const type = txn.type;
+    const cat = String(txn.cat || '');
+    const ref = String(txn.bank_reference || txn.cheque_no || '').trim();
+    const date = String(txn.date || '').slice(0, 10);
+    const paidOn = date ? `\nPaid on: ${date}` : '';
+    const hay = `${ref} ${txn.description || ''}`.toLowerCase();
+    const fromWallet = wallet !== 'BANK' || (cat === 'Petty Cash' && type === 'IN');
+    if (fromWallet) return `Payment: Cash${paidOn}`;
+    if (/upi|neft|imps|rtgs|online/.test(hay)) {
+        return `Online: ${ref || String(txn.description || 'Bank').slice(0, 48)}${paidOn}`;
+    }
+    if (ref) return `Cheque: ${ref}${paidOn}`;
+    if (wallet === 'BANK') return `Online: ${String(txn.description || 'Bank').slice(0, 48)}${paidOn}`;
+    return `Payment: Cash${paidOn}`;
+}
+
+function notesNeedPaymentMode(notes) {
+    const text = String(notes || '').trim();
+    if (!text) return true;
+    if (/Payment:\s*Unpaid/i.test(text)) return true;
+    if (/^Cheque:\s*/i.test(text) || /^Online:\s*/i.test(text) || /Payment:\s*Cash/i.test(text)) return false;
+    return true;
+}
+
 async function saveFinanceDocument(db, apartmentId, userId, body) {
     const raw = body.document || {};
     const id = raw.id || uid();
@@ -418,7 +523,20 @@ async function saveFinanceDocument(db, apartmentId, userId, body) {
     const existing = await db.collection('vouchers').findOne({ _id: String(id), ...apt(apartmentId) });
     const prevTxn = existing?.transaction_id || existing?.ledgerEntryId || null;
     const transactionId = raw.transaction_id || raw.ledgerEntryId || null;
-    const kept = body.keepAttachments || body.keepAttachmentPaths || raw.attachment_urls || existing?.attachment_urls || [];
+    const kept = normalizeKeptAttachments(
+        body.keepAttachments || body.keepAttachmentPaths || raw.attachment_urls || existing?.attachment_urls || [],
+    );
+    let uploaded = [];
+    if (body.newAttachmentFiles?.length) {
+        uploaded = await uploadFinanceDocFilesToR2(apartmentId, body.newAttachmentFiles, { kind });
+    }
+    const removeList = body.removeAttachments || [];
+    const removeKeys = removeList
+        .map((a) => (a && typeof a === 'object' ? a.key : attachmentObjectKey(a)))
+        .filter((k) => k && isAllowedFinanceDocObjectKey(k));
+    if (removeKeys.length && isR2Configured()) {
+        try { await r2DeleteObjects(removeKeys); } catch { /* keep save even if R2 delete fails */ }
+    }
     const doc = {
         ...(existing || {}),
         ...raw,
@@ -431,7 +549,7 @@ async function saveFinanceDocument(db, apartmentId, userId, body) {
         transaction_id: transactionId,
         ledgerEntryId: transactionId,
         status: resolveVoucherStatus(raw, transactionId),
-        attachment_urls: Array.isArray(kept) ? kept : [],
+        attachment_urls: [...kept, ...uploaded],
         source: raw.source === 'excel' ? 'excel' : (raw.source || 'manual'),
         updated_at: nowIso(),
         _schema: 'v2',
@@ -468,24 +586,30 @@ async function linkFinanceDocuments(db, apartmentId, body) {
     const txnId = body.transaction_id;
     const ids = body.document_ids || [];
     if (!txnId || !ids.length) throw Object.assign(new Error('transaction_id and document_ids required.'), { status: 400 });
+    const txn = await db.collection('ledger_entries').findOne({ _id: String(txnId), ...apt(apartmentId) });
+    if (!txn) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+    const inferredNotes = paymentNotesFromLedgerTxn(txn);
     const documents = [];
     for (const id of ids) {
         // eslint-disable-next-line no-await-in-loop
-        const res = await saveFinanceDocument(db, apartmentId, null, {
-            document: { id, transaction_id: txnId, status: 'linked' },
-        });
-        // merge onto existing
-        // eslint-disable-next-line no-await-in-loop
-        const existing = await db.collection('vouchers').findOne({ _id: String(id) });
-        if (existing) {
-            existing.transaction_id = txnId;
-            existing.ledgerEntryId = txnId;
-            existing.status = 'linked';
-            // eslint-disable-next-line no-await-in-loop
-            await db.collection('vouchers').replaceOne({ _id: String(id) }, existing);
-            documents.push(stripMongo(existing));
+        const existing = await db.collection('vouchers').findOne({ _id: String(id), ...apt(apartmentId) });
+        if (!existing) continue;
+        const next = {
+            ...existing,
+            transaction_id: txnId,
+            ledgerEntryId: txnId,
+            status: 'linked',
+            updated_at: nowIso(),
+        };
+        if (inferredNotes && notesNeedPaymentMode(existing.notes)) {
+            next.notes = inferredNotes;
+        } else if (inferredNotes && existing.notes && !/Paid on:/i.test(String(existing.notes))) {
+            const date = String(txn.date || '').slice(0, 10);
+            if (date) next.notes = `${String(existing.notes).trim()}\nPaid on: ${date}`;
         }
-        void res;
+        // eslint-disable-next-line no-await-in-loop
+        await db.collection('vouchers').replaceOne({ _id: String(id) }, next);
+        documents.push(stripMongo(next));
     }
     await db.collection('ledger_entries').updateOne(
         { _id: String(txnId) },
@@ -881,7 +1005,7 @@ async function createTxnFromBankLine(db, apartmentId, userId, body) {
         line_id: body.line_id,
         transaction_id: res.transaction.id,
     });
-    return { ok: true, txnId: res.transaction.id };
+    return { ok: true, txnId: res.transaction.id, ledgerBalance: res.ledgerBalance || null };
 }
 
 async function createTxnsFromBankLines(db, apartmentId, userId, body) {
@@ -935,7 +1059,7 @@ async function createLedgerFromBankLineAuto(db, apartmentId, userId, body) {
         line_id: body.line_id,
         transaction_id: res.transaction.id,
     });
-    return { ok: true, txnId: res.transaction.id };
+    return { ok: true, txnId: res.transaction.id, ledgerBalance: res.ledgerBalance || null };
 }
 
 async function saveBankClassificationRule(db, apartmentId, body) {

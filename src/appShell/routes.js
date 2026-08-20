@@ -15,6 +15,12 @@ export const MPA_ROUTE_PATHS = {
     'pn-residents': '/residents/',
     'pn-vehicles': '/parking/',
     'pn-units': '/units/',
+    'an-society': '/admin/society/',
+    'an-people': '/admin/people/',
+    'an-vendors': '/admin/vendors/',
+    'an-categories': '/admin/categories/',
+    'an-staff': '/admin/staff/',
+    'an-integrations': '/admin/integrations/',
 };
 
 /** SPA hash fallback until a route has an MPA entry. */
@@ -29,6 +35,13 @@ export function isMpaRoute(route) {
     return Boolean(MPA_ROUTE_PATHS[route]);
 }
 
+export function mpaShellKey(pathname) {
+    const p = String(pathname || '').replace(/\/$/, '') || '/';
+    if (p === '/admin' || p.startsWith('/admin/')) return 'admin';
+    if (p === '/residents' || p.startsWith('/residents/')) return 'residents';
+    return null;
+}
+
 export function navigateToRoute(route) {
     const href = hrefForRoute(route);
     if (href.startsWith('/#') || href === '/') {
@@ -36,7 +49,17 @@ export function navigateToRoute(route) {
         return;
     }
     const path = window.location.pathname.replace(/\/$/, '') || '/';
-    const target = href.replace(/\/$/, '') || '/';
+    const targetUrl = new URL(href, window.location.origin);
+    const target = targetUrl.pathname.replace(/\/$/, '') || '/';
     if (path === target) return;
+
+    const here = mpaShellKey(window.location.pathname);
+    const there = mpaShellKey(targetUrl.pathname);
+    if (here && here === there) {
+        window.dispatchEvent(new CustomEvent('ch-mpa-inapp-nav', {
+            detail: { href: `${targetUrl.pathname}${targetUrl.search || ''}`, route },
+        }));
+        return;
+    }
     window.location.assign(href);
 }

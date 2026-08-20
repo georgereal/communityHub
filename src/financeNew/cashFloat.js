@@ -5,7 +5,8 @@ import { fnFinances, fnLedger, ensureFnClassicShape } from './classicState.js';
  */
 import ExcelJS from 'exceljs';
 import { portalState } from '../store.js';
-import { normalizeCategoryKey, EXPENSE_CATS, categoryDisplayLabel } from '../expenseCategories.js';
+import { normalizeCategoryKey, categoryDisplayLabel } from '../expenseCategories.js';
+import { buildCategoryOptions } from '../classifyOptions.js';
 import { postFnMutation } from './mongoMutations.js';
 import { applySavedTransactionLocally } from './ledgerTxnLocal.js';
 import { withButtonBusy } from '../buttonBusy.js';
@@ -95,11 +96,12 @@ const resolveExpenseCat = (raw) => {
   const t = String(raw ?? '').trim();
   if (!t) return 'Other';
   const key = normalizeCategoryKey(t);
-  if (EXPENSE_CATS.includes(key) && key !== 'Petty Cash') return key;
+  const allowed = buildCategoryOptions(false).filter((c) => c !== 'Petty Cash');
+  if (allowed.includes(key) && key !== 'Petty Cash') return key;
   const lower = t.toLowerCase();
-  const hit = EXPENSE_CATS.find((c) => c.toLowerCase() === lower || categoryDisplayLabel(c).toLowerCase() === lower);
+  const hit = allowed.find((c) => c.toLowerCase() === lower || categoryDisplayLabel(c).toLowerCase() === lower);
   if (hit && hit !== 'Petty Cash') return hit;
-  return 'Other';
+  return t;
 };
 
 const cellStr = (cell) => {

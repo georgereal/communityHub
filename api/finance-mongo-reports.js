@@ -191,6 +191,38 @@ function passbookRowBalance(line, importById) {
     return Number.isFinite(value) ? value : null;
 }
 
+function computeLedgerBankSnapshot(entries, bankAccount) {
+    const openingAmt = bankAccount?.opening_balance != null && bankAccount.opening_balance !== ''
+        && !Number.isNaN(parseFloat(bankAccount.opening_balance))
+        ? parseFloat(bankAccount.opening_balance)
+        : null;
+    const openingDate = bankAccount?.opening_balance_date
+        ? String(bankAccount.opening_balance_date).slice(0, 10)
+        : null;
+    const bankTxns = (entries || [])
+        .filter((t) => !t?.excluded_from_ledger && reportWallet(t) === 'BANK')
+        .filter((t) => {
+            const day = String(t.date || '').slice(0, 10);
+            return !openingDate || day >= openingDate;
+        })
+        .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    const net = bankTxns.reduce((s, t) => {
+        const amt = Math.abs(Number(t.amount) || 0);
+        return s + (t.type === 'IN' ? amt : -amt);
+    }, 0);
+    const last = bankTxns[bankTxns.length - 1];
+    const asOf = last ? String(last.date || '').slice(0, 10) : openingDate;
+    if (openingAmt == null) {
+        return { bankBalance: null, asOf, txnCount: bankTxns.length, hasBank: false };
+    }
+    return {
+        bankBalance: round2(openingAmt + net),
+        asOf,
+        txnCount: bankTxns.length,
+        hasBank: true,
+    };
+}
+
 /**
  * Classic: prefer last chronological passbook balance on/after opening;
  * else opening + credits − debits (calculated from MATCHED lines only).
@@ -645,7 +677,10 @@ async function analytics(db, apartmentId, body = {}) {
 
     const bankAccount = config?.bankAccount || null;
     const bankSnap = computeBankBalanceSnapshot(bankLines, imports, bankAccount);
-    const { bankBalance, asOf: bankAsOf, hasBank } = bankSnap;
+    const ledgerBank = computeLedgerBankSnapshot(entries, bankAccount);
+    const bankBalance = ledgerBank.bankBalance ?? bankSnap.bankBalance;
+    const bankAsOf = ledgerBank.asOf || bankSnap.asOf;
+    const hasBank = bankBalance != null;
 
     const cashWallet = computeWalletLeft(entries, vouchers, bankAccount);
 

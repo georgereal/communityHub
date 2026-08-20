@@ -206,15 +206,22 @@ aside {
   display: block;
 }
 
-.nav-section-label {
+.nav-old-heading {
   display: none;
-  font-size: var(--text-xs);
+  font-size: 0.68rem;
   font-weight: var(--font-medium);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--sidebar-muted);
-  margin: 0.15rem 0 0.45rem;
-  padding: 0 0.2rem;
+  margin: 0.85rem 0.2rem 0.35rem;
+  padding: 0.35rem 0 0;
+  border-top: 1px solid var(--sidebar-border);
+}
+.nav-expanded .nav-old-heading {
+  display: block;
+}
+body:not(.nav-expanded) .nav-old-heading {
+  display: none !important;
 }
 
 .nav-modules {
@@ -250,6 +257,7 @@ aside {
   align-items: center;
   gap: 0.65rem;
   min-width: 0;
+  position: relative;
 }
 
 .nav-module-toggle__lead i {
@@ -699,6 +707,8 @@ a.brand-home-link:hover {
 
 .topbar-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.25rem;
   padding: 0.2rem;
@@ -707,6 +717,45 @@ a.brand-home-link:hover {
   border: 1px solid #eef2f7;
 }
 
+.topbar-ui-mode-btn {
+  width: auto;
+  min-width: 38px;
+  gap: 0.35rem;
+  padding: 0 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.topbar-ui-mode-btn[aria-pressed="true"] {
+  color: #9a3412;
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+.nav-island-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #ea580c;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.nav-island-dot--mod {
+  position: absolute;
+  left: 1.05rem;
+  top: -0.05rem;
+}
+html[data-ui-mode="new"] aside {
+  box-shadow: inset 6px 0 0 #1a73e8;
+}
+html[data-ui-mode="new"] .nav-expanded .nav-module--open .nav-module-pages {
+  display: flex;
+  border-left: 1px solid var(--sidebar-border);
+}
+body:not(.nav-expanded) .nav-island-dot--mod {
+  display: block;
+}
 .topbar-notifications-anchor {
   position: relative;
   flex-shrink: 0;
@@ -4568,6 +4617,7 @@ header {
     border: none;
     padding: 0;
     gap: 0.15rem;
+    flex-wrap: nowrap;
   }
 
   #topbar-logout-btn {
@@ -4578,6 +4628,13 @@ header {
     width: 34px;
     height: 34px;
     flex-shrink: 0;
+  }
+
+  .topbar-ui-mode-btn {
+    width: auto;
+    height: 34px;
+    padding: 0 0.5rem;
+    font-size: 0.62rem;
   }
 
   .topbar-user {
@@ -13509,6 +13566,15 @@ header {
   background: #f8fafc;
 }
 
+.bank-recon-table__row--opening {
+  background: #f1f5f9;
+}
+
+.bank-recon-table__row--opening .bank-recon-table__cell {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .bank-recon-table__row--readonly .bank-recon-table__cell {
   color: var(--text-dim);
 }
@@ -14568,10 +14634,14 @@ header {
 
 .bank-recon-table-wrap {
   overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-width: 100%;
   border: none;
   border-radius: 0;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 #bank-recon-table-shell,
@@ -14580,6 +14650,7 @@ header {
   flex-direction: column;
   resize: vertical;
   overflow: hidden;
+  min-width: 0;
   min-height: 890px;
   height: 890px;
   max-height: calc(100vh - 100px);
@@ -14592,6 +14663,7 @@ header {
 #fn-bank-recon-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 body.bank-recon-table-resizing {
@@ -14708,8 +14780,8 @@ body.bank-recon-table-resizing {
 }
 
 .bank-recon-table {
-  width: 100%;
-  min-width: 1180px;
+  width: max-content;
+  min-width: 0;
   border-collapse: collapse;
   font-size: 0.8rem;
   background: #fff;
@@ -14730,7 +14802,7 @@ body.bank-recon-table-resizing {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--text-dim);
-  padding: 0.5rem 0.55rem;
+  padding: 0.4rem 0.32rem;
   border-bottom: 2px solid var(--border);
   white-space: nowrap;
 }
@@ -14770,13 +14842,14 @@ body.bank-recon-table-resizing {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  width: 5.75rem;
-  min-width: 5.75rem;
-  max-width: 6.5rem;
+  width: 5.25rem;
+  min-width: 5.25rem;
+  max-width: 5.25rem;
 }
 
 .bank-recon-table__cell--num .bank-recon-cell-input--num {
-  min-width: 5.5rem;
+  min-width: 0;
+  width: 100%;
 }
 
 .bank-recon-table__th--check,
@@ -14837,15 +14910,16 @@ body.bank-recon-table-resizing {
 
 .bank-recon-table__th--match,
 .bank-recon-table__cell--match {
-  width: 9rem;
-  max-width: 9rem;
+  width: 8rem;
+  min-width: 8rem;
+  max-width: 8rem;
 }
 
 .bank-recon-table__th--actions,
 .bank-recon-table__cell--actions {
-  width: 10.5rem;
-  min-width: 10.5rem;
-  max-width: 10.5rem;
+  width: 8.75rem;
+  min-width: 8.75rem;
+  max-width: 8.75rem;
   white-space: nowrap;
 }
 
@@ -14869,7 +14943,7 @@ body.bank-recon-table-resizing {
 }
 
 .bank-recon-table__cell {
-  padding: 0.28rem 0.4rem;
+  padding: 0.22rem 0.28rem;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
   overflow: hidden;
@@ -14883,16 +14957,17 @@ body.bank-recon-table-resizing {
 
 .bank-recon-table__th--desc,
 .bank-recon-table__cell--desc {
-  width: auto;
-  min-width: 12rem;
+  width: 16rem;
+  min-width: 14rem;
+  max-width: 16rem;
   white-space: normal;
 }
 
 .bank-recon-table__th--date,
 .bank-recon-table__cell--date {
-  width: 5.5rem;
-  min-width: 5.5rem;
-  max-width: 5.5rem;
+  width: 5.25rem;
+  min-width: 5.25rem;
+  max-width: 5.25rem;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -14908,9 +14983,16 @@ body.bank-recon-table-resizing {
 
 .bank-recon-table__th--classify,
 .bank-recon-table__cell--classify {
-  width: 15.5rem;
-  min-width: 15.5rem;
-  max-width: 15.5rem;
+  width: 13.5rem;
+  min-width: 13.5rem;
+  max-width: 13.5rem;
+}
+
+.bank-recon-table th.bank-recon-table__th--passbook,
+.bank-recon-table td.bank-recon-table__cell--passbook {
+  width: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 7.5rem;
 }
 
 .bank-recon-table__th--ledger,
@@ -17086,6 +17168,7 @@ textarea.bank-recon-cell-input {
 
 .fa-cash-sheet {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 0.55rem 0 0.75rem;
   font-size: 0.84rem;
@@ -17137,7 +17220,27 @@ textarea.bank-recon-cell-input {
   white-space: nowrap;
   font-weight: 700;
   color: var(--text);
-  width: 7.5rem;
+  width: 8.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fa-cash-sheet__amt-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  text-align: right;
+  width: 100%;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.fa-cash-sheet__amt-btn--out {
+  color: #b91c1c;
 }
 
 .fa-cash-sheet__amt--out {
@@ -17229,17 +17332,20 @@ textarea.bank-recon-cell-input {
 .fa-cash-sheet__prefix {
   font-weight: 700;
   color: var(--success);
+  flex: 0 0 auto;
 }
 
 .fa-cash-sheet__income {
-  width: 7.5rem;
+  width: 7.25rem;
+  max-width: 100%;
+  box-sizing: border-box;
   text-align: right;
   font: inherit;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.28rem 0.45rem;
+  padding: 0.2rem 0.4rem;
   background: #fff;
 }
 
@@ -19005,6 +19111,10 @@ textarea.bank-recon-cell-input {
   font-weight: 600;
   color: var(--text, #0f172a);
   cursor: pointer;
+}
+
+.fdoc-link-wallet-wrap[hidden] {
+  display: none !important;
 }
 
 .fdoc-link-wallet-wrap input {

@@ -222,14 +222,11 @@ html:not([data-finance-app="1"]):not([data-mpa-app="1"]) #app-shell-page.content
     white-space: nowrap !important;
   }
 
-  html[data-finance-app="1"] body.nav-collapsed .nav-module--open .nav-module-pages,
-  html[data-mpa-app="1"] body.nav-collapsed .nav-module--open .nav-module-pages,
-  html[data-finance-app="1"] body:not(.nav-expanded) .nav-module--open .nav-module-pages {
-    display: flex !important;
-    margin: 0.2rem 0 0.45rem 0.65rem !important;
-    padding: 0.15rem 0 0.15rem 0.65rem !important;
-    border-left: 1px solid var(--sidebar-border) !important;
-    gap: 0.12rem !important;
+  html[data-finance-app="1"] body.nav-collapsed .nav-module-pages,
+  html[data-mpa-app="1"] body.nav-collapsed .nav-module-pages,
+  html[data-finance-app="1"] body:not(.nav-expanded) .nav-module-pages,
+  html[data-mpa-app="1"] body:not(.nav-expanded) .nav-module-pages {
+    display: none !important;
   }
 
   html[data-finance-app="1"] body.nav-collapsed .nav-module-toggle,

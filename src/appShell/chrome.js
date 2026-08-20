@@ -4,13 +4,9 @@
  */
 import { clearFinanceCtx, readFinanceCtx } from '../financeApp/session.js';
 import { clearMpaCtx, readMpaCtx } from './mpaSession.js';
-import {
-    initFinanceShellNav,
-    renderFinanceShellNav,
-    setFinanceNavActive,
-} from '../financeApp/financeNav.js';
 import { goToLogin } from '../authRedirect.js';
-import { applyMpaNavCollapsed, isMpaNavCollapsedPref, restoreMpaNavPref } from './navPref.js';
+import { restoreMpaNavPref, wireHoverSidebar, syncHamburgerToHoverNav, applyMpaNavCollapsed } from './navPref.js';
+import { paintUiModeButtons, wireUiModeToggle, isNewUi } from '../uiMode.js';
 
 function readShellCtx() {
     if (document.documentElement.dataset.financeApp === '1') {
@@ -89,56 +85,17 @@ function wireShellControls({ onApartmentChange } = {}) {
     const isMpa = document.documentElement.dataset.financeApp === '1'
         || document.documentElement.dataset.mpaApp === '1';
 
-    if (isMpa) {
-        const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
-        const mainContent = document.getElementById('main-content');
-
-        const expand = () => applyMpaNavCollapsed(false, { persist: !isMobile() });
-        const collapse = () => applyMpaNavCollapsed(true, { persist: !isMobile() });
-        const previewExpand = () => applyMpaNavCollapsed(false, { persist: false });
-        const previewCollapse = () => {
-            if (!isMpaNavCollapsedPref()) return;
-            applyMpaNavCollapsed(true, { persist: false });
-        };
-
+    if (isMpa || isNewUi()) {
         restoreMpaNavPref();
-
-        const toggleNav = (e) => {
-            e?.stopPropagation();
-            if (document.body.classList.contains('nav-expanded')) collapse();
-            else expand();
-        };
-        document.getElementById('nav-toggle')?.addEventListener('click', toggleNav);
-        document.getElementById('mobile-nav-toggle')?.addEventListener('click', toggleNav);
-
-        const sidebar = document.getElementById('sidebar');
-        let leaveTimer = 0;
-        sidebar?.addEventListener('mouseenter', () => {
-            if (isMobile() || !isMpaNavCollapsedPref()) return;
-            clearTimeout(leaveTimer);
-            previewExpand();
-        });
-        sidebar?.addEventListener('mouseleave', () => {
-            if (isMobile() || !isMpaNavCollapsedPref()) return;
-            clearTimeout(leaveTimer);
-            leaveTimer = window.setTimeout(previewCollapse, 160);
-        });
-
-        mainContent?.addEventListener('click', (e) => {
-            if (e.target.closest('#sidebar')) return;
-            if (e.target.closest('#nav-toggle, #mobile-nav-toggle')) return;
-            if (e.target.closest('#topbar-user-btn, #topbar-user-menu')) return;
-            collapse();
-        });
-
+        wireHoverSidebar();
+        syncHamburgerToHoverNav();
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                collapse();
+                applyMpaNavCollapsed(true, { persist: !window.matchMedia('(max-width: 820px)').matches });
                 closeUserMenu();
             }
         });
     } else {
-        // SPA: classic toggle behaviour
         const toggleNav = () => document.body.classList.toggle('nav-expanded');
         document.getElementById('nav-toggle')?.addEventListener('click', toggleNav);
         document.getElementById('mobile-nav-toggle')?.addEventListener('click', toggleNav);
@@ -227,17 +184,11 @@ export function paintAppShellChrome(opts = {}) {
     fillApartmentSelects(ctx);
     fillUserChrome(ctx);
 
-    if (document.documentElement.dataset.financeApp === '1') {
-        renderFinanceShellNav({ activeRoute: opts.activeRoute });
-        initFinanceShellNav();
-        setFinanceNavActive(opts.activeRoute);
-    } else {
-        void import('./nav.js').then((m) => {
-            m.renderAppShellNav({ activeRoute: opts.activeRoute });
-            m.initAppShellNavInteraction();
-            m.setActiveNavRoute(opts.activeRoute);
-        });
-    }
+    void import('./nav.js').then((m) => {
+        m.renderAppShellNav({ activeRoute: opts.activeRoute });
+        m.initAppShellNavInteraction();
+        m.setActiveNavRoute(opts.activeRoute);
+    });
 
     if (opts.moduleLabel) {
         const el = document.getElementById('topbar-nav-module');
@@ -251,7 +202,9 @@ export function paintAppShellChrome(opts = {}) {
     if (!document.documentElement.dataset.appShellChromeWired) {
         document.documentElement.dataset.appShellChromeWired = '1';
         wireShellControls({ onApartmentChange: opts.onApartmentChange });
+        wireUiModeToggle();
     }
+    paintUiModeButtons();
 }
 
 function esc(s) {

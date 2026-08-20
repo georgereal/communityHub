@@ -6,6 +6,7 @@ import './dashboard.css';
 import { portalState, loadStateDomain } from './store.js';
 import { hasClientPermission } from './rbac.js';
 import { isModuleEnabled } from './moduleAccess.js';
+import { isNewUi } from './uiMode.js';
 import { readApiJson } from './apiJson.js';
 import { isNavigationCurrent } from './accessLocks.js';
 
@@ -143,6 +144,7 @@ function syncStatusInfo(syncFromSummary = null) {
 function buildActionItems(parking, billing, ops, syncInfo) {
     const items = [];
     const can = (perm) => hasClientPermission(perm);
+    const nu = isNewUi();
 
     if ((parking.overlimitCars + parking.overlimitBikes) > 0 && can('vehicle_registry.view')) {
         items.push({
@@ -150,7 +152,7 @@ function buildActionItems(parking, billing, ops, syncInfo) {
             icon: 'fa-triangle-exclamation',
             title: `${parking.overlimitCars + parking.overlimitBikes} overlimit vehicle(s)`,
             detail: 'Base parking slots exceeded — review registry compliance.',
-            route: 'property-vehicles',
+            route: nu ? 'pn-vehicles' : 'property-vehicles',
         });
     }
 
@@ -160,7 +162,7 @@ function buildActionItems(parking, billing, ops, syncInfo) {
             icon: 'fa-file-invoice-dollar',
             title: `${formatMoney(billing.outstanding)} outstanding across ${billing.flatsWithDues} flat(s)`,
             detail: `${billing.openCount} open invoice(s) need collection follow-up.`,
-            route: 'finance-billing-list',
+            route: nu ? 'fn-billing-list' : 'finance-billing-list',
         });
     }
 
@@ -226,10 +228,11 @@ function buildQuickActions() {
         }
     };
 
+    const nu = isNewUi();
     add('vehicle_registry.view', ['vehicle_registry.edit'], {
         label: 'Parking registry',
         icon: 'fa-car',
-        route: 'property-vehicles',
+        route: nu ? 'pn-vehicles' : 'property-vehicles',
     }, 'property');
     add('accounts.edit', ['accounts.view'], {
         label: 'Add expense',
@@ -239,12 +242,12 @@ function buildQuickActions() {
     add('accounts.edit', [], {
         label: 'Income & expenses',
         icon: 'fa-chart-line',
-        route: 'finance-ledger',
+        route: nu ? 'fn-ledger' : 'finance-ledger',
     }, 'finance');
     add('accounts.view', [], {
         label: 'Maintenance billing',
         icon: 'fa-file-invoice',
-        route: 'finance-billing-list',
+        route: nu ? 'fn-billing-list' : 'finance-billing-list',
     }, 'finance');
     add('apartment_mgmt.edit', [], {
         label: 'New notice',
@@ -269,7 +272,7 @@ function buildQuickActions() {
     add('apartment_mgmt.view', [], {
         label: 'Unit directory',
         icon: 'fa-door-open',
-        route: 'property-units',
+        route: nu ? 'pn-units' : 'property-units',
     }, 'property');
 
     return actions;
@@ -307,7 +310,7 @@ function wireDashboardClicks(root) {
     });
     root.querySelectorAll('[data-dash-action="expense-cash"]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            window.switchView?.('finance-ledger');
+            window.switchView?.(isNewUi() ? 'fn-ledger' : 'finance-ledger');
             window.openExpense?.('CASH');
         });
     });

@@ -19,6 +19,7 @@ import { fetchFinanceNewReport } from './api.js';
 import { getFinanceNew } from './state.js';
 import { navigateFinance } from '../financeApp/session.js';
 import { getLedgerBankBalance } from './ledgerBalance.js';
+import { getBankOpeningConfig } from './bankStatementQueries.js';
 
 /** @type {typeof import('./bankReconciliation.js')|null} */
 let bankReconApi = null;
@@ -66,7 +67,12 @@ const buildRaisedInvoicesStack = (months, invoices) => {
     return { heads: [], series: {}, monthTotals: months.map(() => 0) };
 };
 
-const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+const formatMoney = (n) => {
+    const v = parseFloat(n || 0);
+    const abs = Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    if (v < -0.009) return `−₹${abs}`;
+    return `₹${abs}`;
+};
 
 /** Latest Mongo analytics pack for #fn-reports (server pivots). */
 let analyticsPack = null;
@@ -122,13 +128,37 @@ export const getPendingChequesSummary = () => {
     };
 };
 
+const isoDay = (v) => {
+    const s = String(v || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+};
+
 /** Book balance = ledger running balance + Wallet Left − pending cheques. */
 export const getBookBalanceSummary = () => {
-    // Always use the ledger running balance as the authoritative bank balance.
-    // Unmatched bank statement lines (work-in-progress in bank recon) must NOT
-    // affect the reported balance — they only count once posted from bank recon.
     const ledgerBank = getLedgerBankBalance();
-    const bankBalance = ledgerBank.balance ?? null;
+    const ledgerReady = !!getFinanceNew().ledgerLoaded && (ledgerBank.txnCount || 0) > 0;
+    const packBb = analyticsPack?.bookBalance;
+    const packAsOf = isoDay(packBb?.asOf);
+    const openingDay = isoDay(getBankOpeningConfig().date);
+    const ledgerAsOf = isoDay(ledgerBank.asOf);
+
+    let bankBalance = ledgerBank.balance ?? null;
+    let asOf = ledgerAsOf || packAsOf || openingDay || null;
+    if (!ledgerReady && packBb?.bankBalance != null) {
+        bankBalance = packBb.bankBalance;
+        asOf = packAsOf || asOf;
+    } else if (
+        ledgerAsOf
+        && openingDay
+        && ledgerAsOf === openingDay
+        && packAsOf
+        && packAsOf > openingDay
+        && packBb?.bankBalance != null
+    ) {
+        bankBalance = packBb.bankBalance;
+        asOf = packAsOf;
+    }
+
     const hasBank = bankBalance != null;
 
     if (analyticsPack?.bookBalance) {
@@ -157,11 +187,11 @@ export const getBookBalanceSummary = () => {
                 count: bb.pending?.count || 0,
             },
             book,
-            asOf: ledgerBank.asOf || bb.asOf,
+            asOf,
             recon: {
                 diff: reconDiff,
-                passbook: { balance: passbookBalance, asOf: packRecon.passbook?.asOf || bb.asOf },
-                calculated: { balance: bankBalance, asOf: ledgerBank.asOf || bb.asOf },
+                passbook: { balance: passbookBalance, asOf: packRecon.passbook?.asOf || asOf },
+                calculated: { balance: bankBalance, asOf },
             },
         };
     }
@@ -178,7 +208,7 @@ export const getBookBalanceSummary = () => {
         hasBank,
         pending,
         book,
-        asOf: ledgerBank.asOf || recon.calculated?.asOf,
+        asOf: asOf || recon.calculated?.asOf,
         recon,
     };
 };
@@ -1160,7 +1190,67 @@ const buildCashFormula = (s) => {
     return `${left} − ${right}`;
 };
 
-/** Cash position worksheet — bank/petty cash ± scenario rows. */
+const fmtCashPosDate = (iso) => {
+    if (!iso) return '—';
+    return new Date(`${String(iso).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'short', year: '2-digit',
+    });
+};
+
+const closeCashPositionListModal = () => {
+    document.getElementById('fn-fa-cash-list-modal')?.remove();
+};
+
+const openCashPositionListModal = ({ title, hint, rows }) => {
+    closeCashPositionListModal();
+    const total = round2(rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0));
+    const body = rows.length
+        ? rows.map((r) => `
+            <tr>
+              <td>${escAttr(fmtCashPosDate(r.date))}</td>
+              <td>${escAttr(r.title || '—')}</td>
+              <td>${escAttr(categoryDisplayLabel(r.cat) || r.cat || '—')}</td>
+              <td class="fa-cash-sheet__amt">${formatMoney(r.amount)}</td>
+            </tr>`).join('')
+        : `<tr><td colspan="4" class="fa-panel__hint">Nothing in this list.</td></tr>`;
+    const modal = document.createElement('div');
+    modal.id = 'fn-fa-cash-list-modal';
+    modal.className = 'fdoc-link-modal';
+    modal.innerHTML = `
+      <div class="fdoc-link-modal__backdrop" data-fa-cash-list-close="1"></div>
+      <div class="fdoc-link-modal__panel fdoc-link-modal__panel--wide" role="dialog" aria-labelledby="fn-fa-cash-list-title">
+        <div class="fdoc-link-modal__head">
+          <div>
+            <h3 id="fn-fa-cash-list-title">${escAttr(title)}</h3>
+            ${hint ? `<p class="fa-panel__hint" style="margin:0.25rem 0 0;">${escAttr(hint)}</p>` : ''}
+          </div>
+          <button type="button" class="btn btn-outline btn--small btn--icon" data-fa-cash-list-close="1" title="Close" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="fa-table-wrap" style="max-height:min(70vh, 28rem); overflow:auto;">
+          <table class="fa-pivot-table cash-float-table">
+            <thead>
+              <tr><th>Date</th><th>Detail</th><th>Category</th><th class="fa-cash-sheet__amt">Amount</th></tr>
+            </thead>
+            <tbody>${body}</tbody>
+            <tfoot>
+              <tr class="fdoc-funding-totals">
+                <td colspan="3">${rows.length} item${rows.length === 1 ? '' : 's'}</td>
+                <td class="fa-cash-sheet__amt"><strong>${formatMoney(total)}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target.closest('[data-fa-cash-list-close]')) closeCashPositionListModal();
+    });
+};
+
+const cashAmtButton = (id, html, extraClass = '') =>
+    `<button type="button" class="fa-cash-sheet__amt-btn ${extraClass}" id="${id}">${html}</button>`;
 const renderPlannedExpensesCard = async () => {
     const el = document.getElementById('fn-fa-planned-expenses');
     if (!el) return;
@@ -1207,10 +1297,10 @@ const renderPlannedExpensesCard = async () => {
             Play with the scenario: toggle planned spend and expected income. Hard commitments (C–D) always count.
           </p>
           <div class="fa-cash-sheet__actions">
-            <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-plan">
+            <button type="button" class="btn btn-outline btn--small" id="fn-fa-planned-open-plan">
               <i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Expense plan
             </button>
-            <button type="button" class="btn btn-outline btn--small" id="fa-planned-open-bills">
+            <button type="button" class="btn btn-outline btn--small" id="fn-fa-planned-open-bills">
               <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Open bills
             </button>
           </div>
@@ -1230,23 +1320,27 @@ const renderPlannedExpensesCard = async () => {
             <tr class="fa-cash-sheet__row--deduct">
               <td class="fa-cash-sheet__ref">C</td>
               <td class="fa-cash-sheet__label">Cheque ready (unlinked) <span class="fa-cash-sheet__hint">${chequeSub}</span></td>
-              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.chequesAmt > 0.009 ? `−${formatMoney(s.chequesAmt)}` : formatMoney(0)}</td>
+              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.chequesAmt > 0.009
+                ? cashAmtButton('fn-fa-cash-amt-cheques', formatMoney(-s.chequesAmt), 'fa-cash-sheet__amt-btn--out')
+                : formatMoney(0)}</td>
             </tr>
             <tr class="fa-cash-sheet__row--deduct">
               <td class="fa-cash-sheet__ref">D</td>
               <td class="fa-cash-sheet__label">Unpaid bills <span class="fa-cash-sheet__hint">${s.unpaidCount} open</span></td>
-              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.unpaidAmt > 0.009 ? `−${formatMoney(s.unpaidAmt)}` : formatMoney(0)}</td>
+              <td class="fa-cash-sheet__amt fa-cash-sheet__amt--out">${s.unpaidAmt > 0.009
+                ? cashAmtButton('fn-fa-cash-amt-unpaid', formatMoney(-s.unpaidAmt), 'fa-cash-sheet__amt-btn--out')
+                : formatMoney(0)}</td>
             </tr>
             <tr class="fa-cash-sheet__row--scenario${s.includePlanned ? ' fa-cash-sheet__row--deduct' : ' fa-cash-sheet__row--off'}">
               <td class="fa-cash-sheet__ref">E</td>
               <td class="fa-cash-sheet__label">
                 <label class="fa-cash-sheet__check">
-                  <input type="checkbox" id="fa-cash-include-planned" ${s.includePlanned ? 'checked' : ''} />
+                  <input type="checkbox" id="fn-fa-cash-include-planned" ${s.includePlanned ? 'checked' : ''} />
                   <span>Planned expenditures</span>
                 </label>
                 <span class="fa-cash-sheet__hint">
                   Expense plan ·
-                  <select id="fa-cash-planned-months" class="fa-cash-sheet__select" title="Horizon for planned spend">
+                  <select id="fn-fa-cash-planned-months" class="fa-cash-sheet__select" title="Horizon for planned spend">
                     <option value="3" ${s.plannedMonths === 3 ? 'selected' : ''}>3 mo</option>
                     <option value="6" ${s.plannedMonths === 6 ? 'selected' : ''}>6 mo</option>
                     <option value="12" ${s.plannedMonths === 12 ? 'selected' : ''}>12 mo</option>
@@ -1255,21 +1349,25 @@ const renderPlannedExpensesCard = async () => {
                 </span>
               </td>
               <td class="fa-cash-sheet__amt ${plannedOut ? 'fa-cash-sheet__amt--out' : ''}">${
-                plannedOut ? `−${formatMoney(s.plannedAmt)}` : formatMoney(s.plannedAmt)
+                cashAmtButton(
+                    'fn-fa-cash-amt-planned',
+                    plannedOut ? formatMoney(-s.plannedAmt) : formatMoney(s.plannedAmt),
+                    plannedOut ? 'fa-cash-sheet__amt-btn--out' : '',
+                )
               }</td>
             </tr>
             <tr class="fa-cash-sheet__row--scenario${s.includeManualIncome ? ' fa-cash-sheet__row--add' : ' fa-cash-sheet__row--off'}">
               <td class="fa-cash-sheet__ref">F</td>
               <td class="fa-cash-sheet__label">
                 <label class="fa-cash-sheet__check">
-                  <input type="checkbox" id="fa-cash-include-income" ${s.includeManualIncome ? 'checked' : ''} />
+                  <input type="checkbox" id="fn-fa-cash-include-income" ${s.includeManualIncome ? 'checked' : ''} />
                   <span>Expected income / savings</span>
                 </label>
                 <span class="fa-cash-sheet__hint">Manual — invoices due, deposits, etc.</span>
               </td>
               <td class="fa-cash-sheet__amt fa-cash-sheet__amt--input">
                 <span class="fa-cash-sheet__prefix">+</span>
-                <input type="number" id="fa-cash-manual-income" class="fa-cash-sheet__income" min="0" step="1" value="${s.manualIncome || ''}" placeholder="0" ${s.includeManualIncome ? '' : 'disabled'} />
+                <input type="number" id="fn-fa-cash-manual-income" class="fa-cash-sheet__income" min="0" step="1" value="${s.manualIncome || ''}" placeholder="0" ${s.includeManualIncome ? '' : 'disabled'} />
               </td>
             </tr>
             <tr class="fa-cash-sheet__row--total ${afterClass}">
@@ -1307,12 +1405,81 @@ const renderPlannedExpensesCard = async () => {
     el.querySelector('#fn-fa-cash-include-planned')?.addEventListener('change', persistAndRefresh);
     el.querySelector('#fn-fa-cash-include-income')?.addEventListener('change', persistAndRefresh);
     el.querySelector('#fn-fa-cash-planned-months')?.addEventListener('change', persistAndRefresh);
-    el.querySelector('#fn-fa-cash-manual-income')?.addEventListener('change', persistAndRefresh);
-    el.querySelector('#fn-fa-cash-manual-income')?.addEventListener('keydown', (e) => {
+    const incomeEl = el.querySelector('#fn-fa-cash-manual-income');
+    const applyIncomeLive = () => {
+        const next = {
+            includePlanned: !!el.querySelector('#fn-fa-cash-include-planned')?.checked,
+            includeManualIncome: !!el.querySelector('#fn-fa-cash-include-income')?.checked,
+            manualIncome: Math.max(0, round2(parseFloat(incomeEl?.value || '0') || 0)),
+            plannedMonths: parseInt(el.querySelector('#fn-fa-cash-planned-months')?.value || '6', 10) || 6,
+        };
+        saveCashPosScenario(next);
+        const live = getCashCommitmentBreakdown(next, planned);
+        const totalCell = el.querySelector('.fa-cash-sheet__row--total .fa-cash-sheet__amt');
+        if (totalCell) totalCell.textContent = formatMoney(live.available);
+        const formulaEl = el.querySelector('.fa-cash-sheet__formula');
+        if (formulaEl) formulaEl.textContent = buildCashFormula(live);
+        const metaEl = el.querySelector('.fa-collapsible-panel__meta');
+        if (metaEl) metaEl.textContent = `Available ${formatMoney(live.available)} · Hard ${formatMoney(live.hardCommitments)}`;
+        const totalRow = el.querySelector('.fa-cash-sheet__row--total');
+        if (totalRow) {
+            totalRow.classList.remove('fa-cash-sheet__total--short', 'fa-cash-sheet__total--tight', 'fa-cash-sheet__total--ok');
+            totalRow.classList.add(live.available < -0.009
+                ? 'fa-cash-sheet__total--short'
+                : (live.hasBank && live.available < live.funds * 0.15 ? 'fa-cash-sheet__total--tight' : 'fa-cash-sheet__total--ok'));
+        }
+    };
+    incomeEl?.addEventListener('input', applyIncomeLive);
+    incomeEl?.addEventListener('change', applyIncomeLive);
+    incomeEl?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             persistAndRefresh();
         }
+    });
+    ['fn-fa-cash-include-planned', 'fn-fa-cash-include-income', 'fn-fa-cash-planned-months'].forEach((id) => {
+        el.querySelector(`#${id}`)?.addEventListener('click', (e) => e.stopPropagation());
+    });
+
+    const billRows = (docs) => (docs || []).map((d) => ({
+        date: d.doc_date,
+        title: d.vendor_name || d.description || 'Bill',
+        cat: d.cat,
+        amount: parseFloat(d.amount) || 0,
+    }));
+    el.querySelector('#fn-fa-cash-amt-cheques')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openCashPositionListModal({
+            title: 'Cheque ready (unlinked)',
+            hint: 'Cheque noted on the bill, not yet linked to a ledger line.',
+            rows: billRows(s.chequeBills),
+        });
+    });
+    el.querySelector('#fn-fa-cash-amt-unpaid')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openCashPositionListModal({
+            title: 'Unpaid bills',
+            hint: 'Open expense bills with no payment yet.',
+            rows: billRows(s.unpaidBills),
+        });
+    });
+    el.querySelector('#fn-fa-cash-amt-planned')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openCashPositionListModal({
+            title: `Planned expenditures (${s.plannedMonths} mo)`,
+            hint: s.includePlanned
+                ? 'These items are included in Available.'
+                : 'Unchecked — not included in Available.',
+            rows: (planned.items || []).map((r) => ({
+                date: r.date,
+                title: r.title || r.vendor_name || 'Planned',
+                cat: r.cat,
+                amount: r.amount,
+            })),
+        });
     });
 
     el.querySelector('#fn-fa-planned-open-bills')?.addEventListener('click', async (e) => {
@@ -1746,6 +1913,7 @@ export const renderFinanceAnalytics = () => {
                 sheetOnly: settings.sheetOnly,
                 cashExpenseReporting: settings.cashExpenseReporting,
                 pivotDimension: settings.pivotDimension,
+                force: !getFinanceNew().ledgerLoaded,
             });
             getFinanceNew().reportAnalytics = analyticsPack;
         } catch (err) {

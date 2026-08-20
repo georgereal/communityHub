@@ -15,6 +15,7 @@ const VIEW_DOMAINS = {
     // Finance-New boots via /api/finance-mongo — do not hydrate Postgres finance.
     'finance-new-accounts': [],
     'property-new': [],
+    'admin-new': ['admin'],
     // Portal domain already includes open invoices + allocations for residents.
     portal: ['portal'],
     security: ['security', 'property'],

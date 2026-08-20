@@ -1,7 +1,8 @@
 /**
  * Ledger line add/edit modal (thin — no finances.js).
  */
-import { EXPENSE_CATS, INCOME_CATS, categoryDisplayLabel } from '../../expenseCategories.js';
+import { categoryDisplayLabel } from '../../expenseCategories.js';
+import { buildCategoryOptions } from '../../classifyOptions.js';
 import { saveLedgerEntry, deleteLedgerEntry } from './data.js';
 import { esc } from './view.js';
 
@@ -26,7 +27,7 @@ function setWallet(wallet) {
 function fillCatDatalist(type) {
     const list = document.getElementById('ledger-line-cat-datalist');
     if (!list) return;
-    const cats = type === 'IN' ? INCOME_CATS : EXPENSE_CATS;
+    const cats = buildCategoryOptions(type === 'IN');
     list.innerHTML = cats.map((c) => {
         const label = categoryDisplayLabel(c) || c;
         return `<option value="${esc(c)}">${esc(label)}</option>`;

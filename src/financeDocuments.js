@@ -37,7 +37,8 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** Full bills management (link, delete, float, deposit). */
 export const canManageFinanceDocs = () => hasClientPermission('accounts.edit');
-export const canDeleteFinanceDocs = () => canCrud('accounts', 'delete');
+export const canDeleteFinanceDocs = () =>
+  canCrud('accounts', 'delete') || hasClientPermission('accounts.edit');
 
 /** Add / upload / view bills (includes staff entry). */
 export const canEnterFinanceDocs = () =>
@@ -1203,6 +1204,8 @@ const fitCashDocsToBucket = (docs, remaining) => {
 const docsLinkMode = (docs) => {
   const modes = new Set(docs.map((d) => paymentInfo(d).mode));
   const kinds = new Set(docs.map((d) => d.kind));
+  const ledgerPay = [...modes].every((m) => m === 'unpaid' || m === 'unknown' || m === 'online' || m === 'cheque');
+  if (ledgerPay && !modes.has('cash')) return 'cheque';
   if (modes.has('cheque') && !modes.has('cash')) return 'cheque';
   if (modes.has('cash') && modes.has('cheque')) return 'cheque';
   if (modes.has('cash')) {
@@ -1210,7 +1213,7 @@ const docsLinkMode = (docs) => {
     if (kinds.has('IN')) return 'cash-deposit';
     return 'cash';
   }
-  return 'cash';
+  return 'cheque';
 };
 
 const ledgerCandidatesForCashLink = () => {
@@ -1280,7 +1283,7 @@ const ledgerCandidatesForCashDeposit = (docs, query) => {
   });
 
   return scored
-    .sort((a, b) => b.score - a.score || String(b.t.date || '').localeCompare(String(a.t.date || '')))
+    .sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || '')) || b.score - a.score)
     .slice(0, 40)
     .map((x) => x.t);
 };
@@ -1303,6 +1306,20 @@ const depositAllocation = (txn, docs, { includeWalletFloat = true, walletLeft = 
   return { depositAmt, receiptsAmt, fromWallet, uncovered, covered, floatCap };
 };
 
+const linkedLedgerTxnIds = () => {
+  const ids = new Set();
+  (portalState.finances.financeDocuments || []).forEach((d) => {
+    if (!d || d.status === 'void') return;
+    if (d.transaction_id && (bookStatus(d) === 'linked' || d.status === 'linked')) {
+      ids.add(String(d.transaction_id));
+    }
+  });
+  (portalState.finances.txns || []).forEach((t) => {
+    if (Array.isArray(t.voucherIds) && t.voucherIds.length) ids.add(String(t.id));
+  });
+  return ids;
+};
+
 const ledgerCandidatesForChequeSearch = (docs, query) => {
   const q = String(query || '').trim().toLowerCase();
   const primary = docs[0];
@@ -1310,7 +1327,11 @@ const ledgerCandidatesForChequeSearch = (docs, query) => {
     ? String(paymentInfo(primary).short || '').toLowerCase()
     : '';
   const docAmt = docs.length === 1 ? (parseFloat(primary?.amount) || 0) : 0;
-  const txns = (portalState.finances.txns || []).filter((t) => !t.excluded_from_ledger);
+  const wantType = primary?.kind === 'IN' ? 'IN' : 'OUT';
+  const taken = linkedLedgerTxnIds();
+  const txns = (portalState.finances.txns || []).filter((t) =>
+    !t.excluded_from_ledger && t.type === wantType && !taken.has(String(t.id)),
+  );
   const needle = q || chequeHint;
   if (!needle && !docAmt) return [];
 
@@ -1328,21 +1349,19 @@ const ledgerCandidatesForChequeSearch = (docs, query) => {
       if (hay.includes(needle)) score += 40;
       const ref = String(t.bank_reference || '').toLowerCase();
       if (ref && (ref === needle || ref.includes(needle) || needle.includes(ref))) score += 50;
-      needle.split(/\s+/).filter(Boolean).forEach((tok) => {
-        if (tok.length >= 2 && hay.includes(tok)) score += 8;
+      needle.split(/\s+/).filter((tok) => tok.length >= 4).forEach((tok) => {
+        if (hay.includes(tok)) score += 8;
       });
     }
     const txnAmt = Math.abs(parseFloat(t.amount) || 0);
     if (docAmt > 0 && Math.abs(txnAmt - docAmt) < 0.02) score += 35;
-    else if (docAmt > 0 && Math.abs(txnAmt - docAmt) / docAmt < 0.02) score += 20;
-    if ((t.wallet || 'CASH') === 'BANK') score += 5;
-    if (primary?.kind === 'OUT' && t.type === 'OUT') score += 3;
-    if (primary?.kind === 'IN' && t.type === 'IN') score += 3;
+    else if (docAmt > 0 && txnAmt > 0 && Math.abs(txnAmt - docAmt) / docAmt < 0.02) score += 20;
+    if (score > 0 && (t.wallet || 'CASH') === 'BANK') score += 5;
     return { t, score };
   }).filter((x) => x.score > 0);
 
   return scored
-    .sort((a, b) => b.score - a.score || String(b.t.date || '').localeCompare(String(a.t.date || '')))
+    .sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || '')) || b.score - a.score)
     .slice(0, 40)
     .map((x) => x.t);
 };
@@ -1618,7 +1637,10 @@ const openLinkModal = (docIds, { walletDeposit = false } = {}) => {
   const chequePrefill = docs.length === 1 && paymentInfo(docs[0]).mode === 'cheque'
     ? paymentInfo(docs[0]).short
     : '';
-  linkPicker.search = chequePrefill || '';
+  const unpaidPrefill = !chequePrefill && docs.length === 1
+    ? String(docs[0].vendor_name || docs[0].amount || '').trim()
+    : '';
+  linkPicker.search = chequePrefill || unpaidPrefill || '';
 
   const selectedTotal = round2(docs.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
   const left = walletLeftAvailable();
@@ -1650,7 +1672,7 @@ const openLinkModal = (docIds, { walletDeposit = false } = {}) => {
     } else {
       hint.textContent = docs.length > 1
         ? `Search the ledger for the matching cheque / bank payment, then link ${docs.length} bills.`
-        : 'Search by cheque number, vendor, or amount to find the bank ledger row.';
+        : 'Search by vendor, amount, cheque #, or narration. Linking marks the bill paid and copies cheque/cash/online from the ledger row.';
     }
   }
 
@@ -2486,7 +2508,7 @@ const syncBulkActionButtons = () => {
   const selectedIds = checked.map((el) => el.value).filter(Boolean);
   const openIds = selectedIds.filter((id) => {
     const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === id);
-    return doc && bookStatus(doc) === 'paid';
+    return doc && bookStatus(doc) !== 'linked' && !doc.transaction_id;
   });
   const openDocs = openIds
     .map((id) => (portalState.finances.financeDocuments || []).find((d) => d.id === id))
@@ -2547,7 +2569,7 @@ const selectedDocIds = () =>
 const selectedUnlinkedDocIds = () =>
   selectedDocIds().filter((id) => {
     const doc = (portalState.finances.financeDocuments || []).find((d) => d.id === id);
-    return doc && bookStatus(doc) === 'paid';
+    return doc && bookStatus(doc) !== 'linked' && !doc.transaction_id;
   });
 
 const selectedOpenCashReceiptIds = () =>
@@ -2635,9 +2657,7 @@ const paintFinanceDocumentsTable = () => {
     const linkBtn = manage
       ? (status === 'linked'
         ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
-        : status === 'paid'
-          ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`
-          : '')
+        : `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link to ledger" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
       : '';
     const delBtn = manage && canDeleteFinanceDocs()
       ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
@@ -3327,10 +3347,19 @@ export async function excludeLedgerFromCashFloat(txnId) {
 
 const paymentNotesFromTxn = (txn) => {
   const wallet = String(txn?.wallet || '').toUpperCase();
-  const ref = String(txn?.bank_reference || '').trim();
-  if (wallet === 'BANK' && ref) return `Cheque: ${ref}`;
-  if (wallet === 'CASH') return 'Payment: Cash';
-  return null;
+  const type = txn?.type;
+  const cat = String(txn?.cat || '');
+  const ref = String(txn?.bank_reference || txn?.cheque_no || '').trim();
+  const date = String(txn?.date || '').slice(0, 10);
+  const paidOn = date ? `\nPaid on: ${date}` : '';
+  const hay = `${ref} ${txn?.description || ''}`.toLowerCase();
+  if (wallet !== 'BANK' || (cat === 'Petty Cash' && type === 'IN')) return `Payment: Cash${paidOn}`;
+  if (/upi|neft|imps|rtgs|online/.test(hay)) {
+    return `Online: ${ref || String(txn?.description || 'Bank').slice(0, 48)}${paidOn}`;
+  }
+  if (ref) return `Cheque: ${ref}${paidOn}`;
+  if (wallet === 'BANK') return `Online: ${String(txn?.description || 'Bank').slice(0, 48)}${paidOn}`;
+  return `Payment: Cash${paidOn}`;
 };
 
 /**

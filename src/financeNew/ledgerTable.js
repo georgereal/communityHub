@@ -7,13 +7,12 @@ import { portalState } from '../store.js';
 import { postFnMutation } from './mongoMutations.js';
 import { removeTransactionsLocally } from './ledgerTxnLocal.js';
 import {
-    INCOME_CATS,
-    EXPENSE_CATS,
     BANK_REJECT_CAT,
     defaultExcludeFromReports,
     normalizeCategoryKey,
     categoryDisplayLabel,
 } from '../expenseCategories.js';
+import { buildCategoryOptionGroups } from '../classifyOptions.js';
 import { isTransactionReconciled, getBankOpeningConfig } from './bankStatementQueries.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { setLedgerActivity, ledgerHasActiveFilters, sortLedgerTxnsChronological } from './ledgerFilter.js';
@@ -1415,18 +1414,18 @@ const populateBulkCategorySelect = () => {
     const sel = document.getElementById('fn-ledger-bulk-cat');
     if (!sel) return;
     const escOpt = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const { income, expense } = buildCategoryOptionGroups();
     sel.innerHTML = [
         '<option value="">Set category…</option>',
-        `<optgroup label="Income">${INCOME_CATS.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
-        `<optgroup label="Expenses">${EXPENSE_CATS.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+        `<optgroup label="Income">${income.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
+        `<optgroup label="Expenses">${expense.map((c) => `<option value="${escOpt(c)}">${escOpt(categoryDisplayLabel(c))}</option>`).join('')}</optgroup>`,
     ].join('');
 };
 
 export const initLedgerBulkBar = () => {
+    populateBulkCategorySelect();
     if (document.body.dataset.ledgerBulkBarWired === '1') return;
     document.body.dataset.ledgerBulkBarWired = '1';
-
-    populateBulkCategorySelect();
 
     if (!document.body.dataset.ledgerClassifyDismissWired) {
         document.body.dataset.ledgerClassifyDismissWired = '1';

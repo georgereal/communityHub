@@ -5,7 +5,8 @@ import { bindFinanceNewWindow } from './windowBridge.js';
  * Expense plan — list-first: planned timeline + details; add via modals.
  */
 import { portalState } from '../store.js';
-import { EXPENSE_CATS, categoryDisplayLabel } from '../expenseCategories.js';
+import { categoryDisplayLabel } from '../expenseCategories.js';
+import { buildCategoryOptions } from '../classifyOptions.js';
 import { postFnMutation } from './mongoMutations.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { getBookBalanceSummary } from './financeAnalytics.js';
@@ -257,18 +258,34 @@ export const getExpensePlanHorizonSummary = (months = 6) => {
       return d >= from && d <= to;
     });
   const projected = projectRecurringOccurrences(getRecurring(), from, to);
-  const total = round2(
-    oneOff.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
-    + projected.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
-  );
+  const items = [
+    ...oneOff.map((i) => ({
+      source: 'oneoff',
+      date: String(i.due_date || i.plan_date || '').slice(0, 10),
+      amount: parseFloat(i.amount) || 0,
+      cat: i.cat,
+      title: i.description || i.vendor_name || 'Planned',
+      vendor_name: i.vendor_name,
+    })),
+    ...projected.map((r) => ({
+      source: 'recurring',
+      date: String(r.due_date || r.plan_date || '').slice(0, 10),
+      amount: parseFloat(r.amount) || 0,
+      cat: r.cat,
+      title: r.title || r.description || r.vendor_name || 'Recurring',
+      vendor_name: r.vendor_name,
+    })),
+  ].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.title).localeCompare(String(b.title)));
+  const total = round2(items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0));
   return {
     months: Math.max(1, parseInt(months, 10) || 6),
     from,
     to,
     oneOffCount: oneOff.length,
     recurringCount: projected.length,
-    count: oneOff.length + projected.length,
+    count: items.length,
     total,
+    items,
   };
 };
 
@@ -303,15 +320,7 @@ const buildTimeline = () => {
   });
 };
 
-const catOptionsList = () => {
-  const fromPlan = [
-    ...getItems().map((i) => i.cat),
-    ...getRecurring().map((t) => t.cat),
-  ].filter(Boolean);
-  return [...new Set([...EXPENSE_CATS, ...fromPlan])].sort((a, b) =>
-    String(categoryDisplayLabel(a) || a).localeCompare(String(categoryDisplayLabel(b) || b)),
-  );
-};
+const catOptionsList = () => buildCategoryOptions(false);
 
 const fmtDate = (iso) => {
   if (!iso) return '—';

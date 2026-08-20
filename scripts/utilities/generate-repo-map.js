@@ -185,6 +185,7 @@ const SRC_DESCRIPTIONS = {
   'externalConnections.js': 'External connections (admin)',
   'externalFetch.js': 'External fetch helpers',
   'admin.js': 'Setup subview switching & admin helpers',
+  'uiMode.js': 'Classic vs New UI mode',
   'moduleAccess.js': 'Module-level access / isModuleEnabled',
   'moduleAccessAdmin.js': 'Module access admin panel',
   'pageAccess.js': 'Page-level access',

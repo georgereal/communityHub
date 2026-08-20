@@ -191,7 +191,7 @@ export function getLedgerBankBalance(txns = null) {
             balance: null,
             netMovements,
             asOf: onOrAfterOpening.length
-                ? onOrAfterOpening[onOrAfterOpening.length - 1].date
+                ? ledgerTxnDayKey(onOrAfterOpening[onOrAfterOpening.length - 1], ctx)
                 : opening.date || null,
             txnCount: onOrAfterOpening.length,
             needsOpening: true,
@@ -199,18 +199,20 @@ export function getLedgerBankBalance(txns = null) {
         };
     }
 
-    let balance = meta.closing;
-    if (balance == null || meta.needsRecalc) {
-        const last = [...onOrAfterOpening].reverse()
-            .find((t) => t.running_balance_after != null && t.running_balance_after !== '');
-        if (last) balance = parseFloat(last.running_balance_after);
-        else balance = parseFloat(opening.amount) + netMovements;
+    const live = parseFloat(opening.amount) + netMovements;
+    // Never keep a stale finance_config.ledgerBalance.closing after posts.
+    // New BANK rows often have no running_balance_after until Recalculate.
+    let balance = live;
+    if (!meta.needsRecalc && meta.closing != null && Math.abs(meta.closing - live) <= 0.05) {
+        balance = meta.closing;
     }
 
     return {
         balance,
         netMovements,
-        asOf: onOrAfterOpening.length ? onOrAfterOpening[onOrAfterOpening.length - 1].date : opening.date || null,
+        asOf: onOrAfterOpening.length
+            ? ledgerTxnDayKey(onOrAfterOpening[onOrAfterOpening.length - 1], ctx)
+            : opening.date || null,
         txnCount: onOrAfterOpening.length,
         needsOpening: false,
         needsRecalc: meta.needsRecalc,

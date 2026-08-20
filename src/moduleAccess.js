@@ -112,7 +112,8 @@ export function isModuleEnabled(moduleKey) {
     // Sibling of Finance — follow the same apartment/user toggle.
     if (moduleKey === 'finance-new') return isModuleEnabled('finance');
     // Sibling of Property — follow the same apartment/user toggle.
-    if (moduleKey === 'property-new') return isModuleEnabled('property');
+    if (moduleKey === 'property-new' || moduleKey === 'old-ops') return isModuleEnabled('property');
+    if (moduleKey === 'admin-new') return isModuleEnabled('admin');
     if (!MODULE_KEYS.has(moduleKey)) return true;
     if (LOCKED_MODULE_KEYS.has(moduleKey)) return true;
     if (moduleBypassGating()) return true;

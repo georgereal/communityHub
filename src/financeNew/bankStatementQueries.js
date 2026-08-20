@@ -121,7 +121,32 @@ export const getCalculatedBankBalance = () => {
     return { balance, asOf, lineCount: matchedLines.length, needsOpening: false };
 };
 
-/** Passbook closing balance from the last chronologically ordered row with a passbook balance. */
+/** Passbook on posted (MATCHED) lines only — same universe as ledger calculated. */
+export const getPostedPassbookBalance = (asOf = null) => {
+    const opening = getBankOpeningConfig();
+    const cutoff = asOf ? String(asOf).slice(0, 10) : null;
+    const chronological = getStatementLinesChronological().filter((line) => {
+        if (opening.date && line.line_date < opening.date) return false;
+        if (line.match_status !== 'MATCHED') return false;
+        if (cutoff && String(line.line_date).slice(0, 10) > cutoff) return false;
+        return true;
+    });
+
+    for (let i = chronological.length - 1; i >= 0; i -= 1) {
+        const line = chronological[i];
+        const passbookBalance = passbookRowBalance(line);
+        if (passbookBalance != null) {
+            return {
+                balance: passbookBalance,
+                asOf: line.line_date,
+                lineId: line.id,
+            };
+        }
+    }
+    return null;
+};
+
+/** Passbook closing from the last statement row with a balance (includes unmatched work). */
 export const getPassbookClosingBalance = () => {
     const opening = getBankOpeningConfig();
     const chronological = getStatementLinesChronological().filter((l) =>
