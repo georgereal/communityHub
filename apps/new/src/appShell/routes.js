@@ -6,6 +6,7 @@ import { FINANCE_PAGES } from '../financeApp/session.js';
 
 /** @type {Record<string, string>} */
 export const MPA_ROUTE_PATHS = {
+    dashboard: '/home/',
     'fn-reports': FINANCE_PAGES.reports.path,
     'fn-ledger': FINANCE_PAGES.ledger.path,
     'fn-docs': FINANCE_PAGES.docs.path,
@@ -26,10 +27,8 @@ export const MPA_ROUTE_PATHS = {
 
 /** SPA hash fallback until a route has an MPA entry. */
 export function hrefForRoute(route) {
-    if (!route) return '/';
-    const mpa = MPA_ROUTE_PATHS[route];
-    if (mpa) return mpa;
-    return `/#${route}`;
+    if (!route) return '/home/';
+    return MPA_ROUTE_PATHS[route] || '/home/';
 }
 
 export function isMpaRoute(route) {
@@ -38,6 +37,7 @@ export function isMpaRoute(route) {
 
 export function mpaShellKey(pathname) {
     const p = String(pathname || '').replace(/\/$/, '') || '/';
+    if (p === '/home' || p.startsWith('/home/')) return 'home';
     if (p === '/admin' || p.startsWith('/admin/')) return 'admin';
     if (p === '/residents' || p.startsWith('/residents/')) return 'residents';
     return null;

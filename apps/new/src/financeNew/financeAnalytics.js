@@ -2119,10 +2119,8 @@ export const initFinanceAnalyticsUi = () => {
         });
     }
 
-    void import('@classic/financeReportsExport.js').then(({ initFinanceReportsExport }) => {
+    void import('../financeReportsExport.js').then(({ initFinanceReportsExport }) => {
         initFinanceReportsExport();
-    }).catch(() => {
-        // financeReportsExport is optional
     });
 
     const projectionToggle = document.getElementById('fn-fa-projection-toggle');

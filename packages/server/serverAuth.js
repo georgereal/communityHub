@@ -3,11 +3,11 @@ import {
     clearSessionCookie,
     authHeaderFromRequest,
     requireSession,
-} from '../packages/auth/server.js';
+} from '../auth/server.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { assertUuid } from './supabaseRest.js';
 import { requireAccountsEditor } from './accountsAuth.js';
-import { mongoRbacReady, resolveRbacForUser, userHasMongoSocietyAccess } from './rbacMongo/service.js';
+import { mongoRbacReady, resolveRbacForUser, userHasMongoSocietyAccess } from '../../apps/new/api/rbacMongo/service.js';
 import { isNewUiRequest } from './uiMode.js';
 
 export { setSessionCookie, clearSessionCookie, authHeaderFromRequest, requireSession };
@@ -102,7 +102,15 @@ export async function requireApartmentPermission(req, apartmentIdRaw, permission
     await assertSocietyMembership(req, service, user.id, apartmentId);
 
     const mongoOnly = isNewUiRequest(req) && await mongoRbacReady();
-    const allowed = await userHasPermission(service, user.id, apartmentId, permissionKey, { mongoOnly });
+    if (mongoOnly) {
+        const mongo = await resolveRbacForUser(user.id, apartmentId);
+        const allowed = mongo?.isSystemAdmin
+            || (mongo?.permissions || []).includes(permissionKey);
+        if (!allowed) throw Object.assign(new Error('Not permitted.'), { status: 403 });
+        return { user, authHeader, apartmentId, service };
+    }
+
+    const allowed = await userHasPermission(service, user.id, apartmentId, permissionKey, { mongoOnly: false });
     if (!allowed) throw Object.assign(new Error('Not permitted.'), { status: 403 });
 
     return { user, authHeader, apartmentId, service };

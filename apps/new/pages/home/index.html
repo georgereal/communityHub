@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard · CommunityHub</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app-shell-root">
+    <p class="home-mpa-status" style="padding:1.5rem">Loading…</p>
+  </div>
+  <script>
+    (function () {
+      try {
+        var stored = '';
+        try { stored = localStorage.getItem('ch_ui_mode') || ''; } catch (e) {}
+        var cookie = (document.cookie.match(/(?:^|; )ch_ui_mode=([^;]*)/) || [])[1];
+        var mode = stored || (cookie ? decodeURIComponent(cookie) : '');
+        if (mode === 'classic') location.replace('/#dashboard');
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/apps/new/src/homeApp/main.js"></script>
+</body>
+</html>

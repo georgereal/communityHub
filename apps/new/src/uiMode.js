@@ -117,7 +117,13 @@ function hrefKey(href) {
 }
 
 async function goToRouteWithReload(mode) {
-    let href = '/#dashboard';
+    if (mode === 'classic') {
+        let route = currentAppRoute() || 'dashboard';
+        route = remapRouteForMode(route, 'classic') || 'dashboard';
+        window.location.assign(`/#${route}`);
+        return;
+    }
+    let href = '/home/';
     try {
         const { hrefForRoute, MPA_ROUTE_PATHS } = await import('./appShell/routes.js');
         let route = currentAppRoute();
@@ -134,7 +140,7 @@ async function goToRouteWithReload(mode) {
         route = remapRouteForMode(route || 'dashboard', mode) || 'dashboard';
         href = hrefForRoute(route);
     } catch {
-        href = '/#dashboard';
+        href = '/home/';
     }
     if (hrefKey(href) === locationKey()) {
         window.location.reload();

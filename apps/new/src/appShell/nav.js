@@ -12,7 +12,6 @@ import {
 import { portalState } from '../store.js';
 import { hrefForRoute, navigateToRoute, isMpaRoute } from './routes.js';
 import { applyMpaNavCollapsed } from './navPref.js';
-import { getUiMode } from '../uiMode.js';
 
 function esc(s) {
     return String(s ?? '')
@@ -42,19 +41,15 @@ function renderPageButtons(mod) {
         const page = mod.pages.find((p) => p.route === entry.route);
         if (!page) return '';
         const href = hrefForRoute(page.route);
-        const island = getUiMode() !== 'classic' && (mod.classicIsland || String(page.route).startsWith('ops-'));
-        const islandMark = island
-            ? ' <span class="nav-island-dot" title="Classic (Supabase)" aria-hidden="true"></span>'
-            : '';
         return `
-            <a class="nav-page-btn${island ? ' nav-page-btn--island' : ''}"
+            <a class="nav-page-btn"
               href="${esc(href)}"
-              title="${esc(island ? `${page.label} (classic · Supabase)` : page.label)}"
+              title="${esc(page.label)}"
               aria-label="${esc(page.label)}"
               data-route="${esc(page.route)}"
               data-nav-route="${esc(page.route)}">
               <i class="fa-solid ${esc(page.icon)}" aria-hidden="true"></i>
-              <span>${esc(page.label)}</span>${islandMark}
+              <span>${esc(page.label)}</span>
             </a>`;
     }).join('');
 }
@@ -75,15 +70,14 @@ export function renderAppShellNav({ activeRoute } = {}) {
             return entry.route === activeRoute;
         });
         return `
-      <div class="nav-module${mod.tabbed ? ' nav-module--tabbed' : ''}${isOpen ? ' nav-module--open nav-module--active' : ''}${mod.classicIsland ? ' nav-module--island' : ''}" data-module="${esc(mod.id)}">
+      <div class="nav-module${mod.tabbed ? ' nav-module--tabbed' : ''}${isOpen ? ' nav-module--open nav-module--active' : ''}" data-module="${esc(mod.id)}">
         <button type="button" class="nav-module-toggle${isOpen ? ' active' : ''}" aria-expanded="${isOpen ? 'true' : 'false'}"
-          title="${esc(mod.classicIsland ? `${mod.label} (classic · Supabase)` : mod.label)}"
+          title="${esc(mod.label)}"
           aria-label="${esc(mod.label)}"
           ${entryRoute ? `data-route="${esc(entryRoute)}" data-href="${esc(entryHref)}"` : ''}
           ${mod.tabbed ? '' : `aria-controls="nav-sub-${esc(mod.id)}"`}>
           <span class="nav-module-toggle__lead">
             <i class="fa-solid ${esc(mod.icon)}" aria-hidden="true"></i>
-            ${mod.classicIsland && getUiMode() !== 'classic' ? '<span class="nav-island-dot nav-island-dot--mod" title="Classic (Supabase)" aria-hidden="true"></span>' : ''}
             <span class="nav-module-toggle__label">${esc(mod.label)}</span>
           </span>
           ${mod.tabbed ? '' : '<i class="fa-solid fa-chevron-down nav-module-toggle__chevron" aria-hidden="true"></i>'}

@@ -4,6 +4,7 @@
 import { createApiSupabaseClient, fetchApartmentState, setActiveApartmentIdForApi } from './dbClient.js';
 import { authClient, ensureAuthInitialized } from '@auth/authClient.js';
 import { domainsForRoute, STATE_DOMAINS } from './stateLoader.js';
+import { isNewUi } from '@new/uiMode.js';
 
 export { authClient, ensureAuthInitialized };
 
@@ -213,6 +214,7 @@ function applyStatePatch(partial = {}) {
 }
 
 export async function loadStateDomain(domain, { force = false, signal } = {}) {
+    if (isNewUi()) return false;
     if (!supabase) return false;
     const activeApartmentId = portalState.access?.activeApartmentId;
     if (!activeApartmentId || isPlaceholderApartmentId(activeApartmentId)) return false;

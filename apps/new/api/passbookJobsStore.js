@@ -1,6 +1,6 @@
-import { parseRestError, supabasePublicEnv } from './supabaseRest.js';
-import { prepareImportedStatementLines } from '../src/bankStatementOrdering.js';
-import { extractOcrRowIndexFromTxn } from '../src/bankStatementLineUtils.js';
+import { parseRestError, supabasePublicEnv } from '../../../packages/server/supabaseRest.js';
+import { prepareImportedStatementLines } from '../../classic/src/bankStatementOrdering.js';
+import { extractOcrRowIndexFromTxn } from '../../classic/src/bankStatementLineUtils.js';
 
 export const PASSBOOK_JOB_STATUS = {
     INITIALIZED: 'INITIALIZED',

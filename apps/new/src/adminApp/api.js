@@ -1,7 +1,6 @@
 import { portalState, pullState, upsertSocietyConfig } from '../store.js';
 import { EXPENSE_CATS } from '../expenseCategories.js';
 import { buildCategoryOptions, defaultExpenseCategory } from '../classifyOptions.js';
-import { refreshExpenseReferences } from '../finances.js';
 import {
     fetchApartmentModuleSettings,
     saveApartmentModuleSettings,
@@ -9,7 +8,6 @@ import {
     LOCKED_MODULE_KEYS,
 } from '../moduleAccess.js';
 import {
-    fetchPendingAccessRequestsForAdmin,
     approveAccessRequest,
     denyAccessRequest,
 } from '../accessRequests.js';
@@ -236,38 +234,33 @@ export async function deleteStaff(id) {
 
 export async function loadPeopleDirectory() {
     const apartmentId = aptId();
-    const { isNewUi } = await import('../uiMode.js');
-    if (isNewUi()) {
-        if (!apartmentId) return { users: [], requests: [] };
-        const res = await fetch(`/api/rbac-mongo?apartment_id=${encodeURIComponent(apartmentId)}`, {
-            credentials: 'include',
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error || 'Could not load people.');
-        const dirMap = new Map((json.directory || []).map((p) => [p.user_id, p]));
-        const rolesByUser = new Map();
-        (json.assignments || []).forEach((r) => {
-            if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
-            rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
-        });
-        const users = [...rolesByUser.entries()].map(([id, apartment_roles]) => {
-            const p = dirMap.get(id) || {};
-            return {
-                id,
-                name: p.full_name || p.email || id,
-                email: p.email || '',
-                role: apartment_roles[apartmentId] || p.role || 'resident_viewer',
-                apartment_ids: [apartmentId],
-                apartment_roles,
-                approved: true,
-            };
-        });
-        users.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
-        portalState.access.users = users;
-        return { users, requests: [] };
-    }
     if (!apartmentId) return { users: [], requests: [] };
-    return { users: [], requests: [] };
+    const res = await fetch(`/api/rbac-mongo?apartment_id=${encodeURIComponent(apartmentId)}`, {
+        credentials: 'include',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Could not load people.');
+    const dirMap = new Map((json.directory || []).map((p) => [p.user_id, p]));
+    const rolesByUser = new Map();
+    (json.assignments || []).forEach((r) => {
+        if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, {});
+        rolesByUser.get(r.user_id)[r.apartment_id] = r.role_key;
+    });
+    const users = [...rolesByUser.entries()].map(([id, apartment_roles]) => {
+        const p = dirMap.get(id) || {};
+        return {
+            id,
+            name: p.full_name || p.email || id,
+            email: p.email || '',
+            role: apartment_roles[apartmentId] || p.role || 'resident_viewer',
+            apartment_ids: [apartmentId],
+            apartment_roles,
+            approved: true,
+        };
+    });
+    users.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
+    portalState.access.users = users;
+    return { users, requests: [] };
 }
 
 export async function approveRequest(request, roleKey) {
@@ -283,34 +276,31 @@ export async function denyRequest(request) {
 export async function assignUserAccess({ email, name, roleKey, apartmentIds }) {
     assertCan('admin.people.assign');
     if (!isSocietyAdminUser()) throw new Error('Only a Society Administrator can assign or change roles.');
-    const { isNewUi } = await import('../uiMode.js');
-    if (isNewUi()) {
-        const apartmentId = aptId();
-        const res = await fetch('/api/rbac-mongo', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'findDirectory',
-                apartment_id: apartmentId,
-                email: email.trim(),
-            }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error || 'Could not look up user.');
-        const prof = json.user;
-        if (!prof?.user_id) throw new Error('User not found in Mongo directory. Re-run migrate:rbac-mongo after they sign up.');
-        const previousAssignments = await loadUserRoleAssignments(prof.user_id);
-        await saveUserAccess({
-            userId: prof.user_id,
-            name: name || prof.full_name,
+    const apartmentId = aptId();
+    const res = await fetch('/api/rbac-mongo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'findDirectory',
+            apartment_id: apartmentId,
             email: email.trim(),
-            roleKey,
-            apartmentIds,
-            previousAssignments,
-            managedApartmentIds: (portalState.access?.apartments || []).map((a) => a.id),
-        });
-    }
+        }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'Could not look up user.');
+    const prof = json.user;
+    if (!prof?.user_id) throw new Error('User not found in Mongo directory. Re-run migrate:rbac-mongo after they sign up.');
+    const previousAssignments = await loadUserRoleAssignments(prof.user_id);
+    await saveUserAccess({
+        userId: prof.user_id,
+        name: name || prof.full_name,
+        email: email.trim(),
+        roleKey,
+        apartmentIds,
+        previousAssignments,
+        managedApartmentIds: (portalState.access?.apartments || []).map((a) => a.id),
+    });
 }
 
 export function portalLinks() {
@@ -376,14 +366,9 @@ export function userDisplayRole(user) {
 export async function loadRbacMatrix() {
     const apartmentId = aptId();
     if (!apartmentId) throw new Error('Select a society first.');
-    const { isNewUi } = await import('../uiMode.js');
-    const { buildRbacMatrixState, MATRIX_ROLE_KEYS, CRUD_RESOURCES, defaultCrudFromPermKeys } = await import('../rbacMatrix.js');
+    const { MATRIX_ROLE_KEYS, CRUD_RESOURCES, defaultCrudFromPermKeys } = await import('../rbacMatrix.js');
     const { MODULE_CATALOG, LOCKED_MODULE_KEYS } = await import('../moduleAccess.js');
     const { buildPageCatalog, pageAllowedByPermissions, pageCatalogByModule } = await import('../navigation.js');
-
-    if (!isNewUi()) {
-        return buildRbacMatrixState(apartmentId);
-    }
 
     const res = await fetch(`/api/rbac-mongo?apartment_id=${encodeURIComponent(apartmentId)}`, {
         credentials: 'include',

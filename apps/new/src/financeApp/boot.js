@@ -1,64 +1,24 @@
 /**
- * Finance MPA boot — cookie session + slim portalState for Finance-New UI modules.
+ * Finance MPA boot — cookie session + Mongo identity/RBAC.
  */
-import { portalState } from '../store.js';
-import { setActiveApartmentIdForApi } from '../dbClient.js';
 import { readFinanceCtx, writeFinanceCtx, clearFinanceCtx } from './session.js';
 import { goToLogin } from '../authRedirect.js';
 import { restoreMpaNavPref } from '../appShell/navPref.js';
+import {
+    applyMongoBoot,
+    fetchWorkspaceBoot,
+    apartmentsFromBoot,
+    sessionFieldsFromBoot,
+} from '../appShell/workspaceBoot.js';
 
-async function fetchJson(path, init = {}) {
-    const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
-    const res = await fetch(path, {
-        credentials: 'include',
-        ...init,
-        headers,
-    });
-    let json = {};
-    try {
-        json = await res.json();
-    } catch { /* empty */ }
-    if (!res.ok) {
-        const err = new Error(json.error || res.statusText || 'Request failed');
-        err.status = res.status;
-        throw err;
-    }
-    return json;
-}
-
-function seedPortalFromCtx(ctx) {
-    portalState.auth = {
-        id: ctx.userId || null,
-        email: ctx.userEmail || '',
-        name: ctx.userName || '',
-    };
-    portalState.authPermissions = ctx.permissions || [];
-    portalState.access = {
-        ...(portalState.access || {}),
-        apartments: ctx.apartments?.length
-            ? ctx.apartments
-            : [{ id: ctx.apartmentId, name: ctx.apartmentName || ctx.apartmentId }],
-        activeApartmentId: ctx.apartmentId,
-        activeUserId: ctx.userId || 'usr-finance',
-        users: portalState.access?.users || [],
-    };
-    portalState.community = {
-        ...(portalState.community || {}),
-        name: ctx.apartmentName || portalState.community?.name || 'CommunityHub',
-    };
-    setActiveApartmentIdForApi(ctx.apartmentId);
-}
-
-/**
- * @param {{ page?: string }} [opts]
- */
 export async function bootFinanceApp(opts = {}) {
     document.documentElement.dataset.financeApp = '1';
     document.documentElement.dataset.financePage = opts.page || '';
     restoreMpaNavPref();
 
     try {
-        await fetchJson('/api/auth-session');
+        const res = await fetch('/api/auth-session', { credentials: 'include' });
+        if (!res.ok) throw new Error('auth');
     } catch {
         goToLogin('Sign in required.', {
             next: `${window.location.pathname}${window.location.search || ''}`,
@@ -66,41 +26,13 @@ export async function bootFinanceApp(opts = {}) {
         return null;
     }
 
-    let ctx = readFinanceCtx();
-    const needRefresh = !ctx?.apartmentId || !ctx.permissions?.length || ctx.permScope !== 'all';
-
-    if (needRefresh) {
-        const boot = await fetchJson(
-            `/api/new/workspace-boot${ctx?.apartmentId ? `?apartment_id=${encodeURIComponent(ctx.apartmentId)}` : ''}`,
-        );
-        const apartments = (boot.apartments || []).map((a) => ({ id: a.id, name: a.name || a.id }));
-        const apartmentId = boot.activeApartmentId || apartments[0]?.id || ctx?.apartmentId;
-        if (!apartmentId) {
-            throw new Error('No society assigned to this account.');
-        }
-        const apt = apartments.find((a) => a.id === apartmentId);
-        ctx = writeFinanceCtx({
-            apartmentId,
-            apartmentName: apt?.name || '',
-            userId: boot.profile?.id || boot.user?.id || '',
-            userName: boot.profile?.full_name || boot.profile?.name || '',
-            userEmail: boot.profile?.email || '',
-            permissions: boot.permissions || [],
-            apartments,
-        });
-        if (boot.crudAccess) portalState.crudAccess = boot.crudAccess;
-        ctx.effectiveRoleKey = boot.effectiveRoleKey || null;
-        ctx.isSystemAdmin = boot.isSystemAdmin === true;
-    }
-
-    seedPortalFromCtx(ctx);
-    if (ctx.effectiveRoleKey || ctx.isSystemAdmin) {
-        portalState.auth = {
-            ...(portalState.auth || {}),
-            effectiveRoleKey: ctx.effectiveRoleKey || null,
-            isSystemAdmin: ctx.isSystemAdmin === true,
-        };
-    }
+    const hint = readFinanceCtx();
+    const boot = await fetchWorkspaceBoot(hint?.apartmentId);
+    const apartments = apartmentsFromBoot(boot, hint?.apartmentId);
+    const apartmentId = boot.activeApartmentId || apartments[0]?.id || hint?.apartmentId;
+    if (!apartmentId) throw new Error('No society assigned to this account.');
+    const ctx = writeFinanceCtx(sessionFieldsFromBoot(boot, apartmentId, apartments));
+    applyMongoBoot(boot, ctx);
     document.documentElement.dataset.financePage = opts.page || '';
 
     const { initFinancePackCache } = await import('../financeNew/packCache.js');
@@ -117,20 +49,9 @@ export async function switchFinanceApartment(apartmentId) {
         clearFinancePackCache(prev?.apartmentId);
         clearFinancePackCache(apartmentId);
     } catch { /* ignore */ }
-    const boot = await fetchJson(
-        `/api/new/workspace-boot?apartment_id=${encodeURIComponent(apartmentId)}`,
-    );
-    const apartments = (boot.apartments || []).map((a) => ({ id: a.id, name: a.name || a.id }));
-    const apt = apartments.find((a) => a.id === apartmentId);
-    writeFinanceCtx({
-        apartmentId,
-        apartmentName: apt?.name || '',
-        userId: boot.profile?.id || boot.user?.id || '',
-        userName: boot.profile?.full_name || boot.profile?.name || '',
-        userEmail: boot.profile?.email || '',
-        permissions: boot.permissions || [],
-        apartments,
-    });
+    const boot = await fetchWorkspaceBoot(apartmentId);
+    const apartments = apartmentsFromBoot(boot, apartmentId);
+    writeFinanceCtx(sessionFieldsFromBoot(boot, apartmentId, apartments));
     window.location.reload();
 }
 

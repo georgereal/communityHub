@@ -1,6 +1,6 @@
-import { requireAnyApartmentPermission } from '../serverAuth.js';
-import { getQueryParam, readJsonBody } from '../vercelRequest.js';
-import { logMongoApi } from '../mongoLog.js';
+import { requireAnyApartmentPermission } from '../../../../packages/server/serverAuth.js';
+import { getQueryParam, readJsonBody } from '../../../../packages/server/vercelRequest.js';
+import { logMongoApi } from '../../../../packages/server/mongoLog.js';
 import { PropertyHttpError } from './errors.js';
 import { connectPropertyMongo } from './mongoose.js';
 import { ensurePropertyIndexes } from './service.js';

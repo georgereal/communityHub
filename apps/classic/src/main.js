@@ -588,23 +588,26 @@ const switchViewInner = async (v) => {
     return;
   }
 
-  // Multi-page apps (Finance-New, Residents React) → full document navigation
-  try {
-    const { MPA_ROUTE_PATHS } = await import('@new/appShell/routes.js');
-    const mpaPath = MPA_ROUTE_PATHS[route];
-    if (mpaPath) {
-      if (String(route).startsWith('fn-')) {
-        const { writeFinanceCtxFromPortal } = await import('@new/financeApp/session.js');
-        writeFinanceCtxFromPortal(portalState);
-      } else {
-        const { writeMpaCtxFromPortal } = await import('@new/appShell/mpaSession.js');
-        writeMpaCtxFromPortal(portalState);
+  // New UI only: leave the SPA for MPA HTML. Classic must keep hash routes
+  // (dashboard is in MPA_ROUTE_PATHS as /home/, which caused a reload loop).
+  if (isNewUi()) {
+    try {
+      const { MPA_ROUTE_PATHS } = await import('@new/appShell/routes.js');
+      const mpaPath = MPA_ROUTE_PATHS[route];
+      if (mpaPath) {
+        if (String(route).startsWith('fn-')) {
+          const { writeFinanceCtxFromPortal } = await import('@new/financeApp/session.js');
+          writeFinanceCtxFromPortal(portalState);
+        } else {
+          const { writeMpaCtxFromPortal } = await import('@new/appShell/mpaSession.js');
+          writeMpaCtxFromPortal(portalState);
+        }
+        window.location.assign(mpaPath);
+        return;
       }
-      window.location.assign(mpaPath);
-      return;
+    } catch (err) {
+      console.warn('[nav] MPA redirect failed:', err?.message || err);
     }
-  } catch (err) {
-    console.warn('[nav] MPA redirect failed:', err?.message || err);
   }
 
   const meta = findPage(route);

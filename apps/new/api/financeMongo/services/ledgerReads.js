@@ -38,6 +38,7 @@ export async function buildLedgerSummary(db, apartmentId) {
                 amount: 1,
                 date: 1,
                 cat: 1,
+                id: 1,
                 excluded_from_ledger: 1,
                 running_balance_after: 1,
                 is_cash_float: 1,
@@ -51,22 +52,24 @@ export async function buildLedgerSummary(db, apartmentId) {
                 status: { $ne: 'void' },
             })
             .project({
+                id: 1,
                 kind: 1,
                 status: 1,
                 amount: 1,
                 notes: 1,
                 transaction_id: 1,
+                ledgerEntryId: 1,
             })
             .toArray(),
     ]);
 
     const active = entries.filter(isActive).map((t) => ({
         ...t,
-        id: t.id || t._id,
+        id: t.id || (t._id != null ? String(t._id) : ''),
     }));
     const voucherRows = (vouchers || []).map((d) => ({
         ...d,
-        id: d.id || d._id,
+        id: d.id || (d._id != null ? String(d._id) : ''),
         transaction_id: d.transaction_id || d.ledgerEntryId || null,
     }));
     const excludedCount = entries.length - active.length;
@@ -126,18 +129,15 @@ export async function buildLedgerSummary(db, apartmentId) {
             ? dayKey(bankRows[bankRows.length - 1].date) || openingDate
             : openingDate;
 
-        if (!needsRecalc && ledgerBalance.closing != null) {
+        // Same as finance reports: opening + BANK movements. Do not prefer a stale
+        // finance_config.ledgerBalance.closing (that is what made Home disagree with Reports).
+        let live = openingAmount;
+        for (const t of bankRows) live += txnMovement(t);
+        live = roundMoney(live);
+        if (!needsRecalc && ledgerBalance.closing != null && Math.abs(ledgerBalance.closing - live) <= 0.05) {
             bank = ledgerBalance.closing;
         } else {
-            const lastWithBalance = [...bankRows].reverse()
-                .find((t) => t.running_balance_after != null && t.running_balance_after !== '');
-            if (lastWithBalance) {
-                bank = roundMoney(lastWithBalance.running_balance_after);
-            } else {
-                let running = openingAmount;
-                for (const t of bankRows) running += txnMovement(t);
-                bank = roundMoney(running);
-            }
+            bank = live;
         }
     }
 

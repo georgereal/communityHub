@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { getMongoClientOptions, getMongoEnv } from '../mongoClient.js';
+import { getMongoClientOptions, getMongoEnv } from '../../../../packages/server/mongoClient.js';
 
 const globalKey = '__communityHubMongoose';
 

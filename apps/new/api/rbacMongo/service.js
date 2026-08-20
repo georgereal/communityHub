@@ -1,4 +1,4 @@
-import { getMongoDb } from '../mongoClient.js';
+import { getMongoDb } from '../../../../packages/server/mongoClient.js';
 import {
     DEFAULT_ROLE_PERMISSIONS,
     deriveCrudFromPermissionKeys,

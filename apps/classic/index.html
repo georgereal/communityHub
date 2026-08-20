@@ -13,6 +13,19 @@
   <link rel="stylesheet" href="/apps/classic/src/style.css" />
   <link rel="stylesheet" href="/apps/classic/src/ledgerSync.css" />
   <link rel="stylesheet" href="/apps/classic/src/financeMobile.css" />
+  <script>
+    (function () {
+      try {
+        var stored = '';
+        try { stored = localStorage.getItem('ch_ui_mode') || ''; } catch (e) {}
+        var cookie = (document.cookie.match(/(?:^|; )ch_ui_mode=([^;]*)/) || [])[1];
+        var mode = stored || (cookie ? decodeURIComponent(cookie) : 'new');
+        if (mode === 'classic') return;
+        var hash = String(location.hash || '').replace(/^#/, '').split('?')[0];
+        if (!hash || hash === 'dashboard') location.replace('/home/');
+      } catch (e) {}
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 

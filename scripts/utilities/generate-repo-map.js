@@ -334,9 +334,11 @@ function generateRepoMap() {
   const d = gather();
   return `# CommunityHub / ApartmentMaintenance — Repository Map
 
-> **Project:** ApartmentMaintenance (CommunityHub) — Vite + vanilla JS + Supabase single-page app.
-> **Stack:** Vite (vite build) · vanilla JS modules · Supabase (Postgres + RLS) · Vercel serverless \`api/*.js\` endpoints · ExcelJS/PDF/Quill.
-> **Conventions:** SQL migrations as \`supabase_*.sql\` at repo root; feature modules in \`src/\`; UI in \`index.html\` + \`src/style.css\`; serverless handlers in \`api/\`.
+> **Project:** ApartmentMaintenance (CommunityHub) — two apps, one Vercel project.
+> **Shared (platform):** thin \`api/*.js\` re-exports for Vercel, plus \`packages/auth\` and \`packages/server\`.
+> **Classic:** \`apps/classic/src\`, \`apps/classic/api\`, \`apps/classic/sql\`.
+> **New:** \`apps/new/src\`, \`apps/new/api\`, \`apps/new/pages\`.
+> Same origin until classic is retired; then New can use \`base: '/new/'\` only.
 
 ---
 
@@ -352,8 +354,8 @@ ${renderTree(listFiles(ROOT))}
 
 ## 2. \`src/\` — Frontend Feature Modules
 
-The SPA is modular: \`src/main.js\` boots → \`src/store.js\` hydrates state → \`src/navigation.js\` maps routes →
-\`src/views/controllers.js\` lazily activates the active view's feature modules (dynamic \`import()\`, keeping the initial bundle small).
+Classic SPA: \`apps/classic/src/main.js\` boots → store → \`navigation.js\` → lazy views.
+New MPAs: \`apps/new/src/*App\` plus HTML in \`apps/new/pages/\`. New nav is MPA-only.
 
 ### Directory tree
 

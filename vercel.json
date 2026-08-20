@@ -49,7 +49,63 @@
       "destination": "/admin/index.html"
     },
     {
-      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/|admin/).*)",
+      "source": "/home",
+      "destination": "/home/index.html"
+    },
+    {
+      "source": "/home/:path*",
+      "destination": "/home/index.html"
+    },
+    {
+      "source": "/new",
+      "destination": "/home/index.html"
+    },
+    {
+      "source": "/new/home",
+      "destination": "/home/index.html"
+    },
+    {
+      "source": "/new/home/:path*",
+      "destination": "/home/index.html"
+    },
+    {
+      "source": "/new/residents",
+      "destination": "/residents/index.html"
+    },
+    {
+      "source": "/new/residents/:path*",
+      "destination": "/residents/index.html"
+    },
+    {
+      "source": "/new/parking",
+      "destination": "/parking/index.html"
+    },
+    {
+      "source": "/new/parking/:path*",
+      "destination": "/parking/index.html"
+    },
+    {
+      "source": "/new/units",
+      "destination": "/units/index.html"
+    },
+    {
+      "source": "/new/units/:path*",
+      "destination": "/units/index.html"
+    },
+    {
+      "source": "/new/admin",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/new/admin/:path*",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/new/finance/:path*",
+      "destination": "/finance/:path*"
+    },
+    {
+      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/|admin/|home/|new/).*)",
       "destination": "/index.html"
     }
   ],

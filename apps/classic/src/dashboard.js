@@ -65,8 +65,8 @@ async function fetchDashboardSummary({ force = false, signal } = {}) {
         const params = new URLSearchParams({ apartment_id: apartmentId });
         const headers = {};
         try {
-            const { supabase } = await import('./store.js');
-            const { data } = await supabase?.auth.getSession() || {};
+            const { authClient } = await import('@auth/authClient.js');
+            const { data } = await authClient?.auth.getSession() || {};
             const token = data?.session?.access_token;
             if (token) headers.Authorization = `Bearer ${token}`;
         } catch { /* cookie fallback */ }
@@ -426,7 +426,9 @@ export async function renderDashboard({ signal, generation } = {}) {
     const aptName = getActiveApartmentName();
     const wantsFinance = hasClientPermission('accounts.view') || hasClientPermission('setup.view');
     const wantsParking = hasClientPermission('vehicle_registry.view');
-    const wantsOps = hasClientPermission('apartment_mgmt.view') || hasClientPermission('apartment_mgmt.edit');
+    const wantsOps = !isNewUi() && (
+        hasClientPermission('apartment_mgmt.view') || hasClientPermission('apartment_mgmt.edit')
+    );
     const quickActions = buildQuickActions();
 
     const parking = emptyParking();
@@ -511,7 +513,7 @@ export async function renderDashboard({ signal, generation } = {}) {
                 ? new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
                 : null;
             subtitleEl.textContent = label
-                ? `${n} unit(s) in workspace · Data refreshed ${label}`
+                ? `${n} unit(s) in workspace · ${summary?.meta?.source === 'mongo' ? 'Mongo' : 'Postgres'} · Data refreshed ${label}`
                 : `${n} unit(s) in workspace`;
         }
         refreshSections();

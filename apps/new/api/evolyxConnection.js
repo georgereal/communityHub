@@ -1,4 +1,4 @@
-import { createServiceClient, createUserClient } from './serverSupabase.js';
+import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
 
 export const EVOLYX_PROVIDER = 'EVOLYX';
 export const EVOLYX_PASSBOOK_KEY = 'passbook_reader';

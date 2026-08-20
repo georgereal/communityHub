@@ -1,6 +1,2 @@
-/**
- * Top-level Vercel function for Finance-New REST.
- * Nested `api/finance/[...path].js` is often omitted from Vite deployments
- * (platform 404 HTML). Rewrites in vercel.json send /api/finance/* here.
- */
-export { default } from './finance/[...path].js';
+/** Vercel/Vite public entry — implementation lives at ../apps/new/api/finance-rest.js */
+export { default } from '../apps/new/api/finance-rest.js';
