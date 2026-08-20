@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
 import { viteApiDevPlugin } from './viteApiDev.js';
 
 function loginPathRewritePlugin() {
@@ -17,6 +18,34 @@ function loginPathRewritePlugin() {
   };
 }
 
+/** SPA fallback for MPA React apps (deep links in Vite dev). */
+function mpaSpaFallbackPlugin() {
+  const prefixes = ['/residents', '/parking', '/units'];
+  return {
+    name: 'mpa-spa-fallback',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url || '';
+        for (const prefix of prefixes) {
+          if (url === prefix || url.startsWith(`${prefix}?`)) {
+            req.url = `${prefix}/index.html`;
+            break;
+          }
+          if (
+            url.startsWith(`${prefix}/`)
+            && !url.includes('.')
+            && !url.startsWith(`${prefix}/index.html`)
+          ) {
+            req.url = `${prefix}/index.html`;
+            break;
+          }
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiProxy = env.VITE_API_PROXY || 'https://communityhub.evolyx.in';
@@ -24,7 +53,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     // Always register local api/*.js handlers when present; proxy only fills gaps (VITE_LOCAL_API=0).
-    plugins: [viteApiDevPlugin(env), loginPathRewritePlugin()],
+    plugins: [react(), viteApiDevPlugin(env), loginPathRewritePlugin(), mpaSpaFallbackPlugin()],
     server: {
       // Prevent Vite from serving api/*.js as static modules (breaks POST /api/*).
       fs: {
@@ -46,6 +75,15 @@ export default defineConfig(({ mode }) => {
           main: resolve(__dirname, 'index.html'),
           login: resolve(__dirname, 'login.html'),
           microsoftAuth: resolve(__dirname, 'microsoft-auth.html'),
+          financeLedger: resolve(__dirname, 'finance/ledger.html'),
+          financeReports: resolve(__dirname, 'finance/reports.html'),
+          financeDocs: resolve(__dirname, 'finance/docs.html'),
+          financeExpensePlan: resolve(__dirname, 'finance/expense-plan.html'),
+          financeInvoicesRaised: resolve(__dirname, 'finance/invoices-raised.html'),
+          financeBankRecon: resolve(__dirname, 'finance/bank-recon.html'),
+          residents: resolve(__dirname, 'residents/index.html'),
+          parking: resolve(__dirname, 'parking/index.html'),
+          units: resolve(__dirname, 'units/index.html'),
         },
         output: {
           entryFileNames: 'assets/[name]-[hash].js',

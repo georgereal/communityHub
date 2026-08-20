@@ -307,7 +307,8 @@
     display: none;
   }
 
-  .accounts-subview-tabs--compact button {
+  .accounts-subview-tabs--compact button,
+  .accounts-subview-tabs--compact a.accounts-subview-tab {
     flex: 0 0 auto;
     white-space: nowrap;
   }

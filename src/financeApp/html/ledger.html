@@ -1,0 +1,125 @@
+        <div id="fn-subview-ledger" class="ledger-subview">
+          <div class="ledger-kpi-bar" aria-label="Account balances">
+            <div class="ledger-kpi ledger-kpi--total">
+              <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Total</span>
+                <span class="ledger-kpi__value ledger-kpi__value--total" id="fn-total-wealth">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--cash">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Petty cash</span>
+                <span class="ledger-kpi__value" id="fn-cash-balance">₹ 0</span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--bank">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Bank</span>
+                <span class="ledger-kpi__value" id="fn-bank-balance">₹ 0</span>
+                <span id="fn-ledger-bank-hint" class="ledger-kpi__hint" hidden></span>
+              </div>
+            </div>
+            <div class="ledger-kpi ledger-kpi--out">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <div class="ledger-kpi__body">
+                <span class="ledger-kpi__label">Today out</span>
+                <span class="ledger-kpi__value ledger-kpi__value--out" id="fn-cash-today-out">₹ 0</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="fn-ledger-sync-panel"></div>
+
+          <section class="ledger-workspace">
+            <div class="ledger-toolbar" id="fn-ledger-toolbar">
+              <form class="search-container ledger-toolbar__search" role="search" autocomplete="off" onsubmit="return false">
+                <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+                <i class="fa-solid fa-circle-notch fa-spin ledger-search-spinner" aria-hidden="true" hidden></i>
+                <input
+                  type="search"
+                  id="fn-cash-search"
+                  name="ledger-txn-filter"
+                  class="ledger-toolbar__search-input"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  inputmode="search"
+                  data-lpignore="true"
+                  data-1p-ignore
+                  data-form-type="other"
+                  placeholder="Search description, vendor…"
+                />
+              </form>
+              <select id="fn-ledger-cat-filter" class="expense-combobox ledger-toolbar__select" aria-label="Filter by category" title="Filter by category">
+                <option value="">All categories</option>
+              </select>
+              <span id="fn-cash-txn-count" class="ledger-toolbar__count" aria-live="polite"></span>
+              <div class="ledger-toolbar__actions">
+                <span id="fn-ledger-columns-slot"></span>
+                <details class="bank-recon-columns-picker ledger-opening-picker" id="fn-ledger-opening-picker">
+                  <summary class="btn btn-outline btn--small" id="fn-ledger-opening-summary" title="Set bank opening balance for Calculated values">
+                    <i class="fa-solid fa-bookmark" aria-hidden="true"></i>
+                    <span class="fdoc-action-full">Opening</span>
+                    <span class="fdoc-action-short">Open</span>
+                  </summary>
+                  <div class="bank-recon-columns-picker__menu ledger-opening-picker__menu">
+                    <p class="ledger-opening-picker__hint">Passbook opening balance and date — the starting point for Calculated values.</p>
+                    <label class="ledger-opening-picker__field">
+                      <span>As of date</span>
+                      <input type="date" id="fn-ledger-opening-date" />
+                    </label>
+                    <label class="ledger-opening-picker__field">
+                      <span>Amount (₹)</span>
+                      <input type="number" step="0.01" id="fn-ledger-opening-amount" placeholder="e.g. 150000" />
+                    </label>
+                    <button type="button" class="btn btn-primary btn--small" id="fn-ledger-opening-save">
+                      <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save &amp; recalculate
+                    </button>
+                  </div>
+                </details>
+                <button type="button" class="btn btn-outline btn--small" id="fn-ledger-recalc-btn" title="Refresh stored Calculated balances">
+                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                  <span class="fdoc-action-full">Recalculate</span>
+                  <span class="fdoc-action-short">Recalc</span>
+                  <span id="fn-ledger-recalc-stale-badge" class="ledger-recalc-stale-badge" hidden>Needs refresh</span>
+                </button>
+                <button type="button" class="btn btn-outline btn--small" id="fn-ledger-download-xlsx" title="Download filtered ledger as Excel">
+                  <i class="fa-solid fa-download" aria-hidden="true"></i>
+                  <span class="fdoc-action-full">Excel</span>
+                  <span class="fdoc-action-short">Excel</span>
+                </button>
+              </div>
+            </div>
+            <p id="fn-ledger-recalc-status" class="bank-recon-recalc-status bank-recon-recalc-status--inline" hidden></p>
+            <div id="fn-ledger-pivot-banner" class="ledger-pivot-banner" hidden></div>
+            <div id="fn-ledger-bulk-bar" class="ledger-bulk-bar" hidden>
+              <span id="fn-ledger-bulk-count" class="ledger-bulk-bar__status">0 selected</span>
+              <select id="fn-ledger-bulk-cat" class="expense-combobox ledger-bulk-bar__select" title="Bulk category">
+                <option value="">Set category…</option>
+              </select>
+              <select id="fn-ledger-bulk-exclude" class="expense-combobox ledger-bulk-bar__select" title="Omit from Financial Reports or include again">
+                <option value="nochange">Reports: keep</option>
+                <option value="exclude">Omit from reports</option>
+                <option value="include">Show in reports</option>
+              </select>
+              <button type="button" class="btn btn-outline btn--small" id="fn-ledger-bulk-apply" disabled>
+                <span class="fdoc-action-full">Apply to selected</span>
+                <span class="fdoc-action-short">Apply</span>
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="fn-ledger-bulk-save" disabled>
+                <span class="fdoc-action-full">Save changes</span>
+                <span class="fdoc-action-short">Save</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-ledger-bulk-delete" disabled title="Permanently delete selected ledger entries">
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Delete selected</span>
+                <span class="fdoc-action-short">Delete</span>
+              </button>
+            </div>
+            <div id="fn-cash-ledger-items" class="ledger-table-host"></div>
+            <div id="fn-ledger-excluded-items" class="ledger-excluded-host"></div>
+          </section>
+        </div>

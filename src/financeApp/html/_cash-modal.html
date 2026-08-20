@@ -1,0 +1,304 @@
+<div class="modal-backdrop" id="cash-modal">
+    <div class="modal-content expense-modal">
+      <div class="expense-modal__header">
+        <div>
+          <h2 id="cash-modal-title">Add Expense</h2>
+          <p id="cash-modal-desc">Record money spent from petty cash or the bank account.</p>
+        </div>
+        <button type="button" class="btn btn-outline expense-modal__close" aria-label="Close"
+          onclick="document.getElementById('cash-modal').classList.remove('active')">&times;</button>
+      </div>
+
+      <div id="bill-documents-section" class="bill-docs" hidden>
+        <div class="bill-docs__intro">
+          <h3 class="bill-docs__title">Attachments</h3>
+          <p class="bill-docs__desc">Invoice, payment proof, cheque photo, or transfer screenshot — photos or PDFs, multiple allowed.</p>
+        </div>
+        <div class="expense-receipt-box expense-receipt-box--drop">
+          <label class="expense-attach-drop" for="cash-bill">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            <span class="expense-attach-drop__title">Drop files here or browse</span>
+            <span class="expense-attach-drop__hint" id="cash-receipt-hint">Images or PDFs · invoice and payment proof</span>
+          </label>
+          <div class="expense-attach-drop__actions">
+            <label class="btn btn-outline btn--small" for="cash-bill">
+              <i class="fa-solid fa-folder-open" aria-hidden="true"></i> Choose files
+            </label>
+            <label class="btn btn-primary btn--small" for="cash-bill-camera">
+              <i class="fa-solid fa-camera" aria-hidden="true"></i> Take photo
+            </label>
+          </div>
+          <input type="file" id="cash-bill" accept="image/*,.pdf,application/pdf" multiple />
+          <input type="file" id="cash-bill-camera" accept="image/*" capture="environment" />
+          <div id="cash-receipt-preview" class="expense-attach-preview" hidden></div>
+          <ul id="cash-receipt-list" class="expense-receipt-list" hidden></ul>
+        </div>
+      </div>
+
+      <div class="cash-modal-body">
+      <div id="expense-form-view" class="expense-form">
+        <div class="bill-docs__intro bill-details-step" hidden>
+          <h3 class="bill-docs__title">Details from the bill</h3>
+          <p class="bill-docs__desc">Copy amount, vendor, and date as printed on the invoice.</p>
+        </div>
+        <div class="expense-form__section expense-form__section--wallet">
+          <div class="expense-wallet-row">
+            <span class="expense-label expense-label--inline">Paid from</span>
+            <div class="expense-wallet-pills expense-wallet-pills--compact" id="expense-wallet-pills" role="group" aria-label="Paid from">
+              <button type="button" class="expense-wallet-pill active" data-wallet="CASH">
+                <i class="fa-solid fa-wallet"></i> Petty Cash
+              </button>
+              <button type="button" class="expense-wallet-pill" data-wallet="BANK">
+                <i class="fa-solid fa-building-columns"></i> Bank
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="expense-bank-section" class="expense-form__section expense-form__section--bank" hidden>
+          <div class="expense-bank-panel">
+            <label class="expense-label">Bank payment</label>
+            <div class="expense-bank-pills" id="expense-bank-type-pills">
+              <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
+              <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
+            </div>
+            <label class="expense-label" for="expense-bank-ref" id="expense-bank-ref-label">Cheque number</label>
+            <input type="text" id="expense-bank-ref" class="expense-combobox"
+              placeholder="e.g. 004521" autocomplete="off" />
+            <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
+            <div class="expense-receipt-box">
+              <input type="file" id="cash-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
+              <p class="expense-receipt-hint">Passbook entry, bank statement, or payment screenshot.</p>
+              <ul id="cash-bank-proof-list" class="expense-receipt-list" hidden></ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="expense-form__section expense-form__section--amount">
+          <label class="expense-label" for="cash-amt">Amount (₹)</label>
+          <input type="number" id="cash-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--date">
+          <label class="expense-label" for="cash-date">Bill date</label>
+          <input type="date" id="cash-date" class="expense-date" />
+        </div>
+
+        <div class="expense-form__section expense-form__section--cats">
+          <label class="expense-label" for="expense-cat-input">Category</label>
+          <input type="text" id="expense-cat-input" class="expense-combobox" list="expense-cat-datalist"
+            placeholder="Type to search… e.g. Maintenance" autocomplete="off" />
+          <datalist id="expense-cat-datalist"></datalist>
+        </div>
+
+        <div class="expense-form__section expense-form__section--subcat">
+          <label class="expense-label" for="expense-subcat-input">Sub-category <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="expense-subcat-input" class="expense-combobox" list="expense-subcat-datalist"
+            placeholder="e.g. Lift motor, Guard uniforms" autocomplete="off" />
+          <datalist id="expense-subcat-datalist"></datalist>
+        </div>
+
+        <div class="expense-form__section expense-form__section--vendor-invoice">
+          <div class="expense-form__section expense-form__section--vendor">
+            <label class="expense-label" for="expense-vendor-input">Vendor</label>
+            <input type="text" id="expense-vendor-input" class="expense-combobox" list="expense-vendor-datalist"
+              placeholder="e.g. ABC Elevators, Sharma Plumbing" autocomplete="off" />
+            <datalist id="expense-vendor-datalist"></datalist>
+          </div>
+          <div class="expense-form__section expense-form__section--invoice" id="expense-invoice-wrap">
+            <label class="expense-label" for="expense-invoice-input">Invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="expense-invoice-input" class="expense-combobox"
+              placeholder="e.g. INV-4821" autocomplete="off" />
+          </div>
+          <div class="expense-form__section expense-form__section--invoice" id="bill-invoice-wrap" hidden>
+            <label class="expense-label" for="bill-invoice-input" id="bill-invoice-label">Invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="bill-invoice-input" class="expense-combobox" placeholder="e.g. INV-4821" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="expense-form__section expense-form__section--desc">
+          <label class="expense-label" for="cash-desc">Notes <span class="expense-optional">(optional)</span></label>
+          <textarea id="cash-desc" class="expense-desc expense-textarea" rows="2"
+            placeholder="Work done, payment terms, or other details"></textarea>
+        </div>
+      </div>
+
+      <div id="income-form-view" class="expense-form expense-form--income" style="display: none;">
+        <div class="bill-docs__intro bill-details-step" hidden>
+          <h3 class="bill-docs__title">Details from the receipt</h3>
+          <p class="bill-docs__desc">Amount, date, and income type for this receipt.</p>
+        </div>
+        <div class="payment-record__details">
+          <div class="payment-record__amount-row payment-record__amount-row--lead">
+            <div class="expense-form__section expense-form__section--amount">
+              <label class="expense-label" for="income-amt">Amount (₹)</label>
+              <input type="number" id="income-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" autofocus />
+            </div>
+            <div class="expense-form__section expense-form__section--date">
+              <label class="expense-label" for="income-date">Date</label>
+              <input type="date" id="income-date" class="expense-date" />
+            </div>
+          </div>
+
+          <div class="expense-form__section" id="income-bill-invoice-wrap" hidden>
+            <label class="expense-label" for="income-bill-invoice-input" id="income-bill-invoice-label">Receipt / invoice # <span class="expense-optional">(optional)</span></label>
+            <input type="text" id="income-bill-invoice-input" class="expense-combobox" placeholder="e.g. INV-4821" autocomplete="off" />
+          </div>
+
+          <div class="payment-record__flat-row expense-form__section" id="payment-record-flat-wrap" hidden>
+            <label class="expense-label" for="maintenance-unit-input">Flat / unit</label>
+            <input type="text" id="maintenance-unit-input" class="expense-combobox" list="maintenance-unit-datalist"
+              placeholder="e.g. A-101" autocomplete="off" />
+            <datalist id="maintenance-unit-datalist"></datalist>
+          </div>
+
+          <fieldset class="expense-form__section expense-form__section--wallet payment-method-fieldset">
+            <legend class="expense-label">Payment method</legend>
+            <div class="payment-method-radios" id="income-wallet-pills" role="radiogroup" aria-label="Payment method">
+              <label class="payment-method-radio expense-wallet-pill expense-wallet-pill--cash active" data-wallet="CASH">
+                <input type="radio" name="income-wallet-method" value="CASH" class="payment-method-radio__input" checked />
+                <span class="payment-method-radio__control" aria-hidden="true"></span>
+                <span class="payment-method-radio__label">Petty cash</span>
+              </label>
+              <label class="payment-method-radio expense-wallet-pill expense-wallet-pill--bank" data-wallet="BANK">
+                <input type="radio" name="income-wallet-method" value="BANK" class="payment-method-radio__input" />
+                <span class="payment-method-radio__control" aria-hidden="true"></span>
+                <span class="payment-method-radio__label">Bank <span class="payment-method-radio__hint">UPI · cheque · NEFT</span></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="income-bank-section" class="expense-form__section expense-form__section--bank" hidden>
+            <div class="expense-bank-panel">
+              <label class="expense-label">Bank receipt</label>
+              <div class="expense-bank-pills" id="income-bank-type-pills">
+                <button type="button" class="expense-bank-pill active" data-bank-type="CHEQUE">Cheque</button>
+                <button type="button" class="expense-bank-pill" data-bank-type="UPI">UPI</button>
+                <button type="button" class="expense-bank-pill" data-bank-type="NEFT">NEFT / IMPS</button>
+              </div>
+              <label class="expense-label" for="income-bank-ref" id="income-bank-ref-label">Cheque number</label>
+              <input type="text" id="income-bank-ref" class="expense-combobox"
+                placeholder="e.g. 004521" autocomplete="off" />
+              <label class="expense-label" style="margin-top:0.65rem;">Bank proof <span class="expense-optional">(optional)</span></label>
+              <div class="expense-receipt-box">
+                <input type="file" id="cash-income-bank-proof" accept="image/*,.pdf,application/pdf" multiple />
+                <p class="expense-receipt-hint">Deposit slip, passbook entry, or payment confirmation.</p>
+                <ul id="cash-income-bank-proof-list" class="expense-receipt-list" hidden></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="expense-form__section expense-form__section--cats">
+            <label class="expense-label" for="income-cat-input">Income type</label>
+            <input type="text" id="income-cat-input" class="expense-combobox" list="income-cat-datalist"
+              placeholder="Type to search… e.g. Maintenance collection" autocomplete="off" />
+            <datalist id="income-cat-datalist"></datalist>
+          </div>
+
+          <div id="income-extra-section" class="expense-form__section expense-form__section--income-extra" hidden>
+            <p id="income-extra-hint" class="income-extra-hint"></p>
+            <div class="expense-form__section--vendor-invoice income-extra-fields">
+              <div id="income-extra-vendor-wrap" class="expense-form__section expense-form__section--vendor" hidden>
+                <label class="expense-label" for="income-vendor-input" id="income-vendor-label">Vendor</label>
+                <input type="text" id="income-vendor-input" class="expense-combobox" list="income-vendor-datalist"
+                  placeholder="e.g. ABC Builders" autocomplete="off" />
+                <datalist id="income-vendor-datalist"></datalist>
+              </div>
+              <div id="income-extra-ref-wrap" class="expense-form__section expense-form__section--invoice" hidden>
+                <label class="expense-label" for="income-reference-input" id="income-reference-label">Reference</label>
+                <input type="text" id="income-reference-input" class="expense-combobox"
+                  placeholder="e.g. Contract #12" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+
+          <div class="expense-form__section expense-form__section--desc">
+            <label class="expense-label" for="income-desc">Notes <span class="expense-optional">(optional)</span></label>
+            <textarea id="income-desc" class="expense-desc expense-textarea" rows="2"
+              placeholder="e.g. Monthly maintenance collection from Block A"></textarea>
+          </div>
+        </div>
+
+        <div id="income-maintenance-section" class="expense-form__section expense-form__section--maintenance payment-record__alloc" hidden>
+          <div class="payment-record__alloc-head">
+            <h3 class="payment-record__alloc-title">Apply to invoices</h3>
+            <span class="payment-record__alloc-hint">Oldest first — adjust if needed</span>
+          </div>
+          <div id="maintenance-allocation-rows" class="maintenance-allocation-rows"></div>
+          <p id="maintenance-allocation-summary" class="maintenance-alloc-summary"></p>
+          <p id="maintenance-alloc-credit" class="maintenance-alloc-credit" hidden></p>
+        </div>
+      </div>
+
+      <div id="bill-payment-section" class="bill-payment" hidden>
+        <div class="bill-docs__intro">
+          <h3 class="bill-docs__title" id="bill-payment-title">Payment status</h3>
+          <p class="bill-docs__desc" id="bill-payment-desc">Already paid, or leave unpaid until cash / bank is linked later?</p>
+        </div>
+        <div class="expense-wallet-pills expense-wallet-pills--compact bill-payment-pills" id="bill-payment-pills" role="group" aria-label="Payment status">
+          <button type="button" class="expense-wallet-pill active" data-bill-pay="unpaid">
+            <i class="fa-solid fa-clock"></i> Unpaid
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="cash">
+            <i class="fa-solid fa-money-bill-wave"></i> Paid · Cash
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="cheque">
+            <i class="fa-solid fa-money-check"></i> Paid · Cheque
+          </button>
+          <button type="button" class="expense-wallet-pill" data-bill-pay="online">
+            <i class="fa-solid fa-mobile-screen"></i> Paid · Online
+          </button>
+        </div>
+        <div id="bill-cheque-wrap" hidden>
+          <label class="expense-label" for="bill-cheque-no">Cheque number</label>
+          <input type="text" id="bill-cheque-no" class="expense-combobox" placeholder="e.g. 27108" autocomplete="off" />
+        </div>
+        <div id="bill-online-wrap" hidden>
+          <label class="expense-label" for="bill-online-ref">UTR / transfer ref <span class="expense-optional">(optional)</span></label>
+          <input type="text" id="bill-online-ref" class="expense-combobox" placeholder="e.g. UPI ref or NEFT UTR" autocomplete="off" />
+        </div>
+        <div id="bill-paid-date-wrap" hidden>
+          <label class="expense-label" for="bill-paid-date">Payment date</label>
+          <input type="date" id="bill-paid-date" class="expense-combobox" />
+        </div>
+      </div>
+
+      <!-- kept for save logic -->
+      <select id="cash-cat-select" hidden aria-hidden="true" tabindex="-1">
+        <option value="Security">Security / Guards</option>
+        <option value="Maintenance">General Maintenance</option>
+        <option value="Plumbing">Plumbing / Water</option>
+        <option value="Electrical">Electrical / Diesel</option>
+        <option value="Stationery">Office / Stationery</option>
+        <option value="Maintenance Collection">Maintenance Collection</option>
+        <option value="Marketing">Marketing / Events</option>
+        <option value="Promotion">Promotion / Sponsorship</option>
+        <option value="Interest">Bank Interest</option>
+        <option value="Petty Inflow">Petty Cash Top-up</option>
+        <option value="Reconcile">Direct Synchronization</option>
+        <option value="Bank Reject">Bank Reject</option>
+        <option value="Other Income">Other Income</option>
+        <option value="Other">Miscellaneous</option>
+      </select>
+      <select id="cash-wallet-select" hidden aria-hidden="true" tabindex="-1">
+        <option value="CASH">Cash Desk</option>
+        <option value="BANK">Main Bank</option>
+      </select>
+      </div>
+
+      <div class="expense-modal__footer">
+        <label class="expense-form__exclude-reports">
+          <input type="checkbox" id="txn-exclude-reports" />
+          <span>Exclude from income/expense reports</span>
+          <span class="expense-form__exclude-hint">Ledger &amp; bank balance unchanged — use for bank rejects and internal transfers</span>
+        </label>
+        <div class="expense-modal__footer-actions">
+        <button class="btn btn-outline" type="button"
+          onclick="document.getElementById('cash-modal').classList.remove('active')">Cancel</button>
+        <button class="btn btn-outline" type="button" id="cash-modal-unlock-btn" hidden>Edit</button>
+        <button class="btn btn-primary" type="button" id="save-cash-btn">Save Expense</button>
+        </div>
+      </div>
+    </div>
+  </div>

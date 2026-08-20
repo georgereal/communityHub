@@ -1,0 +1,165 @@
+<div id="fn-subview-finance-docs" class="fdoc-subview" style="padding: 0;">
+          <div class="raised-page-toolbar">
+            <div class="raised-page-toolbar__left">
+              <div>
+                <h3 class="fa-panel__title" style="margin:0;">Bills &amp; receipts</h3>
+                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">
+                  Supporting vouchers with uploads — not the passbook ledger.
+                  Link cash spends to a Petty Cash funding line (1 ledger → many bills). Cash float store lives here.
+                </p>
+              </div>
+              <p id="fn-fdoc-meta" class="raised-page-meta"></p>
+            </div>
+            <div class="raised-page-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-template-btn">
+                <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Template
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="fn-fdoc-upload-btn">
+                <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Import Excel
+              </button>
+              <input type="file" id="fn-fdoc-file" accept=".xlsx,.xls" hidden />
+            </div>
+          </div>
+
+          <section id="fn-fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" aria-label="Cash float store"></section>
+
+          <details class="fdoc-funding-details" id="fn-fdoc-funding-details">
+            <summary class="fdoc-funding-details__summary">
+              <span class="fdoc-funding-details__title">Petty Cash float</span>
+              <span id="fn-fdoc-funding-summary-meta" class="fdoc-funding-details__meta"></span>
+            </summary>
+            <div class="fdoc-funding-details__body">
+              <div class="fdoc-cash-opening" id="fn-fdoc-cash-opening">
+                <span class="fdoc-cash-opening__label" title="Desk cash before the first bucket (Prev on the first row)">Opening</span>
+                <label class="fdoc-cash-opening__field">
+                  <span class="visually-hidden">As of</span>
+                  <input type="date" id="fn-fdoc-cash-opening-date" class="expense-combobox" aria-label="Opening as of" />
+                </label>
+                <label class="fdoc-cash-opening__field fdoc-cash-opening__field--amt">
+                  <span class="visually-hidden">Opening cash</span>
+                  <input type="number" id="fn-fdoc-cash-opening-amount" class="expense-combobox" step="1" placeholder="₹ opening" aria-label="Opening cash" />
+                </label>
+                <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-cash-opening-save">Save</button>
+                <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-cash-opening-match" title="Set opening so Left equals a cash count">Match…</button>
+                <p class="fdoc-cash-opening__hint" id="fn-fdoc-cash-opening-hint" hidden></p>
+              </div>
+              <div id="fn-fdoc-funding-table" class="fa-table-wrap fdoc-funding-table-wrap"></div>
+              <details class="fdoc-funding-sub" id="fn-fdoc-cash-to-bank-details">
+                <summary class="fdoc-funding-sub__summary">
+                  <span>Cash to bank</span>
+                  <span id="fn-fdoc-cash-to-bank-meta" class="fdoc-funding-details__meta"></span>
+                </summary>
+                <div id="fn-fdoc-cash-to-bank-table" class="fa-table-wrap"></div>
+              </details>
+            </div>
+          </details>
+
+          <div id="fn-fdoc-report-banner" class="ledger-pivot-banner" hidden></div>
+
+          <div class="fdoc-filters" role="search">
+            <form class="search-container fdoc-filters__search" autocomplete="off" onsubmit="return false">
+              <i class="fa-solid fa-magnifying-glass ledger-search-icon" aria-hidden="true"></i>
+              <input
+                type="search"
+                id="fn-fdoc-search"
+                class="expense-combobox fdoc-filters__search-input"
+                placeholder="Search vendor, category…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </form>
+            <select id="fn-fdoc-filter-kind" class="expense-combobox fdoc-filters__select" aria-label="Filter by kind">
+              <option value="all">All kinds</option>
+              <option value="OUT">Expenses</option>
+              <option value="IN">Income</option>
+            </select>
+            <select id="fn-fdoc-filter-status" class="expense-combobox fdoc-filters__select" aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Cheque ready / paid (unlinked)</option>
+              <option value="linked">Linked to ledger</option>
+            </select>
+            <select id="fn-fdoc-filter-pay" class="expense-combobox fdoc-filters__select" aria-label="Filter by payment">
+              <option value="all">All payment types</option>
+              <option value="cash">Cash only</option>
+              <option value="cheque">Cheque only</option>
+              <option value="online">Online / UPI</option>
+              <option value="unpaid">Unpaid only</option>
+            </select>
+            <div class="fdoc-filters__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-jump-bottom" title="Jump to oldest bills">
+                <i class="fa-solid fa-angles-down" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Jump to end</span>
+                <span class="fdoc-action-short">End</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-jump-top" hidden title="Back to newest bills">
+                <i class="fa-solid fa-angles-up" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Newest first</span>
+                <span class="fdoc-action-short">Top</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-bulk-link" disabled title="Link selected">
+                <i class="fa-solid fa-link" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Link selected</span>
+                <span class="fdoc-action-short">Link</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-deposit-wallet" title="Deposit wallet to bank">
+                <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Deposit wallet to bank</span>
+                <span class="fdoc-action-short">Deposit</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-sync-cats" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
+                <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Sync categories</span>
+                <span class="fdoc-action-short">Sync</span>
+              </button>
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-fdoc-bulk-delete" disabled title="Delete selected">
+                <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Delete selected</span>
+                <span class="fdoc-action-short">Delete</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="fa-table-wrap" style="margin-bottom:1.25rem;">
+            <table class="fa-pivot-table cash-float-table">
+              <thead>
+                <tr>
+                  <th class="fdoc-check-col">
+                    <input type="checkbox" id="fn-fdoc-select-all" title="Select all rows" aria-label="Select all bills" />
+                  </th>
+                  <th>Date</th>
+                  <th>Kind</th>
+                  <th>Category / sub</th>
+                  <th>Vendor / note</th>
+                  <th>Payment</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="fn-fdoc-table-body"></tbody>
+            </table>
+            <p id="fn-fdoc-scroll-sentinel" class="fdoc-scroll-sentinel" hidden>Scroll for more</p>
+          </div>
+
+          <!-- Inline edit form removed: Add/Edit bill & receipt use the shared cash modal. -->
+
+          <div id="fn-fdoc-link-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="fn-fdoc-link-backdrop"></div>
+            <div class="fdoc-link-modal__panel" role="dialog" aria-labelledby="fdoc-link-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="fn-fdoc-link-title" class="fa-panel__title" style="margin:0;">Link to ledger row</h3>
+                <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-link-close">Close</button>
+              </div>
+              <p id="fn-fdoc-link-hint" class="fa-panel__hint"></p>
+              <div id="fn-fdoc-link-search-wrap" class="fdoc-link-search-wrap" hidden>
+                <input type="search" id="fn-fdoc-link-search" class="expense-combobox" placeholder="Search cheque #, vendor, narration, amount…" autocomplete="off" />
+              </div>
+              <label id="fn-fdoc-link-wallet-wrap" class="fdoc-link-wallet-wrap" hidden>
+                <input type="checkbox" id="fn-fdoc-link-wallet-float" checked />
+                <span>Use wallet float when bank deposit ≠ selected receipts</span>
+              </label>
+              <div id="fn-fdoc-link-list" class="fdoc-link-list"></div>
+            </div>
+          </div>
+        </div>

@@ -1,0 +1,27 @@
+<div id="fn-subview-invoices-raised" class="raised-subview" style="padding: 0;">
+          <div class="raised-page-toolbar">
+            <div class="raised-page-toolbar__left">
+              <div>
+                <h3 class="fa-panel__title" style="margin:0;">Invoices raised</h3>
+                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">Data from invoices raised in tools like NoBroker or MyGate — upload Excel and filter for financial tracking. Amount filters support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</p>
+              </div>
+              <p id="fn-raised-page-meta" class="raised-page-meta"></p>
+            </div>
+            <div class="raised-page-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fn-raised-clear-filters" hidden title="Clear column filters">
+                Clear filters
+              </button>
+              <div id="fn-raised-col-picker"></div>
+              <button type="button" class="btn btn-primary btn--small" id="fn-raised-page-upload-btn">
+                <i class="fa-solid fa-file-arrow-up"></i> Upload Excel
+              </button>
+              <input type="file" id="fn-raised-page-file" accept=".xlsx,.xls" hidden />
+            </div>
+          </div>
+          <div class="fa-table-wrap raised-table-wrap">
+            <table class="fa-pivot-table raised-table">
+              <thead id="fn-raised-table-head"></thead>
+              <tbody id="fn-raised-table-body"></tbody>
+            </table>
+          </div>
+        </div>

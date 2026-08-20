@@ -1,0 +1,159 @@
+<div id="fn-subview-reports" style="padding: 0;">
+
+  <div class="fn-settings" id="fn-reports-header-tools">
+    <button type="button" class="fn-action-btn fn-action-btn--icon" id="fn-fa-settings-btn"
+      aria-haspopup="true" aria-expanded="false" aria-controls="fn-fa-settings-panel"
+      title="Report settings">
+      <i class="fa-solid fa-gear" aria-hidden="true"></i>
+      <span class="sr-only">Settings</span>
+    </button>
+    <div class="fn-settings-panel" id="fn-fa-settings-panel" hidden>
+      <div class="fn-filter-strip">
+
+        <div class="fn-filter-chip">
+          <i class="fa-solid fa-clock-rotate-left fn-filter-chip__icon" aria-hidden="true"></i>
+          <label class="fn-filter-chip__label" for="fn-fa-month-range">History</label>
+          <select id="fn-fa-month-range" class="fn-filter-chip__select">
+            <option value="6" selected>Last 6 months</option>
+            <option value="12">Last 12 months</option>
+            <option value="18">Last 18 months</option>
+          </select>
+          <i class="fa-solid fa-chevron-down fn-filter-chip__caret" aria-hidden="true"></i>
+        </div>
+
+        <div class="fn-filter-chip">
+          <i class="fa-solid fa-table-columns fn-filter-chip__icon" aria-hidden="true"></i>
+          <label class="fn-filter-chip__label" for="fn-fa-pivot-dimension">Pivot by</label>
+          <select id="fn-fa-pivot-dimension" class="fn-filter-chip__select">
+            <option value="cat">Category</option>
+            <option value="wallet_cat">Cash / Bank → Category</option>
+            <option value="sub_category">Sub-category</option>
+            <option value="vendor">Vendor</option>
+          </select>
+          <i class="fa-solid fa-chevron-down fn-filter-chip__caret" aria-hidden="true"></i>
+        </div>
+
+        <div class="fn-filter-chip">
+          <i class="fa-solid fa-chart-line fn-filter-chip__icon" aria-hidden="true"></i>
+          <label class="fn-filter-chip__label" for="fn-fa-project-months">Forecast</label>
+          <select id="fn-fa-project-months" class="fn-filter-chip__select">
+            <option value="1">1 month</option>
+            <option value="3" selected>3 months</option>
+            <option value="6">6 months</option>
+          </select>
+          <i class="fa-solid fa-chevron-down fn-filter-chip__caret" aria-hidden="true"></i>
+        </div>
+
+        <div class="fn-filter-chip">
+          <i class="fa-solid fa-calendar-days fn-filter-chip__icon" aria-hidden="true"></i>
+          <label class="fn-filter-chip__label" for="fn-fa-date-tolerance">Match dates</label>
+          <select id="fn-fa-date-tolerance" class="fn-filter-chip__select">
+            <option value="0">Exact date</option>
+            <option value="3" selected>±3 days</option>
+            <option value="7">±7 days</option>
+          </select>
+          <i class="fa-solid fa-chevron-down fn-filter-chip__caret" aria-hidden="true"></i>
+        </div>
+
+        <label class="fn-filter-chip fn-filter-chip--check">
+          <i class="fa-solid fa-filter fn-filter-chip__icon" aria-hidden="true"></i>
+          <input type="checkbox" id="fn-fa-sheet-only" checked class="fn-filter-chip__checkbox" />
+          <span class="fn-filter-chip__label">Structured only</span>
+        </label>
+
+      </div>
+    </div>
+  </div>
+
+  <section class="dashboard-metrics fa-balance-metrics" id="fn-fa-balance-metrics" aria-label="Balance reconciliation"></section>
+
+  <div class="fa-insight-row">
+    <details class="fa-panel fa-collapsible-panel" id="fn-fa-planned-expenses" aria-label="Cash position worksheet"></details>
+    <details class="fa-panel fa-collapsible-panel" id="fn-fa-monthly-summary" aria-label="Monthly raised income expenses summary"></details>
+  </div>
+
+  <div
+    class="fa-cash-mode fn-cash-toggle-v2"
+    id="fn-fa-cash-expense-reporting"
+    role="group"
+    aria-label="Cash expense reporting mode"
+    data-mode="petty_bank"
+  >
+    <span class="fn-cash-toggle-v2__side" data-side="petty_bank">Bank Petty Cash</span>
+    <button
+      type="button"
+      class="fa-cash-mode__toggle"
+      id="fn-fa-cash-expense-toggle"
+      role="switch"
+      aria-checked="false"
+      aria-label="Include cash bills by category in reports"
+      title="Toggle between bank Petty Cash lump sum and cash bills by category"
+    >
+      <span class="fa-cash-mode__knob" aria-hidden="true"></span>
+    </button>
+    <span class="fn-cash-toggle-v2__side" data-side="cash_detail">Cash bills by category</span>
+    <p class="fa-cash-mode__hint">
+      Off = bank Petty Cash as one lump. On = bank ledger plus cash bills broken out by category.
+    </p>
+    <button type="button" class="fn-action-btn fn-cash-toggle-v2__excel" id="fn-fa-download-xlsx" title="Download monthly stacks and pivots as Excel">
+      <i class="fa-solid fa-download" aria-hidden="true"></i>
+      <span>Excel</span>
+    </button>
+  </div>
+
+  <div class="fa-charts-grid fa-charts-grid--single">
+    <div class="metric-card fa-chart-card fa-chart-card--full">
+      <div class="fa-chart-card__head">
+        <div>
+          <h3 class="fa-panel__title">Monthly stacks: raised, income &amp; expenses</h3>
+          <p class="fa-panel__hint">Three stacked bars per month — <strong>raised</strong> (NoBroker invoices), <strong>income</strong> (cash in), and <strong>expenses</strong> (<strong>Pivot by</strong> applies to the expense bar).</p>
+        </div>
+        <div class="fa-projection-anchor">
+          <button type="button" class="fa-projection-icon-btn" id="fn-fa-projection-toggle" aria-expanded="false" aria-controls="fn-fa-projection-popover" title="Trend projection">
+            <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+            <span class="sr-only">Trend projection</span>
+            <span class="fa-projection-icon-btn__badge" id="fn-fa-projection-badge" hidden></span>
+          </button>
+          <div class="fa-projection-popover" id="fn-fa-projection-popover" hidden role="dialog" aria-label="Trend projection">
+            <div id="fn-fa-projection-summary"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fa-chart-wrap"><canvas id="fn-fa-combined-chart"></canvas></div>
+    </div>
+  </div>
+
+  <section class="fa-panel fa-pivot-panel">
+    <div class="fa-panel__head fa-panel__head--row">
+      <div>
+        <h3 class="fa-panel__title">Invoices raised pivot</h3>
+        <p class="fa-panel__hint">NoBroker current-period charge heads by month (from Start Period Date). Upload on the <strong>Invoices Raised</strong> tab.</p>
+      </div>
+      <div id="fn-fa-raised-pivot-meta" class="fa-pivot-meta"></div>
+    </div>
+    <div class="fa-table-wrap" id="fn-fa-raised-pivot"></div>
+  </section>
+
+  <section class="fa-panel fa-pivot-panel">
+    <div class="fa-panel__head fa-panel__head--row">
+      <div>
+        <h3 class="fa-panel__title">Income pivot</h3>
+        <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. Rows excluded from reports are omitted.</p>
+      </div>
+      <div id="fn-fa-income-pivot-meta" class="fa-pivot-meta"></div>
+    </div>
+    <div class="fa-table-wrap" id="fn-fa-income-pivot"></div>
+  </section>
+
+  <section class="fa-panel fa-pivot-panel">
+    <div class="fa-panel__head fa-panel__head--row">
+      <div>
+        <h3 class="fa-panel__title">Expense pivot</h3>
+        <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. For cash detail, set category/subcategory on each bill under Bills &amp; receipts.</p>
+      </div>
+      <div id="fn-fa-expense-pivot-meta" class="fa-pivot-meta"></div>
+    </div>
+    <div class="fa-table-wrap" id="fn-fa-expense-pivot"></div>
+  </section>
+
+</div>

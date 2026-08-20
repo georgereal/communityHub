@@ -33,6 +33,8 @@ export let portalState = {
     units: [],
     slots: [], // Shared Community Slots
     finances: { txns: [], vendors: [], subCategories: [], maintenanceInvoices: [], maintenanceAllocations: [], maintenanceChargeHeads: [], maintenanceInvoiceLines: [], maintenancePenaltyRules: [], maintenanceBillingGroups: [], maintenanceBillingGroupUnits: [], maintenanceBillingBatches: [], maintenanceBillingBatchSkips: [], maintenanceReminderLog: [], bankStatementImports: [], bankStatementLines: [], bankClassificationRules: [], nobrokerInvoicesRaised: [], financeDocuments: [], expensePlanItems: [], expensePlanRecurring: [], ledgerSyncSettings: null, ledgerOAuthApps: [], myOAuthConnections: [], syncServiceAccounts: [] },
+    /** Finance-New (Mongo) — isolated from `finances` / classic Finance UI. */
+    financeNew: null,
     community: { name: 'CommunityHub', defaults: { cars: 1, bikes: 1 }, configId: null },
     access: {
         apartments: [{ id: 'apt-default', name: 'CommunityHub' }],

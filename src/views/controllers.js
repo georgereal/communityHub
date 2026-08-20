@@ -127,6 +127,16 @@ export async function activateView(route, page, { signal, generation } = {}) {
             }
             break;
         }
+        case 'finance-new-accounts': {
+            const { activateFinanceNewAccounts } = await import('../financeNew/shell.js');
+            await activateFinanceNewAccounts(sub || 'ledger');
+            break;
+        }
+        case 'finance-new-invoices': {
+            const { activateFinanceNewInvoices } = await import('../financeNew/shell.js');
+            await activateFinanceNewInvoices(sub || 'pending-dues');
+            break;
+        }
         case 'portal': {
             document.querySelectorAll('.portal-subview').forEach((el) => {
                 el.hidden = el.id !== `portal-subview-${sub}`;

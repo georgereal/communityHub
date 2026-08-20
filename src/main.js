@@ -586,6 +586,25 @@ const switchViewInner = async (v) => {
     return;
   }
 
+  // Multi-page apps (Finance-New, Residents React) → full document navigation
+  try {
+    const { MPA_ROUTE_PATHS } = await import('./appShell/routes.js');
+    const mpaPath = MPA_ROUTE_PATHS[route];
+    if (mpaPath) {
+      if (String(route).startsWith('fn-')) {
+        const { writeFinanceCtxFromPortal } = await import('./financeApp/session.js');
+        writeFinanceCtxFromPortal(portalState);
+      } else {
+        const { writeMpaCtxFromPortal } = await import('./appShell/mpaSession.js');
+        writeMpaCtxFromPortal(portalState);
+      }
+      window.location.assign(mpaPath);
+      return;
+    }
+  } catch (err) {
+    console.warn('[nav] MPA redirect failed:', err?.message || err);
+  }
+
   const meta = findPage(route);
   if (!meta) {
     console.warn(`Unknown route: ${v}`);
@@ -1017,6 +1036,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderNavModules();
   initNavInteraction((route) => window.switchView(route));
   applyNavPermissions(new Set(portalState.authPermissions || []), !supabase);
+
+  document.querySelectorAll('a.brand-home-link').forEach((el) => {
+    if (el.dataset.wired === '1') return;
+    el.dataset.wired = '1';
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.switchView?.('dashboard');
+    });
+  });
 
   // Initialize Router State
   console.log('Main: Starting boot sequence...');

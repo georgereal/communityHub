@@ -10,10 +10,52 @@
 
 ```
 ├── .cursor
+│   └── rules
+│       └── ux-list-pages.mdc
 ├── .github
 │   └── workflows
 │       └── repo-map-check.yml
 ├── api
+│   ├── finance
+│   │   └── [...path].js
+│   ├── financeMongo
+│   │   ├── services
+│   │   │   ├── ledgerMutations.js
+│   │   │   └── ledgerReads.js
+│   │   ├── validation
+│   │   │   └── ledger.js
+│   │   ├── errors.js
+│   │   ├── index.js
+│   │   ├── money.js
+│   │   └── permissions.js
+│   ├── property
+│   │   ├── residents
+│   │   │   ├── [id].js
+│   │   │   └── import.js
+│   │   ├── slots
+│   │   │   ├── [id]
+│   │   │   │   ├── assign.js
+│   │   │   │   └── release.js
+│   │   │   └── [id].js
+│   │   ├── units
+│   │   │   ├── [id].js
+│   │   │   ├── import.js
+│   │   │   └── parking-limits.js
+│   │   ├── vehicles
+│   │   │   ├── [id].js
+│   │   │   └── import.js
+│   │   ├── residents.js
+│   │   ├── slots.js
+│   │   ├── state.js
+│   │   ├── units.js
+│   │   └── vehicles.js
+│   ├── propertyMongo
+│   │   ├── errors.js
+│   │   ├── http.js
+│   │   ├── models.js
+│   │   ├── mongoose.js
+│   │   ├── permissions.js
+│   │   └── service.js
 │   ├── accountsAuth.js
 │   ├── auth-session.js
 │   ├── dashboard-summary.js
@@ -22,7 +64,12 @@
 │   ├── evolyxConnection.js
 │   ├── external-connections.js
 │   ├── external-proxy.js
+│   ├── finance-mongo-mutations.js
+│   ├── finance-mongo-reports.js
+│   ├── finance-mongo.js
 │   ├── finance-mutations.js
+│   ├── mongoClient.js
+│   ├── mongoLog.js
 │   ├── oauth-microsoft.js
 │   ├── oauth-service.js
 │   ├── passbook-jobs.js
@@ -116,10 +163,21 @@
 │   ├── finance-reports-preview.md
 │   ├── PHASED_REQUIREMENTS.md
 │   └── REPO_MAP.md
+├── finance
+│   ├── bank-recon.html
+│   ├── docs.html
+│   ├── expense-plan.html
+│   ├── invoices-raised.html
+│   ├── ledger.html
+│   └── reports.html
+├── parking
+│   └── index.html
 ├── public
 │   ├── favicon.svg
 │   ├── finance-reports-preview.html
 │   └── icons.svg
+├── residents
+│   └── index.html
 ├── scripts
 │   ├── git-hooks
 │   │   ├── install-hooks.js
@@ -127,11 +185,141 @@
 │   ├── utilities
 │   │   └── generate-repo-map.js
 │   ├── capture-finance-screenshots.mjs
+│   ├── migrate-finance-to-mongo.mjs
+│   ├── migrate-logs-to-mongo.mjs
+│   ├── migrate-property-to-mongo.mjs
 │   ├── mockFinanceState.js
+│   ├── remodel-finance-mongo.mjs
 │   ├── verify-build-chunks.mjs
 │   └── verify-vercel-api.mjs
 ├── src
+│   ├── appShell
+│   │   ├── html
+│   │   │   └── layout.html
+│   │   ├── chrome.js
+│   │   ├── ensureChartJs.js
+│   │   ├── mount.js
+│   │   ├── mpaSession.js
+│   │   ├── nav.js
+│   │   ├── navPref.js
+│   │   ├── routes.js
+│   │   └── shell.css
 │   ├── assets
+│   ├── financeApp
+│   │   ├── html
+│   │   │   ├── _bank-recon-modals.html
+│   │   │   ├── _cash-modal.html
+│   │   │   ├── _header-actions.html
+│   │   │   ├── _ledger-line-modal.html
+│   │   │   ├── bank-recon.html
+│   │   │   ├── docs.html
+│   │   │   ├── expense-plan.html
+│   │   │   ├── invoices-raised.html
+│   │   │   ├── ledger.html
+│   │   │   └── reports.html
+│   │   ├── ledger
+│   │   │   ├── data.js
+│   │   │   ├── exportExcel.js
+│   │   │   ├── lineModal.js
+│   │   │   └── view.js
+│   │   ├── pages
+│   │   │   ├── bank-recon.js
+│   │   │   ├── docs.js
+│   │   │   ├── expense-plan.js
+│   │   │   ├── invoices-raised.js
+│   │   │   ├── ledger.js
+│   │   │   └── reports.js
+│   │   ├── boot.js
+│   │   ├── chrome.js
+│   │   ├── finance-app.css
+│   │   ├── financeNav.js
+│   │   ├── mount.js
+│   │   └── session.js
+│   ├── financeNew
+│   │   ├── api.js
+│   │   ├── bankReconciliation.js
+│   │   ├── bankStatementQueries.js
+│   │   ├── billingBatches.js
+│   │   ├── billingGroups.js
+│   │   ├── billingHeads.js
+│   │   ├── cashFloat.js
+│   │   ├── cashFloatPredicates.js
+│   │   ├── classicState.js
+│   │   ├── duesAging.js
+│   │   ├── expensePlan.js
+│   │   ├── financeAnalytics.js
+│   │   ├── financeDocuments.js
+│   │   ├── finances.js
+│   │   ├── invoicesRaisedPage.js
+│   │   ├── ledger.js
+│   │   ├── ledgerBalance.js
+│   │   ├── ledgerDisplayRows.js
+│   │   ├── ledgerExport.js
+│   │   ├── ledgerFilter.js
+│   │   ├── ledgerStatementContext.js
+│   │   ├── ledgerSummaryUi.js
+│   │   ├── ledgerTable.js
+│   │   ├── ledgerTxnLocal.js
+│   │   ├── load.js
+│   │   ├── loadReports.js
+│   │   ├── maintenanceBilling.js
+│   │   ├── mongoMutations.js
+│   │   ├── mongoWrite.js
+│   │   ├── nobrokerInvoicesRaised.js
+│   │   ├── packCache.js
+│   │   ├── payments.js
+│   │   ├── pull.js
+│   │   ├── reports.js
+│   │   ├── shell.js
+│   │   ├── state.js
+│   │   ├── vouchers.js
+│   │   ├── voucherStore.js
+│   │   └── windowBridge.js
+│   ├── listUi
+│   │   └── ExcelColHeader.jsx
+│   ├── propertyApp
+│   │   ├── parking
+│   │   │   ├── api.js
+│   │   │   ├── BaseSlotsDialog.jsx
+│   │   │   ├── InlineUnitEdit.jsx
+│   │   │   ├── main.jsx
+│   │   │   ├── NeighborRentDialog.jsx
+│   │   │   ├── PoolAssignDialog.jsx
+│   │   │   ├── PoolSlotDialog.jsx
+│   │   │   ├── UnitParkingDialog.jsx
+│   │   │   ├── VehicleFormDialog.jsx
+│   │   │   └── VehicleList.jsx
+│   │   ├── units
+│   │   │   ├── api.js
+│   │   │   ├── main.jsx
+│   │   │   ├── UnitDetailDialog.jsx
+│   │   │   ├── UnitFormDialog.jsx
+│   │   │   ├── UnitImportDialog.jsx
+│   │   │   └── UnitList.jsx
+│   │   ├── boot.js
+│   │   ├── client.js
+│   │   ├── loadState.js
+│   │   ├── mount.jsx
+│   │   └── property-app.css
+│   ├── residentsApp
+│   │   ├── components
+│   │   │   ├── ResidentFormDialog.jsx
+│   │   │   └── ResidentImportDialog.jsx
+│   │   ├── hooks
+│   │   │   └── useListQueryParams.js
+│   │   ├── pages
+│   │   │   ├── ResidentDetails.jsx
+│   │   │   └── ResidentList.jsx
+│   │   ├── utils
+│   │   │   └── listNavigation.js
+│   │   ├── api.js
+│   │   ├── App.jsx
+│   │   ├── boot.js
+│   │   ├── loadState.js
+│   │   ├── main.jsx
+│   │   ├── mount.jsx
+│   │   ├── residents-app.css
+│   │   └── theme.js
 │   ├── views
 │   │   ├── html
 │   │   │   ├── access-control.html
@@ -139,6 +327,8 @@
 │   │   │   ├── apartment.html
 │   │   │   ├── dashboard.html
 │   │   │   ├── email.html
+│   │   │   ├── finance-new-accounts.html
+│   │   │   ├── finance-new-invoices.html
 │   │   │   ├── invoices.html
 │   │   │   ├── operations.html
 │   │   │   ├── portal.html
@@ -152,6 +342,8 @@
 │   │   │   ├── apartment.js
 │   │   │   ├── dashboard.js
 │   │   │   ├── email.js
+│   │   │   ├── finance-new-accounts.js
+│   │   │   ├── finance-new-invoices.js
 │   │   │   ├── invoices.js
 │   │   │   ├── operations.js
 │   │   │   ├── portal.js
@@ -282,6 +474,8 @@
 │   ├── visitorGate.js
 │   ├── visitors.css
 │   └── visitors.js
+├── units
+│   └── index.html
 ├── .cursorrules
 ├── .gitignore
 ├── AGENTS.md
@@ -312,7 +506,7 @@
 
 ```
 
-**Scale:** ~149 JavaScript modules, ~11 CSS files, ~15 HTML entry pages.
+**Scale:** ~257 JavaScript modules, ~15 CSS files, ~28 HTML entry pages.
 
 ---
 
@@ -324,7 +518,133 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ### Directory tree
 
 ```
+├── appShell
+│   ├── html
+│   │   └── layout.html
+│   ├── chrome.js
+│   ├── ensureChartJs.js
+│   ├── mount.js
+│   ├── mpaSession.js
+│   ├── nav.js
+│   ├── navPref.js
+│   ├── routes.js
+│   └── shell.css
 ├── assets
+├── financeApp
+│   ├── html
+│   │   ├── _bank-recon-modals.html
+│   │   ├── _cash-modal.html
+│   │   ├── _header-actions.html
+│   │   ├── _ledger-line-modal.html
+│   │   ├── bank-recon.html
+│   │   ├── docs.html
+│   │   ├── expense-plan.html
+│   │   ├── invoices-raised.html
+│   │   ├── ledger.html
+│   │   └── reports.html
+│   ├── ledger
+│   │   ├── data.js
+│   │   ├── exportExcel.js
+│   │   ├── lineModal.js
+│   │   └── view.js
+│   ├── pages
+│   │   ├── bank-recon.js
+│   │   ├── docs.js
+│   │   ├── expense-plan.js
+│   │   ├── invoices-raised.js
+│   │   ├── ledger.js
+│   │   └── reports.js
+│   ├── boot.js
+│   ├── chrome.js
+│   ├── finance-app.css
+│   ├── financeNav.js
+│   ├── mount.js
+│   └── session.js
+├── financeNew
+│   ├── api.js
+│   ├── bankReconciliation.js
+│   ├── bankStatementQueries.js
+│   ├── billingBatches.js
+│   ├── billingGroups.js
+│   ├── billingHeads.js
+│   ├── cashFloat.js
+│   ├── cashFloatPredicates.js
+│   ├── classicState.js
+│   ├── duesAging.js
+│   ├── expensePlan.js
+│   ├── financeAnalytics.js
+│   ├── financeDocuments.js
+│   ├── finances.js
+│   ├── invoicesRaisedPage.js
+│   ├── ledger.js
+│   ├── ledgerBalance.js
+│   ├── ledgerDisplayRows.js
+│   ├── ledgerExport.js
+│   ├── ledgerFilter.js
+│   ├── ledgerStatementContext.js
+│   ├── ledgerSummaryUi.js
+│   ├── ledgerTable.js
+│   ├── ledgerTxnLocal.js
+│   ├── load.js
+│   ├── loadReports.js
+│   ├── maintenanceBilling.js
+│   ├── mongoMutations.js
+│   ├── mongoWrite.js
+│   ├── nobrokerInvoicesRaised.js
+│   ├── packCache.js
+│   ├── payments.js
+│   ├── pull.js
+│   ├── reports.js
+│   ├── shell.js
+│   ├── state.js
+│   ├── vouchers.js
+│   ├── voucherStore.js
+│   └── windowBridge.js
+├── listUi
+│   └── ExcelColHeader.jsx
+├── propertyApp
+│   ├── parking
+│   │   ├── api.js
+│   │   ├── BaseSlotsDialog.jsx
+│   │   ├── InlineUnitEdit.jsx
+│   │   ├── main.jsx
+│   │   ├── NeighborRentDialog.jsx
+│   │   ├── PoolAssignDialog.jsx
+│   │   ├── PoolSlotDialog.jsx
+│   │   ├── UnitParkingDialog.jsx
+│   │   ├── VehicleFormDialog.jsx
+│   │   └── VehicleList.jsx
+│   ├── units
+│   │   ├── api.js
+│   │   ├── main.jsx
+│   │   ├── UnitDetailDialog.jsx
+│   │   ├── UnitFormDialog.jsx
+│   │   ├── UnitImportDialog.jsx
+│   │   └── UnitList.jsx
+│   ├── boot.js
+│   ├── client.js
+│   ├── loadState.js
+│   ├── mount.jsx
+│   └── property-app.css
+├── residentsApp
+│   ├── components
+│   │   ├── ResidentFormDialog.jsx
+│   │   └── ResidentImportDialog.jsx
+│   ├── hooks
+│   │   └── useListQueryParams.js
+│   ├── pages
+│   │   ├── ResidentDetails.jsx
+│   │   └── ResidentList.jsx
+│   ├── utils
+│   │   └── listNavigation.js
+│   ├── api.js
+│   ├── App.jsx
+│   ├── boot.js
+│   ├── loadState.js
+│   ├── main.jsx
+│   ├── mount.jsx
+│   ├── residents-app.css
+│   └── theme.js
 ├── views
 │   ├── html
 │   │   ├── access-control.html
@@ -332,6 +652,8 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 │   │   ├── apartment.html
 │   │   ├── dashboard.html
 │   │   ├── email.html
+│   │   ├── finance-new-accounts.html
+│   │   ├── finance-new-invoices.html
 │   │   ├── invoices.html
 │   │   ├── operations.html
 │   │   ├── portal.html
@@ -345,6 +667,8 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 │   │   ├── apartment.js
 │   │   ├── dashboard.js
 │   │   ├── email.js
+│   │   ├── finance-new-accounts.js
+│   │   ├── finance-new-invoices.js
 │   │   ├── invoices.js
 │   │   ├── operations.js
 │   │   ├── portal.js
@@ -632,6 +956,9 @@ and an optional `subview`.
 | ops-amenities | Amenities | operations | amenities |
 | ops-visitors | Visitors | operations | visitors |
 | ops-payroll | Staff & Payroll | operations | payroll |
+| pn-units | Unit Directory | property-new | — |
+| pn-vehicles | Parking & Vehicles | property-new | — |
+| pn-residents | Residents | property-new | — |
 | finance-reports | Financial reports | accounts | reports |
 | finance-ledger | Ledger | accounts | ledger |
 | finance-docs | Bills & receipts | accounts | finance-docs |
@@ -643,6 +970,17 @@ and an optional `subview`.
 | finance-billing-aging | Aging Report | invoices | aging |
 | finance-bank-recon | Bank Reconciliation | accounts | bank-recon |
 | finance-invoices-raised | Invoices Raised | accounts | invoices-raised |
+| fn-reports | Financial reports | finance-new-accounts | reports |
+| fn-ledger | Ledger | finance-new-accounts | ledger |
+| fn-docs | Bills & receipts | finance-new-accounts | finance-docs |
+| fn-expense-plan | Expense plan | finance-new-accounts | expense-plan |
+| fn-billing-pending | Pending Dues | finance-new-invoices | pending-dues |
+| fn-billing-list | All Invoices | finance-new-invoices | list |
+| fn-billing-collections | Collections | finance-new-invoices | collections |
+| fn-billing-batches | Billing Batches | finance-new-invoices | batches |
+| fn-billing-aging | Aging Report | finance-new-invoices | aging |
+| fn-bank-recon | Bank Reconciliation | finance-new-accounts | bank-recon |
+| fn-invoices-raised | Invoices Raised | finance-new-accounts | invoices-raised |
 | admin-access | Roles | access-control | — |
 | admin-society | Profile | setup | society |
 | admin-activity | Activity Log | accounts | activity |
@@ -668,6 +1006,46 @@ cron (`/api/sync` daily 06:00 UTC). During local dev, `viteApiDev.js` mounts the
 proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 
 ```
+├── finance
+│   └── [...path].js
+├── financeMongo
+│   ├── services
+│   │   ├── ledgerMutations.js
+│   │   └── ledgerReads.js
+│   ├── validation
+│   │   └── ledger.js
+│   ├── errors.js
+│   ├── index.js
+│   ├── money.js
+│   └── permissions.js
+├── property
+│   ├── residents
+│   │   ├── [id].js
+│   │   └── import.js
+│   ├── slots
+│   │   ├── [id]
+│   │   │   ├── assign.js
+│   │   │   └── release.js
+│   │   └── [id].js
+│   ├── units
+│   │   ├── [id].js
+│   │   ├── import.js
+│   │   └── parking-limits.js
+│   ├── vehicles
+│   │   ├── [id].js
+│   │   └── import.js
+│   ├── residents.js
+│   ├── slots.js
+│   ├── state.js
+│   ├── units.js
+│   └── vehicles.js
+├── propertyMongo
+│   ├── errors.js
+│   ├── http.js
+│   ├── models.js
+│   ├── mongoose.js
+│   ├── permissions.js
+│   └── service.js
 ├── accountsAuth.js
 ├── auth-session.js
 ├── dashboard-summary.js
@@ -676,7 +1054,12 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── evolyxConnection.js
 ├── external-connections.js
 ├── external-proxy.js
+├── finance-mongo-mutations.js
+├── finance-mongo-reports.js
+├── finance-mongo.js
 ├── finance-mutations.js
+├── mongoClient.js
+├── mongoLog.js
 ├── oauth-microsoft.js
 ├── oauth-service.js
 ├── passbook-jobs.js
@@ -709,7 +1092,12 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | evolyxConnection.js | Evolyx external connection |
 | external-connections.js | External connections read/write |
 | external-proxy.js | External API proxy |
+| finance-mongo-mutations.js | Serverless endpoint |
+| finance-mongo-reports.js | Serverless endpoint |
+| finance-mongo.js | Serverless endpoint |
 | finance-mutations.js | Finance write mutations |
+| mongoClient.js | Serverless endpoint |
+| mongoLog.js | Serverless endpoint |
 | oauth-microsoft.js | Microsoft OAuth flow |
 | oauth-service.js | OAuth service helper |
 | passbook-jobs.js | Evolyx passbook jobs |
@@ -739,7 +1127,11 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── utilities
 │   └── generate-repo-map.js
 ├── capture-finance-screenshots.mjs
+├── migrate-finance-to-mongo.mjs
+├── migrate-logs-to-mongo.mjs
+├── migrate-property-to-mongo.mjs
 ├── mockFinanceState.js
+├── remodel-finance-mongo.mjs
 ├── verify-build-chunks.mjs
 └── verify-vercel-api.mjs
 
@@ -907,9 +1299,13 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run build` → `vite build && node scripts/verify-build-chunks.mjs`
 - `npm run preview` → `vite preview`
 - `npm run verify:vercel-api` → `node scripts/verify-vercel-api.mjs`
+- `npm run migrate:finance-mongo` → `node scripts/migrate-finance-to-mongo.mjs`
+- `npm run migrate:finance-mongo-remodel` → `node scripts/remodel-finance-mongo.mjs`
+- `npm run migrate:property-mongo` → `node scripts/migrate-property-to-mongo.mjs`
+- `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
 - `npm run generate-repo-map` → `node scripts/utilities/generate-repo-map.js`
 - `npm run setup:hooks` → `node scripts/git-hooks/install-hooks.js`
 
 ---
 
-*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-11.*
+*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-20.*

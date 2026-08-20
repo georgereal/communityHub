@@ -469,12 +469,19 @@ export const annotateStatementLineBalances = () => {
     });
 };
 
-/** Balance from opening baseline + all statement movements on/after opening date. */
+/**
+ * Balance from opening baseline + MATCHED statement line movements on/after opening date.
+ *
+ * Only MATCHED lines are counted because unmatched lines have not been posted to the
+ * ledger yet — including them would overstate or understate the calculated book balance
+ * and cause a spurious variance against the passbook figure in Financial Reports.
+ */
 export const getCalculatedBankBalance = () => {
     const opening = getBankOpeningConfig();
-    const lines = getStatementLinesChronological().filter((l) =>
+    const allLines = getStatementLinesChronological().filter((l) =>
         !opening.date || l.line_date >= opening.date,
     );
+    const lines = allLines.filter((l) => l.match_status === 'MATCHED');
 
     if (opening.amount == null) {
         return { balance: null, asOf: opening.date, lineCount: lines.length, needsOpening: true };

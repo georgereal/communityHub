@@ -17,7 +17,7 @@ export function takeAuthFlash() {
     }
 }
 
-export function goToLogin(msg = '') {
+export function goToLogin(msg = '', { next } = {}) {
     try {
         if (msg) sessionStorage.setItem(AUTH_FLASH_KEY, String(msg));
     } catch { /* ignore */ }
@@ -25,10 +25,34 @@ export function goToLogin(msg = '') {
         window.dispatchEvent(new CustomEvent('auth-flash', { detail: { message: msg || '' } }));
         return;
     }
-    window.location.assign('/login');
+    const params = new URLSearchParams();
+    const nextPath = next || `${window.location.pathname}${window.location.search || ''}`;
+    if (nextPath && nextPath !== '/' && !isLoginPath(nextPath.split('?')[0])) {
+        params.set('next', nextPath);
+    }
+    const q = params.toString();
+    window.location.assign(`/login.html${q ? `?${q}` : ''}`);
+}
+
+/** Safe post-login destination from ?next= (same-origin path only). */
+export function consumeLoginNext() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const next = params.get('next') || '';
+        if (!next.startsWith('/') || next.startsWith('//')) return null;
+        if (next.startsWith('/login')) return null;
+        return next;
+    } catch {
+        return null;
+    }
 }
 
 export function goToApp(hash = '') {
+    const next = consumeLoginNext();
+    if (next) {
+        window.location.assign(next);
+        return;
+    }
     const h = hash && !hash.startsWith('#') ? `#${hash}` : (hash || '');
     window.location.assign(`/${h}`);
 }

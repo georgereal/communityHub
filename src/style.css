@@ -479,9 +479,10 @@ body:not(.nav-expanded) .nav-modules {
   position: sticky;
   top: 0;
   z-index: 1200;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Solid bg — translucent sticky + backdrop-filter can paint brand text over page tables */
+  background: #fff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-bottom: 1px solid rgba(226, 232, 240, 0.95);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
   padding: 0.65rem 1.25rem;
@@ -582,6 +583,20 @@ body:not(.nav-expanded) .nav-modules {
   letter-spacing: -0.02em;
   color: var(--text-main);
   white-space: nowrap;
+}
+
+a.brand-home-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.brand-home-link:hover {
+  color: var(--accent);
+}
+
+.sidebar-title a.brand-home-link {
+  color: inherit;
 }
 
 .brand-lockup__divider {
@@ -865,6 +880,11 @@ body:not(.nav-expanded) .nav-modules {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+/* `[hidden]` must win over mobile `display: block` below */
+.brand-lockup__entity[hidden] {
+  display: none !important;
 }
 
 .topbar-right {
@@ -4454,6 +4474,10 @@ header {
     gap: 0.2rem 0.45rem;
     padding: 0.5rem 0.65rem;
     align-items: center;
+    /* Solid bg — translucent sticky + display:contents can paint brand text over page tables */
+    background: #fff;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .topbar-left,
@@ -4508,6 +4532,10 @@ header {
     font-weight: 600;
     color: var(--text-dim);
     max-width: 100%;
+  }
+
+  .brand-lockup__entity[hidden] {
+    display: none !important;
   }
 
   .topbar-breadcrumb {
@@ -9010,7 +9038,8 @@ header {
   padding: 0 1rem 0.55rem;
 }
 
-.accounts-subview-tabs button {
+.accounts-subview-tabs button,
+.accounts-subview-tabs a.accounts-subview-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -9024,10 +9053,12 @@ header {
   cursor: pointer;
   padding: 0.45rem 0.7rem;
   text-align: left;
+  text-decoration: none;
   transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-.accounts-subview-tabs button i {
+.accounts-subview-tabs button i,
+.accounts-subview-tabs a.accounts-subview-tab i {
   width: 1rem;
   text-align: center;
   font-size: 0.72rem;
@@ -9035,17 +9066,20 @@ header {
   flex-shrink: 0;
 }
 
-.accounts-subview-tabs button:hover {
+.accounts-subview-tabs button:hover,
+.accounts-subview-tabs a.accounts-subview-tab:hover {
   background: var(--sidebar-hover);
   color: var(--sidebar-text-strong);
 }
 
-.accounts-subview-tabs button:hover i {
+.accounts-subview-tabs button:hover i,
+.accounts-subview-tabs a.accounts-subview-tab:hover i {
   opacity: 1;
   color: var(--sidebar-text-strong);
 }
 
-.accounts-subview-tabs button.active {
+.accounts-subview-tabs button.active,
+.accounts-subview-tabs a.accounts-subview-tab.active {
   background: var(--sidebar-active-bg);
   color: var(--sidebar-text-strong);
   font-weight: var(--font-medium);
@@ -9053,7 +9087,8 @@ header {
   box-shadow: inset 0 -2px 0 var(--sidebar-active-border);
 }
 
-.accounts-subview-tabs button.active i {
+.accounts-subview-tabs button.active i,
+.accounts-subview-tabs a.accounts-subview-tab.active i {
   color: var(--sidebar-active-border);
   opacity: 1;
 }
@@ -14260,6 +14295,21 @@ header {
   color: var(--danger);
 }
 
+.bank-recon-stat--warn {
+  color: #b45309;
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bank-recon-stat--warn:hover {
+  color: #92400e;
+}
+
 .bank-recon-stat--success {
   color: var(--success);
 }
@@ -14524,7 +14574,8 @@ header {
   min-height: 0;
 }
 
-#bank-recon-table-shell {
+#bank-recon-table-shell,
+#fn-bank-recon-table-shell {
   display: flex;
   flex-direction: column;
   resize: vertical;
@@ -14537,7 +14588,8 @@ header {
   background: #fff;
 }
 
-#bank-recon-table-wrap {
+#bank-recon-table-wrap,
+#fn-bank-recon-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -14961,6 +15013,132 @@ textarea.bank-recon-cell-input {
 .bank-recon-amt--out {
   color: var(--danger);
   font-weight: 600;
+}
+
+.bank-recon-amt--in .bank-recon-cell-input--num,
+.bank-recon-amt--out .bank-recon-cell-input--num {
+  color: inherit;
+  font-weight: 600;
+}
+
+.bank-recon-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  margin: 0.55rem 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.bank-recon-filter-bar .bank-recon-filter-q {
+  min-width: 11rem;
+  flex: 1 1 11rem;
+  max-width: 18rem;
+}
+
+.bank-recon-filter-bar .expense-combobox,
+.bank-recon-filter-bar select {
+  min-width: 8.5rem;
+}
+
+.bank-recon-filter-mismatch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bank-recon-filter-mismatch-meta {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.bank-recon-filter-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.bank-recon-table__row--flash {
+  outline: 2px solid #f59e0b;
+  outline-offset: -2px;
+  background: #fffbeb !important;
+}
+
+.bank-recon-table__row--flash td {
+  background: #fffbeb !important;
+}
+
+.bank-recon-balance-panel__mismatch-count.bank-recon-mismatch-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bank-recon-balance-panel__mismatch-count.bank-recon-mismatch-jump:hover {
+  background: #fef3c7;
+}
+
+.ledger-passbook-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  line-height: 1.2;
+}
+
+.ledger-passbook-main {
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-passbook-calc {
+  font-size: 0.72em;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-passbook-calc--stale {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.ledger-recalc-btn--stale {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+.ledger-recalc-stale-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.bank-recon-table__cell--passbook .bank-recon-mismatch-icon {
+  margin-left: 0.25rem;
 }
 
 .bank-recon-classify-combobox {

@@ -1,0 +1,106 @@
+<div class="modal-backdrop" id="bank-recon-move-confirm-modal">
+    <div class="modal-content bank-recon-move-confirm-modal">
+      <h2>Move row</h2>
+      <p>Recalculating balances takes a moment. If you are adjusting several rows, choose <strong>Just move</strong> for each change, then use <strong>Recalculate</strong> in the toolbar when you are finished.</p>
+      <div class="bank-recon-move-confirm-modal__actions">
+        <button type="button" class="btn btn-outline" id="bank-recon-move-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="bank-recon-move-just">Just move</button>
+        <button type="button" class="btn btn-outline" id="bank-recon-move-recalc">Move &amp; recalculate</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="bank-recon-rules-modal">
+    <div class="modal-content bank-recon-rules-modal">
+      <div class="bank-recon-rules-modal__head">
+        <div>
+          <h2>Classification rules</h2>
+          <p>When a stored statement line description contains your match text, category and vendor fields are filled automatically. Matching uses the database record (not the on-screen textarea). Default: case-insensitive contains. For regex use /pattern/ e.g. <code>/nobroker/i</code>.</p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" type="button" id="bank-recon-rules-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="bank-recon-rules-modal__run">
+        <button type="button" class="btn btn-primary btn--small" id="bank-recon-rules-run"><i class="fa-solid fa-play"></i> Run on unmatched</button>
+        <label class="bank-recon-rules-modal__checkbox">
+          <input type="checkbox" id="bank-recon-rules-auto-post" />
+          <span>Auto-post when category values are from the list</span>
+        </label>
+        <label class="bank-recon-rules-modal__checkbox">
+          <input type="checkbox" id="bank-recon-rules-only-empty" checked />
+          <span>Only rows with empty category</span>
+        </label>
+      </div>
+      <div id="bank-recon-rules-list" class="bank-recon-rules-list"></div>
+      <p id="bank-recon-rules-empty" class="bank-recon-rules-empty" hidden>No rules yet — add one below or use <strong>Save as rule</strong> on a classified row.</p>
+      <form id="bank-recon-rules-form" class="bank-recon-rules-form" autocomplete="off">
+        <h3 class="bank-recon-rules-form__title">Add rule</h3>
+        <div class="bank-recon-rules-form__grid">
+          <label class="bank-recon-rules-field bank-recon-rules-field--wide">
+            <span>Description match</span>
+            <input type="text" id="bank-recon-rule-match" placeholder="NEFT:Nobroker or /nobroker/i" required />
+          </label>
+          <label class="bank-recon-rules-field">
+            <span>Type</span>
+            <select id="bank-recon-rule-type">
+              <option value="IN">Income</option>
+              <option value="OUT">Expense</option>
+            </select>
+          </label>
+          <label class="bank-recon-rules-field">
+            <span>Category</span>
+            <input type="text" id="bank-recon-rule-category" placeholder="Category" required list="bank-recon-rule-categories" />
+            <datalist id="bank-recon-rule-categories"></datalist>
+          </label>
+          <label class="bank-recon-rules-field bank-recon-rules-field--expense" id="bank-recon-rule-sub-wrap">
+            <span>Sub-category</span>
+            <input type="text" id="bank-recon-rule-sub" placeholder="Optional for expenses" />
+          </label>
+          <label class="bank-recon-rules-field bank-recon-rules-field--expense" id="bank-recon-rule-vendor-wrap">
+            <span>Vendor</span>
+            <input type="text" id="bank-recon-rule-vendor" placeholder="Optional for expenses" />
+          </label>
+          <label class="bank-recon-rules-field bank-recon-rules-field--narrow">
+            <span>Priority</span>
+            <input type="number" id="bank-recon-rule-priority" value="0" step="1" title="Higher priority rules win when several match" />
+          </label>
+          <label class="bank-recon-rules-field bank-recon-rules-field--wide bank-recon-rules-modal__checkbox">
+            <input type="checkbox" id="bank-recon-rule-exclude-reports" />
+            <span>Exclude matching rows from income/expense reports</span>
+          </label>
+        </div>
+        <div class="bank-recon-rules-form__actions">
+          <button type="submit" class="btn btn-primary btn--small" id="bank-recon-rule-save"><i class="fa-solid fa-floppy-disk"></i> Save rule</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="passbook-jobs-modal">
+    <div class="modal-content passbook-jobs-modal">
+      <div class="passbook-jobs-modal__head">
+        <div>
+          <h2>Passbook Scan Jobs</h2>
+          <p>Track asynchronous OCR runs here, then import completed statement lines into bank reconciliation.</p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" type="button" id="passbook-jobs-close">&times;</button>
+      </div>
+      <div class="passbook-jobs-modal__actions">
+        <button type="button" class="btn btn-outline btn--small" id="passbook-jobs-refresh"><i class="fa-solid fa-rotate"></i> Refresh</button>
+      </div>
+      <div id="passbook-jobs-list" class="passbook-jobs-list"></div>
+      <p id="passbook-jobs-empty" class="passbook-jobs-empty" hidden>No passbook scans yet.</p>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="passbook-job-detail-modal">
+    <div class="modal-content passbook-job-detail-modal">
+      <div class="passbook-job-detail-modal__head">
+        <div>
+          <h2 id="passbook-job-detail-title">Passbook scan rows</h2>
+          <p>Mapped OCR rows vs what was imported into bank reconciliation.</p>
+        </div>
+        <button class="btn btn-outline" style="padding: 0.25rem 0.5rem;" type="button" id="passbook-job-detail-close">&times;</button>
+      </div>
+      <div id="passbook-job-detail-body" class="passbook-job-detail-modal__body"></div>
+    </div>
+  </div>

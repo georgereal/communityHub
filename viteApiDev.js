@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 
 function readBody(req) {
     return new Promise((resolveBody, reject) => {
@@ -50,8 +50,74 @@ function attachRes(res) {
     return out;
 }
 
+function isDir(p) {
+    try {
+        return statSync(p).isDirectory();
+    } catch {
+        return false;
+    }
+}
+
 /**
- * Run Vercel-style api/*.js handlers during `vite` dev (POST /api/*).
+ * Resolve Vercel-style api handlers:
+ *   /api/db                         → api/db.js
+ *   /api/finance/x                  → api/finance/[...path].js
+ *   /api/property/slots/:id/assign  → api/property/slots/[id]/assign.js
+ */
+function resolveApiModule(urlPath) {
+    const apiRoot = resolve(process.cwd(), 'api');
+    const parts = urlPath.split('/').filter(Boolean);
+    if (!parts.length) return null;
+
+    const exact = resolve(apiRoot, `${parts.join('/')}.js`);
+    if (existsSync(exact)) return { file: exact, pathParts: [] };
+
+    if (parts.length === 1) {
+        const file = resolve(apiRoot, `${parts[0]}.js`);
+        if (existsSync(file)) return { file, pathParts: [] };
+    }
+
+    let dir = apiRoot;
+    let routeId = null;
+    for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i];
+        const last = i === parts.length - 1;
+        const exactJs = resolve(dir, `${part}.js`);
+        const exactDir = resolve(dir, part);
+        if (last && existsSync(exactJs)) return { file: exactJs, pathParts: [], routeId };
+        if (isDir(exactDir)) {
+            dir = exactDir;
+            continue;
+        }
+        const idJs = resolve(dir, '[id].js');
+        const idDir = resolve(dir, '[id]');
+        if (last && existsSync(idJs)) return { file: idJs, pathParts: [], routeId: part };
+        if (isDir(idDir)) {
+            routeId = part;
+            dir = idDir;
+            continue;
+        }
+        break;
+    }
+
+    for (let i = parts.length; i >= 1; i -= 1) {
+        const baseParts = parts.slice(0, i);
+        const rest = parts.slice(i);
+        const catchAll = resolve(apiRoot, ...baseParts, '[...path].js');
+        if (existsSync(catchAll)) {
+            return { file: catchAll, pathParts: rest };
+        }
+        const optional = resolve(apiRoot, ...baseParts, '[[...path]].js');
+        if (existsSync(optional)) {
+            return { file: optional, pathParts: rest };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Run Vercel-style api/*.js handlers during `vite` dev.
  */
 export function viteApiDevPlugin(env = {}) {
     for (const [key, value] of Object.entries(env)) {
@@ -68,14 +134,24 @@ export function viteApiDevPlugin(env = {}) {
                 if (!url.startsWith('/api/')) return next();
 
                 const name = url.slice('/api/'.length);
-                if (!name || name.includes('/')) return next();
+                if (!name) return next();
 
-                const file = resolve(process.cwd(), 'api', `${name}.js`);
-                if (!existsSync(file)) return next();
+                const resolved = resolveApiModule(name);
+                if (!resolved) return next();
 
                 try {
                     await readBody(req);
-                    const mod = await server.ssrLoadModule(file);
+                    if (resolved.routeId) {
+                        req.query = { ...(req.query || {}), id: resolved.routeId };
+                        req.__routeId = resolved.routeId;
+                    }
+                    if (resolved.pathParts?.length) {
+                        const top = name.split('/')[0];
+                        req.__financePath = resolved.pathParts;
+                        if (top === 'property') req.__propertyPath = resolved.pathParts;
+                        req.query = { ...(req.query || {}), path: resolved.pathParts };
+                    }
+                    const mod = await server.ssrLoadModule(resolved.file);
                     const handler = mod.default;
                     if (typeof handler !== 'function') return next();
 

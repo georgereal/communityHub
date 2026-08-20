@@ -109,6 +109,10 @@ export async function fetchUserModuleAccess(userId, apartmentId) {
 
 /** Effective enabled state for signed-in user (admins / setup viewers always pass locked modules). */
 export function isModuleEnabled(moduleKey) {
+    // Sibling of Finance — follow the same apartment/user toggle.
+    if (moduleKey === 'finance-new') return isModuleEnabled('finance');
+    // Sibling of Property — follow the same apartment/user toggle.
+    if (moduleKey === 'property-new') return isModuleEnabled('property');
     if (!MODULE_KEYS.has(moduleKey)) return true;
     if (LOCKED_MODULE_KEYS.has(moduleKey)) return true;
     if (moduleBypassGating()) return true;

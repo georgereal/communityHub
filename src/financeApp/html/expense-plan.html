@@ -1,0 +1,136 @@
+<div id="fn-subview-expense-plan" class="eplan-subview" style="padding: 0;">
+          <div class="eplan-toolbar">
+            <p class="fa-panel__hint" style="margin:0;">Planned spends over the horizon vs book balance. Click a row for details.</p>
+            <div class="eplan-toolbar__actions">
+              <label class="eplan-horizon">
+                <span>Horizon</span>
+                <select id="fn-eplan-horizon" class="expense-combobox">
+                  <option value="3">3 months</option>
+                  <option value="6" selected>6 months</option>
+                  <option value="12">12 months</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-outline btn--small" id="fn-eplan-add-oneoff" hidden>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add one-off
+              </button>
+              <button type="button" class="btn btn-primary btn--small" id="fn-eplan-add-recurring" hidden>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add recurring
+              </button>
+            </div>
+          </div>
+          <section id="fn-eplan-summary" class="ledger-kpi-bar" aria-label="Expense plan summary"></section>
+
+          <section class="fa-panel eplan-main eplan-pivot-panel" style="margin-top:0.75rem;">
+            <div class="eplan-section-head">
+              <h4 class="fdoc-funding-section-title" style="margin:0;">Planned by month</h4>
+              <span id="fn-eplan-pivot-meta" class="eplan-section-meta"></span>
+            </div>
+            <div id="fn-eplan-month-pivot" class="fa-table-wrap"></div>
+          </section>
+
+          <section class="fa-panel eplan-main" style="margin-top:0.75rem;">
+            <div class="eplan-section-head">
+              <h4 class="fdoc-funding-section-title" style="margin:0;">Detail list</h4>
+              <span id="fn-eplan-timeline-meta" class="eplan-section-meta"></span>
+            </div>
+            <div id="fn-eplan-timeline" class="fa-table-wrap"></div>
+          </section>
+
+          <details class="fa-panel eplan-templates" id="fn-eplan-templates-panel">
+            <summary class="eplan-templates__summary">
+              <span>Recurring templates</span>
+              <span id="fn-eplan-recurring-meta" class="eplan-section-meta"></span>
+            </summary>
+            <div id="fn-eplan-recurring-list" class="fa-table-wrap" style="margin-top:0.65rem;"></div>
+          </details>
+
+          <div id="fn-eplan-detail-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="fn-eplan-detail-backdrop"></div>
+            <div class="fdoc-link-modal__panel fdoc-link-modal__panel--wide" role="dialog" aria-labelledby="eplan-detail-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="fn-eplan-detail-title" class="fa-panel__title" style="margin:0;">Details</h3>
+                <button type="button" class="btn btn-outline btn--small" id="fn-eplan-detail-close">Close</button>
+              </div>
+              <div id="fn-eplan-detail-body" class="eplan-detail__body"></div>
+            </div>
+          </div>
+
+          <div id="fn-eplan-modal" class="fdoc-link-modal" hidden>
+            <div class="fdoc-link-modal__backdrop" id="fn-eplan-modal-backdrop"></div>
+            <div class="fdoc-link-modal__panel fdoc-link-modal__panel--wide" role="dialog" aria-labelledby="eplan-modal-title">
+              <div class="fdoc-link-modal__head">
+                <h3 id="fn-eplan-modal-title" class="fa-panel__title" style="margin:0;">Add</h3>
+                <button type="button" class="btn btn-outline btn--small" id="fn-eplan-modal-close">Close</button>
+              </div>
+              <div id="fn-eplan-modal-oneoff" class="eplan-modal-form" hidden>
+                <div class="eplan-form-grid">
+                  <label class="eplan-form-span eplan-form-primary">
+                    <span>What’s it for</span>
+                    <input type="text" id="fn-eplan-item-desc" class="expense-combobox" placeholder="e.g. Transformer earthing" required />
+                  </label>
+                  <label><span>Category</span>
+                    <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat" id="fn-eplan-item-cat-wrap">
+                      <input type="text" id="fn-eplan-item-cat" class="expense-combobox" placeholder="Type or pick category" autocomplete="off" />
+                      <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+                    </div>
+                  </label>
+                  <label><span>Vendor</span><input type="text" id="fn-eplan-item-vendor" class="expense-combobox" placeholder="Optional" /></label>
+                  <label><span>Amount</span><input type="number" id="fn-eplan-item-amount" class="expense-combobox" step="1" min="0" placeholder="0" /></label>
+                  <label><span>Planned for</span><input type="date" id="fn-eplan-item-date" class="expense-combobox" /></label>
+                  <label><span>Due by</span><input type="date" id="fn-eplan-item-due" class="expense-combobox" title="Complete by this date" /></label>
+                </div>
+                <div class="eplan-modal-actions">
+                  <button type="button" class="btn btn-primary" id="fn-eplan-item-save">Save one-off</button>
+                </div>
+              </div>
+              <div id="fn-eplan-modal-recurring" class="eplan-modal-form" hidden>
+                <div class="eplan-form-grid">
+                  <label class="eplan-form-span eplan-form-primary">
+                    <span>What’s it for</span>
+                    <input type="text" id="fn-eplan-rec-title" class="expense-combobox" placeholder="e.g. Lift AMC" />
+                  </label>
+                  <label class="eplan-form-span"><span>Category</span>
+                    <div class="bank-recon-classify-combobox bank-recon-classify-combobox--cat" id="fn-eplan-rec-cat-wrap">
+                      <input type="text" id="fn-eplan-rec-cat" class="expense-combobox" placeholder="Type or pick category" autocomplete="off" />
+                      <ul class="bank-recon-classify-combobox__menu" role="listbox" hidden></ul>
+                    </div>
+                  </label>
+                  <label><span>Every</span>
+                    <select id="fn-eplan-rec-cadence" class="expense-combobox">
+                      <option value="monthly">Month</option>
+                      <option value="quarterly">Quarter</option>
+                      <option value="yearly">Year</option>
+                    </select>
+                  </label>
+                  <label><span>Term (periods)</span>
+                    <input type="number" id="fn-eplan-rec-term" class="expense-combobox" min="1" max="120" placeholder="e.g. 12" title="How many times it recurs. Leave blank for ongoing." />
+                  </label>
+                  <label><span>On day</span><input type="number" id="fn-eplan-rec-day" class="expense-combobox" min="1" max="28" value="1" title="Default day used for due dates; plan dates follow Starts" /></label>
+                  <label><span>Due day</span><input type="number" id="fn-eplan-rec-due-day" class="expense-combobox" min="1" max="28" value="1" title="Complete by this day of each period month" /></label>
+                  <label><span>Starts</span><input type="date" id="fn-eplan-rec-start" class="expense-combobox" title="First period is this date; later periods step by cadence" /></label>
+                  <label class="eplan-form-span"><span>Amount mode</span>
+                    <select id="fn-eplan-rec-amount-mode" class="expense-combobox">
+                      <option value="per_period">Same amount each period</option>
+                      <option value="total_split">Total — split equally across term</option>
+                      <option value="manual">Manual amount per period</option>
+                    </select>
+                  </label>
+                  <label id="fn-eplan-rec-amount-wrap"><span id="fn-eplan-rec-amount-label">Amount each period</span>
+                    <input type="number" id="fn-eplan-rec-amount" class="expense-combobox" step="1" min="0" placeholder="0" />
+                  </label>
+                </div>
+                <p id="fn-eplan-rec-split-hint" class="fa-panel__hint eplan-rec-split-hint" hidden></p>
+                <div id="fn-eplan-rec-periods" class="eplan-rec-periods" hidden>
+                  <div class="eplan-rec-periods__head">
+                    <span>Period schedule</span>
+                    <span id="fn-eplan-rec-periods-sum" class="eplan-section-meta"></span>
+                  </div>
+                  <div id="fn-eplan-rec-periods-list" class="eplan-rec-periods__list"></div>
+                </div>
+                <div class="eplan-modal-actions">
+                  <button type="button" class="btn btn-primary" id="fn-eplan-rec-save">Save recurring</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>

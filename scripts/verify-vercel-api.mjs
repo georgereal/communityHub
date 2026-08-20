@@ -2,13 +2,43 @@
 /**
  * Smoke-check that API handlers load under Node ESM (same runtime Vercel uses).
  */
-import { readdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readdirSync, statSync } from 'node:fs';
+import { resolve, join, relative } from 'node:path';
 
 const apiDir = resolve(process.cwd(), 'api');
-const skip = new Set(['vercelRequest.js', 'dbAccess.js', 'stateDomains.js', 'serverAuth.js', 'serverSupabase.js', 'supabaseRest.js', 'accountsAuth.js', 'passbookJobsStore.js', 'evolyxConnection.js']);
+const skip = new Set([
+    'vercelRequest.js',
+    'dbAccess.js',
+    'stateDomains.js',
+    'serverAuth.js',
+    'serverSupabase.js',
+    'supabaseRest.js',
+    'accountsAuth.js',
+    'passbookJobsStore.js',
+    'evolyxConnection.js',
+    'mongoClient.js',
+    'mongoLog.js',
+    'r2Storage.js',
+]);
 
-const files = readdirSync(apiDir).filter((f) => f.endsWith('.js') && !skip.has(f));
+function listHandlers(dir, acc = []) {
+    for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        const st = statSync(full);
+        if (st.isDirectory()) {
+            listHandlers(full, acc);
+            continue;
+        }
+        if (!name.endsWith('.js')) continue;
+        const rel = relative(apiDir, full);
+        if (skip.has(name) || skip.has(rel)) continue;
+        if (rel.startsWith('financeMongo/') || rel.startsWith('propertyMongo/')) continue;
+        acc.push(rel);
+    }
+    return acc;
+}
+
+const files = listHandlers(apiDir).sort();
 let failed = 0;
 
 for (const file of files) {

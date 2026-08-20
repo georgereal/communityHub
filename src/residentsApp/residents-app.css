@@ -1,0 +1,87 @@
+#residents-react-root {
+  min-height: 12rem;
+}
+
+.app-shell-page-body--react {
+  padding: 0.75rem 1rem 1.5rem;
+}
+
+.resident-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+}
+
+.resident-summary-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-height: 4.25rem;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: box-shadow 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.resident-summary-card:hover {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.resident-summary-card--active {
+  border-color: var(--accent, #1a73e8) !important;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+}
+
+.resident-summary-card__label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim, #64748b);
+}
+
+.resident-summary-card__value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text, #0f172a);
+}
+
+.resident-summary-legend {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-dim, #64748b);
+}
+
+.resident-summary-card__sub {
+  font-size: 0.68rem;
+  color: var(--text-dim, #64748b);
+  line-height: 1.25;
+}
+
+.resident-summary-card--owner { border-color: #c6dafc; background: #f8fbff; }
+.resident-summary-card--owner .resident-summary-card__value { color: #174ea6; }
+.resident-summary-card--tenant { border-color: #fde293; background: #fffdf5; }
+.resident-summary-card--tenant .resident-summary-card__value { color: #b06000; }
+.resident-summary-card--vacant { border-color: #e0e0e0; background: #fafafa; }
+.resident-summary-card--non-allotable { border-color: #f5c2c0; background: #fff8f7; }
+.resident-summary-card--non-allotable .resident-summary-card__value { color: #c5221f; }
+.resident-summary-card--warn { border-color: #fde293; background: #fffdf5; }
+.resident-summary-card--warn .resident-summary-card__value { color: #b06000; }
+
+/* Let MUI tables sit cleanly inside the opaque shell scroll region */
+.residents-react-page .MuiTableCell-root {
+  background-color: #fff;
+}
+
+.residents-react-page .MuiTableCell-stickyHeader {
+  background-color: #f8fafc;
+}

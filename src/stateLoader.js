@@ -12,6 +12,9 @@ const VIEW_DOMAINS = {
     registry: ['property'],
     accounts: ['finance', 'admin'],
     invoices: ['finance'],
+    // Finance-New boots via /api/finance-mongo — do not hydrate Postgres finance.
+    'finance-new-accounts': [],
+    'property-new': [],
     // Portal domain already includes open invoices + allocations for residents.
     portal: ['portal'],
     security: ['security', 'property'],

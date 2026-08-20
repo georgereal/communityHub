@@ -3,10 +3,6 @@
  * monthly stacks chart image + summary + raised / income / expense breakdowns.
  */
 import ExcelJS from 'exceljs';
-import {
-  captureFinanceReportsChartPng,
-  getFinanceReportsExportSnapshot,
-} from './financeAnalytics.js';
 import { withButtonBusy } from './buttonBusy.js';
 
 const NUM_FMT = '#,##0.00';
@@ -62,8 +58,17 @@ const downloadBlob = (buf, filename) => {
   URL.revokeObjectURL(url);
 };
 
+async function loadAnalyticsApi() {
+  if (document.documentElement.dataset.financeApp === '1'
+    || document.documentElement.dataset.appShell === '1') {
+    return import('./financeNew/financeAnalytics.js');
+  }
+  return import('./financeAnalytics.js');
+}
+
 export async function exportFinanceReportsExcel() {
-  const snap = getFinanceReportsExportSnapshot();
+  const api = await loadAnalyticsApi();
+  const snap = api.getFinanceReportsExportSnapshot();
   const { months, settings, raised, income, expense, monthly } = snap;
 
   const wb = new ExcelJS.Workbook();
@@ -75,7 +80,7 @@ export async function exportFinanceReportsExcel() {
   const heading = ws.addRow(['Monthly stacks: raised, income & expenses']);
   heading.font = { bold: true, size: 14 };
 
-  const chartPng = captureFinanceReportsChartPng();
+  const chartPng = await api.captureFinanceReportsChartPng();
   if (chartPng) {
     for (let i = 0; i < CHART_ROW_SPAN; i++) ws.addRow([]);
     const imageId = wb.addImage({
@@ -152,7 +157,8 @@ export async function exportFinanceReportsExcel() {
 }
 
 export const initFinanceReportsExport = () => {
-  const btn = document.getElementById('fa-download-xlsx');
+  const btn = document.getElementById('fn-fa-download-xlsx')
+    || document.getElementById('fa-download-xlsx');
   if (!btn || btn.dataset.wired) return;
   btn.dataset.wired = '1';
   btn.addEventListener('click', () => {

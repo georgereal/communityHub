@@ -9,7 +9,31 @@
       "destination": "/login.html"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/residents",
+      "destination": "/residents/index.html"
+    },
+    {
+      "source": "/residents/:path*",
+      "destination": "/residents/index.html"
+    },
+    {
+      "source": "/parking",
+      "destination": "/parking/index.html"
+    },
+    {
+      "source": "/parking/:path*",
+      "destination": "/parking/index.html"
+    },
+    {
+      "source": "/units",
+      "destination": "/units/index.html"
+    },
+    {
+      "source": "/units/:path*",
+      "destination": "/units/index.html"
+    },
+    {
+      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/).*)",
       "destination": "/index.html"
     }
   ],
@@ -69,6 +93,24 @@
     },
     "api/finance-mutations.js": {
       "maxDuration": 300
+    },
+    "api/finance-mongo-mutations.js": {
+      "maxDuration": 300
+    },
+    "api/finance/[...path].js": {
+      "maxDuration": 300
+    },
+    "api/property/units/import.js": {
+      "maxDuration": 60
+    },
+    "api/property/vehicles/import.js": {
+      "maxDuration": 60
+    },
+    "api/property/residents/import.js": {
+      "maxDuration": 60
+    },
+    "api/property/units/parking-limits.js": {
+      "maxDuration": 60
     }
   }
 }

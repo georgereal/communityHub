@@ -75,3 +75,6 @@ Before committing structural changes, ensure:
 - SQL migrations as `supabase_*.sql` at repo root, run manually in the Supabase SQL Editor.
 - Feature modules in `src/`; UI in `index.html` + `src/style.css`.
 - Match existing patterns (see the repo map's feature-module index) instead of introducing new frameworks.
+
+### New UX (list pages)
+- See `.cursor/rules/ux-list-pages.mdc`: summary boxes on lists, icon-first header actions, centered (not side) modals, keep classic business functions.

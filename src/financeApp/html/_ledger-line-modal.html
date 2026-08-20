@@ -1,0 +1,69 @@
+<div class="modal-backdrop" id="ledger-line-modal">
+    <div class="modal-content ledger-line-modal">
+      <div class="ledger-line-modal__header">
+        <div>
+          <h2 id="ledger-line-title">Add ledger expense</h2>
+          <p id="ledger-line-desc">Passbook line only. Bills &amp; receipts use the invoice button on the row.</p>
+        </div>
+        <button type="button" class="btn btn-outline ledger-line-modal__close" aria-label="Close"
+          onclick="document.getElementById('ledger-line-modal').classList.remove('active')">&times;</button>
+      </div>
+
+      <div class="ledger-line-form">
+        <div class="ledger-line-form__field">
+          <span class="ledger-line-form__label" id="ledger-line-wallet-label">Wallet</span>
+          <div class="ledger-line-wallet" id="ledger-line-wallet-pills" role="group" aria-labelledby="ledger-line-wallet-label">
+            <button type="button" class="ledger-line-wallet__btn" data-wallet="CASH">
+              <i class="fa-solid fa-wallet" aria-hidden="true"></i> Petty Cash
+            </button>
+            <button type="button" class="ledger-line-wallet__btn active" data-wallet="BANK">
+              <i class="fa-solid fa-building-columns" aria-hidden="true"></i> Bank
+            </button>
+          </div>
+        </div>
+
+        <div class="ledger-line-form__row">
+          <div class="ledger-line-form__field">
+            <label class="ledger-line-form__label" for="ledger-line-amt">Amount (₹)</label>
+            <input type="number" id="ledger-line-amt" class="ledger-line-form__input ledger-line-form__input--amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+          </div>
+          <div class="ledger-line-form__field">
+            <label class="ledger-line-form__label" for="ledger-line-date">Date</label>
+            <input type="date" id="ledger-line-date" class="ledger-line-form__input" />
+          </div>
+        </div>
+
+        <div class="ledger-line-form__field">
+          <label class="ledger-line-form__label" for="ledger-line-cat">Category</label>
+          <input type="text" id="ledger-line-cat" class="ledger-line-form__input" list="ledger-line-cat-datalist" placeholder="Type to search…" autocomplete="off" />
+          <datalist id="ledger-line-cat-datalist"></datalist>
+        </div>
+
+        <div class="ledger-line-form__field">
+          <label class="ledger-line-form__label" for="ledger-line-desc-input">Narration <span class="ledger-line-form__optional">optional</span></label>
+          <input type="text" id="ledger-line-desc-input" class="ledger-line-form__input" placeholder="Passbook narration" />
+        </div>
+
+        <div class="ledger-line-form__field" id="ledger-line-bank-ref-wrap">
+          <label class="ledger-line-form__label" for="ledger-line-bank-ref">Bank reference <span class="ledger-line-form__optional">optional</span></label>
+          <input type="text" id="ledger-line-bank-ref" class="ledger-line-form__input" placeholder="Cheque / UPI / NEFT ref" />
+        </div>
+
+        <label class="ledger-line-form__exclude" for="ledger-line-exclude-reports">
+          <input type="checkbox" id="ledger-line-exclude-reports" />
+          <span>Exclude from income/expense reports</span>
+        </label>
+      </div>
+
+      <div class="ledger-line-modal__footer">
+        <button class="btn btn-outline btn--danger" type="button" id="ledger-line-delete-btn" hidden>
+          Delete
+        </button>
+        <div class="ledger-line-modal__footer-actions">
+          <button class="btn btn-outline" type="button"
+            onclick="document.getElementById('ledger-line-modal').classList.remove('active')">Cancel</button>
+          <button class="btn btn-primary" type="button" id="ledger-line-save-btn">Save ledger line</button>
+        </div>
+      </div>
+    </div>
+  </div>

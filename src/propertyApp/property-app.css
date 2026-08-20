@@ -1,0 +1,234 @@
+.property-app-page {
+  padding: 0 0 1.5rem;
+}
+
+.parking-pool-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.parking-pool-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-width: 6.75rem;
+  padding: 0.45rem 1.4rem 0.45rem 0.65rem;
+  border: 1px solid #d5dde6;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.parking-pool-tile:hover {
+  border-color: #94a3b8;
+}
+
+.parking-pool-tile--taken {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.parking-pool-tile__slot {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.parking-pool-tile__alloc {
+  font-size: 0.68rem;
+  font-weight: 500;
+  opacity: 0.78;
+  line-height: 1.15;
+  word-break: break-all;
+}
+
+.parking-chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.15rem;
+  min-width: 11rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: #fff;
+  cursor: text;
+}
+
+.parking-chip-input:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.parking-chip-input__field {
+  flex: 1 1 5.5rem;
+  min-width: 5.5rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0;
+  color: #1e293b;
+}
+
+.parking-vchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.12rem 0.45rem 0.12rem 0.28rem;
+  border-radius: 999px;
+  border: 1px solid #d5dde6;
+  background: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1e293b;
+}
+
+.parking-vchip__icon {
+  font-size: 0.95rem !important;
+  width: 0.95rem !important;
+  height: 0.95rem !important;
+  opacity: 0.85;
+}
+
+.parking-vchip--pool {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.parking-vchip--rented {
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+  color: #5b21b6;
+}
+
+.parking-vchip--slot {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.parking-vchip--neighbor {
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+  color: #5b21b6;
+}
+
+.parking-vchip__meta {
+  font-size: 0.65rem;
+  font-weight: 700;
+  opacity: 0.85;
+  margin-left: 0.1rem;
+}
+
+.parking-vchip--overlimit {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.parking-vchip--dormant {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.parking-vchip--base {
+  background: #fff;
+}
+
+.parking-vchip__plate {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.parking-vchip__x {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.parking-vchip__x:hover {
+  opacity: 1;
+}
+
+.parking-pool-tile--taken .parking-pool-tile__alloc {
+  opacity: 0.92;
+}
+
+.parking-pool-tile__remove {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #64748b;
+}
+
+.parking-pool-tile__remove:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.unit-detail-dialog .MuiDialogTitle-root {
+  padding: 0.55rem 0.75rem;
+  background: #0f766e;
+  color: #fff;
+}
+
+.unit-detail-dialog .MuiDialogContent-root {
+  padding: 0.65rem 0.75rem 0.85rem;
+  background: #f8fafc;
+}
+
+.unit-detail-dialog .MuiDialogActions-root {
+  padding: 0.4rem 0.75rem;
+  background: #fff;
+  border-top: 1px solid #e2e8f0;
+}
+
+.unit-detail-dialog .MuiTableCell-root {
+  padding: 0.28rem 0.45rem;
+  font-size: 0.8rem;
+}
+
+.unit-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem 0.55rem;
+}
+
+@media (max-width: 720px) {
+  .unit-detail-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+

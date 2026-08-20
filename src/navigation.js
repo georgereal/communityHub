@@ -159,6 +159,39 @@ export const NAV_MODULES = [
         ],
     },
     {
+        id: 'property-new',
+        label: 'Property-New',
+        icon: 'fa-user-group',
+        navEntries: [
+            { route: 'pn-units' },
+            { route: 'pn-vehicles' },
+            { route: 'pn-residents' },
+        ],
+        pages: [
+            {
+                route: 'pn-units',
+                label: 'Unit Directory',
+                icon: 'fa-door-open',
+                view: 'property-new',
+                permission: 'apartment_mgmt.view',
+            },
+            {
+                route: 'pn-vehicles',
+                label: 'Parking & Vehicles',
+                icon: 'fa-car',
+                view: 'property-new',
+                permission: 'vehicle_registry.view',
+            },
+            {
+                route: 'pn-residents',
+                label: 'Residents',
+                icon: 'fa-user-group',
+                view: 'property-new',
+                permission: 'apartment_mgmt.view',
+            },
+        ],
+    },
+    {
         id: 'finance',
         label: 'Finance',
         icon: 'fa-coins',
@@ -278,6 +311,127 @@ export const NAV_MODULES = [
                 label: 'Invoices Raised',
                 icon: 'fa-file-invoice',
                 view: 'accounts',
+                subview: 'invoices-raised',
+                permission: 'accounts.view',
+            },
+        ],
+    },
+    {
+        id: 'finance-new',
+        label: 'Finance-New',
+        icon: 'fa-coins',
+        navEntries: [
+            { route: 'fn-reports' },
+            {
+                tabbed: true,
+                label: 'Invoices',
+                icon: 'fa-file-invoice',
+                defaultRoute: 'fn-billing-pending',
+                routes: [
+                    'fn-billing-pending',
+                    'fn-billing-list',
+                    'fn-billing-collections',
+                    'fn-billing-batches',
+                    'fn-billing-aging',
+                ],
+            },
+            { route: 'fn-ledger' },
+            { route: 'fn-docs' },
+            { route: 'fn-expense-plan' },
+            { route: 'fn-invoices-raised' },
+            { route: 'fn-bank-recon' },
+        ],
+        pages: [
+            {
+                route: 'fn-reports',
+                label: 'Financial reports',
+                icon: 'fa-chart-line',
+                view: 'finance-new-accounts',
+                subview: 'reports',
+                permission: 'accounts.view',
+            },
+            {
+                route: 'fn-ledger',
+                label: 'Ledger',
+                icon: 'fa-book',
+                view: 'finance-new-accounts',
+                subview: 'ledger',
+                permission: 'accounts.view',
+            },
+            {
+                route: 'fn-docs',
+                label: 'Bills & receipts',
+                icon: 'fa-file-invoice',
+                view: 'finance-new-accounts',
+                subview: 'finance-docs',
+                permission: 'accounts.view',
+                altPermissions: ['accounts.bills_entry'],
+            },
+            {
+                route: 'fn-expense-plan',
+                label: 'Expense plan',
+                icon: 'fa-calendar-check',
+                view: 'finance-new-accounts',
+                subview: 'expense-plan',
+                permission: 'accounts.view',
+            },
+            {
+                route: 'fn-billing-pending',
+                label: 'Pending Dues',
+                icon: 'fa-file-invoice-dollar',
+                view: 'finance-new-invoices',
+                subview: 'pending-dues',
+                permission: 'accounts.edit',
+            },
+            {
+                route: 'fn-billing-list',
+                label: 'All Invoices',
+                icon: 'fa-file-invoice',
+                view: 'finance-new-invoices',
+                subview: 'list',
+                permission: 'accounts.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'fn-billing-collections',
+                label: 'Collections',
+                icon: 'fa-hand-holding-dollar',
+                view: 'finance-new-invoices',
+                subview: 'collections',
+                permission: 'accounts.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'fn-billing-batches',
+                label: 'Billing Batches',
+                icon: 'fa-layer-group',
+                view: 'finance-new-invoices',
+                subview: 'batches',
+                permission: 'accounts.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'fn-billing-aging',
+                label: 'Aging Report',
+                icon: 'fa-hourglass-half',
+                view: 'finance-new-invoices',
+                subview: 'aging',
+                permission: 'accounts.edit',
+                hideFromNav: true,
+            },
+            {
+                route: 'fn-bank-recon',
+                label: 'Bank Reconciliation',
+                icon: 'fa-scale-balanced',
+                view: 'finance-new-accounts',
+                subview: 'bank-recon',
+                permission: 'accounts.edit',
+            },
+            {
+                route: 'fn-invoices-raised',
+                label: 'Invoices Raised',
+                icon: 'fa-file-invoice',
+                view: 'finance-new-accounts',
                 subview: 'invoices-raised',
                 permission: 'accounts.view',
             },
@@ -448,6 +602,20 @@ export function getFinanceAccountsPages() {
     return ordered;
 }
 
+/** Finance-New accounts shell tabs (excludes invoice billing view). */
+export function getFinanceNewAccountsPages() {
+    const mod = NAV_MODULES.find((m) => m.id === 'finance-new');
+    if (!mod) return [];
+    const byRoute = new Map(mod.pages.map((p) => [p.route, p]));
+    const ordered = [];
+    for (const entry of mod.navEntries || []) {
+        if (entry.tabbed) continue;
+        const page = byRoute.get(entry.route);
+        if (page?.view === 'finance-new-accounts' && page.subview) ordered.push(page);
+    }
+    return ordered;
+}
+
 ACCOUNTS_SUBVIEW_ROUTES = Object.fromEntries(
     getFinanceAccountsPages().map((page) => [page.subview, page.route]),
 );
@@ -559,7 +727,7 @@ export const pageIsVisible = (page, permSet, _offline = false, navModuleId = nul
         || (page.altPermissions || []).some((p) => set.has(p));
 };
 
-const getModuleNavEntries = (mod) => {
+export const getModuleNavEntries = (mod) => {
     if (mod.tabbed) {
         return [{
             tabbed: true,

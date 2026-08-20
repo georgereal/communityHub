@@ -1,0 +1,32 @@
+---
+description: List-page UX — summary boxes, icon actions, centered modals
+alwaysApply: true
+---
+
+# List pages and dialogs (new UX)
+
+Apply on Property-New, Finance-New, and other MPA screens. Do not change classic SPA pages unless asked.
+
+## List screens
+
+- Start every list with **summary boxes** (counts for the dataset). Clicking a box filters the list when that is meaningful.
+- Keep **business actions** from the classic screen (add, import, export, refresh, delete, etc.). Change presentation, not capability.
+
+## Header actions
+
+- Prefer **icons with a tooltip**. Use a short label only when the action is primary (e.g. Add).
+- Place actions on the **same row as the page title**, far right.
+- Do not use a row of full-width labeled outline buttons.
+
+## Dialogs
+
+- **Centered modals only** — never drawers, right sheets, or side panels for forms/import/filters/details-on-list.
+- Dialogs may use most of the desktop (`maxWidth="md"` / `"lg"`, `fullWidth`, high `maxHeight`). Mobile can go full-screen.
+
+```jsx
+// ❌ BAD — side panel
+<Drawer anchor="right" open={open}>…</Drawer>
+
+// ✅ GOOD — centered, roomy
+<Dialog open={open} fullWidth maxWidth="lg" scroll="paper">…</Dialog>
+```
