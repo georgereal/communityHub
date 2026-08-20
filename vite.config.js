@@ -54,6 +54,13 @@ export default defineConfig(({ mode }) => {
   return {
     // Always register local api/*.js handlers when present; proxy only fills gaps (VITE_LOCAL_API=0).
     plugins: [react(), viteApiDevPlugin(env), loginPathRewritePlugin(), mpaSpaFallbackPlugin()],
+    resolve: {
+      alias: {
+        '@classic': resolve(__dirname, 'apps/classic/src'),
+        '@new': resolve(__dirname, 'apps/new/src'),
+        '@auth': resolve(__dirname, 'packages/auth'),
+      },
+    },
     server: {
       // Prevent Vite from serving api/*.js as static modules (breaks POST /api/*).
       fs: {

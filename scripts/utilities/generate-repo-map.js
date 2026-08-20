@@ -185,7 +185,7 @@ const SRC_DESCRIPTIONS = {
   'externalConnections.js': 'External connections (admin)',
   'externalFetch.js': 'External fetch helpers',
   'admin.js': 'Setup subview switching & admin helpers',
-  'uiMode.js': 'Classic vs New UI mode',
+  'uiMode.js': 'Classic (Postgres) vs New (Mongo) UI mode',
   'moduleAccess.js': 'Module-level access / isModuleEnabled',
   'moduleAccessAdmin.js': 'Module access admin panel',
   'pageAccess.js': 'Page-level access',
@@ -196,6 +196,8 @@ const SRC_DESCRIPTIONS = {
   'accessSync.js': 'Access user directory sync',
   'rbac.js': 'RBAC: roles, permissions, effective-role resolution',
   'rbacMatrix.js': 'RBAC permission matrix UI',
+  'capabilities.js': 'Named action capabilities for new screens (can / assertCan)',
+  'rbacMongoClient.js': 'Client Mongo RBAC writes (New UI)',
   'activityAudit.js': 'Activity audit log page',
   'staffNotifications.js': 'Staff notifications UI',
   'noticeDelivery.js': 'Notice delivery',
@@ -250,12 +252,14 @@ const API_DESCRIPTIONS = {
   'stateDomains.js': 'State domain data',
   'sync.js': 'Scheduled sync (Vercel cron)',
   'vercelRequest.js': 'Vercel request helper',
+  'rbac-mongo.js': 'Mongo identity + RBAC (New UI)',
+  'uiMode.js': 'Read ch_ui_mode cookie (new vs classic)',
   'workspace-boot.js': 'Workspace boot helper',
 };
 
 /** Extract route → label → view → subview from src/navigation.js pages. */
 function extractRoutes() {
-  const navPath = path.join(ROOT, 'src', 'navigation.js');
+  const navPath = path.join(ROOT, 'apps/classic/src/navigation.js');
   if (!fs.existsSync(navPath)) return [];
   const src = fs.readFileSync(navPath, 'utf8');
   const routes = [];
@@ -279,16 +283,21 @@ function mdTable(headers, rows) {
 }
 
 function gather() {
-  const srcTree = renderTree(listFiles(path.join(ROOT, 'src')));
+  const srcTree = renderTree(listFiles(path.join(ROOT, 'apps')))
+    + '\n--- packages ---\n'
+    + renderTree(listFiles(path.join(ROOT, 'packages')));
   const apiTree = renderTree(listFiles(path.join(ROOT, 'api')));
   const scriptsTree = renderTree(listFiles(path.join(ROOT, 'scripts')));
   const docsTree = renderTree(listFiles(path.join(ROOT, 'docs')));
   const publicTree = renderTree(listFiles(path.join(ROOT, 'public')));
 
-  const srcFiles = listFileNames(path.join(ROOT, 'src'));
+  const srcFiles = [
+    ...listFileNames(path.join(ROOT, 'apps/classic/src')).map((f) => `classic/${f}`),
+    ...listFileNames(path.join(ROOT, 'apps/new/src')).map((f) => `new/${f}`),
+  ];
   const srcRows = srcFiles.map((f) => [
-    `src/${f}`,
-    SRC_DESCRIPTIONS[f] || f.replace(/\.(js|css)$/, '').replace(/([a-z])([A-Z])/g, '$1 $2'),
+    `apps/${f}`,
+    SRC_DESCRIPTIONS[f.split('/').pop()] || f.replace(/\.(js|css)$/, '').replace(/([a-z])([A-Z])/g, '$1 $2'),
   ]);
 
   const apiFiles = listFileNames(path.join(ROOT, 'api'));
@@ -304,9 +313,9 @@ function gather() {
   const routes = extractRoutes();
   const routeRows = routes.map((r) => [r.route, r.label, r.view, r.subview || '—']);
 
-  const jsCount = countExt(path.join(ROOT, 'src'), '.js') + countExt(path.join(ROOT, 'api'), '.js');
-  const cssCount = countExt(path.join(ROOT, 'src'), '.css');
-  const htmlCount = countExt(path.join(ROOT, 'src'), '.html') + 2;
+  const jsCount = countExt(path.join(ROOT, 'apps'), '.js') + countExt(path.join(ROOT, 'api'), '.js');
+  const cssCount = countExt(path.join(ROOT, 'apps'), '.css');
+  const htmlCount = countExt(path.join(ROOT, 'apps'), '.html') + 2;
 
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const devScripts = Object.entries(pkg.scripts || {})
@@ -432,12 +441,13 @@ ${mdTable(['File', 'Purpose'], d.topConfig.map((f) => [f, 'Repo config / entry p
 
 ## 9. Key Architectural Concepts
 
-- **State:** \`src/store.js\` — \`portalState\` (units, slots, finances, access, community) hydrated by \`pullState()\`;
+- **State:** Classic \`apps/classic/src/store.js\` (Postgres). New \`apps/new/src/runtime/state.js\` (Mongo session). Auth in \`packages/auth\`.
   partitioned read-only domains via \`stateLoader.js\` / \`stateDomains.js\`.
 - **Data access:** browser → Supabase client (\`src/dbClient.js\`) and/or Vercel \`/api/*\` endpoints; admin/finance
   mutations go through \`api/finance-mutations.js\`. Spreadsheet sync via \`api/ledger*\`, Excel push via Microsoft Graph.
 - **Auth:** \`authClient.js\` + \`socialAuth.js\` (Google/Microsoft), MSAL callback (\`microsoft-auth.html\`, \`ms-callback.js\`).
-- **RBAC & access:** \`rbac.js\` / \`rbacMatrix.js\` (roles/permissions), \`moduleAccess*\`, \`pageAccess*\`, \`accessSync.js\`.
+- **RBAC & access:** \`ch_ui_mode\` cookie selects the store. New: Mongo identity (\`rbac_directory\`, \`rbac_societies\`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
+  UI actions use \`src/capabilities.js\`. Fallback remains \`rbac.js\` / \`rbacMatrix.js\` until Mongo is populated.
 - **Views:** lazy-activated per route (\`views/controllers.js\`), each \`views/inits/*.js\` wires view-specific init.
 - **Deployment:** Vercel (\`vercel.json\`) — SPA rewrite to \`index.html\`, \`api/*\` serverless, cron sync, immutable assets.
 

@@ -82,6 +82,18 @@ function pruneUserCache(now = Date.now()) {
     }
 }
 
+function isJwtExpired(token, skewMs = 5_000) {
+    try {
+        const parts = String(token || '').split('.');
+        if (parts.length !== 3) return true;
+        const payload = b64urlJson(parts[1]);
+        const expMs = Number(payload.exp || 0) * 1000;
+        return !expMs || expMs <= Date.now() + skewMs;
+    } catch {
+        return true;
+    }
+}
+
 function b64urlJson(segment) {
     const padded = segment + '='.repeat((4 - (segment.length % 4)) % 4);
     const json = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
@@ -181,8 +193,11 @@ export async function getUserFromAuthHeader(authHeader) {
 
     const now = Date.now();
     const cached = userByToken.get(token);
-    if (cached && cached.expiresAt > now) {
+    if (cached && cached.expiresAt > now && !isJwtExpired(token)) {
         return { user: cached.user, error: null };
+    }
+    if (cached && isJwtExpired(token)) {
+        userByToken.delete(token);
     }
 
     const { jwtSecret } = getSupabaseEnv();
@@ -198,6 +213,10 @@ export async function getUserFromAuthHeader(authHeader) {
         userByToken.set(token, { user: localUser, expiresAt: now + USER_CACHE_TTL_MS });
         pruneUserCache(now);
         return { user: localUser, error: null };
+    }
+
+    if (isJwtExpired(token)) {
+        return { user: null, error: 'Sign in required. Session expired.' };
     }
 
     let pending = inflightUserByToken.get(token);

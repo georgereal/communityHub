@@ -11,8 +11,10 @@
     "migrate:finance-mongo": "node scripts/migrate-finance-to-mongo.mjs",
     "migrate:finance-mongo-remodel": "node scripts/remodel-finance-mongo.mjs",
     "migrate:property-mongo": "node scripts/migrate-property-to-mongo.mjs",
+    "migrate:rbac-mongo": "node scripts/migrate-rbac-to-mongo.mjs",
     "migrate:logs-mongo": "node scripts/migrate-logs-to-mongo.mjs",
     "generate-repo-map": "node scripts/utilities/generate-repo-map.js",
+    "check:import-boundary": "node scripts/check-import-boundary.mjs",
     "setup:hooks": "node scripts/git-hooks/install-hooks.js"
   },
   "devDependencies": {

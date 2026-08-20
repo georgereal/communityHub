@@ -9,8 +9,8 @@
 
 This file is the single source of truth for the project's directory structure, feature modules, API endpoints, views/routes, SQL migrations, architectural patterns, and development commands. Reading it first:
 - Provides instant context without re-exploring the entire codebase
-- Identifies where features live (`src/` UI modules, `api/` serverless handlers)
-- Reveals existing patterns (state in `store.js`, routing in `navigation.js`, lazy views in `views/controllers.js`)
+- Identifies where features live (`apps/classic/src` SPA, `apps/new/src` Mongo MPAs, `api/` serverless)
+- Reveals existing patterns (classic state in `apps/classic/src/store.js`, New runtime in `apps/new/src/runtime/state.js`)
 - Keeps new work consistent with current conventions
 
 **Workflow:**
@@ -23,7 +23,7 @@ This file is the single source of truth for the project's directory structure, f
 
 **Whenever you make any of the following changes, you MUST update `docs/REPO_MAP.md`:**
 
-1. **New or removed files/directories** — under `src/`, `api/`, or `scripts/`
+1. **New or removed files/directories** — under `apps/`, `packages/`, `api/`, or `scripts/`
 2. **New feature modules** — additions to `src/` (ledger, notices, portal, etc.)
 3. **New routes / views** — changes to `src/navigation.js` (`NAV_MODULES`) or `src/views/controllers.js` view dispatch
 4. **New `api/` endpoints** — adding/removing serverless handlers in `api/`

@@ -1286,13 +1286,14 @@ async function tableWrite(db, apartmentId, body) {
 
     if (table === 'expense_vendors' || table === 'expense_sub_categories'
         || table === 'maintenance_charge_heads' || table === 'maintenance_penalty_rules'
-        || table === 'bank_classification_rules') {
+        || table === 'bank_classification_rules' || table === 'staff_members') {
         const keyMap = {
             expense_vendors: 'vendors',
             expense_sub_categories: 'subCategories',
             maintenance_charge_heads: 'chargeHeads',
             maintenance_penalty_rules: 'penaltyRules',
             bank_classification_rules: 'classificationRules',
+            staff_members: 'staff',
         };
         const field = keyMap[table];
         const cfg = await ensureConfig(db, apartmentId);

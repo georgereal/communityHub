@@ -30,6 +30,8 @@
 │   │   ├── index.js
 │   │   ├── money.js
 │   │   └── permissions.js
+│   ├── new
+│   │   └── workspace-boot.js
 │   ├── propertyMongo
 │   │   ├── routes
 │   │   │   ├── residents
@@ -58,6 +60,9 @@
 │   │   ├── mongoose.js
 │   │   ├── permissions.js
 │   │   └── service.js
+│   ├── rbacMongo
+│   │   ├── defaults.js
+│   │   └── service.js
 │   ├── accountsAuth.js
 │   ├── auth-session.js
 │   ├── dashboard-summary.js
@@ -81,6 +86,7 @@
 │   ├── passbookJobsStore.js
 │   ├── property-rest.js
 │   ├── r2Storage.js
+│   ├── rbac-mongo.js
 │   ├── rpc.js
 │   ├── serverAuth.js
 │   ├── serverSupabase.js
@@ -89,8 +95,361 @@
 │   ├── storage.js
 │   ├── supabaseRest.js
 │   ├── sync.js
+│   ├── uiMode.js
 │   ├── vercelRequest.js
 │   └── workspace-boot.js
+├── apps
+│   ├── classic
+│   │   └── src
+│   │       ├── assets
+│   │       ├── views
+│   │       │   ├── html
+│   │       │   │   ├── access-control.html
+│   │       │   │   ├── accounts.html
+│   │       │   │   ├── apartment.html
+│   │       │   │   ├── dashboard.html
+│   │       │   │   ├── email.html
+│   │       │   │   ├── finance-new-accounts.html
+│   │       │   │   ├── finance-new-invoices.html
+│   │       │   │   ├── invoices.html
+│   │       │   │   ├── operations.html
+│   │       │   │   ├── portal.html
+│   │       │   │   ├── portfolio.html
+│   │       │   │   ├── registry.html
+│   │       │   │   ├── security.html
+│   │       │   │   ├── setup.html
+│   │       │   │   └── units.html
+│   │       │   ├── inits
+│   │       │   │   ├── accounts.js
+│   │       │   │   ├── apartment.js
+│   │       │   │   ├── dashboard.js
+│   │       │   │   ├── email.js
+│   │       │   │   ├── finance-new-accounts.js
+│   │       │   │   ├── finance-new-invoices.js
+│   │       │   │   ├── invoices.js
+│   │       │   │   ├── operations.js
+│   │       │   │   ├── portal.js
+│   │       │   │   ├── portfolio.js
+│   │       │   │   ├── registry.js
+│   │       │   │   ├── security.js
+│   │       │   │   ├── setup.js
+│   │       │   │   └── units.js
+│   │       │   ├── controllers.js
+│   │       │   └── viewShell.js
+│   │       ├── accessLocks.js
+│   │       ├── accessRequests.js
+│   │       ├── accessSync.js
+│   │       ├── activityAudit.js
+│   │       ├── admin.js
+│   │       ├── allocation.js
+│   │       ├── apiJson.js
+│   │       ├── authRedirect.js
+│   │       ├── authShell.js
+│   │       ├── authUserKind.js
+│   │       ├── bankClassificationRules.js
+│   │       ├── bankReconciliation.js
+│   │       ├── bankStatementLineUtils.js
+│   │       ├── bankStatementOrdering.js
+│   │       ├── billingBatches.js
+│   │       ├── billingGroups.js
+│   │       ├── billingHeads.js
+│   │       ├── blockFilter.js
+│   │       ├── bulkCollectionImport.js
+│   │       ├── bulkInvoiceImport.js
+│   │       ├── buttonBusy.js
+│   │       ├── cashFloat.js
+│   │       ├── classifyCombobox.js
+│   │       ├── classifyOptions.js
+│   │       ├── counter.js
+│   │       ├── dashboard.css
+│   │       ├── dashboard.js
+│   │       ├── dbClient.js
+│   │       ├── duesAging.js
+│   │       ├── emailOutbox.js
+│   │       ├── expenseCategories.js
+│   │       ├── expensePlan.js
+│   │       ├── externalConnections.js
+│   │       ├── externalFetch.js
+│   │       ├── financeAnalytics.js
+│   │       ├── financeApi.js
+│   │       ├── financeDocuments.js
+│   │       ├── financeMobile.css
+│   │       ├── financePageHelp.js
+│   │       ├── financeReportsExport.js
+│   │       ├── finances.js
+│   │       ├── flatPicker.js
+│   │       ├── gateWizard.css
+│   │       ├── gateWizard.js
+│   │       ├── generalLedger.js
+│   │       ├── invoicePdf.js
+│   │       ├── invoicesRaisedPage.js
+│   │       ├── ledgerBalance.js
+│   │       ├── ledgerColumnMapping.js
+│   │       ├── ledgerDisplayRows.js
+│   │       ├── ledgerExport.js
+│   │       ├── ledgerFilter.js
+│   │       ├── ledgerOAuth.js
+│   │       ├── ledgerSheetRegion.js
+│   │       ├── ledgerSpreadsheetSync.js
+│   │       ├── ledgerStatementContext.js
+│   │       ├── ledgerSync.css
+│   │       ├── ledgerSyncApply.js
+│   │       ├── ledgerSyncImport.js
+│   │       ├── ledgerSyncJournal.js
+│   │       ├── ledgerSyncLog.js
+│   │       ├── ledgerSyncRunAudit.js
+│   │       ├── ledgerTable.js
+│   │       ├── ledgerTransform.js
+│   │       ├── ledgerTxnLocal.js
+│   │       ├── login.css
+│   │       ├── loginPage.js
+│   │       ├── main.js
+│   │       ├── mainBoot.js
+│   │       ├── maintenanceBilling.js
+│   │       ├── microsoftExcelPush.js
+│   │       ├── moduleAccess.css
+│   │       ├── moduleAccess.js
+│   │       ├── moduleAccessAdmin.js
+│   │       ├── ms-callback.js
+│   │       ├── navigation.js
+│   │       ├── nobrokerInvoicesRaised.js
+│   │       ├── noticeDelivery.js
+│   │       ├── noticeEditor.js
+│   │       ├── notices.css
+│   │       ├── notices.js
+│   │       ├── operations.js
+│   │       ├── pageAccess.css
+│   │       ├── pageAccess.js
+│   │       ├── pageAccessAdmin.js
+│   │       ├── pageAccessResolve.js
+│   │       ├── parkingImport.js
+│   │       ├── parkingOps.js
+│   │       ├── parkingReconcileUi.js
+│   │       ├── passbookEvolyx.js
+│   │       ├── passbookJobImportAnalysis.js
+│   │       ├── payments.js
+│   │       ├── penaltyRules.js
+│   │       ├── portfolio.js
+│   │       ├── rbac.js
+│   │       ├── rbacMatrix.js
+│   │       ├── registry.js
+│   │       ├── residentImport.js
+│   │       ├── residentLinks.js
+│   │       ├── residentPortal.js
+│   │       ├── residents.js
+│   │       ├── residentView.js
+│   │       ├── securityPortal.css
+│   │       ├── securityPortal.js
+│   │       ├── setupSocietyUi.js
+│   │       ├── socialAuth.js
+│   │       ├── staffNotifications.js
+│   │       ├── stateLoader.js
+│   │       ├── store.js
+│   │       ├── style.css
+│   │       ├── syncCodeEditor.js
+│   │       ├── transitionFees.js
+│   │       ├── unitDirectory.js
+│   │       ├── unitTransitions.js
+│   │       ├── vehicleAudit.js
+│   │       ├── visitorApprovals.js
+│   │       ├── visitorGate.js
+│   │       ├── visitors.css
+│   │       └── visitors.js
+│   └── new
+│       └── src
+│           ├── adminApp
+│           │   ├── components
+│           │   │   ├── PageHeader.jsx
+│           │   │   └── SummaryStrip.jsx
+│           │   ├── pages
+│           │   │   ├── BankPage.jsx
+│           │   │   ├── CategoriesPage.jsx
+│           │   │   ├── IntegrationsPage.jsx
+│           │   │   ├── PeoplePage.jsx
+│           │   │   ├── RolesPage.jsx
+│           │   │   ├── SocietyPage.jsx
+│           │   │   ├── StaffPage.jsx
+│           │   │   └── VendorsPage.jsx
+│           │   ├── admin-app.css
+│           │   ├── api.js
+│           │   ├── App.jsx
+│           │   ├── boot.js
+│           │   ├── main.jsx
+│           │   ├── mount.jsx
+│           │   └── pages.js
+│           ├── appShell
+│           │   ├── html
+│           │   │   └── layout.html
+│           │   ├── chrome.js
+│           │   ├── ensureChartJs.js
+│           │   ├── mount.js
+│           │   ├── mpaAuth.js
+│           │   ├── mpaSession.js
+│           │   ├── nav.js
+│           │   ├── navPref.js
+│           │   ├── routes.js
+│           │   └── shell.css
+│           ├── financeApp
+│           │   ├── html
+│           │   │   ├── _bank-recon-modals.html
+│           │   │   ├── _cash-modal.html
+│           │   │   ├── _header-actions.html
+│           │   │   ├── _ledger-line-modal.html
+│           │   │   ├── bank-recon.html
+│           │   │   ├── docs.html
+│           │   │   ├── expense-plan.html
+│           │   │   ├── invoices-raised.html
+│           │   │   ├── ledger.html
+│           │   │   └── reports.html
+│           │   ├── ledger
+│           │   │   ├── data.js
+│           │   │   ├── exportExcel.js
+│           │   │   ├── lineModal.js
+│           │   │   └── view.js
+│           │   ├── pages
+│           │   │   ├── bank-recon.js
+│           │   │   ├── docs.js
+│           │   │   ├── expense-plan.js
+│           │   │   ├── invoices-raised.js
+│           │   │   ├── ledger.js
+│           │   │   └── reports.js
+│           │   ├── boot.js
+│           │   ├── chrome.js
+│           │   ├── finance-app.css
+│           │   ├── financeNav.js
+│           │   ├── mount.js
+│           │   └── session.js
+│           ├── financeNew
+│           │   ├── api.js
+│           │   ├── bankReconciliation.js
+│           │   ├── bankStatementQueries.js
+│           │   ├── billingBatches.js
+│           │   ├── billingGroups.js
+│           │   ├── billingHeads.js
+│           │   ├── cashFloat.js
+│           │   ├── cashFloatPredicates.js
+│           │   ├── classicState.js
+│           │   ├── duesAging.js
+│           │   ├── expensePlan.js
+│           │   ├── financeAnalytics.js
+│           │   ├── financeDocuments.js
+│           │   ├── finances.js
+│           │   ├── invoicesRaisedPage.js
+│           │   ├── ledger.js
+│           │   ├── ledgerBalance.js
+│           │   ├── ledgerDisplayRows.js
+│           │   ├── ledgerExport.js
+│           │   ├── ledgerFilter.js
+│           │   ├── ledgerStatementContext.js
+│           │   ├── ledgerSummaryUi.js
+│           │   ├── ledgerTable.js
+│           │   ├── ledgerTxnLocal.js
+│           │   ├── load.js
+│           │   ├── loadReports.js
+│           │   ├── maintenanceBilling.js
+│           │   ├── mongoMutations.js
+│           │   ├── mongoWrite.js
+│           │   ├── nobrokerInvoicesRaised.js
+│           │   ├── packCache.js
+│           │   ├── payments.js
+│           │   ├── pull.js
+│           │   ├── reports.js
+│           │   ├── shell.js
+│           │   ├── state.js
+│           │   ├── vouchers.js
+│           │   ├── voucherStore.js
+│           │   └── windowBridge.js
+│           ├── listUi
+│           │   └── ExcelColHeader.jsx
+│           ├── propertyApp
+│           │   ├── parking
+│           │   │   ├── api.js
+│           │   │   ├── BaseSlotsDialog.jsx
+│           │   │   ├── InlineUnitEdit.jsx
+│           │   │   ├── main.jsx
+│           │   │   ├── NeighborRentDialog.jsx
+│           │   │   ├── PoolAssignDialog.jsx
+│           │   │   ├── PoolSlotDialog.jsx
+│           │   │   ├── UnitParkingDialog.jsx
+│           │   │   ├── VehicleFormDialog.jsx
+│           │   │   └── VehicleList.jsx
+│           │   ├── units
+│           │   │   ├── api.js
+│           │   │   ├── main.jsx
+│           │   │   ├── UnitDetailDialog.jsx
+│           │   │   ├── UnitFormDialog.jsx
+│           │   │   ├── UnitImportDialog.jsx
+│           │   │   └── UnitList.jsx
+│           │   ├── boot.js
+│           │   ├── client.js
+│           │   ├── loadState.js
+│           │   ├── mount.jsx
+│           │   └── property-app.css
+│           ├── residentsApp
+│           │   ├── components
+│           │   │   ├── ResidentFormDialog.jsx
+│           │   │   └── ResidentImportDialog.jsx
+│           │   ├── hooks
+│           │   │   └── useListQueryParams.js
+│           │   ├── pages
+│           │   │   ├── ResidentDetails.jsx
+│           │   │   └── ResidentList.jsx
+│           │   ├── utils
+│           │   │   └── listNavigation.js
+│           │   ├── api.js
+│           │   ├── App.jsx
+│           │   ├── boot.js
+│           │   ├── loadState.js
+│           │   ├── main.jsx
+│           │   ├── mount.jsx
+│           │   ├── residents-app.css
+│           │   └── theme.js
+│           ├── runtime
+│           │   ├── authHeaders.js
+│           │   └── state.js
+│           ├── accessLocks.js
+│           ├── accessRequests.js
+│           ├── activityAudit.js
+│           ├── allocation.js
+│           ├── apiJson.js
+│           ├── authClient.js
+│           ├── authRedirect.js
+│           ├── bankClassificationRules.js
+│           ├── bankStatementLineUtils.js
+│           ├── bankStatementOrdering.js
+│           ├── blockFilter.js
+│           ├── bulkCollectionImport.js
+│           ├── bulkInvoiceImport.js
+│           ├── buttonBusy.js
+│           ├── capabilities.js
+│           ├── classifyCombobox.js
+│           ├── classifyOptions.js
+│           ├── dbClient.js
+│           ├── expenseCategories.js
+│           ├── externalConnections.js
+│           ├── financeApi.js
+│           ├── financePageHelp.js
+│           ├── finances.js
+│           ├── invoicePdf.js
+│           ├── ledgerColumnMapping.js
+│           ├── ledgerSpreadsheetSync.js
+│           ├── ledgerTransform.js
+│           ├── moduleAccess.js
+│           ├── navigation.js
+│           ├── parkingImport.js
+│           ├── passbookEvolyx.js
+│           ├── passbookJobImportAnalysis.js
+│           ├── penaltyRules.js
+│           ├── rbac.js
+│           ├── rbacMatrix.js
+│           ├── rbacMongoClient.js
+│           ├── registry.js
+│           ├── residentImport.js
+│           ├── residentLinks.js
+│           ├── residents.js
+│           ├── store.js
+│           ├── uiMode.js
+│           └── unitDirectory.js
 ├── docs
 │   ├── screenshots
 │   │   ├── finance-bank-recon-mock.png
@@ -174,6 +533,10 @@
 │   ├── invoices-raised.html
 │   ├── ledger.html
 │   └── reports.html
+├── packages
+│   └── auth
+│       ├── authClient.js
+│       └── server.js
 ├── parking
 │   └── index.html
 ├── public
@@ -189,315 +552,15 @@
 │   ├── utilities
 │   │   └── generate-repo-map.js
 │   ├── capture-finance-screenshots.mjs
+│   ├── check-import-boundary.mjs
 │   ├── migrate-finance-to-mongo.mjs
 │   ├── migrate-logs-to-mongo.mjs
 │   ├── migrate-property-to-mongo.mjs
+│   ├── migrate-rbac-to-mongo.mjs
 │   ├── mockFinanceState.js
 │   ├── remodel-finance-mongo.mjs
 │   ├── verify-build-chunks.mjs
 │   └── verify-vercel-api.mjs
-├── src
-│   ├── adminApp
-│   │   ├── components
-│   │   │   ├── PageHeader.jsx
-│   │   │   └── SummaryStrip.jsx
-│   │   ├── pages
-│   │   │   ├── BankPage.jsx
-│   │   │   ├── CategoriesPage.jsx
-│   │   │   ├── IntegrationsPage.jsx
-│   │   │   ├── PeoplePage.jsx
-│   │   │   ├── SocietyPage.jsx
-│   │   │   ├── StaffPage.jsx
-│   │   │   └── VendorsPage.jsx
-│   │   ├── admin-app.css
-│   │   ├── api.js
-│   │   ├── App.jsx
-│   │   ├── boot.js
-│   │   ├── main.jsx
-│   │   ├── mount.jsx
-│   │   └── pages.js
-│   ├── appShell
-│   │   ├── html
-│   │   │   └── layout.html
-│   │   ├── chrome.js
-│   │   ├── ensureChartJs.js
-│   │   ├── mount.js
-│   │   ├── mpaSession.js
-│   │   ├── nav.js
-│   │   ├── navPref.js
-│   │   ├── routes.js
-│   │   └── shell.css
-│   ├── assets
-│   ├── financeApp
-│   │   ├── html
-│   │   │   ├── _bank-recon-modals.html
-│   │   │   ├── _cash-modal.html
-│   │   │   ├── _header-actions.html
-│   │   │   ├── _ledger-line-modal.html
-│   │   │   ├── bank-recon.html
-│   │   │   ├── docs.html
-│   │   │   ├── expense-plan.html
-│   │   │   ├── invoices-raised.html
-│   │   │   ├── ledger.html
-│   │   │   └── reports.html
-│   │   ├── ledger
-│   │   │   ├── data.js
-│   │   │   ├── exportExcel.js
-│   │   │   ├── lineModal.js
-│   │   │   └── view.js
-│   │   ├── pages
-│   │   │   ├── bank-recon.js
-│   │   │   ├── docs.js
-│   │   │   ├── expense-plan.js
-│   │   │   ├── invoices-raised.js
-│   │   │   ├── ledger.js
-│   │   │   └── reports.js
-│   │   ├── boot.js
-│   │   ├── chrome.js
-│   │   ├── finance-app.css
-│   │   ├── financeNav.js
-│   │   ├── mount.js
-│   │   └── session.js
-│   ├── financeNew
-│   │   ├── api.js
-│   │   ├── bankReconciliation.js
-│   │   ├── bankStatementQueries.js
-│   │   ├── billingBatches.js
-│   │   ├── billingGroups.js
-│   │   ├── billingHeads.js
-│   │   ├── cashFloat.js
-│   │   ├── cashFloatPredicates.js
-│   │   ├── classicState.js
-│   │   ├── duesAging.js
-│   │   ├── expensePlan.js
-│   │   ├── financeAnalytics.js
-│   │   ├── financeDocuments.js
-│   │   ├── finances.js
-│   │   ├── invoicesRaisedPage.js
-│   │   ├── ledger.js
-│   │   ├── ledgerBalance.js
-│   │   ├── ledgerDisplayRows.js
-│   │   ├── ledgerExport.js
-│   │   ├── ledgerFilter.js
-│   │   ├── ledgerStatementContext.js
-│   │   ├── ledgerSummaryUi.js
-│   │   ├── ledgerTable.js
-│   │   ├── ledgerTxnLocal.js
-│   │   ├── load.js
-│   │   ├── loadReports.js
-│   │   ├── maintenanceBilling.js
-│   │   ├── mongoMutations.js
-│   │   ├── mongoWrite.js
-│   │   ├── nobrokerInvoicesRaised.js
-│   │   ├── packCache.js
-│   │   ├── payments.js
-│   │   ├── pull.js
-│   │   ├── reports.js
-│   │   ├── shell.js
-│   │   ├── state.js
-│   │   ├── vouchers.js
-│   │   ├── voucherStore.js
-│   │   └── windowBridge.js
-│   ├── listUi
-│   │   └── ExcelColHeader.jsx
-│   ├── propertyApp
-│   │   ├── parking
-│   │   │   ├── api.js
-│   │   │   ├── BaseSlotsDialog.jsx
-│   │   │   ├── InlineUnitEdit.jsx
-│   │   │   ├── main.jsx
-│   │   │   ├── NeighborRentDialog.jsx
-│   │   │   ├── PoolAssignDialog.jsx
-│   │   │   ├── PoolSlotDialog.jsx
-│   │   │   ├── UnitParkingDialog.jsx
-│   │   │   ├── VehicleFormDialog.jsx
-│   │   │   └── VehicleList.jsx
-│   │   ├── units
-│   │   │   ├── api.js
-│   │   │   ├── main.jsx
-│   │   │   ├── UnitDetailDialog.jsx
-│   │   │   ├── UnitFormDialog.jsx
-│   │   │   ├── UnitImportDialog.jsx
-│   │   │   └── UnitList.jsx
-│   │   ├── boot.js
-│   │   ├── client.js
-│   │   ├── loadState.js
-│   │   ├── mount.jsx
-│   │   └── property-app.css
-│   ├── residentsApp
-│   │   ├── components
-│   │   │   ├── ResidentFormDialog.jsx
-│   │   │   └── ResidentImportDialog.jsx
-│   │   ├── hooks
-│   │   │   └── useListQueryParams.js
-│   │   ├── pages
-│   │   │   ├── ResidentDetails.jsx
-│   │   │   └── ResidentList.jsx
-│   │   ├── utils
-│   │   │   └── listNavigation.js
-│   │   ├── api.js
-│   │   ├── App.jsx
-│   │   ├── boot.js
-│   │   ├── loadState.js
-│   │   ├── main.jsx
-│   │   ├── mount.jsx
-│   │   ├── residents-app.css
-│   │   └── theme.js
-│   ├── views
-│   │   ├── html
-│   │   │   ├── access-control.html
-│   │   │   ├── accounts.html
-│   │   │   ├── apartment.html
-│   │   │   ├── dashboard.html
-│   │   │   ├── email.html
-│   │   │   ├── finance-new-accounts.html
-│   │   │   ├── finance-new-invoices.html
-│   │   │   ├── invoices.html
-│   │   │   ├── operations.html
-│   │   │   ├── portal.html
-│   │   │   ├── portfolio.html
-│   │   │   ├── registry.html
-│   │   │   ├── security.html
-│   │   │   ├── setup.html
-│   │   │   └── units.html
-│   │   ├── inits
-│   │   │   ├── accounts.js
-│   │   │   ├── apartment.js
-│   │   │   ├── dashboard.js
-│   │   │   ├── email.js
-│   │   │   ├── finance-new-accounts.js
-│   │   │   ├── finance-new-invoices.js
-│   │   │   ├── invoices.js
-│   │   │   ├── operations.js
-│   │   │   ├── portal.js
-│   │   │   ├── portfolio.js
-│   │   │   ├── registry.js
-│   │   │   ├── security.js
-│   │   │   ├── setup.js
-│   │   │   └── units.js
-│   │   ├── controllers.js
-│   │   └── viewShell.js
-│   ├── accessLocks.js
-│   ├── accessRequests.js
-│   ├── accessSync.js
-│   ├── activityAudit.js
-│   ├── admin.js
-│   ├── allocation.js
-│   ├── apiJson.js
-│   ├── authClient.js
-│   ├── authRedirect.js
-│   ├── authShell.js
-│   ├── authUserKind.js
-│   ├── bankClassificationRules.js
-│   ├── bankReconciliation.js
-│   ├── bankStatementLineUtils.js
-│   ├── bankStatementOrdering.js
-│   ├── billingBatches.js
-│   ├── billingGroups.js
-│   ├── billingHeads.js
-│   ├── blockFilter.js
-│   ├── bulkCollectionImport.js
-│   ├── bulkInvoiceImport.js
-│   ├── buttonBusy.js
-│   ├── cashFloat.js
-│   ├── classifyCombobox.js
-│   ├── classifyOptions.js
-│   ├── counter.js
-│   ├── dashboard.css
-│   ├── dashboard.js
-│   ├── dbClient.js
-│   ├── duesAging.js
-│   ├── emailOutbox.js
-│   ├── expenseCategories.js
-│   ├── expensePlan.js
-│   ├── externalConnections.js
-│   ├── externalFetch.js
-│   ├── financeAnalytics.js
-│   ├── financeApi.js
-│   ├── financeDocuments.js
-│   ├── financeMobile.css
-│   ├── financePageHelp.js
-│   ├── financeReportsExport.js
-│   ├── finances.js
-│   ├── flatPicker.js
-│   ├── gateWizard.css
-│   ├── gateWizard.js
-│   ├── generalLedger.js
-│   ├── invoicePdf.js
-│   ├── invoicesRaisedPage.js
-│   ├── ledgerBalance.js
-│   ├── ledgerColumnMapping.js
-│   ├── ledgerDisplayRows.js
-│   ├── ledgerExport.js
-│   ├── ledgerFilter.js
-│   ├── ledgerOAuth.js
-│   ├── ledgerSheetRegion.js
-│   ├── ledgerSpreadsheetSync.js
-│   ├── ledgerStatementContext.js
-│   ├── ledgerSync.css
-│   ├── ledgerSyncApply.js
-│   ├── ledgerSyncImport.js
-│   ├── ledgerSyncJournal.js
-│   ├── ledgerSyncLog.js
-│   ├── ledgerSyncRunAudit.js
-│   ├── ledgerTable.js
-│   ├── ledgerTransform.js
-│   ├── ledgerTxnLocal.js
-│   ├── login.css
-│   ├── loginPage.js
-│   ├── main.js
-│   ├── mainBoot.js
-│   ├── maintenanceBilling.js
-│   ├── microsoftExcelPush.js
-│   ├── moduleAccess.css
-│   ├── moduleAccess.js
-│   ├── moduleAccessAdmin.js
-│   ├── ms-callback.js
-│   ├── navigation.js
-│   ├── nobrokerInvoicesRaised.js
-│   ├── noticeDelivery.js
-│   ├── noticeEditor.js
-│   ├── notices.css
-│   ├── notices.js
-│   ├── operations.js
-│   ├── pageAccess.css
-│   ├── pageAccess.js
-│   ├── pageAccessAdmin.js
-│   ├── pageAccessResolve.js
-│   ├── parkingImport.js
-│   ├── parkingOps.js
-│   ├── parkingReconcileUi.js
-│   ├── passbookEvolyx.js
-│   ├── passbookJobImportAnalysis.js
-│   ├── payments.js
-│   ├── penaltyRules.js
-│   ├── portfolio.js
-│   ├── rbac.js
-│   ├── rbacMatrix.js
-│   ├── registry.js
-│   ├── residentImport.js
-│   ├── residentLinks.js
-│   ├── residentPortal.js
-│   ├── residents.js
-│   ├── residentView.js
-│   ├── securityPortal.css
-│   ├── securityPortal.js
-│   ├── setupSocietyUi.js
-│   ├── socialAuth.js
-│   ├── staffNotifications.js
-│   ├── stateLoader.js
-│   ├── store.js
-│   ├── style.css
-│   ├── syncCodeEditor.js
-│   ├── transitionFees.js
-│   ├── uiMode.js
-│   ├── unitDirectory.js
-│   ├── unitTransitions.js
-│   ├── vehicleAudit.js
-│   ├── visitorApprovals.js
-│   ├── visitorGate.js
-│   ├── visitors.css
-│   └── visitors.js
 ├── units
 │   └── index.html
 ├── .cursorrules
@@ -530,7 +593,7 @@
 
 ```
 
-**Scale:** ~263 JavaScript modules, ~16 CSS files, ~28 HTML entry pages.
+**Scale:** ~312 JavaScript modules, ~16 CSS files, ~28 HTML entry pages.
 
 ---
 
@@ -542,307 +605,362 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 ### Directory tree
 
 ```
-├── adminApp
-│   ├── components
-│   │   ├── PageHeader.jsx
-│   │   └── SummaryStrip.jsx
-│   ├── pages
-│   │   ├── BankPage.jsx
-│   │   ├── CategoriesPage.jsx
-│   │   ├── IntegrationsPage.jsx
-│   │   ├── PeoplePage.jsx
-│   │   ├── SocietyPage.jsx
-│   │   ├── StaffPage.jsx
-│   │   └── VendorsPage.jsx
-│   ├── admin-app.css
-│   ├── api.js
-│   ├── App.jsx
-│   ├── boot.js
-│   ├── main.jsx
-│   ├── mount.jsx
-│   └── pages.js
-├── appShell
-│   ├── html
-│   │   └── layout.html
-│   ├── chrome.js
-│   ├── ensureChartJs.js
-│   ├── mount.js
-│   ├── mpaSession.js
-│   ├── nav.js
-│   ├── navPref.js
-│   ├── routes.js
-│   └── shell.css
-├── assets
-├── financeApp
-│   ├── html
-│   │   ├── _bank-recon-modals.html
-│   │   ├── _cash-modal.html
-│   │   ├── _header-actions.html
-│   │   ├── _ledger-line-modal.html
-│   │   ├── bank-recon.html
-│   │   ├── docs.html
-│   │   ├── expense-plan.html
-│   │   ├── invoices-raised.html
-│   │   ├── ledger.html
-│   │   └── reports.html
-│   ├── ledger
-│   │   ├── data.js
-│   │   ├── exportExcel.js
-│   │   ├── lineModal.js
-│   │   └── view.js
-│   ├── pages
-│   │   ├── bank-recon.js
-│   │   ├── docs.js
-│   │   ├── expense-plan.js
-│   │   ├── invoices-raised.js
-│   │   ├── ledger.js
-│   │   └── reports.js
-│   ├── boot.js
-│   ├── chrome.js
-│   ├── finance-app.css
-│   ├── financeNav.js
-│   ├── mount.js
-│   └── session.js
-├── financeNew
-│   ├── api.js
-│   ├── bankReconciliation.js
-│   ├── bankStatementQueries.js
-│   ├── billingBatches.js
-│   ├── billingGroups.js
-│   ├── billingHeads.js
-│   ├── cashFloat.js
-│   ├── cashFloatPredicates.js
-│   ├── classicState.js
-│   ├── duesAging.js
-│   ├── expensePlan.js
-│   ├── financeAnalytics.js
-│   ├── financeDocuments.js
-│   ├── finances.js
-│   ├── invoicesRaisedPage.js
-│   ├── ledger.js
-│   ├── ledgerBalance.js
-│   ├── ledgerDisplayRows.js
-│   ├── ledgerExport.js
-│   ├── ledgerFilter.js
-│   ├── ledgerStatementContext.js
-│   ├── ledgerSummaryUi.js
-│   ├── ledgerTable.js
-│   ├── ledgerTxnLocal.js
-│   ├── load.js
-│   ├── loadReports.js
-│   ├── maintenanceBilling.js
-│   ├── mongoMutations.js
-│   ├── mongoWrite.js
-│   ├── nobrokerInvoicesRaised.js
-│   ├── packCache.js
-│   ├── payments.js
-│   ├── pull.js
-│   ├── reports.js
-│   ├── shell.js
-│   ├── state.js
-│   ├── vouchers.js
-│   ├── voucherStore.js
-│   └── windowBridge.js
-├── listUi
-│   └── ExcelColHeader.jsx
-├── propertyApp
-│   ├── parking
-│   │   ├── api.js
-│   │   ├── BaseSlotsDialog.jsx
-│   │   ├── InlineUnitEdit.jsx
-│   │   ├── main.jsx
-│   │   ├── NeighborRentDialog.jsx
-│   │   ├── PoolAssignDialog.jsx
-│   │   ├── PoolSlotDialog.jsx
-│   │   ├── UnitParkingDialog.jsx
-│   │   ├── VehicleFormDialog.jsx
-│   │   └── VehicleList.jsx
-│   ├── units
-│   │   ├── api.js
-│   │   ├── main.jsx
-│   │   ├── UnitDetailDialog.jsx
-│   │   ├── UnitFormDialog.jsx
-│   │   ├── UnitImportDialog.jsx
-│   │   └── UnitList.jsx
-│   ├── boot.js
-│   ├── client.js
-│   ├── loadState.js
-│   ├── mount.jsx
-│   └── property-app.css
-├── residentsApp
-│   ├── components
-│   │   ├── ResidentFormDialog.jsx
-│   │   └── ResidentImportDialog.jsx
-│   ├── hooks
-│   │   └── useListQueryParams.js
-│   ├── pages
-│   │   ├── ResidentDetails.jsx
-│   │   └── ResidentList.jsx
-│   ├── utils
-│   │   └── listNavigation.js
-│   ├── api.js
-│   ├── App.jsx
-│   ├── boot.js
-│   ├── loadState.js
-│   ├── main.jsx
-│   ├── mount.jsx
-│   ├── residents-app.css
-│   └── theme.js
-├── views
-│   ├── html
-│   │   ├── access-control.html
-│   │   ├── accounts.html
-│   │   ├── apartment.html
-│   │   ├── dashboard.html
-│   │   ├── email.html
-│   │   ├── finance-new-accounts.html
-│   │   ├── finance-new-invoices.html
-│   │   ├── invoices.html
-│   │   ├── operations.html
-│   │   ├── portal.html
-│   │   ├── portfolio.html
-│   │   ├── registry.html
-│   │   ├── security.html
-│   │   ├── setup.html
-│   │   └── units.html
-│   ├── inits
-│   │   ├── accounts.js
-│   │   ├── apartment.js
-│   │   ├── dashboard.js
-│   │   ├── email.js
-│   │   ├── finance-new-accounts.js
-│   │   ├── finance-new-invoices.js
-│   │   ├── invoices.js
-│   │   ├── operations.js
-│   │   ├── portal.js
-│   │   ├── portfolio.js
-│   │   ├── registry.js
-│   │   ├── security.js
-│   │   ├── setup.js
-│   │   └── units.js
-│   ├── controllers.js
-│   └── viewShell.js
-├── accessLocks.js
-├── accessRequests.js
-├── accessSync.js
-├── activityAudit.js
-├── admin.js
-├── allocation.js
-├── apiJson.js
-├── authClient.js
-├── authRedirect.js
-├── authShell.js
-├── authUserKind.js
-├── bankClassificationRules.js
-├── bankReconciliation.js
-├── bankStatementLineUtils.js
-├── bankStatementOrdering.js
-├── billingBatches.js
-├── billingGroups.js
-├── billingHeads.js
-├── blockFilter.js
-├── bulkCollectionImport.js
-├── bulkInvoiceImport.js
-├── buttonBusy.js
-├── cashFloat.js
-├── classifyCombobox.js
-├── classifyOptions.js
-├── counter.js
-├── dashboard.css
-├── dashboard.js
-├── dbClient.js
-├── duesAging.js
-├── emailOutbox.js
-├── expenseCategories.js
-├── expensePlan.js
-├── externalConnections.js
-├── externalFetch.js
-├── financeAnalytics.js
-├── financeApi.js
-├── financeDocuments.js
-├── financeMobile.css
-├── financePageHelp.js
-├── financeReportsExport.js
-├── finances.js
-├── flatPicker.js
-├── gateWizard.css
-├── gateWizard.js
-├── generalLedger.js
-├── invoicePdf.js
-├── invoicesRaisedPage.js
-├── ledgerBalance.js
-├── ledgerColumnMapping.js
-├── ledgerDisplayRows.js
-├── ledgerExport.js
-├── ledgerFilter.js
-├── ledgerOAuth.js
-├── ledgerSheetRegion.js
-├── ledgerSpreadsheetSync.js
-├── ledgerStatementContext.js
-├── ledgerSync.css
-├── ledgerSyncApply.js
-├── ledgerSyncImport.js
-├── ledgerSyncJournal.js
-├── ledgerSyncLog.js
-├── ledgerSyncRunAudit.js
-├── ledgerTable.js
-├── ledgerTransform.js
-├── ledgerTxnLocal.js
-├── login.css
-├── loginPage.js
-├── main.js
-├── mainBoot.js
-├── maintenanceBilling.js
-├── microsoftExcelPush.js
-├── moduleAccess.css
-├── moduleAccess.js
-├── moduleAccessAdmin.js
-├── ms-callback.js
-├── navigation.js
-├── nobrokerInvoicesRaised.js
-├── noticeDelivery.js
-├── noticeEditor.js
-├── notices.css
-├── notices.js
-├── operations.js
-├── pageAccess.css
-├── pageAccess.js
-├── pageAccessAdmin.js
-├── pageAccessResolve.js
-├── parkingImport.js
-├── parkingOps.js
-├── parkingReconcileUi.js
-├── passbookEvolyx.js
-├── passbookJobImportAnalysis.js
-├── payments.js
-├── penaltyRules.js
-├── portfolio.js
-├── rbac.js
-├── rbacMatrix.js
-├── registry.js
-├── residentImport.js
-├── residentLinks.js
-├── residentPortal.js
-├── residents.js
-├── residentView.js
-├── securityPortal.css
-├── securityPortal.js
-├── setupSocietyUi.js
-├── socialAuth.js
-├── staffNotifications.js
-├── stateLoader.js
-├── store.js
-├── style.css
-├── syncCodeEditor.js
-├── transitionFees.js
-├── uiMode.js
-├── unitDirectory.js
-├── unitTransitions.js
-├── vehicleAudit.js
-├── visitorApprovals.js
-├── visitorGate.js
-├── visitors.css
-└── visitors.js
+├── classic
+│   └── src
+│       ├── assets
+│       ├── views
+│       │   ├── html
+│       │   │   ├── access-control.html
+│       │   │   ├── accounts.html
+│       │   │   ├── apartment.html
+│       │   │   ├── dashboard.html
+│       │   │   ├── email.html
+│       │   │   ├── finance-new-accounts.html
+│       │   │   ├── finance-new-invoices.html
+│       │   │   ├── invoices.html
+│       │   │   ├── operations.html
+│       │   │   ├── portal.html
+│       │   │   ├── portfolio.html
+│       │   │   ├── registry.html
+│       │   │   ├── security.html
+│       │   │   ├── setup.html
+│       │   │   └── units.html
+│       │   ├── inits
+│       │   │   ├── accounts.js
+│       │   │   ├── apartment.js
+│       │   │   ├── dashboard.js
+│       │   │   ├── email.js
+│       │   │   ├── finance-new-accounts.js
+│       │   │   ├── finance-new-invoices.js
+│       │   │   ├── invoices.js
+│       │   │   ├── operations.js
+│       │   │   ├── portal.js
+│       │   │   ├── portfolio.js
+│       │   │   ├── registry.js
+│       │   │   ├── security.js
+│       │   │   ├── setup.js
+│       │   │   └── units.js
+│       │   ├── controllers.js
+│       │   └── viewShell.js
+│       ├── accessLocks.js
+│       ├── accessRequests.js
+│       ├── accessSync.js
+│       ├── activityAudit.js
+│       ├── admin.js
+│       ├── allocation.js
+│       ├── apiJson.js
+│       ├── authRedirect.js
+│       ├── authShell.js
+│       ├── authUserKind.js
+│       ├── bankClassificationRules.js
+│       ├── bankReconciliation.js
+│       ├── bankStatementLineUtils.js
+│       ├── bankStatementOrdering.js
+│       ├── billingBatches.js
+│       ├── billingGroups.js
+│       ├── billingHeads.js
+│       ├── blockFilter.js
+│       ├── bulkCollectionImport.js
+│       ├── bulkInvoiceImport.js
+│       ├── buttonBusy.js
+│       ├── cashFloat.js
+│       ├── classifyCombobox.js
+│       ├── classifyOptions.js
+│       ├── counter.js
+│       ├── dashboard.css
+│       ├── dashboard.js
+│       ├── dbClient.js
+│       ├── duesAging.js
+│       ├── emailOutbox.js
+│       ├── expenseCategories.js
+│       ├── expensePlan.js
+│       ├── externalConnections.js
+│       ├── externalFetch.js
+│       ├── financeAnalytics.js
+│       ├── financeApi.js
+│       ├── financeDocuments.js
+│       ├── financeMobile.css
+│       ├── financePageHelp.js
+│       ├── financeReportsExport.js
+│       ├── finances.js
+│       ├── flatPicker.js
+│       ├── gateWizard.css
+│       ├── gateWizard.js
+│       ├── generalLedger.js
+│       ├── invoicePdf.js
+│       ├── invoicesRaisedPage.js
+│       ├── ledgerBalance.js
+│       ├── ledgerColumnMapping.js
+│       ├── ledgerDisplayRows.js
+│       ├── ledgerExport.js
+│       ├── ledgerFilter.js
+│       ├── ledgerOAuth.js
+│       ├── ledgerSheetRegion.js
+│       ├── ledgerSpreadsheetSync.js
+│       ├── ledgerStatementContext.js
+│       ├── ledgerSync.css
+│       ├── ledgerSyncApply.js
+│       ├── ledgerSyncImport.js
+│       ├── ledgerSyncJournal.js
+│       ├── ledgerSyncLog.js
+│       ├── ledgerSyncRunAudit.js
+│       ├── ledgerTable.js
+│       ├── ledgerTransform.js
+│       ├── ledgerTxnLocal.js
+│       ├── login.css
+│       ├── loginPage.js
+│       ├── main.js
+│       ├── mainBoot.js
+│       ├── maintenanceBilling.js
+│       ├── microsoftExcelPush.js
+│       ├── moduleAccess.css
+│       ├── moduleAccess.js
+│       ├── moduleAccessAdmin.js
+│       ├── ms-callback.js
+│       ├── navigation.js
+│       ├── nobrokerInvoicesRaised.js
+│       ├── noticeDelivery.js
+│       ├── noticeEditor.js
+│       ├── notices.css
+│       ├── notices.js
+│       ├── operations.js
+│       ├── pageAccess.css
+│       ├── pageAccess.js
+│       ├── pageAccessAdmin.js
+│       ├── pageAccessResolve.js
+│       ├── parkingImport.js
+│       ├── parkingOps.js
+│       ├── parkingReconcileUi.js
+│       ├── passbookEvolyx.js
+│       ├── passbookJobImportAnalysis.js
+│       ├── payments.js
+│       ├── penaltyRules.js
+│       ├── portfolio.js
+│       ├── rbac.js
+│       ├── rbacMatrix.js
+│       ├── registry.js
+│       ├── residentImport.js
+│       ├── residentLinks.js
+│       ├── residentPortal.js
+│       ├── residents.js
+│       ├── residentView.js
+│       ├── securityPortal.css
+│       ├── securityPortal.js
+│       ├── setupSocietyUi.js
+│       ├── socialAuth.js
+│       ├── staffNotifications.js
+│       ├── stateLoader.js
+│       ├── store.js
+│       ├── style.css
+│       ├── syncCodeEditor.js
+│       ├── transitionFees.js
+│       ├── unitDirectory.js
+│       ├── unitTransitions.js
+│       ├── vehicleAudit.js
+│       ├── visitorApprovals.js
+│       ├── visitorGate.js
+│       ├── visitors.css
+│       └── visitors.js
+└── new
+    └── src
+        ├── adminApp
+        │   ├── components
+        │   │   ├── PageHeader.jsx
+        │   │   └── SummaryStrip.jsx
+        │   ├── pages
+        │   │   ├── BankPage.jsx
+        │   │   ├── CategoriesPage.jsx
+        │   │   ├── IntegrationsPage.jsx
+        │   │   ├── PeoplePage.jsx
+        │   │   ├── RolesPage.jsx
+        │   │   ├── SocietyPage.jsx
+        │   │   ├── StaffPage.jsx
+        │   │   └── VendorsPage.jsx
+        │   ├── admin-app.css
+        │   ├── api.js
+        │   ├── App.jsx
+        │   ├── boot.js
+        │   ├── main.jsx
+        │   ├── mount.jsx
+        │   └── pages.js
+        ├── appShell
+        │   ├── html
+        │   │   └── layout.html
+        │   ├── chrome.js
+        │   ├── ensureChartJs.js
+        │   ├── mount.js
+        │   ├── mpaAuth.js
+        │   ├── mpaSession.js
+        │   ├── nav.js
+        │   ├── navPref.js
+        │   ├── routes.js
+        │   └── shell.css
+        ├── financeApp
+        │   ├── html
+        │   │   ├── _bank-recon-modals.html
+        │   │   ├── _cash-modal.html
+        │   │   ├── _header-actions.html
+        │   │   ├── _ledger-line-modal.html
+        │   │   ├── bank-recon.html
+        │   │   ├── docs.html
+        │   │   ├── expense-plan.html
+        │   │   ├── invoices-raised.html
+        │   │   ├── ledger.html
+        │   │   └── reports.html
+        │   ├── ledger
+        │   │   ├── data.js
+        │   │   ├── exportExcel.js
+        │   │   ├── lineModal.js
+        │   │   └── view.js
+        │   ├── pages
+        │   │   ├── bank-recon.js
+        │   │   ├── docs.js
+        │   │   ├── expense-plan.js
+        │   │   ├── invoices-raised.js
+        │   │   ├── ledger.js
+        │   │   └── reports.js
+        │   ├── boot.js
+        │   ├── chrome.js
+        │   ├── finance-app.css
+        │   ├── financeNav.js
+        │   ├── mount.js
+        │   └── session.js
+        ├── financeNew
+        │   ├── api.js
+        │   ├── bankReconciliation.js
+        │   ├── bankStatementQueries.js
+        │   ├── billingBatches.js
+        │   ├── billingGroups.js
+        │   ├── billingHeads.js
+        │   ├── cashFloat.js
+        │   ├── cashFloatPredicates.js
+        │   ├── classicState.js
+        │   ├── duesAging.js
+        │   ├── expensePlan.js
+        │   ├── financeAnalytics.js
+        │   ├── financeDocuments.js
+        │   ├── finances.js
+        │   ├── invoicesRaisedPage.js
+        │   ├── ledger.js
+        │   ├── ledgerBalance.js
+        │   ├── ledgerDisplayRows.js
+        │   ├── ledgerExport.js
+        │   ├── ledgerFilter.js
+        │   ├── ledgerStatementContext.js
+        │   ├── ledgerSummaryUi.js
+        │   ├── ledgerTable.js
+        │   ├── ledgerTxnLocal.js
+        │   ├── load.js
+        │   ├── loadReports.js
+        │   ├── maintenanceBilling.js
+        │   ├── mongoMutations.js
+        │   ├── mongoWrite.js
+        │   ├── nobrokerInvoicesRaised.js
+        │   ├── packCache.js
+        │   ├── payments.js
+        │   ├── pull.js
+        │   ├── reports.js
+        │   ├── shell.js
+        │   ├── state.js
+        │   ├── vouchers.js
+        │   ├── voucherStore.js
+        │   └── windowBridge.js
+        ├── listUi
+        │   └── ExcelColHeader.jsx
+        ├── propertyApp
+        │   ├── parking
+        │   │   ├── api.js
+        │   │   ├── BaseSlotsDialog.jsx
+        │   │   ├── InlineUnitEdit.jsx
+        │   │   ├── main.jsx
+        │   │   ├── NeighborRentDialog.jsx
+        │   │   ├── PoolAssignDialog.jsx
+        │   │   ├── PoolSlotDialog.jsx
+        │   │   ├── UnitParkingDialog.jsx
+        │   │   ├── VehicleFormDialog.jsx
+        │   │   └── VehicleList.jsx
+        │   ├── units
+        │   │   ├── api.js
+        │   │   ├── main.jsx
+        │   │   ├── UnitDetailDialog.jsx
+        │   │   ├── UnitFormDialog.jsx
+        │   │   ├── UnitImportDialog.jsx
+        │   │   └── UnitList.jsx
+        │   ├── boot.js
+        │   ├── client.js
+        │   ├── loadState.js
+        │   ├── mount.jsx
+        │   └── property-app.css
+        ├── residentsApp
+        │   ├── components
+        │   │   ├── ResidentFormDialog.jsx
+        │   │   └── ResidentImportDialog.jsx
+        │   ├── hooks
+        │   │   └── useListQueryParams.js
+        │   ├── pages
+        │   │   ├── ResidentDetails.jsx
+        │   │   └── ResidentList.jsx
+        │   ├── utils
+        │   │   └── listNavigation.js
+        │   ├── api.js
+        │   ├── App.jsx
+        │   ├── boot.js
+        │   ├── loadState.js
+        │   ├── main.jsx
+        │   ├── mount.jsx
+        │   ├── residents-app.css
+        │   └── theme.js
+        ├── runtime
+        │   ├── authHeaders.js
+        │   └── state.js
+        ├── accessLocks.js
+        ├── accessRequests.js
+        ├── activityAudit.js
+        ├── allocation.js
+        ├── apiJson.js
+        ├── authClient.js
+        ├── authRedirect.js
+        ├── bankClassificationRules.js
+        ├── bankStatementLineUtils.js
+        ├── bankStatementOrdering.js
+        ├── blockFilter.js
+        ├── bulkCollectionImport.js
+        ├── bulkInvoiceImport.js
+        ├── buttonBusy.js
+        ├── capabilities.js
+        ├── classifyCombobox.js
+        ├── classifyOptions.js
+        ├── dbClient.js
+        ├── expenseCategories.js
+        ├── externalConnections.js
+        ├── financeApi.js
+        ├── financePageHelp.js
+        ├── finances.js
+        ├── invoicePdf.js
+        ├── ledgerColumnMapping.js
+        ├── ledgerSpreadsheetSync.js
+        ├── ledgerTransform.js
+        ├── moduleAccess.js
+        ├── navigation.js
+        ├── parkingImport.js
+        ├── passbookEvolyx.js
+        ├── passbookJobImportAnalysis.js
+        ├── penaltyRules.js
+        ├── rbac.js
+        ├── rbacMatrix.js
+        ├── rbacMongoClient.js
+        ├── registry.js
+        ├── residentImport.js
+        ├── residentLinks.js
+        ├── residents.js
+        ├── store.js
+        ├── uiMode.js
+        └── unitDirectory.js
+
+--- packages ---
+└── auth
+    ├── authClient.js
+    └── server.js
 
 ```
 
@@ -850,127 +968,168 @@ The SPA is modular: `src/main.js` boots → `src/store.js` hydrates state → `s
 
 | File | Purpose |
 | --- | --- |
-| src/accessLocks.js | Access lock guard (HMR-safe) |
-| src/accessRequests.js | Access request handling |
-| src/accessSync.js | Access user directory sync |
-| src/activityAudit.js | Activity audit log page |
-| src/admin.js | Setup subview switching & admin helpers |
-| src/allocation.js | Parking slot allocation |
-| src/apiJson.js | API JSON request helpers |
-| src/authClient.js | Auth client & session handling |
-| src/authRedirect.js | auth Redirect |
-| src/authShell.js | Auth UI shell |
-| src/authUserKind.js | auth User Kind |
-| src/bankClassificationRules.js | Bank statement classification rules |
-| src/bankReconciliation.js | Bank reconciliation UI |
-| src/bankStatementLineUtils.js | Bank statement line utilities |
-| src/bankStatementOrdering.js | Bank statement line ordering |
-| src/billingBatches.js | Billing batch history |
-| src/billingGroups.js | Billing groups & group units |
-| src/billingHeads.js | Maintenance charge heads |
-| src/blockFilter.js | Block filter helper |
-| src/bulkCollectionImport.js | Bulk collection import |
-| src/bulkInvoiceImport.js | Bulk invoice import |
-| src/buttonBusy.js | Busy-state button helper |
-| src/cashFloat.js | Cash float management |
-| src/classifyCombobox.js | Classification combobox |
-| src/classifyOptions.js | Shared category/sub-category lists for Finance-New + Admin-New (catalog + Mongo usage) |
-| src/counter.js | Counter helper |
-| src/dashboard.css | Dashboard styles |
-| src/dashboard.js | Dashboard render |
-| src/dbClient.js | Supabase client + apartment state fetch |
-| src/duesAging.js | Dues aging report |
-| src/emailOutbox.js | Email outbox |
-| src/expenseCategories.js | Expense categories |
-| src/expensePlan.js | Expense plan & recurring items |
-| src/externalConnections.js | External connections (admin) |
-| src/externalFetch.js | External fetch helpers |
-| src/financeAnalytics.js | Finance reports & analytics |
-| src/financeApi.js | Finance API client |
-| src/financeDocuments.js | Bills & receipts document management |
-| src/financeMobile.css | Mobile finance styles |
-| src/financePageHelp.js | finance Page Help |
-| src/financeReportsExport.js | Export finance reports (Excel) |
-| src/finances.js | Cash & bank ledger engine + processFinances |
-| src/flatPicker.js | Flat (units) picker helper |
-| src/gateWizard.css | Gate wizard styles |
-| src/gateWizard.js | Gate wizard / visitor check-in flow |
-| src/generalLedger.js | General ledger entry management |
-| src/invoicePdf.js | Invoice PDF generation & share |
-| src/invoicesRaisedPage.js | Invoices-raised list page |
-| src/ledgerBalance.js | Ledger balance computation |
-| src/ledgerColumnMapping.js | Ledger column mapping for imports |
-| src/ledgerDisplayRows.js | Ledger table row rendering |
-| src/ledgerExport.js | Ledger export |
-| src/ledgerFilter.js | Ledger filtering |
-| src/ledgerOAuth.js | Bank OAuth connections for ledger sync |
-| src/ledgerSheetRegion.js | Spreadsheet region detection |
-| src/ledgerSpreadsheetSync.js | Spreadsheet sync panel (admin-sync) |
-| src/ledgerStatementContext.js | Bank statement context helpers |
-| src/ledgerSync.css | Ledger sync styles |
-| src/ledgerSyncApply.js | Apply ledger sync rows |
-| src/ledgerSyncImport.js | Ledger sync import |
-| src/ledgerSyncJournal.js | Ledger sync journal |
-| src/ledgerSyncLog.js | Ledger sync run log |
-| src/ledgerSyncRunAudit.js | Ledger sync run audit UI |
-| src/ledgerTable.js | Ledger table rendering |
-| src/ledgerTransform.js | Ledger row transform helpers |
-| src/ledgerTxnLocal.js | Local (offline) ledger transactions |
-| src/login.css | login |
-| src/loginPage.js | login Page |
-| src/main.js | Entry point / primary boot sequence & view coordination |
-| src/mainBoot.js | Shared boot helpers (access mappings, resident rendering, apartment options) |
-| src/maintenanceBilling.js | Maintenance billing engine + invoices page |
-| src/microsoftExcelPush.js | Push finance data to Excel via Microsoft Graph |
-| src/moduleAccess.css | Module access styles |
-| src/moduleAccess.js | Module-level access / isModuleEnabled |
-| src/moduleAccessAdmin.js | Module access admin panel |
-| src/ms-callback.js | Microsoft (MSAL) auth redirect callback |
-| src/navigation.js | Modules, pages, routing & permission gating (NAV_MODULES) |
-| src/nobrokerInvoicesRaised.js | NoBroker invoices-raised list |
-| src/noticeDelivery.js | Notice delivery |
-| src/noticeEditor.js | Notice editor |
-| src/notices.css | Notices styles |
-| src/notices.js | Notices feature |
-| src/operations.js | operations |
-| src/pageAccess.css | Page access styles |
-| src/pageAccess.js | Page-level access |
-| src/pageAccessAdmin.js | Page access admin panel |
-| src/pageAccessResolve.js | Page access route resolution |
-| src/parkingImport.js | Parking data import |
-| src/parkingOps.js | Parking operations UI refresh |
-| src/parkingReconcileUi.js | Parking reconciliation UI |
-| src/passbookEvolyx.js | Evolyx passbook job handling |
-| src/passbookJobImportAnalysis.js | Passbook job import analysis |
-| src/payments.js | Payments / collections |
-| src/penaltyRules.js | Maintenance penalty rules |
-| src/portfolio.js | Portfolio rollup view |
-| src/rbac.js | RBAC: roles, permissions, effective-role resolution |
-| src/rbacMatrix.js | RBAC permission matrix UI |
-| src/registry.js | Parking & vehicle registry (offline-first) + analytics |
-| src/residentImport.js | Resident import (Excel/CSV) |
-| src/residentLinks.js | Resident ↔ unit link admin |
-| src/residentPortal.js | Resident self-service portal subviews |
-| src/residents.js | Residents CRUD |
-| src/residentView.js | Resident detail view |
-| src/securityPortal.css | Security portal styles |
-| src/securityPortal.js | Security gate portal (gate desk / visitor log / passes) |
-| src/setupSocietyUi.js | setup Society Ui |
-| src/socialAuth.js | Social provider sign-in (Google / Microsoft) |
-| src/staffNotifications.js | Staff notifications UI |
-| src/stateLoader.js | Domain loaders & STATE_DOMAINS registry for partitioned state |
-| src/store.js | Central state (portalState) + Supabase client + pullState hydration |
-| src/style.css | Global styles |
-| src/syncCodeEditor.js | Sync code editor |
-| src/transitionFees.js | Transition fee computation |
-| src/uiMode.js | Classic vs New UI mode |
-| src/unitDirectory.js | Unit directory (block/bhk/area) |
-| src/unitTransitions.js | Move-in / move-out transition wizard |
-| src/vehicleAudit.js | Vehicle audit log & badge refresh |
-| src/visitorApprovals.js | Visitor approvals workflow |
-| src/visitorGate.js | Gate-side visitor handling |
-| src/visitors.css | Visitors styles |
-| src/visitors.js | Visitor log UI |
+| apps/classic/accessLocks.js | Access lock guard (HMR-safe) |
+| apps/classic/accessRequests.js | Access request handling |
+| apps/classic/accessSync.js | Access user directory sync |
+| apps/classic/activityAudit.js | Activity audit log page |
+| apps/classic/admin.js | Setup subview switching & admin helpers |
+| apps/classic/allocation.js | Parking slot allocation |
+| apps/classic/apiJson.js | API JSON request helpers |
+| apps/classic/authRedirect.js | classic/auth Redirect |
+| apps/classic/authShell.js | Auth UI shell |
+| apps/classic/authUserKind.js | classic/auth User Kind |
+| apps/classic/bankClassificationRules.js | Bank statement classification rules |
+| apps/classic/bankReconciliation.js | Bank reconciliation UI |
+| apps/classic/bankStatementLineUtils.js | Bank statement line utilities |
+| apps/classic/bankStatementOrdering.js | Bank statement line ordering |
+| apps/classic/billingBatches.js | Billing batch history |
+| apps/classic/billingGroups.js | Billing groups & group units |
+| apps/classic/billingHeads.js | Maintenance charge heads |
+| apps/classic/blockFilter.js | Block filter helper |
+| apps/classic/bulkCollectionImport.js | Bulk collection import |
+| apps/classic/bulkInvoiceImport.js | Bulk invoice import |
+| apps/classic/buttonBusy.js | Busy-state button helper |
+| apps/classic/cashFloat.js | Cash float management |
+| apps/classic/classifyCombobox.js | Classification combobox |
+| apps/classic/classifyOptions.js | Classification options |
+| apps/classic/counter.js | Counter helper |
+| apps/classic/dashboard.css | Dashboard styles |
+| apps/classic/dashboard.js | Dashboard render |
+| apps/classic/dbClient.js | Supabase client + apartment state fetch |
+| apps/classic/duesAging.js | Dues aging report |
+| apps/classic/emailOutbox.js | Email outbox |
+| apps/classic/expenseCategories.js | Expense categories |
+| apps/classic/expensePlan.js | Expense plan & recurring items |
+| apps/classic/externalConnections.js | External connections (admin) |
+| apps/classic/externalFetch.js | External fetch helpers |
+| apps/classic/financeAnalytics.js | Finance reports & analytics |
+| apps/classic/financeApi.js | Finance API client |
+| apps/classic/financeDocuments.js | Bills & receipts document management |
+| apps/classic/financeMobile.css | Mobile finance styles |
+| apps/classic/financePageHelp.js | classic/finance Page Help |
+| apps/classic/financeReportsExport.js | Export finance reports (Excel) |
+| apps/classic/finances.js | Cash & bank ledger engine + processFinances |
+| apps/classic/flatPicker.js | Flat (units) picker helper |
+| apps/classic/gateWizard.css | Gate wizard styles |
+| apps/classic/gateWizard.js | Gate wizard / visitor check-in flow |
+| apps/classic/generalLedger.js | General ledger entry management |
+| apps/classic/invoicePdf.js | Invoice PDF generation & share |
+| apps/classic/invoicesRaisedPage.js | Invoices-raised list page |
+| apps/classic/ledgerBalance.js | Ledger balance computation |
+| apps/classic/ledgerColumnMapping.js | Ledger column mapping for imports |
+| apps/classic/ledgerDisplayRows.js | Ledger table row rendering |
+| apps/classic/ledgerExport.js | Ledger export |
+| apps/classic/ledgerFilter.js | Ledger filtering |
+| apps/classic/ledgerOAuth.js | Bank OAuth connections for ledger sync |
+| apps/classic/ledgerSheetRegion.js | Spreadsheet region detection |
+| apps/classic/ledgerSpreadsheetSync.js | Spreadsheet sync panel (admin-sync) |
+| apps/classic/ledgerStatementContext.js | Bank statement context helpers |
+| apps/classic/ledgerSync.css | Ledger sync styles |
+| apps/classic/ledgerSyncApply.js | Apply ledger sync rows |
+| apps/classic/ledgerSyncImport.js | Ledger sync import |
+| apps/classic/ledgerSyncJournal.js | Ledger sync journal |
+| apps/classic/ledgerSyncLog.js | Ledger sync run log |
+| apps/classic/ledgerSyncRunAudit.js | Ledger sync run audit UI |
+| apps/classic/ledgerTable.js | Ledger table rendering |
+| apps/classic/ledgerTransform.js | Ledger row transform helpers |
+| apps/classic/ledgerTxnLocal.js | Local (offline) ledger transactions |
+| apps/classic/login.css | classic/login |
+| apps/classic/loginPage.js | classic/login Page |
+| apps/classic/main.js | Entry point / primary boot sequence & view coordination |
+| apps/classic/mainBoot.js | Shared boot helpers (access mappings, resident rendering, apartment options) |
+| apps/classic/maintenanceBilling.js | Maintenance billing engine + invoices page |
+| apps/classic/microsoftExcelPush.js | Push finance data to Excel via Microsoft Graph |
+| apps/classic/moduleAccess.css | Module access styles |
+| apps/classic/moduleAccess.js | Module-level access / isModuleEnabled |
+| apps/classic/moduleAccessAdmin.js | Module access admin panel |
+| apps/classic/ms-callback.js | Microsoft (MSAL) auth redirect callback |
+| apps/classic/navigation.js | Modules, pages, routing & permission gating (NAV_MODULES) |
+| apps/classic/nobrokerInvoicesRaised.js | NoBroker invoices-raised list |
+| apps/classic/noticeDelivery.js | Notice delivery |
+| apps/classic/noticeEditor.js | Notice editor |
+| apps/classic/notices.css | Notices styles |
+| apps/classic/notices.js | Notices feature |
+| apps/classic/operations.js | classic/operations |
+| apps/classic/pageAccess.css | Page access styles |
+| apps/classic/pageAccess.js | Page-level access |
+| apps/classic/pageAccessAdmin.js | Page access admin panel |
+| apps/classic/pageAccessResolve.js | Page access route resolution |
+| apps/classic/parkingImport.js | Parking data import |
+| apps/classic/parkingOps.js | Parking operations UI refresh |
+| apps/classic/parkingReconcileUi.js | Parking reconciliation UI |
+| apps/classic/passbookEvolyx.js | Evolyx passbook job handling |
+| apps/classic/passbookJobImportAnalysis.js | Passbook job import analysis |
+| apps/classic/payments.js | Payments / collections |
+| apps/classic/penaltyRules.js | Maintenance penalty rules |
+| apps/classic/portfolio.js | Portfolio rollup view |
+| apps/classic/rbac.js | RBAC: roles, permissions, effective-role resolution |
+| apps/classic/rbacMatrix.js | RBAC permission matrix UI |
+| apps/classic/registry.js | Parking & vehicle registry (offline-first) + analytics |
+| apps/classic/residentImport.js | Resident import (Excel/CSV) |
+| apps/classic/residentLinks.js | Resident ↔ unit link admin |
+| apps/classic/residentPortal.js | Resident self-service portal subviews |
+| apps/classic/residents.js | Residents CRUD |
+| apps/classic/residentView.js | Resident detail view |
+| apps/classic/securityPortal.css | Security portal styles |
+| apps/classic/securityPortal.js | Security gate portal (gate desk / visitor log / passes) |
+| apps/classic/setupSocietyUi.js | classic/setup Society Ui |
+| apps/classic/socialAuth.js | Social provider sign-in (Google / Microsoft) |
+| apps/classic/staffNotifications.js | Staff notifications UI |
+| apps/classic/stateLoader.js | Domain loaders & STATE_DOMAINS registry for partitioned state |
+| apps/classic/store.js | Central state (portalState) + Supabase client + pullState hydration |
+| apps/classic/style.css | Global styles |
+| apps/classic/syncCodeEditor.js | Sync code editor |
+| apps/classic/transitionFees.js | Transition fee computation |
+| apps/classic/unitDirectory.js | Unit directory (block/bhk/area) |
+| apps/classic/unitTransitions.js | Move-in / move-out transition wizard |
+| apps/classic/vehicleAudit.js | Vehicle audit log & badge refresh |
+| apps/classic/visitorApprovals.js | Visitor approvals workflow |
+| apps/classic/visitorGate.js | Gate-side visitor handling |
+| apps/classic/visitors.css | Visitors styles |
+| apps/classic/visitors.js | Visitor log UI |
+| apps/new/accessLocks.js | Access lock guard (HMR-safe) |
+| apps/new/accessRequests.js | Access request handling |
+| apps/new/activityAudit.js | Activity audit log page |
+| apps/new/allocation.js | Parking slot allocation |
+| apps/new/apiJson.js | API JSON request helpers |
+| apps/new/authClient.js | Auth client & session handling |
+| apps/new/authRedirect.js | new/auth Redirect |
+| apps/new/bankClassificationRules.js | Bank statement classification rules |
+| apps/new/bankStatementLineUtils.js | Bank statement line utilities |
+| apps/new/bankStatementOrdering.js | Bank statement line ordering |
+| apps/new/blockFilter.js | Block filter helper |
+| apps/new/bulkCollectionImport.js | Bulk collection import |
+| apps/new/bulkInvoiceImport.js | Bulk invoice import |
+| apps/new/buttonBusy.js | Busy-state button helper |
+| apps/new/capabilities.js | Named action capabilities for new screens (can / assertCan) |
+| apps/new/classifyCombobox.js | Classification combobox |
+| apps/new/classifyOptions.js | Classification options |
+| apps/new/dbClient.js | Supabase client + apartment state fetch |
+| apps/new/expenseCategories.js | Expense categories |
+| apps/new/externalConnections.js | External connections (admin) |
+| apps/new/financeApi.js | Finance API client |
+| apps/new/financePageHelp.js | new/finance Page Help |
+| apps/new/finances.js | Cash & bank ledger engine + processFinances |
+| apps/new/invoicePdf.js | Invoice PDF generation & share |
+| apps/new/ledgerColumnMapping.js | Ledger column mapping for imports |
+| apps/new/ledgerSpreadsheetSync.js | Spreadsheet sync panel (admin-sync) |
+| apps/new/ledgerTransform.js | Ledger row transform helpers |
+| apps/new/moduleAccess.js | Module-level access / isModuleEnabled |
+| apps/new/navigation.js | Modules, pages, routing & permission gating (NAV_MODULES) |
+| apps/new/parkingImport.js | Parking data import |
+| apps/new/passbookEvolyx.js | Evolyx passbook job handling |
+| apps/new/passbookJobImportAnalysis.js | Passbook job import analysis |
+| apps/new/penaltyRules.js | Maintenance penalty rules |
+| apps/new/rbac.js | RBAC: roles, permissions, effective-role resolution |
+| apps/new/rbacMatrix.js | RBAC permission matrix UI |
+| apps/new/rbacMongoClient.js | Client Mongo RBAC writes (New UI) |
+| apps/new/registry.js | Parking & vehicle registry (offline-first) + analytics |
+| apps/new/residentImport.js | Resident import (Excel/CSV) |
+| apps/new/residentLinks.js | Resident ↔ unit link admin |
+| apps/new/residents.js | Residents CRUD |
+| apps/new/store.js | Central state (portalState) + Supabase client + pullState hydration |
+| apps/new/uiMode.js | Classic (Postgres) vs New (Mongo) UI mode |
+| apps/new/unitDirectory.js | Unit directory (block/bhk/area) |
 
 ---
 
@@ -1032,8 +1191,9 @@ and an optional `subview`.
 | an-categories | Sub-categories | admin-new | — |
 | an-staff | Staff directory | admin-new | — |
 | an-integrations | Integrations | admin-new | — |
-| admin-access | Roles | access-control | — |
+| an-roles | Roles | admin-new | — |
 | admin-activity | Activity Log | accounts | activity |
+| admin-access | Roles | access-control | — |
 | admin-society | Profile | setup | society |
 | admin-bank | Bank account | setup | bank |
 | admin-vendors | Vendors | setup | vendors |
@@ -1069,6 +1229,8 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │   ├── index.js
 │   ├── money.js
 │   └── permissions.js
+├── new
+│   └── workspace-boot.js
 ├── propertyMongo
 │   ├── routes
 │   │   ├── residents
@@ -1097,6 +1259,9 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │   ├── mongoose.js
 │   ├── permissions.js
 │   └── service.js
+├── rbacMongo
+│   ├── defaults.js
+│   └── service.js
 ├── accountsAuth.js
 ├── auth-session.js
 ├── dashboard-summary.js
@@ -1120,6 +1285,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── passbookJobsStore.js
 ├── property-rest.js
 ├── r2Storage.js
+├── rbac-mongo.js
 ├── rpc.js
 ├── serverAuth.js
 ├── serverSupabase.js
@@ -1128,6 +1294,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── storage.js
 ├── supabaseRest.js
 ├── sync.js
+├── uiMode.js
 ├── vercelRequest.js
 └── workspace-boot.js
 
@@ -1160,6 +1327,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | passbookJobsStore.js | Passbook jobs store helper |
 | property-rest.js | Serverless endpoint |
 | r2Storage.js | S3/R2 storage upload |
+| rbac-mongo.js | Mongo identity + RBAC (New UI) |
 | rpc.js | Postgres RPC endpoint (with maxDuration) |
 | serverAuth.js | Server-side auth helpers |
 | serverSupabase.js | Serverless endpoint |
@@ -1168,6 +1336,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | storage.js | File storage |
 | supabaseRest.js | Supabase REST helper |
 | sync.js | Scheduled sync (Vercel cron) |
+| uiMode.js | Read ch_ui_mode cookie (new vs classic) |
 | vercelRequest.js | Vercel request helper |
 | workspace-boot.js | Workspace boot helper |
 
@@ -1182,9 +1351,11 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── utilities
 │   └── generate-repo-map.js
 ├── capture-finance-screenshots.mjs
+├── check-import-boundary.mjs
 ├── migrate-finance-to-mongo.mjs
 ├── migrate-logs-to-mongo.mjs
 ├── migrate-property-to-mongo.mjs
+├── migrate-rbac-to-mongo.mjs
 ├── mockFinanceState.js
 ├── remodel-finance-mongo.mjs
 ├── verify-build-chunks.mjs
@@ -1335,12 +1506,13 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 
 ## 9. Key Architectural Concepts
 
-- **State:** `src/store.js` — `portalState` (units, slots, finances, access, community) hydrated by `pullState()`;
+- **State:** Classic `apps/classic/src/store.js` (Postgres). New `apps/new/src/runtime/state.js` (Mongo session). Auth in `packages/auth`.
   partitioned read-only domains via `stateLoader.js` / `stateDomains.js`.
 - **Data access:** browser → Supabase client (`src/dbClient.js`) and/or Vercel `/api/*` endpoints; admin/finance
   mutations go through `api/finance-mutations.js`. Spreadsheet sync via `api/ledger*`, Excel push via Microsoft Graph.
 - **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
-- **RBAC & access:** `rbac.js` / `rbacMatrix.js` (roles/permissions), `moduleAccess*`, `pageAccess*`, `accessSync.js`.
+- **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
+  UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.
 
@@ -1357,8 +1529,10 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run migrate:finance-mongo` → `node scripts/migrate-finance-to-mongo.mjs`
 - `npm run migrate:finance-mongo-remodel` → `node scripts/remodel-finance-mongo.mjs`
 - `npm run migrate:property-mongo` → `node scripts/migrate-property-to-mongo.mjs`
+- `npm run migrate:rbac-mongo` → `node scripts/migrate-rbac-to-mongo.mjs`
 - `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
 - `npm run generate-repo-map` → `node scripts/utilities/generate-repo-map.js`
+- `npm run check:import-boundary` → `node scripts/check-import-boundary.mjs`
 - `npm run setup:hooks` → `node scripts/git-hooks/install-hooks.js`
 
 ---

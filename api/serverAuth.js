@@ -1,67 +1,45 @@
-import { createServiceClient, createUserClient, getUserFromAuthHeader } from './serverSupabase.js';
+import {
+    setSessionCookie,
+    clearSessionCookie,
+    authHeaderFromRequest,
+    requireSession,
+} from '../packages/auth/server.js';
+import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { assertUuid } from './supabaseRest.js';
 import { requireAccountsEditor } from './accountsAuth.js';
+import { mongoRbacReady, resolveRbacForUser, userHasMongoSocietyAccess } from './rbacMongo/service.js';
+import { isNewUiRequest } from './uiMode.js';
 
-const SESSION_COOKIE = 'communityhub_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 8;
+export { setSessionCookie, clearSessionCookie, authHeaderFromRequest, requireSession };
 
-function cookieAttrs() {
-    return [
-        `Max-Age=${SESSION_TTL_SECONDS}`,
-        'Path=/',
-        'HttpOnly',
-        'SameSite=Lax',
-        process.env.NODE_ENV === 'production' ? 'Secure' : '',
-    ].filter(Boolean).join('; ');
-}
-
-function parseCookies(cookieHeader = '') {
-    return Object.fromEntries(
-        String(cookieHeader || '')
-            .split(';')
-            .map((part) => part.trim())
-            .filter(Boolean)
-            .map((part) => {
-                const idx = part.indexOf('=');
-                if (idx < 0) return [part, ''];
-                return [decodeURIComponent(part.slice(0, idx)), decodeURIComponent(part.slice(idx + 1))];
-            }),
-    );
-}
-
-function bearerFromHeader(headers = {}) {
-    const authHeader = headers.authorization || headers.Authorization || '';
-    return typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
-        ? authHeader
-        : '';
-}
-
-export function setSessionCookie(res, accessToken) {
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(accessToken)}; ${cookieAttrs()}`);
-}
-
-export function clearSessionCookie(res) {
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
-}
-
-export function authHeaderFromRequest(req) {
-    const direct = bearerFromHeader(req.headers);
-    if (direct) return direct;
-    const cookies = parseCookies(req.headers.cookie || '');
-    const token = cookies[SESSION_COOKIE];
-    return token ? `Bearer ${token}` : '';
-}
-
-export async function requireSession(req) {
-    const authHeader = authHeaderFromRequest(req);
-    const { user, error } = await getUserFromAuthHeader(authHeader);
-    if (error || !user?.id) {
-        throw Object.assign(new Error(error || 'Sign in required.'), { status: 401 });
+async function assertSocietyMembership(req, service, userId, apartmentId) {
+    if (isNewUiRequest(req) && await mongoRbacReady()) {
+        const ok = await userHasMongoSocietyAccess(userId, apartmentId);
+        if (!ok) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+        return;
     }
-    return { user, authHeader };
+    const { data: mapping, error: mapErr } = await service
+        .from('user_apartments')
+        .select('apartment_id')
+        .eq('user_id', userId)
+        .eq('apartment_id', apartmentId)
+        .maybeSingle();
+    if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
+    if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
 }
 
-export async function userHasPermission(service, userId, apartmentId, permissionKey) {
+export async function userHasPermission(service, userId, apartmentId, permissionKey, { mongoOnly = false } = {}) {
+    try {
+        const mongo = await resolveRbacForUser(userId, apartmentId);
+        if (mongo) {
+            if (mongo.isSystemAdmin) return true;
+            return (mongo.permissions || []).includes(permissionKey);
+        }
+        if (mongoOnly) return false;
+    } catch {
+        if (mongoOnly) return false;
+    }
+
     try {
         const { data: roles } = await service
             .from('user_role_assignments')
@@ -121,16 +99,10 @@ export async function requireApartmentPermission(req, apartmentIdRaw, permission
         };
     }
 
-    const { data: mapping, error: mapErr } = await service
-        .from('user_apartments')
-        .select('apartment_id')
-        .eq('user_id', user.id)
-        .eq('apartment_id', apartmentId)
-        .maybeSingle();
-    if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
-    if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+    await assertSocietyMembership(req, service, user.id, apartmentId);
 
-    const allowed = await userHasPermission(service, user.id, apartmentId, permissionKey);
+    const mongoOnly = isNewUiRequest(req) && await mongoRbacReady();
+    const allowed = await userHasPermission(service, user.id, apartmentId, permissionKey, { mongoOnly });
     if (!allowed) throw Object.assign(new Error('Not permitted.'), { status: 403 });
 
     return { user, authHeader, apartmentId, service };
@@ -141,6 +113,20 @@ export async function requireApartmentPermission(req, apartmentIdRaw, permission
  * Delete is opt-in via matrix; Create/Update fall back to *.edit when no matrix row exists.
  */
 export async function userCanCrud(service, userId, apartmentId, resourceKey, action = 'read') {
+    try {
+        const mongo = await resolveRbacForUser(userId, apartmentId);
+        if (mongo) {
+            if (mongo.isSystemAdmin) return true;
+            const stored = mongo.crudAccess?.[resourceKey];
+            if (stored && Object.prototype.hasOwnProperty.call(stored, action)) {
+                return !!stored[action];
+            }
+            return false;
+        }
+    } catch {
+        // fall through to Supabase
+    }
+
     try {
         const { data: roles } = await service
             .from('user_role_assignments')
@@ -232,18 +218,12 @@ export async function requireAnyApartmentPermission(req, apartmentIdRaw, permiss
         };
     }
 
-    const { data: mapping, error: mapErr } = await service
-        .from('user_apartments')
-        .select('apartment_id')
-        .eq('user_id', user.id)
-        .eq('apartment_id', apartmentId)
-        .maybeSingle();
-    if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
-    if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+    await assertSocietyMembership(req, service, user.id, apartmentId);
 
+    const mongoOnly = isNewUiRequest(req) && await mongoRbacReady();
     for (const key of keys) {
         // eslint-disable-next-line no-await-in-loop
-        if (await userHasPermission(service, user.id, apartmentId, key)) {
+        if (await userHasPermission(service, user.id, apartmentId, key, { mongoOnly })) {
             return { user, authHeader, apartmentId, service };
         }
     }

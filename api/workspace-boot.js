@@ -5,6 +5,7 @@
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { getQueryParam } from './vercelRequest.js';
+import { isNewUiRequest } from './uiMode.js';
 
 /** Prefer higher-privilege society role when multiple assignments exist. */
 function primaryRoleFromAssignments(assignments = []) {
@@ -183,15 +184,22 @@ export default async function handler(req, res) {
         const tAuth = Date.now();
         const { user, authHeader } = await requireSession(req);
         userId = user.id;
+        phases.auth = Date.now() - tAuth;
+
+        const hintApartmentId = getQueryParam(req, 'apartment_id') || null;
+
+        if (isNewUiRequest(req)) {
+            const { default: mongoBoot } = await import('./new/workspace-boot.js');
+            return mongoBoot(req, res);
+        }
+
+        // Classic (Postgres) identity + RBAC.
         let service;
         try {
             service = createServiceClient();
         } catch {
             service = createUserClient(authHeader);
         }
-        phases.auth = Date.now() - tAuth;
-
-        const hintApartmentId = getQueryParam(req, 'apartment_id') || null;
 
         // One round-trip wave: profile + memberships (with apartment names) + roles.
         const tIdent = Date.now();
@@ -217,7 +225,7 @@ export default async function handler(req, res) {
         if (rolesRes.error) throw Object.assign(new Error(rolesRes.error.message), { status: 500 });
 
         const profile = profileRes.data || null;
-        const roleAssignments = rolesRes.data || [];
+        let roleAssignments = rolesRes.data || [];
         let apartments = apartmentsFromMappings(mapRes.data || []);
         let apartmentIds = [...new Set((mapRes.data || []).map((m) => m.apartment_id).filter(Boolean))];
 
@@ -255,9 +263,6 @@ export default async function handler(req, res) {
 
         const tPerms = Date.now();
         const permInfo = await loadPermissionsForRoles(service, roleAssignments, apartmentId);
-        phases.permissions = Date.now() - tPerms;
-
-        const tCrud = Date.now();
         const crudAccess = await loadCrudAccessMap(
             service,
             apartmentId,
@@ -265,7 +270,8 @@ export default async function handler(req, res) {
             permInfo.isSystemAdmin,
             permInfo.permissions,
         );
-        phases.crudAccess = Date.now() - tCrud;
+        phases.permissions = Date.now() - tPerms;
+        phases.crudAccess = 0;
 
         // Fire-and-forget last-apartment write.
         if (profile && profile.last_apartment_id !== apartmentId && apartmentId) {
@@ -275,6 +281,7 @@ export default async function handler(req, res) {
         logBoot(userId, apartmentId, Date.now() - started, null, phases);
         return res.status(200).json({
             ok: true,
+            source: 'postgres',
             profile: profile || {
                 id: user.id,
                 email: user.email || '',
@@ -289,7 +296,6 @@ export default async function handler(req, res) {
             permissions: permInfo.permissions,
             isSystemAdmin: permInfo.isSystemAdmin,
             effectiveRoleKey: permInfo.effectiveRoleKey,
-            // Module/page maps still load async after boot (accessSync.schedulePostBootAccessLoads).
             moduleAccess: {
                 apartment: {},
                 user: {},
