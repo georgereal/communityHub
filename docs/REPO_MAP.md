@@ -28,28 +28,28 @@
 │   │   ├── index.js
 │   │   ├── money.js
 │   │   └── permissions.js
-│   ├── property
-│   │   ├── residents
-│   │   │   ├── [id].js
-│   │   │   └── import.js
-│   │   ├── slots
-│   │   │   ├── [id]
-│   │   │   │   ├── assign.js
-│   │   │   │   └── release.js
-│   │   │   └── [id].js
-│   │   ├── units
-│   │   │   ├── [id].js
-│   │   │   ├── import.js
-│   │   │   └── parking-limits.js
-│   │   ├── vehicles
-│   │   │   ├── [id].js
-│   │   │   └── import.js
-│   │   ├── residents.js
-│   │   ├── slots.js
-│   │   ├── state.js
-│   │   ├── units.js
-│   │   └── vehicles.js
 │   ├── propertyMongo
+│   │   ├── routes
+│   │   │   ├── residents
+│   │   │   │   ├── [id].js
+│   │   │   │   └── import.js
+│   │   │   ├── slots
+│   │   │   │   ├── [id]
+│   │   │   │   │   ├── assign.js
+│   │   │   │   │   └── release.js
+│   │   │   │   └── [id].js
+│   │   │   ├── units
+│   │   │   │   ├── [id].js
+│   │   │   │   ├── import.js
+│   │   │   │   └── parking-limits.js
+│   │   │   ├── vehicles
+│   │   │   │   ├── [id].js
+│   │   │   │   └── import.js
+│   │   │   ├── residents.js
+│   │   │   ├── slots.js
+│   │   │   ├── state.js
+│   │   │   ├── units.js
+│   │   │   └── vehicles.js
 │   │   ├── errors.js
 │   │   ├── http.js
 │   │   ├── models.js
@@ -68,6 +68,7 @@
 │   ├── finance-mongo-reports.js
 │   ├── finance-mongo.js
 │   ├── finance-mutations.js
+│   ├── finance-rest.js
 │   ├── mongoClient.js
 │   ├── mongoLog.js
 │   ├── oauth-microsoft.js
@@ -76,6 +77,7 @@
 │   ├── passbook-parse.js
 │   ├── passbook-webhook.js
 │   ├── passbookJobsStore.js
+│   ├── property-rest.js
 │   ├── r2Storage.js
 │   ├── rpc.js
 │   ├── serverAuth.js
@@ -506,7 +508,7 @@
 
 ```
 
-**Scale:** ~257 JavaScript modules, ~15 CSS files, ~28 HTML entry pages.
+**Scale:** ~259 JavaScript modules, ~15 CSS files, ~28 HTML entry pages.
 
 ---
 
@@ -1018,28 +1020,28 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │   ├── index.js
 │   ├── money.js
 │   └── permissions.js
-├── property
-│   ├── residents
-│   │   ├── [id].js
-│   │   └── import.js
-│   ├── slots
-│   │   ├── [id]
-│   │   │   ├── assign.js
-│   │   │   └── release.js
-│   │   └── [id].js
-│   ├── units
-│   │   ├── [id].js
-│   │   ├── import.js
-│   │   └── parking-limits.js
-│   ├── vehicles
-│   │   ├── [id].js
-│   │   └── import.js
-│   ├── residents.js
-│   ├── slots.js
-│   ├── state.js
-│   ├── units.js
-│   └── vehicles.js
 ├── propertyMongo
+│   ├── routes
+│   │   ├── residents
+│   │   │   ├── [id].js
+│   │   │   └── import.js
+│   │   ├── slots
+│   │   │   ├── [id]
+│   │   │   │   ├── assign.js
+│   │   │   │   └── release.js
+│   │   │   └── [id].js
+│   │   ├── units
+│   │   │   ├── [id].js
+│   │   │   ├── import.js
+│   │   │   └── parking-limits.js
+│   │   ├── vehicles
+│   │   │   ├── [id].js
+│   │   │   └── import.js
+│   │   ├── residents.js
+│   │   ├── slots.js
+│   │   ├── state.js
+│   │   ├── units.js
+│   │   └── vehicles.js
 │   ├── errors.js
 │   ├── http.js
 │   ├── models.js
@@ -1058,6 +1060,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── finance-mongo-reports.js
 ├── finance-mongo.js
 ├── finance-mutations.js
+├── finance-rest.js
 ├── mongoClient.js
 ├── mongoLog.js
 ├── oauth-microsoft.js
@@ -1066,6 +1069,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── passbook-parse.js
 ├── passbook-webhook.js
 ├── passbookJobsStore.js
+├── property-rest.js
 ├── r2Storage.js
 ├── rpc.js
 ├── serverAuth.js
@@ -1086,7 +1090,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | --- | --- |
 | accountsAuth.js | Accounts/session auth endpoint |
 | auth-session.js | Auth session endpoint |
-| dashboard-summary.js | Dashboard summary endpoint |
+| dashboard-summary.js | Dashboard KPIs from Mongo (dues, ledger, property units) |
 | db.js | DB access (Supabase) |
 | dbAccess.js | DB access helpers |
 | evolyxConnection.js | Evolyx external connection |
@@ -1096,6 +1100,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | finance-mongo-reports.js | Serverless endpoint |
 | finance-mongo.js | Serverless endpoint |
 | finance-mutations.js | Finance write mutations |
+| finance-rest.js | Serverless endpoint |
 | mongoClient.js | Serverless endpoint |
 | mongoLog.js | Serverless endpoint |
 | oauth-microsoft.js | Microsoft OAuth flow |
@@ -1104,6 +1109,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | passbook-parse.js | Passbook file parsing |
 | passbook-webhook.js | Passbook webhook |
 | passbookJobsStore.js | Passbook jobs store helper |
+| property-rest.js | Serverless endpoint |
 | r2Storage.js | S3/R2 storage upload |
 | rpc.js | Postgres RPC endpoint (with maxDuration) |
 | serverAuth.js | Server-side auth helpers |
@@ -1288,6 +1294,10 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - **RBAC & access:** `rbac.js` / `rbacMatrix.js` (roles/permissions), `moduleAccess*`, `pageAccess*`, `accessSync.js`.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.
+- **Mongo on Vercel:** Finance-New is `api/finance-rest.js` (rewrite `/api/finance/*`). Property-New is
+  `api/property-rest.js` (rewrite `/api/property/*`); handlers live in `api/propertyMongo/routes/` and are
+  not separate functions. `api/mongoClient.js` keeps one client per isolate (`maxPoolSize: 1`).
+  Dashboard glance KPIs load from `/api/dashboard-summary` (Mongo), not the Postgres finance/core domains.
 
 ---
 

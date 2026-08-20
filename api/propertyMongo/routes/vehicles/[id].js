@@ -1,8 +1,8 @@
-import { propertyHandler } from '../../propertyMongo/http.js';
-import { VEHICLE_EDIT_PERMS } from '../../propertyMongo/permissions.js';
-import { deleteVehicle, patchVehicle } from '../../propertyMongo/service.js';
+import { propertyHandler } from '../../http.js';
+import { VEHICLE_EDIT_PERMS } from '../../permissions.js';
+import { deleteVehicle, patchVehicle } from '../../service.js';
 
-export default propertyHandler({
+export const handle = propertyHandler({
     perms: VEHICLE_EDIT_PERMS,
     op: 'vehicles.item',
     run: async ({ method, body, apartmentId, id }) => {

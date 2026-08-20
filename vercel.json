@@ -5,6 +5,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/finance/:path*",
+      "destination": "/api/finance-rest?__financePath=:path*"
+    },
+    {
+      "source": "/api/property/:path*",
+      "destination": "/api/property-rest?__propertyPath=:path*"
+    },
+    {
       "source": "/login",
       "destination": "/login.html"
     },
@@ -100,16 +108,10 @@
     "api/finance/[...path].js": {
       "maxDuration": 300
     },
-    "api/property/units/import.js": {
-      "maxDuration": 60
+    "api/finance-rest.js": {
+      "maxDuration": 300
     },
-    "api/property/vehicles/import.js": {
-      "maxDuration": 60
-    },
-    "api/property/residents/import.js": {
-      "maxDuration": 60
-    },
-    "api/property/units/parking-limits.js": {
+    "api/property-rest.js": {
       "maxDuration": 60
     }
   }

@@ -3,12 +3,9 @@
  * Navigation abort cancels in-flight core / summary / ops pulls.
  */
 import './dashboard.css';
-import { portalState, isDomainLoaded, loadStateDomain } from './store.js';
+import { portalState, loadStateDomain } from './store.js';
 import { hasClientPermission } from './rbac.js';
 import { isModuleEnabled } from './moduleAccess.js';
-import { invoiceBalance, invoiceStatus } from './maintenanceBilling.js';
-import { effectiveAllocationType } from './registry.js';
-import { getActiveLedgerTxns, getLedgerBankBalance } from './ledgerBalance.js';
 import { readApiJson } from './apiJson.js';
 import { isNavigationCurrent } from './accessLocks.js';
 
@@ -52,15 +49,6 @@ async function fetchDashboardSummary({ force = false, signal } = {}) {
     const apartmentId = portalState.access?.activeApartmentId;
     if (!apartmentId) return null;
     if (signal?.aborted) return null;
-
-    if (!force && isDomainLoaded('finance')) {
-        return {
-            billing: computeBillingStats(),
-            finance: computeFinanceStats(),
-            sync: syncStatusInfo(),
-            meta: { source: 'finance-domain', at: new Date().toISOString() },
-        };
-    }
 
     const freshEnough = dashboardSummaryCache.apartmentId === apartmentId
         && dashboardSummaryCache.summary
@@ -113,98 +101,10 @@ function getActiveApartmentName() {
     return apt?.name || portalState.community?.name || 'Your society';
 }
 
-function computeParkingStats() {
-    let overlimitCars = 0;
-    let overlimitBikes = 0;
-    let cars = 0;
-    let bikes = 0;
-    let baseCapacity = 0;
-
-    portalState.units.forEach((u) => {
-        baseCapacity += (u.car_limit || 0) + (u.bike_limit || 0);
-        let baseCars = 0;
-        let baseBikes = 0;
-        (u.vehicles || []).forEach((v) => {
-            if (!v.is_parking_active) return;
-            const allocType = effectiveAllocationType(v);
-            if (v.type === 'CAR') cars += 1;
-            else bikes += 1;
-            if (allocType === 'COMMON' || allocType === 'NEIGHBOR') return;
-            if (v.type === 'CAR') {
-                baseCars += 1;
-                if (baseCars > (u.car_limit || 0)) overlimitCars += 1;
-            } else {
-                baseBikes += 1;
-                if (baseBikes > (u.bike_limit || 0)) overlimitBikes += 1;
-            }
-        });
-    });
-
-    const activeTotal = cars + bikes;
-    const occupancyPct = baseCapacity > 0
-        ? Math.round((activeTotal / baseCapacity) * 100)
-        : null;
-
+function emptyParking() {
     return {
-        units: portalState.units.length,
-        cars,
-        bikes,
-        overlimitCars,
-        overlimitBikes,
-        occupancyPct,
-        baseCapacity,
-    };
-}
-
-function computeBillingStats() {
-    const invoices = portalState.finances?.maintenanceInvoices || [];
-    let outstanding = 0;
-    let openCount = 0;
-    const flatsWithDues = new Set();
-
-    invoices.forEach((inv) => {
-        const bal = invoiceBalance(inv);
-        const status = invoiceStatus(inv);
-        if (bal > 0.001) {
-            outstanding += bal;
-            if (inv.unit_id) flatsWithDues.add(inv.unit_id);
-        }
-        if (status !== 'PAID') openCount += 1;
-    });
-
-    return { outstanding, openCount, flatsWithDues: flatsWithDues.size };
-}
-
-function computeFinanceStats() {
-    const txns = getActiveLedgerTxns(portalState.finances?.txns || []);
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    const monthStr = monthStart.toISOString().slice(0, 10);
-    let monthIn = 0;
-    let monthOut = 0;
-    let cashBalance = 0;
-
-    txns.forEach((t) => {
-        const amt = parseFloat(t.amount || 0);
-        const d = (t.date || '').slice(0, 10);
-        if (d >= monthStr) {
-            if (t.type === 'IN') monthIn += amt;
-            else monthOut += amt;
-        }
-        if ((t.wallet || 'CASH').toUpperCase() !== 'BANK') {
-            cashBalance += t.type === 'IN' ? amt : -amt;
-        }
-    });
-
-    const bank = getLedgerBankBalance(txns);
-
-    return {
-        monthIn,
-        monthOut,
-        cashBalance,
-        bankBalance: bank.balance,
-        bankAsOf: bank.asOf,
-        bankNeedsOpening: bank.needsOpening,
+        units: 0, cars: 0, bikes: 0, overlimitCars: 0, overlimitBikes: 0,
+        occupancyPct: null, baseCapacity: 0,
     };
 }
 
@@ -526,10 +426,7 @@ export async function renderDashboard({ signal, generation } = {}) {
     const wantsOps = hasClientPermission('apartment_mgmt.view') || hasClientPermission('apartment_mgmt.edit');
     const quickActions = buildQuickActions();
 
-    const parkingReady = isDomainLoaded('core');
-    const parking = parkingReady ? computeParkingStats() : {
-        units: 0, cars: 0, bikes: 0, overlimitCars: 0, overlimitBikes: 0, occupancyPct: null, baseCapacity: 0,
-    };
+    const parking = emptyParking();
 
     root.innerHTML = `
       <header class="dashboard-header">
@@ -537,7 +434,7 @@ export async function renderDashboard({ signal, generation } = {}) {
           <p class="dashboard-header__eyebrow">Dashboard</p>
           <h2 class="page-title">${esc(aptName)}</h2>
           <p class="dashboard-header__subtitle" data-dash-subtitle>
-            ${parkingReady ? `${parking.units} unit(s) in workspace` : 'Loading society data…'}
+            Loading society data…
           </p>
         </div>
       </header>
@@ -568,7 +465,7 @@ export async function renderDashboard({ signal, generation } = {}) {
 
     let state = {
         parking,
-        parkingReady,
+        parkingReady: false,
         billing: { outstanding: 0, openCount: 0, flatsWithDues: 0 },
         finance: {
             monthIn: 0, monthOut: 0, cashBalance: 0,
@@ -595,34 +492,27 @@ export async function renderDashboard({ signal, generation } = {}) {
 
     const tasks = [];
 
-    // Units / parking from core domain
     tasks.push((async () => {
-        await loadStateDomain('core', { signal });
+        const summary = await fetchDashboardSummary({ signal });
         if (!stillActive(signal, gen)) return;
-        state.parkingReady = isDomainLoaded('core');
-        state.parking = computeParkingStats();
+        if (summary?.parking) state.parking = summary.parking;
+        state.parkingReady = true;
+        if (summary?.billing) state.billing = summary.billing;
+        if (summary?.finance) state.finance = summary.finance;
+        state.syncInfo = syncStatusInfo(summary?.sync);
+        state.financeReady = wantsFinance ? !!summary : true;
         if (subtitleEl) {
-            subtitleEl.textContent = `${state.parking.units} unit(s) in workspace`;
+            const n = state.parking.units;
+            const lastPull = summary?.meta?.at;
+            const label = lastPull
+                ? new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+                : null;
+            subtitleEl.textContent = label
+                ? `${n} unit(s) in workspace · Data refreshed ${label}`
+                : `${n} unit(s) in workspace`;
         }
         refreshSections();
     })());
-
-    if (wantsFinance) {
-        tasks.push((async () => {
-            const summary = await fetchDashboardSummary({ signal });
-            if (!stillActive(signal, gen)) return;
-            if (summary?.billing) state.billing = summary.billing;
-            if (summary?.finance) state.finance = summary.finance;
-            state.syncInfo = syncStatusInfo(summary?.sync);
-            state.financeReady = !!summary;
-            const lastPull = summary?.meta?.at;
-            if (lastPull && subtitleEl && state.parkingReady) {
-                const label = new Date(lastPull).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
-                subtitleEl.textContent = `${state.parking.units} unit(s) in workspace · Data refreshed ${label}`;
-            }
-            refreshSections();
-        })());
-    }
 
     if (wantsOps) {
         tasks.push((async () => {

@@ -61,13 +61,20 @@ function isDir(p) {
 /**
  * Resolve Vercel-style api handlers:
  *   /api/db                         → api/db.js
- *   /api/finance/x                  → api/finance/[...path].js
- *   /api/property/slots/:id/assign  → api/property/slots/[id]/assign.js
+ *   /api/finance/x                  → api/finance-rest.js
+ *   /api/property/slots/:id/assign  → api/property-rest.js
  */
 function resolveApiModule(urlPath) {
     const apiRoot = resolve(process.cwd(), 'api');
     const parts = urlPath.split('/').filter(Boolean);
     if (!parts.length) return null;
+
+    if (parts[0] === 'finance') {
+        return { file: resolve(apiRoot, 'finance-rest.js'), pathParts: parts.slice(1) };
+    }
+    if (parts[0] === 'property') {
+        return { file: resolve(apiRoot, 'property-rest.js'), pathParts: parts.slice(1) };
+    }
 
     const exact = resolve(apiRoot, `${parts.join('/')}.js`);
     if (existsSync(exact)) return { file: exact, pathParts: [] };
@@ -147,7 +154,7 @@ export function viteApiDevPlugin(env = {}) {
                     }
                     if (resolved.pathParts?.length) {
                         const top = name.split('/')[0];
-                        req.__financePath = resolved.pathParts;
+                        if (top === 'finance') req.__financePath = resolved.pathParts;
                         if (top === 'property') req.__propertyPath = resolved.pathParts;
                         req.query = { ...(req.query || {}), path: resolved.pathParts };
                     }

@@ -8,7 +8,8 @@
  *   POST   /api/finance/ledger
  *   DELETE /api/finance/ledger/:id
  *   GET    /api/finance/vouchers
- *   GET    /api/finance/reports/summary
+ * Deployed on Vercel as /api/finance-rest (see vercel.json rewrite);
+ * nested [...path] is kept for Vite dev.
  *   POST   /api/finance/tables/:table   { op, rows|filter|patch }
  */
 import { requireAnyApartmentPermission } from '../serverAuth.js';
@@ -24,6 +25,10 @@ import {
 } from '../financeMongo/index.js';
 
 function pathPartsFromReq(req) {
+    const rewritten = req.query?.__financePath;
+    if (typeof rewritten === 'string' && rewritten) {
+        return rewritten.split('/').filter(Boolean);
+    }
     if (Array.isArray(req.query?.path)) return req.query.path.map(String);
     if (typeof req.query?.path === 'string' && req.query.path) {
         return req.query.path.split('/').filter(Boolean);

@@ -1,8 +1,8 @@
-import { propertyHandler } from '../../propertyMongo/http.js';
-import { UNIT_EDIT_PERMS } from '../../propertyMongo/permissions.js';
-import { saveUnit, deleteUnit } from '../../propertyMongo/service.js';
+import { propertyHandler } from '../../http.js';
+import { UNIT_EDIT_PERMS } from '../../permissions.js';
+import { saveUnit, deleteUnit } from '../../service.js';
 
-export default propertyHandler({
+export const handle = propertyHandler({
     perms: UNIT_EDIT_PERMS,
     op: 'units.item',
     run: async ({ method, body, apartmentId, id }) => {

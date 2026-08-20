@@ -1,8 +1,8 @@
-import { propertyHandler } from '../propertyMongo/http.js';
-import { VEHICLE_EDIT_PERMS } from '../propertyMongo/permissions.js';
-import { createPoolSlot } from '../propertyMongo/service.js';
+import { propertyHandler } from '../http.js';
+import { VEHICLE_EDIT_PERMS } from '../permissions.js';
+import { createPoolSlot } from '../service.js';
 
-export default propertyHandler({
+export const handle = propertyHandler({
     perms: VEHICLE_EDIT_PERMS,
     op: 'slots.create',
     collection: 'property_slots',

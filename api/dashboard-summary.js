@@ -1,21 +1,26 @@
 /**
- * Lightweight dashboard KPIs — bulk aggregate queries (not full finance state).
+ * Dashboard KPIs from Mongo (dues_invoices, ledger_entries, finance_config, property_units).
+ * Auth/membership still uses Supabase session + user_apartments.
  */
 import { requireSession } from './serverAuth.js';
 import { createServiceClient, createUserClient } from './serverSupabase.js';
 import { assertUuid } from './supabaseRest.js';
 import { getQueryParam } from './vercelRequest.js';
+import { getMongoDb } from './mongoClient.js';
+import { buildLedgerSummary } from './financeMongo/services/ledgerReads.js';
+import { logMongoApi } from './mongoLog.js';
 
 function logSummary(userId, apartmentId, ms, error) {
-    console.log(JSON.stringify({
-        ts: new Date().toISOString(),
-        layer: 'api/dashboard-summary',
+    logMongoApi({
+        method: 'GET',
+        path: '/api/dashboard-summary',
+        op: 'summary',
+        collection: 'dues_invoices',
         userId,
         apartmentId,
         ms,
-        ok: !error,
         error: error || null,
-    }));
+    });
 }
 
 async function getService(req) {
@@ -45,9 +50,9 @@ function computeBilling(invoices = []) {
         const bal = Math.max(0, amount - paid);
         if (bal > 0.001) {
             outstanding += bal;
+            openCount += 1;
             if (inv.unit_id) flats.add(inv.unit_id);
         }
-        if (bal > 0.001) openCount += 1;
     }
     return {
         outstanding: round2(outstanding),
@@ -56,73 +61,63 @@ function computeBilling(invoices = []) {
     };
 }
 
-function computeFinance(txns = [], bankAccount = null) {
+function computeMonthFlows(txns = []) {
     const monthStr = monthStartIso();
-    const active = (txns || []).filter((t) => !t.excluded_from_ledger);
-
     let monthIn = 0;
     let monthOut = 0;
-    let cashBalance = 0;
-
-    for (const t of active) {
+    for (const t of txns) {
+        if (t.excluded_from_ledger) continue;
         const amt = parseFloat(t.amount) || 0;
         const day = String(t.date || '').slice(0, 10);
-        if (day >= monthStr) {
-            if (t.type === 'IN') monthIn += amt;
-            else monthOut += amt;
+        if (day < monthStr) continue;
+        if (t.type === 'IN') monthIn += amt;
+        else monthOut += amt;
+    }
+    return { monthIn: round2(monthIn), monthOut: round2(monthOut) };
+}
+
+function computeParking(units = []) {
+    let overlimitCars = 0;
+    let overlimitBikes = 0;
+    let cars = 0;
+    let bikes = 0;
+    let baseCapacity = 0;
+
+    for (const u of units) {
+        baseCapacity += (u.car_limit || 0) + (u.bike_limit || 0);
+        let baseCars = 0;
+        let baseBikes = 0;
+        for (const v of u.vehicles || []) {
+            if (!v.is_parking_active) continue;
+            const allocType = String(v.allocation_type || 'BASE').toUpperCase();
+            const type = String(v.type || 'CAR').toUpperCase();
+            if (type === 'CAR') cars += 1;
+            else bikes += 1;
+            if (allocType === 'COMMON' || allocType === 'NEIGHBOR') continue;
+            if (type === 'CAR') {
+                baseCars += 1;
+                if (baseCars > (u.car_limit || 0)) overlimitCars += 1;
+            } else {
+                baseBikes += 1;
+                if (baseBikes > (u.bike_limit || 0)) overlimitBikes += 1;
+            }
         }
-        if (String(t.wallet || 'CASH').toUpperCase() !== 'BANK') {
-            cashBalance += t.type === 'IN' ? amt : -amt;
-        }
     }
 
-    const openingRaw = bankAccount?.opening_balance;
-    const openingAmount = openingRaw == null || openingRaw === ''
-        ? null
-        : parseFloat(openingRaw);
-    const openingDate = bankAccount?.opening_balance_date
-        ? String(bankAccount.opening_balance_date).slice(0, 10)
-        : null;
-
-    if (openingAmount == null || Number.isNaN(openingAmount)) {
-        return {
-            monthIn: round2(monthIn),
-            monthOut: round2(monthOut),
-            cashBalance: round2(cashBalance),
-            bankBalance: null,
-            bankAsOf: null,
-            bankNeedsOpening: true,
-        };
-    }
-
-    const bankTxns = active
-        .filter((t) => String(t.wallet || '').toUpperCase() === 'BANK')
-        .filter((t) => {
-            const day = String(t.date || '').slice(0, 10);
-            if (openingDate && day && day < openingDate) return false;
-            return true;
-        })
-        .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
-
-    let bankBalance = openingAmount;
-    for (const t of bankTxns) {
-        const amt = parseFloat(t.amount) || 0;
-        bankBalance += t.type === 'IN' ? amt : -amt;
-    }
-
+    const activeTotal = cars + bikes;
     return {
-        monthIn: round2(monthIn),
-        monthOut: round2(monthOut),
-        cashBalance: round2(cashBalance),
-        bankBalance: round2(bankBalance),
-        bankAsOf: bankTxns.length
-            ? String(bankTxns[bankTxns.length - 1].date || '').slice(0, 10)
-            : openingDate,
-        bankNeedsOpening: false,
+        units: units.length,
+        cars,
+        bikes,
+        overlimitCars,
+        overlimitBikes,
+        occupancyPct: baseCapacity > 0 ? Math.round((activeTotal / baseCapacity) * 100) : null,
+        baseCapacity,
     };
 }
 
-function computeSync(settings) {
+function computeSync(config) {
+    const settings = config?.ledgerSync || config?.ledger_sync_settings || null;
     if (!settings?.spreadsheet_url) return null;
     return {
         status: settings.last_sync_status || '—',
@@ -131,43 +126,47 @@ function computeSync(settings) {
     };
 }
 
-export async function buildDashboardSummary(service, apartmentId) {
-    const [invRes, txnRes, bankRes, syncRes] = await Promise.all([
-        service
-            .from('maintenance_invoices')
-            .select('amount, amount_paid, unit_id')
-            .eq('apartment_id', apartmentId),
-        service
-            .from('transactions')
-            .select('amount, type, date, wallet, excluded_from_ledger')
-            .eq('apartment_id', apartmentId),
-        service
-            .from('apartment_bank_accounts')
-            .select('opening_balance, opening_balance_date')
-            .eq('apartment_id', apartmentId)
-            .maybeSingle(),
-        service
-            .from('ledger_sync_settings')
-            .select('spreadsheet_url, last_sync_status, last_synced_at, last_sync_message')
-            .eq('apartment_id', apartmentId)
-            .maybeSingle(),
+export async function buildDashboardSummary(db, apartmentId) {
+    const apt = { apartment_id: apartmentId };
+    const [invoices, entries, units, ledgerPack, config] = await Promise.all([
+        db.collection('dues_invoices')
+            .find(apt)
+            .project({ amount: 1, amount_paid: 1, unit_id: 1 })
+            .toArray(),
+        db.collection('ledger_entries')
+            .find(apt)
+            .project({ amount: 1, type: 1, date: 1, excluded_from_ledger: 1 })
+            .toArray(),
+        db.collection('property_units')
+            .find(apt)
+            .project({
+                car_limit: 1,
+                bike_limit: 1,
+                vehicles: 1,
+            })
+            .toArray(),
+        buildLedgerSummary(db, apartmentId),
+        db.collection('finance_config').findOne(apt),
     ]);
 
-    const errors = [invRes, txnRes, bankRes, syncRes]
-        .filter((r) => r?.error)
-        .map((r) => r.error.message);
-
+    const flows = computeMonthFlows(entries);
     return {
-        billing: computeBilling(invRes.error ? [] : (invRes.data || [])),
-        finance: computeFinance(
-            txnRes.error ? [] : (txnRes.data || []),
-            bankRes.error ? null : bankRes.data,
-        ),
-        sync: computeSync(syncRes.error ? null : syncRes.data),
+        parking: computeParking(units),
+        billing: computeBilling(invoices),
+        finance: {
+            monthIn: flows.monthIn,
+            monthOut: flows.monthOut,
+            cashBalance: ledgerPack.totals?.cash ?? 0,
+            bankBalance: ledgerPack.totals?.bank ?? null,
+            bankAsOf: ledgerPack.asOf || null,
+            bankNeedsOpening: !!ledgerPack.needsOpening,
+        },
+        sync: computeSync(config),
         meta: {
             apartmentId,
             at: new Date().toISOString(),
-            errors,
+            source: 'mongo',
+            errors: [],
         },
     };
 }
@@ -187,7 +186,6 @@ export default async function handler(req, res) {
         userId = user.id;
 
         const service = await getService(req);
-
         const { data: mapping, error: mapErr } = await service
             .from('user_apartments')
             .select('apartment_id')
@@ -197,7 +195,8 @@ export default async function handler(req, res) {
         if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
         if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
 
-        const summary = await buildDashboardSummary(service, apartmentId);
+        const db = await getMongoDb();
+        const summary = await buildDashboardSummary(db, apartmentId);
         logSummary(userId, apartmentId, Date.now() - started);
         return res.status(200).json({ ok: true, summary });
     } catch (err) {

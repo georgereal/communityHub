@@ -1,8 +1,8 @@
-import { propertyHandler } from '../../propertyMongo/http.js';
-import { UNIT_EDIT_PERMS } from '../../propertyMongo/permissions.js';
-import { importResidents } from '../../propertyMongo/service.js';
+import { propertyHandler } from '../../http.js';
+import { UNIT_EDIT_PERMS } from '../../permissions.js';
+import { importResidents } from '../../service.js';
 
-export default propertyHandler({
+export const handle = propertyHandler({
     perms: UNIT_EDIT_PERMS,
     op: 'residents.import',
     run: async ({ method, body, apartmentId }) => {
