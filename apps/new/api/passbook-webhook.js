@@ -1,8 +1,13 @@
+/**
+ * Public Evolyx webhook — Mongo-backed (token + job_id).
+ * Path stays /api/passbook-webhook so configured tunnel URLs keep working.
+ */
+import { getMongoDb } from '../../../packages/server/mongoClient.js';
 import {
     PASSBOOK_JOB_STATUS,
     completePassbookJobByWebhook,
     mapEvolyxTransactionsToStatementLines,
-} from './passbookJobsStore.js';
+} from './integrationsMongo/passbookJobsStore.js';
 
 function coerceWebhookStatus(payload) {
     const raw = String(
@@ -39,6 +44,7 @@ export default async function handler(req, res) {
         : [];
 
     try {
+        const db = await getMongoDb();
         const result = await completePassbookJobByWebhook({
             jobId,
             callbackToken: token,
@@ -56,6 +62,7 @@ export default async function handler(req, res) {
                 mapped_lines: mappedLines,
                 mapped_line_count: mappedLines.length,
             },
+            db,
         });
         return res.status(200).json({ ok: true, result });
     } catch (err) {

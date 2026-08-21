@@ -3218,13 +3218,13 @@ export const renderBankReconciliation = () => {
         passbookBtn.disabled = !passbookReady;
         passbookBtn.title = passbookReady
             ? 'Scan passbook photos or PDF with Evolyx OCR'
-            : 'Configure Evolyx under Administration → External Connections';
+            : 'Configure Evolyx under Administration → Integrations';
     }
     if (passbookHint) {
         passbookHint.hidden = passbookReady;
         passbookHint.innerHTML = passbookReady
             ? ''
-            : 'Passbook OCR is not configured. <a href="/#admin-connections">Set up Evolyx</a> under Administration → External Connections.';
+            : 'Passbook OCR is not configured. <a href="/admin#/integrations">Set up Evolyx</a> under Administration → Integrations.';
     }
     updatePassbookJobsBadge(latestPassbookJobs);
 
@@ -3725,7 +3725,7 @@ export const initBankReconciliationUi = () => {
 
     const queuePassbookScan = async (fileList, btn) => {
         if (!isPassbookOcrConfigured()) {
-            alert('Passbook OCR is not configured. Go to Administration → External Connections to add your Evolyx API key.');
+            alert('Passbook OCR is not configured. Go to Administration → Integrations to add your Evolyx API key.');
             return;
         }
         const files = validatePassbookFiles(fileList);
@@ -3734,10 +3734,13 @@ export const initBankReconciliationUi = () => {
         setPassbookStatus('Passbook scan queued. Track progress below and import rows once the run completes.');
         setActiveBankReconTab('passbook');
 
-        const { job } = await withButtonBusy(btn, 'Queueing…', () => parsePassbookFiles(files));
+        const result = await withButtonBusy(btn, 'Queueing…', () => parsePassbookFiles(files));
         await loadPassbookJobs();
-        if (job?.id) {
-            setPassbookStatus(`Passbook scan queued. Job ${job.id.slice(0, 8)} is running — see Recent scans below.`);
+        if (result?.warning) {
+            setPassbookStatus(result.warning, true);
+            alert(result.warning);
+        } else if (result?.job?.id) {
+            setPassbookStatus(`Passbook scan queued. Job ${result.job.id.slice(0, 8)} is running — see Recent scans below.`);
         }
     };
 

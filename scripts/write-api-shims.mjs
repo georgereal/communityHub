@@ -18,6 +18,7 @@ const shims = {
     'api/finance-rest.js': '../apps/new/api/finance-rest.js',
     'api/finance/[...path].js': '../../apps/new/api/finance/[...path].js',
     'api/property-rest.js': '../apps/new/api/property-rest.js',
+    'api/integrations-rest.js': '../apps/new/api/integrations-rest.js',
     'api/rbac-mongo.js': '../apps/new/api/rbac-mongo.js',
     'api/new/workspace-boot.js': '../../apps/new/api/workspace-boot.js',
     'api/passbook-jobs.js': '../apps/new/api/passbook-jobs.js',

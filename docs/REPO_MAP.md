@@ -32,6 +32,7 @@
 │   ├── finance-mongo.js
 │   ├── finance-mutations.js
 │   ├── finance-rest.js
+│   ├── integrations-rest.js
 │   ├── oauth-microsoft.js
 │   ├── oauth-service.js
 │   ├── passbook-jobs.js
@@ -243,6 +244,23 @@
 │       │   │   ├── index.js
 │       │   │   ├── money.js
 │       │   │   └── permissions.js
+│       │   ├── integrationsMongo
+│       │   │   ├── routes
+│       │   │   │   ├── passbook
+│       │   │   │   │   ├── jobs
+│       │   │   │   │   │   └── [id]
+│       │   │   │   │   │       └── imported.js
+│       │   │   │   │   └── jobs.js
+│       │   │   │   └── connections.js
+│       │   │   ├── connectionsStore.js
+│       │   │   ├── errors.js
+│       │   │   ├── evolyxWorkflow.js
+│       │   │   ├── http.js
+│       │   │   ├── indexes.js
+│       │   │   ├── passbookJobsStore.js
+│       │   │   ├── passbookMap.js
+│       │   │   ├── passbookService.js
+│       │   │   └── permissions.js
 │       │   ├── propertyMongo
 │       │   │   ├── routes
 │       │   │   │   ├── residents
@@ -282,6 +300,7 @@
 │       │   ├── finance-mongo-reports.js
 │       │   ├── finance-mongo.js
 │       │   ├── finance-rest.js
+│       │   ├── integrations-rest.js
 │       │   ├── passbook-jobs.js
 │       │   ├── passbook-parse.js
 │       │   ├── passbook-webhook.js
@@ -556,6 +575,7 @@
 │   │       ├── supabase_phase3_portal_bundle.sql
 │   │       ├── supabase_rbac_v2.sql
 │   │       ├── supabase_rbac.sql
+│   │       ├── supabase_rename_public_tables_to_temp.sql
 │   │       ├── supabase_resident_invites.sql
 │   │       ├── supabase_resident_portal.sql
 │   │       ├── supabase_residents_unified.sql
@@ -580,6 +600,7 @@
 │   │       ├── supabase_visitor_approvals.sql
 │   │       ├── supabase_visitor_log.sql
 │   │       └── supabase_visitor_parking.sql
+│   ├── ARCHITECTURE_NEW.md
 │   ├── finance-reports-preview.html
 │   ├── finance-reports-preview.md
 │   ├── PHASED_REQUIREMENTS.md
@@ -616,6 +637,7 @@
 │   ├── capture-finance-screenshots.mjs
 │   ├── check-import-boundary.mjs
 │   ├── migrate-finance-to-mongo.mjs
+│   ├── migrate-integrations-to-mongo.mjs
 │   ├── migrate-logs-to-mongo.mjs
 │   ├── migrate-property-to-mongo.mjs
 │   ├── migrate-rbac-to-mongo.mjs
@@ -636,7 +658,7 @@
 
 ```
 
-**Scale:** ~329 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
+**Scale:** ~343 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
 
 ---
 
@@ -846,6 +868,23 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   │   ├── index.js
     │   │   ├── money.js
     │   │   └── permissions.js
+    │   ├── integrationsMongo
+    │   │   ├── routes
+    │   │   │   ├── passbook
+    │   │   │   │   ├── jobs
+    │   │   │   │   │   └── [id]
+    │   │   │   │   │       └── imported.js
+    │   │   │   │   └── jobs.js
+    │   │   │   └── connections.js
+    │   │   ├── connectionsStore.js
+    │   │   ├── errors.js
+    │   │   ├── evolyxWorkflow.js
+    │   │   ├── http.js
+    │   │   ├── indexes.js
+    │   │   ├── passbookJobsStore.js
+    │   │   ├── passbookMap.js
+    │   │   ├── passbookService.js
+    │   │   └── permissions.js
     │   ├── propertyMongo
     │   │   ├── routes
     │   │   │   ├── residents
@@ -885,6 +924,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   ├── finance-mongo-reports.js
     │   ├── finance-mongo.js
     │   ├── finance-rest.js
+    │   ├── integrations-rest.js
     │   ├── passbook-jobs.js
     │   ├── passbook-parse.js
     │   ├── passbook-webhook.js
@@ -1170,7 +1210,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/classic/emailOutbox.js | Email outbox |
 | apps/classic/expenseCategories.js | Expense categories |
 | apps/classic/expensePlan.js | Expense plan & recurring items |
-| apps/classic/externalConnections.js | External connections (admin) |
+| apps/classic/externalConnections.js | External connections / Integrations client |
 | apps/classic/externalFetch.js | External fetch helpers |
 | apps/classic/financeAnalytics.js | Finance reports & analytics |
 | apps/classic/financeApi.js | Finance API client |
@@ -1276,7 +1316,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/new/classifyOptions.js | Classification options |
 | apps/new/dbClient.js | Supabase client + apartment state fetch |
 | apps/new/expenseCategories.js | Expense categories |
-| apps/new/externalConnections.js | External connections (admin) |
+| apps/new/externalConnections.js | External connections / Integrations client |
 | apps/new/financeApi.js | Finance API client |
 | apps/new/financePageHelp.js | new/finance Page Help |
 | apps/new/financeReportsExport.js | Export finance reports (Excel) |
@@ -1402,6 +1442,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── finance-mongo.js
 ├── finance-mutations.js
 ├── finance-rest.js
+├── integrations-rest.js
 ├── oauth-microsoft.js
 ├── oauth-service.js
 ├── passbook-jobs.js
@@ -1424,19 +1465,20 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | auth-session.js | Auth session endpoint |
 | dashboard-summary.js | Dashboard summary endpoint |
 | db.js | DB access (Supabase) |
-| external-connections.js | External connections read/write |
+| external-connections.js | Legacy external connections shim → Mongo |
 | external-proxy.js | External API proxy |
 | finance-mongo-mutations.js | Serverless endpoint |
 | finance-mongo-reports.js | Serverless endpoint |
 | finance-mongo.js | Serverless endpoint |
 | finance-mutations.js | Finance write mutations |
-| finance-rest.js | Serverless endpoint |
+| finance-rest.js | Finance-New REST entry |
+| integrations-rest.js | Integrations REST entry (connections + passbook) |
 | oauth-microsoft.js | Microsoft OAuth flow |
 | oauth-service.js | OAuth service helper |
-| passbook-jobs.js | Evolyx passbook jobs |
-| passbook-parse.js | Passbook file parsing |
-| passbook-webhook.js | Passbook webhook |
-| property-rest.js | Serverless endpoint |
+| passbook-jobs.js | Legacy passbook jobs shim → Mongo |
+| passbook-parse.js | Legacy passbook parse shim → Mongo |
+| passbook-webhook.js | Passbook webhook (public, Mongo) |
+| property-rest.js | Property-New REST entry |
 | rbac-mongo.js | Mongo identity + RBAC (New UI) |
 | rpc.js | Postgres RPC endpoint (with maxDuration) |
 | state.js | State hydration endpoint |
@@ -1457,6 +1499,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── capture-finance-screenshots.mjs
 ├── check-import-boundary.mjs
 ├── migrate-finance-to-mongo.mjs
+├── migrate-integrations-to-mongo.mjs
 ├── migrate-logs-to-mongo.mjs
 ├── migrate-property-to-mongo.mjs
 ├── migrate-rbac-to-mongo.mjs
@@ -1526,6 +1569,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │       ├── supabase_phase3_portal_bundle.sql
 │       ├── supabase_rbac_v2.sql
 │       ├── supabase_rbac.sql
+│       ├── supabase_rename_public_tables_to_temp.sql
 │       ├── supabase_resident_invites.sql
 │       ├── supabase_resident_portal.sql
 │       ├── supabase_residents_unified.sql
@@ -1550,6 +1594,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │       ├── supabase_visitor_approvals.sql
 │       ├── supabase_visitor_log.sql
 │       └── supabase_visitor_parking.sql
+├── ARCHITECTURE_NEW.md
 ├── finance-reports-preview.html
 ├── finance-reports-preview.md
 ├── PHASED_REQUIREMENTS.md
@@ -1558,6 +1603,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ```
 
 `PHASED_REQUIREMENTS.md` is the product spec (phases/sprints) — hand it to an agent to implement features in order.
+`ARCHITECTURE_NEW.md` is the New-app REST domain guide (Finance / Property / Integrations segregation).
 
 ### public/
 ```
@@ -1594,10 +1640,15 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 
 ## 9. Key Architectural Concepts
 
+- **New REST domains (Mongo):** segregate by capability — Finance `/api/finance`, Property `/api/property`,
+  Integrations `/api/integrations`, Identity `/api/rbac-mongo`. Do **not** hang provider credentials or OCR
+  jobs under finance. Full guide: `docs/ARCHITECTURE_NEW.md`.
 - **State:** Classic `apps/classic/src/store.js` (Postgres). New `apps/new/src/runtime/state.js` (Mongo session). Auth in `packages/auth`.
   partitioned read-only domains via `stateLoader.js` / `stateDomains.js`.
-- **Data access:** browser → Supabase client (`src/dbClient.js`) and/or Vercel `/api/*` endpoints; admin/finance
-  mutations go through `api/finance-mutations.js`. Spreadsheet sync via `api/ledger*`, Excel push via Microsoft Graph.
+- **Data access:** New screens → domain REST (`/api/finance`, `/api/property`, `/api/integrations`). Classic → Supabase
+  client and/or legacy `/api/*` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.
+- **Integrations:** Evolyx passbook OCR config + jobs live in Mongo (`external_connections`, `passbook_ocr_jobs`).
+  Admin + Finance-New call `/api/integrations/*`; public Evolyx callback remains `/api/passbook-webhook`.
 - **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
 - **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
   UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
@@ -1619,10 +1670,11 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run migrate:property-mongo` → `node scripts/migrate-property-to-mongo.mjs`
 - `npm run migrate:rbac-mongo` → `node scripts/migrate-rbac-to-mongo.mjs`
 - `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
+- `npm run migrate:integrations-mongo` → `node scripts/migrate-integrations-to-mongo.mjs`
 - `npm run generate-repo-map` → `node scripts/utilities/generate-repo-map.js`
 - `npm run check:import-boundary` → `node scripts/check-import-boundary.mjs`
 - `npm run setup:hooks` → `node scripts/git-hooks/install-hooks.js`
 
 ---
 
-*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-20.*
+*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-21.*

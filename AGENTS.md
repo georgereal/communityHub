@@ -15,6 +15,12 @@ This file is read by coding agents (Claude Code, Cline, GitHub Copilot, Cursor, 
 docs/REPO_MAP.md
 ```
 
+For **New** app REST / Mongo domains (Finance, Property, Integrations segregation), also read:
+
+```
+docs/ARCHITECTURE_NEW.md
+```
+
 The repository map is the **single source of truth** for this project's directory structure, feature modules,
 API endpoints, views/routes, SQL migrations, architectural patterns, and development commands.
 

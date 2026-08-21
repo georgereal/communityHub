@@ -75,6 +75,9 @@ function resolveApiModule(urlPath) {
     if (parts[0] === 'property') {
         return { file: resolve(apiRoot, 'property-rest.js'), pathParts: parts.slice(1) };
     }
+    if (parts[0] === 'integrations') {
+        return { file: resolve(apiRoot, 'integrations-rest.js'), pathParts: parts.slice(1) };
+    }
 
     const exact = resolve(apiRoot, `${parts.join('/')}.js`);
     if (existsSync(exact)) return { file: exact, pathParts: [] };
@@ -156,6 +159,7 @@ export function viteApiDevPlugin(env = {}) {
                         const top = name.split('/')[0];
                         if (top === 'finance') req.__financePath = resolved.pathParts;
                         if (top === 'property') req.__propertyPath = resolved.pathParts;
+                        if (top === 'integrations') req.__integrationsPath = resolved.pathParts;
                         req.query = { ...(req.query || {}), path: resolved.pathParts };
                     }
                     const mod = await server.ssrLoadModule(resolved.file);

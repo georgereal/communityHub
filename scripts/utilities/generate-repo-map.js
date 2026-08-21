@@ -182,7 +182,7 @@ const SRC_DESCRIPTIONS = {
   'passbookEvolyx.js': 'Evolyx passbook job handling',
   'passbookJobImportAnalysis.js': 'Passbook job import analysis',
   'microsoftExcelPush.js': 'Push finance data to Excel via Microsoft Graph',
-  'externalConnections.js': 'External connections (admin)',
+  'externalConnections.js': 'External connections / Integrations client',
   'externalFetch.js': 'External fetch helpers',
   'admin.js': 'Setup subview switching & admin helpers',
   'uiMode.js': 'Classic (Postgres) vs New (Mongo) UI mode',
@@ -236,16 +236,19 @@ const API_DESCRIPTIONS = {
   'dbAccess.js': 'DB access helpers',
   'rpc.js': 'Postgres RPC endpoint (with maxDuration)',
   'supabaseRest.js': 'Supabase REST helper',
-  'evolyxConnection.js': 'Evolyx external connection',
-  'external-connections.js': 'External connections read/write',
+  'evolyxConnection.js': 'Evolyx external connection (Mongo)',
+  'external-connections.js': 'Legacy external connections shim → Mongo',
   'external-proxy.js': 'External API proxy',
   'finance-mutations.js': 'Finance write mutations',
+  'finance-rest.js': 'Finance-New REST entry',
+  'integrations-rest.js': 'Integrations REST entry (connections + passbook)',
   'oauth-microsoft.js': 'Microsoft OAuth flow',
   'oauth-service.js': 'OAuth service helper',
-  'passbook-jobs.js': 'Evolyx passbook jobs',
-  'passbook-parse.js': 'Passbook file parsing',
-  'passbook-webhook.js': 'Passbook webhook',
-  'passbookJobsStore.js': 'Passbook jobs store helper',
+  'passbook-jobs.js': 'Legacy passbook jobs shim → Mongo',
+  'passbook-parse.js': 'Legacy passbook parse shim → Mongo',
+  'passbook-webhook.js': 'Passbook webhook (public, Mongo)',
+  'passbookJobsStore.js': 'Passbook jobs store re-export',
+  'property-rest.js': 'Property-New REST entry',
   'r2Storage.js': 'S3/R2 storage upload',
   'storage.js': 'File storage',
   'state.js': 'State hydration endpoint',
@@ -419,6 +422,7 @@ ${d.docsTree}
 \`\`\`
 
 \`PHASED_REQUIREMENTS.md\` is the product spec (phases/sprints) — hand it to an agent to implement features in order.
+\`ARCHITECTURE_NEW.md\` is the New-app REST domain guide (Finance / Property / Integrations segregation).
 
 ### public/
 \`\`\`
@@ -443,10 +447,15 @@ ${mdTable(['File', 'Purpose'], d.topConfig.map((f) => [f, 'Repo config / entry p
 
 ## 9. Key Architectural Concepts
 
+- **New REST domains (Mongo):** segregate by capability — Finance \`/api/finance\`, Property \`/api/property\`,
+  Integrations \`/api/integrations\`, Identity \`/api/rbac-mongo\`. Do **not** hang provider credentials or OCR
+  jobs under finance. Full guide: \`docs/ARCHITECTURE_NEW.md\`.
 - **State:** Classic \`apps/classic/src/store.js\` (Postgres). New \`apps/new/src/runtime/state.js\` (Mongo session). Auth in \`packages/auth\`.
   partitioned read-only domains via \`stateLoader.js\` / \`stateDomains.js\`.
-- **Data access:** browser → Supabase client (\`src/dbClient.js\`) and/or Vercel \`/api/*\` endpoints; admin/finance
-  mutations go through \`api/finance-mutations.js\`. Spreadsheet sync via \`api/ledger*\`, Excel push via Microsoft Graph.
+- **Data access:** New screens → domain REST (\`/api/finance\`, \`/api/property\`, \`/api/integrations\`). Classic → Supabase
+  client and/or legacy \`/api/*\` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.
+- **Integrations:** Evolyx passbook OCR config + jobs live in Mongo (\`external_connections\`, \`passbook_ocr_jobs\`).
+  Admin + Finance-New call \`/api/integrations/*\`; public Evolyx callback remains \`/api/passbook-webhook\`.
 - **Auth:** \`authClient.js\` + \`socialAuth.js\` (Google/Microsoft), MSAL callback (\`microsoft-auth.html\`, \`ms-callback.js\`).
 - **RBAC & access:** \`ch_ui_mode\` cookie selects the store. New: Mongo identity (\`rbac_directory\`, \`rbac_societies\`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
   UI actions use \`src/capabilities.js\`. Fallback remains \`rbac.js\` / \`rbacMatrix.js\` until Mongo is populated.

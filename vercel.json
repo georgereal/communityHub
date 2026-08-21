@@ -13,6 +13,10 @@
       "destination": "/api/property-rest?__propertyPath=:path*"
     },
     {
+      "source": "/api/integrations/:path*",
+      "destination": "/api/integrations-rest?__integrationsPath=:path*"
+    },
+    {
       "source": "/login",
       "destination": "/login.html"
     },
@@ -177,6 +181,9 @@
     },
     "api/property-rest.js": {
       "maxDuration": 60
+    },
+    "api/integrations-rest.js": {
+      "maxDuration": 300
     }
   }
 }

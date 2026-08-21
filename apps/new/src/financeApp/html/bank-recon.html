@@ -80,7 +80,7 @@
               <div id="fn-bank-recon-passbook-panel" class="bank-recon-source-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-passbook" hidden>
                 <p id="fn-bank-recon-passbook-hint" class="bank-recon-passbook-hint" hidden></p>
                 <div class="bank-recon-source-panel__intro">
-                  <p>Queue one or more passbook pages (PDF, JPG, PNG, WebP). Evolyx OCR runs in the background — track jobs below and import mapped rows when complete. API key and callback URL are configured under <a href="/#admin-connections">Administration → External Connections</a>.</p>
+                  <p>Queue one or more passbook pages (PDF, JPG, PNG, WebP). Evolyx OCR runs in the background — track jobs below and import mapped rows when complete. API key and <strong>This app’s public URL</strong> (tunnel for webhooks) are configured under <a href="/admin#/integrations">Administration → Integrations</a>. Localhost alone will leave jobs stuck on Queued.</p>
                 </div>
                 <div class="bank-recon-dropzone bank-recon-dropzone--passbook" id="fn-bank-recon-passbook-dropzone" tabindex="0" role="button" aria-label="Drop passbook files to scan">
                   <i class="fa-solid fa-images bank-recon-dropzone__icon" aria-hidden="true"></i>

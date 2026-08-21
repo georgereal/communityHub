@@ -33,6 +33,7 @@ import {
     CONNECTION_CATALOG,
     ensureExternalConnectionsLoaded,
     getExternalConnections,
+    upsertExternalConnectionRow,
 } from '../externalConnections.js';
 
 export { EXPENSE_CATS, MODULE_CATALOG, LOCKED_MODULE_KEYS, ROLE_OPTIONS, v2KeyToLabel, CONNECTION_CATALOG };
@@ -341,20 +342,7 @@ export function connections() {
 
 export async function saveConnection(payload) {
     assertCan('admin.integrations.edit');
-    const res = await fetch('/api/external-connections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-    });
-    const { ok, json, error } = await readApiJson(res);
-    if (!ok) throw new Error(json.error || error || 'Save failed.');
-    portalState.admin = portalState.admin || {};
-    portalState.admin.externalConnections = [
-        ...getExternalConnections().filter((item) => !(item.provider === payload.provider && item.connection_key === payload.connection_key)),
-        json.row,
-    ];
-    return json.row;
+    return upsertExternalConnectionRow(payload);
 }
 
 export function userDisplayRole(user) {

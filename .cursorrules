@@ -7,6 +7,9 @@
 **Before starting ANY task that involves planning, exploration, or code changes, you MUST first read the repository map:**
 - `docs/REPO_MAP.md`
 
+For New-app Mongo REST domains (do not put integrations under finance), also read:
+- `docs/ARCHITECTURE_NEW.md`
+
 This file is the single source of truth for the project's directory structure, feature modules, API endpoints, views/routes, SQL migrations, architectural patterns, and development commands. Reading it first:
 - Provides instant context without re-exploring the entire codebase
 - Identifies where features live (`apps/classic/src` SPA, `apps/new/src` Mongo MPAs, `api/` serverless)

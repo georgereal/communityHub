@@ -39,7 +39,7 @@ function ConnectionCard({ def, canEdit, onSaved }) {
             <Stack spacing={2}>
                 <TextField label="Evolyx API URL" size="small" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} disabled={!canEdit} helperText="Evolyx service endpoint — not this app’s URL." />
                 <TextField label="Client ID" size="small" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} disabled={!canEdit} />
-                <TextField label="This app’s public URL" size="small" value={form.webhook_base_url} onChange={(e) => setForm({ ...form, webhook_base_url: e.target.value })} disabled={!canEdit} helperText="OCR callbacks go to {this URL}/api/passbook-webhook." />
+                <TextField label="This app’s public URL" size="small" value={form.webhook_base_url} onChange={(e) => setForm({ ...form, webhook_base_url: e.target.value })} disabled={!canEdit} helperText="OCR callbacks go to {this URL}/api/passbook-webhook (public Evolyx callback)." />
                 <TextField label="Workflow ID" size="small" value={form.workflow_id} onChange={(e) => setForm({ ...form, workflow_id: e.target.value })} disabled={!canEdit} />
                 <TextField label="API key" type="password" size="small" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} disabled={!canEdit} placeholder={row?.api_key_set ? 'Leave blank to keep current' : 'evx_…'} />
                 <FormControlLabel control={<Switch checked={form.enabled} disabled={!canEdit} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />} label="Enabled" />

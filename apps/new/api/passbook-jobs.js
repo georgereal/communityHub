@@ -1,11 +1,15 @@
+/**
+ * Legacy /api/passbook-jobs — prefer /api/integrations/passbook/jobs.
+ */
 import { requireApartmentPermission } from '../../../packages/server/serverAuth.js';
+import { getMongoDb } from '../../../packages/server/mongoClient.js';
+import { ensureIntegrationsIndexes } from './integrationsMongo/indexes.js';
 import {
     getPassbookJob,
     listPassbookJobs,
-    updatePassbookJob,
-    PASSBOOK_JOB_STATUS,
+    markPassbookJobImported,
     sanitizePassbookJob,
-} from './passbookJobsStore.js';
+} from './integrationsMongo/passbookJobsStore.js';
 
 export default async function handler(req, res) {
     const apartmentIdRaw = req.method === 'GET'
@@ -13,16 +17,18 @@ export default async function handler(req, res) {
         : req.body?.apartment_id;
 
     try {
-        const { apartmentId, service } = await requireApartmentPermission(req, apartmentIdRaw, 'accounts.edit');
+        const { apartmentId } = await requireApartmentPermission(req, apartmentIdRaw, 'accounts.edit');
+        const db = await getMongoDb();
+        await ensureIntegrationsIndexes(db);
 
         if (req.method === 'GET') {
             const jobId = req.query?.job_id || new URL(req.url, 'http://localhost').searchParams.get('job_id');
             if (jobId) {
-                const job = await getPassbookJob(service, apartmentId, jobId);
+                const job = await getPassbookJob(apartmentId, jobId, { db });
                 if (!job) return res.status(404).json({ error: 'Passbook OCR job not found.' });
                 return res.status(200).json({ ok: true, job: sanitizePassbookJob(job) });
             }
-            const jobs = await listPassbookJobs(service, apartmentId);
+            const jobs = await listPassbookJobs(apartmentId, 30, { db });
             return res.status(200).json({ ok: true, jobs: jobs.map(sanitizePassbookJob) });
         }
 
@@ -33,16 +39,10 @@ export default async function handler(req, res) {
             }
             const jobId = body.job_id;
             if (!jobId) return res.status(400).json({ error: 'job_id is required.' });
-            const existing = await getPassbookJob(service, apartmentId, jobId);
-            if (!existing) return res.status(404).json({ error: 'Passbook OCR job not found.' });
-            const nextStatus = existing.status === PASSBOOK_JOB_STATUS.FAILED
-                ? PASSBOOK_JOB_STATUS.FAILED
-                : PASSBOOK_JOB_STATUS.IMPORTED;
-            const job = await updatePassbookJob(service, jobId, {
-                status: nextStatus,
-                import_count: body.import_count || existing.import_count || 0,
-                imported_statement_import_id: body.imported_statement_import_id || null,
-                imported_at: new Date().toISOString(),
+            const job = await markPassbookJobImported(apartmentId, jobId, {
+                importCount: body.import_count || 0,
+                importId: body.imported_statement_import_id || null,
+                db,
             });
             return res.status(200).json({ ok: true, job: sanitizePassbookJob(job) });
         }
