@@ -3224,7 +3224,7 @@ export const renderBankReconciliation = () => {
         passbookHint.hidden = passbookReady;
         passbookHint.innerHTML = passbookReady
             ? ''
-            : 'Passbook OCR is not configured. <a href="/admin#/integrations">Set up Evolyx</a> under Administration → Integrations.';
+            : 'Passbook OCR is not configured. <a href="/admin/integrations/">Set up Evolyx</a> under Administration → Integrations.';
     }
     updatePassbookJobsBadge(latestPassbookJobs);
 

@@ -24,7 +24,14 @@ function InAppNav() {
     useEffect(() => {
         const onNav = (e) => {
             const href = String(e.detail?.href || '');
-            let path = href.replace(/^\/admin/, '') || '/';
+            if (!href) return;
+            // Only handle admin-shell paths; leave finance/property MPAs to full navigation.
+            const pathOnly = href.split('?')[0].split('#')[0];
+            if (!pathOnly.startsWith('/admin')) {
+                window.location.assign(href);
+                return;
+            }
+            let path = pathOnly.replace(/^\/admin/, '') || '/';
             if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
             navigate(path || '/');
         };

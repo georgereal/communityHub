@@ -30,11 +30,37 @@ export function isPublicWebhookBase(baseUrl) {
         if (host.endsWith('.local')) return false;
         if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return false;
         if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
-        // Prefer https for real tunnels; allow http only for non-local (rare)
         return true;
     } catch {
         return false;
     }
+}
+
+/**
+ * Default webhook = this API server (Host / X-Forwarded-*).
+ * Optional override = tunnel or alternate public origin (Integrations field).
+ */
+export function buildPassbookWebhookUrl(req, { webhookBaseUrl = '', jobId, callbackToken }) {
+    const override = String(webhookBaseUrl || '').trim();
+    let webhook;
+    try {
+        const trimmed = override.replace(/\/$/, '');
+        if (override && /\/api\/passbook-webhook$/i.test(trimmed)) {
+            webhook = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+        } else {
+            const base = callbackBaseUrl(req, override);
+            webhook = new URL('api/passbook-webhook', base.endsWith('/') ? base : `${base}/`);
+        }
+    } catch (err) {
+        throw badRequest(`Invalid webhook override URL: ${err?.message || 'Malformed URL.'}`);
+    }
+    webhook.searchParams.set('job_id', jobId);
+    webhook.searchParams.set('token', String(callbackToken || ''));
+    return {
+        webhookUrl: webhook.toString(),
+        callbackBase: `${webhook.protocol}//${webhook.host}`,
+        usedOverride: Boolean(override),
+    };
 }
 
 export async function startEvolyxWorkflow({ files, requestId, config, webhookUrl }) {
