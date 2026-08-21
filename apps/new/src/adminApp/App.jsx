@@ -59,6 +59,15 @@ function ShellSync() {
 }
 
 export default function AdminApp() {
+    // If history was pushed to another MPA (e.g. /finance/…) while this shell
+    // was still mounted, force a real document load for the correct HTML entry.
+    useEffect(() => {
+        const path = window.location.pathname || '';
+        if (!path.startsWith('/admin')) {
+            window.location.replace(`${path}${window.location.search || ''}`);
+        }
+    }, []);
+
     return (
         <BrowserRouter basename="/admin">
             <InAppNav />

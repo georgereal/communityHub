@@ -3,7 +3,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-society',
         path: '/society',
-        href: '/admin/society/',
+        href: '/admin/society',
         label: 'Society profile',
         subtitle: 'Display name, parking defaults, and which modules staff can see.',
         icon: 'fa-building',
@@ -11,7 +11,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-people',
         path: '/people',
-        href: '/admin/people/',
+        href: '/admin/people',
         label: 'People & access',
         subtitle: 'Approve sign-in requests and manage who can use this society.',
         icon: 'fa-user-shield',
@@ -19,7 +19,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-vendors',
         path: '/vendors',
-        href: '/admin/vendors/',
+        href: '/admin/vendors',
         label: 'Vendors',
         subtitle: 'Payees used on expenses and bills.',
         icon: 'fa-truck-field',
@@ -27,7 +27,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-categories',
         path: '/categories',
-        href: '/admin/categories/',
+        href: '/admin/categories',
         label: 'Sub-categories',
         subtitle: 'Expense labels grouped under each category.',
         icon: 'fa-tags',
@@ -35,7 +35,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-staff',
         path: '/staff',
-        href: '/admin/staff/',
+        href: '/admin/staff',
         label: 'Staff directory',
         subtitle: 'On-site staff records (not login accounts).',
         icon: 'fa-users-gear',
@@ -43,7 +43,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-integrations',
         path: '/integrations',
-        href: '/admin/integrations/',
+        href: '/admin/integrations',
         label: 'Integrations',
         subtitle: 'External API connections and ledger spreadsheet sync.',
         icon: 'fa-plug',
@@ -51,7 +51,7 @@ export const ADMIN_PAGES = [
     {
         route: 'an-roles',
         path: '/roles',
-        href: '/admin/roles/',
+        href: '/admin/roles',
         label: 'Roles',
         subtitle: 'CRUD for each society role. Pages follow Read.',
         icon: 'fa-user-lock',
