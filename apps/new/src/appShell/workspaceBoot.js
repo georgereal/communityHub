@@ -4,9 +4,28 @@
 import { portalState } from '../store.js';
 import { setActiveApartmentIdForApi } from '../dbClient.js';
 
+const BOOT_TIMEOUT_MS = 20_000;
+
 export async function fetchWorkspaceBoot(apartmentId = null) {
     const q = apartmentId ? `?apartment_id=${encodeURIComponent(apartmentId)}` : '';
-    const res = await fetch(`/api/new/workspace-boot${q}`, { credentials: 'include' });
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl
+        ? setTimeout(() => ctrl.abort(), BOOT_TIMEOUT_MS)
+        : null;
+    let res;
+    try {
+        res = await fetch(`/api/new/workspace-boot${q}`, {
+            credentials: 'include',
+            signal: ctrl?.signal,
+        });
+    } catch (err) {
+        if (err?.name === 'AbortError') {
+            throw new Error('Workspace boot timed out. Please refresh and try again.');
+        }
+        throw err;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
     let json = {};
     try {
         json = await res.json();

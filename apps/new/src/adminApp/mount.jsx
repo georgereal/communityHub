@@ -20,18 +20,20 @@ export async function mountAdminReactApp() {
     const status = document.querySelector('#app-shell-root .property-mpa-status');
     if (status) status.textContent = 'Loading…';
 
-    // Soft-nav can leave this Admin document on /finance/… — never mount RR there
-    // (basename mismatch → blank page + chunk storm). Force the correct HTML entry.
+    // Soft-nav can leave Admin HTML on /finance/… — load the real finance document.
     const path = window.location.pathname || '';
     if (!path.startsWith('/admin')) {
         const { forceDocumentNavigation } = await import('../appShell/forceDocumentNav.js');
-        forceDocumentNavigation(`${path}${window.location.search || ''}`);
+        const ok = forceDocumentNavigation(`${path}${window.location.search || ''}`);
+        if (!ok && status) {
+            status.textContent = 'This Administration page was opened on the wrong URL. Open /admin or refresh.';
+            status.style.color = '#b91c1c';
+        }
         return null;
     }
 
-    const { clearWrongShellLatch, stripShellRecoveryParam } = await import('../appShell/forceDocumentNav.js');
+    const { clearWrongShellLatch } = await import('../appShell/forceDocumentNav.js');
     clearWrongShellLatch();
-    stripShellRecoveryParam();
 
     const page = adminPageFromPathname();
     const boot = await bootAdminApp({ route: page.route });

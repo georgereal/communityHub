@@ -66,11 +66,17 @@ export function navigateToRoute(route) {
     const targetUrl = new URL(href, window.location.origin);
     const target = targetUrl.pathname.replace(/\/$/, '') || '/';
 
-    // Separate HTML files (finance/*.html) — always full document load.
+    // Finance pages are separate HTML files — always full document load when leaving/entering.
     const targetIsFinance = target.startsWith('/finance');
     const hereIsFinance = path.startsWith('/finance');
     if (targetIsFinance || hereIsFinance) {
-        if (path === target && document.documentElement.dataset.adminApp !== '1') return;
+        if (
+            path === target
+            && document.documentElement.dataset.financeApp === '1'
+            && document.documentElement.dataset.adminApp !== '1'
+        ) {
+            return;
+        }
         void import('./forceDocumentNav.js').then((m) => m.forceDocumentNavigation(href));
         return;
     }
@@ -79,7 +85,7 @@ export function navigateToRoute(route) {
 
     const here = mpaShellKey(window.location.pathname);
     const there = mpaShellKey(targetUrl.pathname);
-    // Same React shell → in-app. Different app (admin↔home, etc.) → full document load.
+    // Same React shell → in-app. Different app → full document load.
     if (here && there && here === there) {
         window.dispatchEvent(new CustomEvent('ch-mpa-inapp-nav', {
             detail: { href: `${targetUrl.pathname}${targetUrl.search || ''}`, route },

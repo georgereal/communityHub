@@ -115,11 +115,10 @@ export function navigateFinance(routeOrKey) {
         || financePathForRoute(routeOrKey)
         || FINANCE_NEW_NAV_ALIASES[routeOrKey];
     if (path) {
+        const here = window.location.pathname.replace(/\/$/, '') || '/';
+        const there = String(path).replace(/\/$/, '') || '/';
+        if (here === there && document.documentElement.dataset.financeApp === '1') return;
         void import('../appShell/forceDocumentNav.js').then((m) => {
-            const here = window.location.pathname.replace(/\/$/, '') || '/';
-            const there = String(path).replace(/\/$/, '') || '/';
-            // Same finance page on the correct document — no-op.
-            if (here === there && document.documentElement.dataset.adminApp !== '1') return;
             m.forceDocumentNavigation(path);
         });
         return;

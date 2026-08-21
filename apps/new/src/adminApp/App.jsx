@@ -26,8 +26,7 @@ function InAppNav() {
             const href = String(e.detail?.href || '');
             if (!href) return;
             const pathOnly = href.split('?')[0].split('#')[0];
-            // Cross-app (finance, home, …): always full document load — never history API.
-            // Do not skip when URL already matches: soft-nav can leave Admin JS on that URL.
+            // Cross-app: always full document load — never history API.
             if (!pathOnly.startsWith('/admin')) {
                 void import('../appShell/forceDocumentNav.js').then((m) => {
                     m.forceDocumentNavigation(href);
@@ -62,39 +61,6 @@ function ShellSync() {
 }
 
 export default function AdminApp() {
-    // Soft history changes can leave this document on /finance/… while Admin JS is still alive.
-    useEffect(() => {
-        const recover = () => {
-            const path = window.location.pathname || '';
-            if (path.startsWith('/admin')) return;
-            void import('../appShell/forceDocumentNav.js').then((m) => {
-                m.forceDocumentNavigation(`${path}${window.location.search || ''}`);
-            });
-        };
-        recover();
-        window.addEventListener('popstate', recover);
-        const push = history.pushState.bind(history);
-        const replace = history.replaceState.bind(history);
-        history.pushState = (...args) => {
-            push(...args);
-            queueMicrotask(recover);
-        };
-        history.replaceState = (...args) => {
-            replace(...args);
-            queueMicrotask(recover);
-        };
-        return () => {
-            window.removeEventListener('popstate', recover);
-            history.pushState = push;
-            history.replaceState = replace;
-        };
-    }, []);
-
-    // Never mount Router outside /admin — avoids basename mismatch render storms.
-    if (!(window.location.pathname || '').startsWith('/admin')) {
-        return null;
-    }
-
     return (
         <BrowserRouter basename="/admin">
             <InAppNav />

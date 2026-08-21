@@ -17,12 +17,6 @@ export async function bootFinanceApp(opts = {}) {
     restoreMpaNavPref();
 
     try {
-        const { clearWrongShellLatch, stripShellRecoveryParam } = await import('../appShell/forceDocumentNav.js');
-        clearWrongShellLatch();
-        stripShellRecoveryParam();
-    } catch { /* ignore */ }
-
-    try {
         const res = await fetch('/api/auth-session', { credentials: 'include' });
         if (!res.ok) throw new Error('auth');
     } catch {
@@ -40,6 +34,11 @@ export async function bootFinanceApp(opts = {}) {
     const ctx = writeFinanceCtx(sessionFieldsFromBoot(boot, apartmentId, apartments));
     applyMongoBoot(boot, ctx);
     document.documentElement.dataset.financePage = opts.page || '';
+
+    try {
+        const { clearWrongShellLatch } = await import('../appShell/forceDocumentNav.js');
+        clearWrongShellLatch();
+    } catch { /* ignore */ }
 
     const { initFinancePackCache } = await import('../financeNew/packCache.js');
     initFinancePackCache(ctx.apartmentId);

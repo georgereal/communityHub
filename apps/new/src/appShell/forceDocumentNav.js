@@ -1,55 +1,71 @@
 /**
- * Full document navigations between MPA shells.
- * Soft history changes (React Router / pushState) can leave the wrong HTML
- * entry mounted on another app's URL — same-URL assign must still reload.
+ * Full document navigations between MPA shells (admin HTML vs finance HTML, etc.).
+ * Soft history changes must never leave the wrong JS document on another app's URL.
  */
 
-const WRONG_SHELL_KEY = 'ch_wrong_shell_nav';
+const LATCH_KEY = 'ch_wrong_shell_nav';
 
-/** @param {string} href */
+function pathOnly(href) {
+    try {
+        return new URL(href, window.location.origin).pathname.replace(/\/$/, '') || '/';
+    } catch {
+        return String(href || '').split('?')[0].replace(/\/$/, '') || '/';
+    }
+}
+
+/**
+ * Navigate with a real document load. Same-URL calls reload at most once per path
+ * (latch) so soft-nav recovery cannot spin forever.
+ * @param {string} href
+ * @returns {boolean} false if a reload loop was blocked
+ */
 export function forceDocumentNavigation(href) {
-    const url = new URL(href, window.location.origin);
-    const path = url.pathname.replace(/\/$/, '') || '/';
-    const here = window.location.pathname.replace(/\/$/, '') || '/';
+    const targetPath = pathOnly(href);
+    const herePath = pathOnly(window.location.pathname);
 
-    // Already on this URL but wrong document may still be mounted — bust cache once.
-    if (here === path) {
+    // Already the correct finance document — never bounce.
+    if (
+        document.documentElement.dataset.financeApp === '1'
+        && targetPath.startsWith('/finance')
+        && herePath === targetPath
+    ) {
+        return false;
+    }
+
+    // Already the correct admin document.
+    if (
+        document.documentElement.dataset.adminApp === '1'
+        && targetPath.startsWith('/admin')
+        && herePath === targetPath
+    ) {
+        return false;
+    }
+
+    if (herePath === targetPath) {
         let alreadyTried = false;
         try {
-            alreadyTried = sessionStorage.getItem(WRONG_SHELL_KEY) === path;
+            alreadyTried = sessionStorage.getItem(LATCH_KEY) === targetPath;
         } catch { /* ignore */ }
         if (alreadyTried) {
-            console.error('[mpa] Wrong app shell for', path, '— stopped reload loop.');
+            console.error('[mpa] Wrong app shell for', targetPath, '— stopped reload loop.');
             return false;
         }
         try {
-            sessionStorage.setItem(WRONG_SHELL_KEY, path);
+            sessionStorage.setItem(LATCH_KEY, targetPath);
         } catch { /* ignore */ }
-        url.searchParams.set('_chshell', String(Date.now()));
-    } else {
-        try {
-            sessionStorage.removeItem(WRONG_SHELL_KEY);
-        } catch { /* ignore */ }
+        window.location.reload();
+        return true;
     }
 
-    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+    try {
+        sessionStorage.removeItem(LATCH_KEY);
+    } catch { /* ignore */ }
+    window.location.assign(href);
     return true;
 }
 
-/** Clear the one-shot latch after a correct shell boots. */
 export function clearWrongShellLatch() {
     try {
-        sessionStorage.removeItem(WRONG_SHELL_KEY);
-    } catch { /* ignore */ }
-}
-
-/** Drop `_chshell` from the address bar after a successful document load. */
-export function stripShellRecoveryParam() {
-    try {
-        const url = new URL(window.location.href);
-        if (!url.searchParams.has('_chshell')) return;
-        url.searchParams.delete('_chshell');
-        const next = `${url.pathname}${url.search}${url.hash}`;
-        window.history.replaceState(window.history.state, '', next);
+        sessionStorage.removeItem(LATCH_KEY);
     } catch { /* ignore */ }
 }
