@@ -65,11 +65,21 @@ export function navigateToRoute(route) {
     const path = window.location.pathname.replace(/\/$/, '') || '/';
     const targetUrl = new URL(href, window.location.origin);
     const target = targetUrl.pathname.replace(/\/$/, '') || '/';
+
+    // Separate HTML files (finance/*.html) — always full document load.
+    const targetIsFinance = target.startsWith('/finance');
+    const hereIsFinance = path.startsWith('/finance');
+    if (targetIsFinance || hereIsFinance) {
+        if (path === target && document.documentElement.dataset.adminApp !== '1') return;
+        void import('./forceDocumentNav.js').then((m) => m.forceDocumentNavigation(href));
+        return;
+    }
+
     if (path === target) return;
 
     const here = mpaShellKey(window.location.pathname);
     const there = mpaShellKey(targetUrl.pathname);
-    // Same React shell → in-app. Different app (admin↔finance, etc.) → full document load.
+    // Same React shell → in-app. Different app (admin↔home, etc.) → full document load.
     if (here && there && here === there) {
         window.dispatchEvent(new CustomEvent('ch-mpa-inapp-nav', {
             detail: { href: `${targetUrl.pathname}${targetUrl.search || ''}`, route },

@@ -17,6 +17,12 @@ export async function bootFinanceApp(opts = {}) {
     restoreMpaNavPref();
 
     try {
+        const { clearWrongShellLatch, stripShellRecoveryParam } = await import('../appShell/forceDocumentNav.js');
+        clearWrongShellLatch();
+        stripShellRecoveryParam();
+    } catch { /* ignore */ }
+
+    try {
         const res = await fetch('/api/auth-session', { credentials: 'include' });
         if (!res.ok) throw new Error('auth');
     } catch {

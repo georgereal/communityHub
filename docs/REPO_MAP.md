@@ -352,6 +352,7 @@
 │           │   │   └── layout.html
 │           │   ├── chrome.js
 │           │   ├── ensureChartJs.js
+│           │   ├── forceDocumentNav.js
 │           │   ├── mount.js
 │           │   ├── mpaAuth.js
 │           │   ├── mpaSession.js
@@ -658,7 +659,7 @@
 
 ```
 
-**Scale:** ~343 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
+**Scale:** ~344 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
 
 ---
 
@@ -976,6 +977,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   │   └── layout.html
         │   ├── chrome.js
         │   ├── ensureChartJs.js
+        │   ├── forceDocumentNav.js
         │   ├── mount.js
         │   ├── mpaAuth.js
         │   ├── mpaSession.js
