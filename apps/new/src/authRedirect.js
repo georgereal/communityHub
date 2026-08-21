@@ -81,7 +81,7 @@ export function goToApp(hash = '') {
         return;
     }
     if (!isClassicUi() && (!hash || hash === 'dashboard' || hash === '#dashboard')) {
-        window.location.assign('/home/');
+        window.location.assign('/home');
         return;
     }
     const h = hash && !hash.startsWith('#') ? `#${hash}` : (hash || '#dashboard');

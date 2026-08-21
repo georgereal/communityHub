@@ -123,7 +123,7 @@ async function goToRouteWithReload(mode) {
         window.location.assign(`/#${route}`);
         return;
     }
-    let href = '/home/';
+    let href = '/home';
     try {
         const { hrefForRoute, MPA_ROUTE_PATHS } = await import('./appShell/routes.js');
         let route = currentAppRoute();
@@ -140,10 +140,10 @@ async function goToRouteWithReload(mode) {
         route = remapRouteForMode(route || 'dashboard', mode) || 'dashboard';
         href = hrefForRoute(route);
     } catch {
-        href = '/home/';
+        href = '/home';
     }
     if (hrefKey(href) === locationKey()) {
-        window.location.reload();
+        // Already on the target New MPA page — do not reload (avoids loops on Vercel).
         return;
     }
     window.location.assign(href);

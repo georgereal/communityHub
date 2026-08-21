@@ -25,9 +25,12 @@ function InAppNav() {
         const onNav = (e) => {
             const href = String(e.detail?.href || '');
             if (!href) return;
-            // Only handle admin-shell paths; leave finance/property MPAs to full navigation.
             const pathOnly = href.split('?')[0].split('#')[0];
+            // Cross-app (finance, home, …): always full document load — never history API.
             if (!pathOnly.startsWith('/admin')) {
+                const here = window.location.pathname.replace(/\/$/, '') || '/';
+                const there = pathOnly.replace(/\/$/, '') || '/';
+                if (here === there) return;
                 window.location.assign(href);
                 return;
             }
@@ -59,15 +62,6 @@ function ShellSync() {
 }
 
 export default function AdminApp() {
-    // If history was pushed to another MPA (e.g. /finance/…) while this shell
-    // was still mounted, force a real document load for the correct HTML entry.
-    useEffect(() => {
-        const path = window.location.pathname || '';
-        if (!path.startsWith('/admin')) {
-            window.location.replace(`${path}${window.location.search || ''}`);
-        }
-    }, []);
-
     return (
         <BrowserRouter basename="/admin">
             <InAppNav />
