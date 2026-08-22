@@ -1,7 +1,7 @@
-import { requireSession } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { assertUuid } from '../../../packages/server/supabaseRest.js';
-import { getQueryParam } from '../../../packages/server/vercelRequest.js';
+import { requireSession } from '../../packages/server/serverAuth.js';
+import { createServiceClient, createUserClient } from '../../packages/server/serverSupabase.js';
+import { assertUuid } from '../../packages/server/supabaseRest.js';
+import { getQueryParam } from '../../packages/server/vercelRequest.js';
 import { fetchDomainState, STATE_DOMAINS } from './stateDomains.js';
 
 function logState(userId, apartmentId, domain, ms, error) {

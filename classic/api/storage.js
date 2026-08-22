@@ -1,13 +1,13 @@
-import { requireSession } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { readJsonBody } from '../../../packages/server/vercelRequest.js';
+import { requireSession } from '../../packages/server/serverAuth.js';
+import { createServiceClient, createUserClient } from '../../packages/server/serverSupabase.js';
+import { readJsonBody } from '../../packages/server/vercelRequest.js';
 import {
     isR2Configured,
     r2PresignedGetUrl,
     r2DeleteObjects,
     attachmentObjectKey,
     isAllowedFinanceDocObjectKey,
-} from '../../../packages/server/r2Storage.js';
+} from '../../packages/server/r2Storage.js';
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 const ALLOWED_BUCKETS = new Set([RECEIPT_BUCKET]);

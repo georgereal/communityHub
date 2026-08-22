@@ -1,2 +1,2 @@
-/** Vercel/Vite public entry — implementation lives at ../apps/classic/api/storage.js */
-export { default } from '../apps/classic/api/storage.js';
+/** Vercel entry — R2 presigned URLs (shared by New finance docs). Implementation: classic/api/storage.js */
+export { default } from '../classic/api/storage.js';

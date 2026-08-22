@@ -2,10 +2,10 @@
  * Slim workspace boot — profile, apartments, roles, permissions only.
  * Module/page/society access maps load async after login (see accessSync).
  */
-import { requireSession } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { getQueryParam } from '../../../packages/server/vercelRequest.js';
-import { isNewUiRequest } from '../../../packages/server/uiMode.js';
+import { requireSession } from '../../packages/server/serverAuth.js';
+import { createServiceClient, createUserClient } from '../../packages/server/serverSupabase.js';
+import { getQueryParam } from '../../packages/server/vercelRequest.js';
+import { isNewUiRequest } from '../../packages/server/uiMode.js';
 
 /** Prefer higher-privilege society role when multiple assignments exist. */
 function primaryRoleFromAssignments(assignments = []) {

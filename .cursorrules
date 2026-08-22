@@ -12,8 +12,8 @@ For New-app Mongo REST domains (do not put integrations under finance), also rea
 
 This file is the single source of truth for the project's directory structure, feature modules, API endpoints, views/routes, SQL migrations, architectural patterns, and development commands. Reading it first:
 - Provides instant context without re-exploring the entire codebase
-- Identifies where features live (`apps/classic/src` SPA, `apps/new/src` Mongo MPAs, `api/` serverless)
-- Reveals existing patterns (classic state in `apps/classic/src/store.js`, New runtime in `apps/new/src/runtime/state.js`)
+- Identifies where features live (`classic/src` archived SPA, `apps/new/src` Mongo MPAs, `api/` serverless)
+- Reveals existing patterns (classic state in `classic/src/store.js`, New runtime in `apps/new/src/runtime/state.js`)
 - Keeps new work consistent with current conventions
 
 **Workflow:**

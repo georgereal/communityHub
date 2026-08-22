@@ -16,7 +16,6 @@ import {
     loadPeopleDirectory, ROLE_OPTIONS, userDisplayRole,
 } from '../api.js';
 import { portalState } from '../../store.js';
-import { can } from '../../capabilities.js';
 import { isSocietyAdminUser } from '../../rbac.js';
 
 const COLS = [

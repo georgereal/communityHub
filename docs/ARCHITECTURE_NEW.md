@@ -1,6 +1,6 @@
 # New App Architecture — REST Domains & Segregation
 
-Guide for building **apps/new** features. Classic (`apps/classic`) stays on Postgres/Supabase until retired; New is Mongo-backed with **domain-segregated REST**.
+Guide for building **apps/new** features. Classic (`classic/`) is archived on Postgres/Supabase; New is Mongo-backed with **domain-segregated REST**.
 
 See also: `docs/REPO_MAP.md` (structure), `AGENTS.md` (agent workflow).
 

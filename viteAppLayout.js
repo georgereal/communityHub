@@ -1,11 +1,5 @@
 /**
- * One Vercel project, two apps:
- *   apps/classic — SPA to phase out (public URL /)
- *   apps/new     — MPAs to keep building (public URL /home, /admin, …; alias /new/…)
- *
- * HTML lives next to each app. Build emits the public URLs so classic and new
- * share the same origin until classic is retired. Then set Vite `base: '/new/'`
- * and point MPA_ROUTE_PATHS at /new/home etc.
+ * Vercel project — New MPAs at /home, /admin, /finance/… (classic archived under /classic).
  */
 import { resolve, dirname, join } from 'node:path';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
@@ -13,7 +7,6 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs';
 const root = process.cwd();
 
 export const HTML_ENTRIES = {
-    main: { src: 'apps/classic/index.html', out: 'index.html' },
     login: { src: 'packages/auth/login.html', out: 'login.html' },
     microsoftAuth: { src: 'packages/auth/microsoft-auth.html', out: 'microsoft-auth.html' },
     home: { src: 'apps/new/pages/home/index.html', out: 'home/index.html' },
@@ -70,7 +63,7 @@ export function rewriteDevHtmlUrl(url) {
     if (pathOnly === '/login' || pathOnly.startsWith('/login?')) return null;
 
     if (pathOnly === '/' || pathOnly === '/index.html') {
-        return `/apps/classic/index.html${q}`;
+        return `/apps/new/pages/home/index.html${q}`;
     }
 
     const publicPath = stripNewPrefix(pathOnly);

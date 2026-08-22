@@ -49,7 +49,7 @@ export default defineConfig(({ mode }) => {
         ],
         resolve: {
             alias: {
-                '@classic': resolve(__dirname, 'apps/classic/src'),
+                '@classic': resolve(__dirname, 'classic/src'),
                 '@new': resolve(__dirname, 'apps/new/src'),
                 '@auth': resolve(__dirname, 'packages/auth'),
             },

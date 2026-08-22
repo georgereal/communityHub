@@ -1,5 +1,5 @@
 import { runDbQuery } from './dbAccess.js';
-import { readJsonBody } from '../../../packages/server/vercelRequest.js';
+import { readJsonBody } from '../../packages/server/vercelRequest.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {

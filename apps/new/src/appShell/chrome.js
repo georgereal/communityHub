@@ -8,7 +8,7 @@ import { goToLogin } from '../authRedirect.js';
 import { signOutAuth } from '../authClient.js';
 import { v2KeyToLabel } from '../rbac.js';
 import { restoreMpaNavPref, wireHoverSidebar, syncHamburgerToHoverNav, applyMpaNavCollapsed } from './navPref.js';
-import { paintUiModeButtons, wireUiModeToggle, isNewUi } from '../uiMode.js';
+import { wireUiModeToggle } from '../uiMode.js';
 
 function readShellCtx() {
     if (document.documentElement.dataset.financeApp === '1') {
@@ -87,39 +87,15 @@ async function signOut() {
 }
 
 function wireShellControls({ onApartmentChange } = {}) {
-    const isMpa = document.documentElement.dataset.financeApp === '1'
-        || document.documentElement.dataset.mpaApp === '1';
-
-    if (isMpa || isNewUi()) {
-        restoreMpaNavPref();
-        wireHoverSidebar();
-        syncHamburgerToHoverNav();
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                applyMpaNavCollapsed(true, { persist: !window.matchMedia('(max-width: 820px)').matches });
-                closeUserMenu();
-            }
-        });
-    } else {
-        const toggleNav = () => document.body.classList.toggle('nav-expanded');
-        document.getElementById('nav-toggle')?.addEventListener('click', toggleNav);
-        document.getElementById('mobile-nav-toggle')?.addEventListener('click', toggleNav);
-
-        if (!document.querySelector('.nav-backdrop')) {
-            const d = document.createElement('div');
-            d.className = 'nav-backdrop';
-            d.setAttribute('aria-hidden', 'true');
-            d.onclick = () => document.body.classList.remove('nav-expanded');
-            document.body.appendChild(d);
+    restoreMpaNavPref();
+    wireHoverSidebar();
+    syncHamburgerToHoverNav();
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            applyMpaNavCollapsed(true, { persist: !window.matchMedia('(max-width: 820px)').matches });
+            closeUserMenu();
         }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                document.body.classList.remove('nav-expanded');
-                closeUserMenu();
-            }
-        });
-    }
+    });
 
     const onApt = async (e) => {
         const id = e.target.value;
@@ -209,7 +185,6 @@ export function paintAppShellChrome(opts = {}) {
         wireShellControls({ onApartmentChange: opts.onApartmentChange });
         wireUiModeToggle();
     }
-    paintUiModeButtons();
 }
 
 function esc(s) {

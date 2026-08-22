@@ -43,8 +43,8 @@ for (const file of files) {
     if ((text.includes("from '@classic/") || text.includes("import('@classic/") || text.includes('import("@classic/')) && !isTopShim) {
         leaks.push(`${rel}: imports @classic (not an allowlisted shim)`);
     }
-    if (text.includes('apps/classic')) {
-        leaks.push(`${rel}: path to apps/classic`);
+    if (text.includes('apps/classic') || text.includes("from 'classic/") || text.includes('from "classic/')) {
+        leaks.push(`${rel}: path to classic source (use @classic shim)`);
     }
     if (text.includes('supabase.from(')) {
         leaks.push(`${rel}: supabase.from(`);

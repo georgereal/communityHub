@@ -14,17 +14,6 @@
   <div id="app-shell-root">
     <p class="home-mpa-status" style="padding:1.5rem">Loading…</p>
   </div>
-  <script>
-    (function () {
-      try {
-        var stored = '';
-        try { stored = localStorage.getItem('ch_ui_mode') || ''; } catch (e) {}
-        var cookie = (document.cookie.match(/(?:^|; )ch_ui_mode=([^;]*)/) || [])[1];
-        var mode = stored || (cookie ? decodeURIComponent(cookie) : '');
-        if (mode === 'classic') location.replace('/#dashboard');
-      } catch (e) {}
-    })();
-  </script>
   <script type="module" src="/apps/new/src/homeApp/main.js"></script>
 </body>
 </html>

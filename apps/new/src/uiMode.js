@@ -1,6 +1,6 @@
 /**
- * App UI mode: `new` (default, Mongo identity + RBAC + property/finance) vs `classic` (Postgres screens).
- * Auth session stays on Supabase. Cookie `ch_ui_mode` is what the API reads.
+ * App UI mode — production is New MPAs only (classic SPA archived).
+ * Legacy `ch_ui_mode=classic` in storage is cleared on load.
  */
 const STORAGE_KEY = 'ch_ui_mode';
 const COOKIE = 'ch_ui_mode';
@@ -30,7 +30,6 @@ const ROUTE_PAIRS = [
     ['an-roles', 'admin-access'],
 ];
 
-const NEW_TO_CLASSIC = Object.fromEntries(ROUTE_PAIRS);
 const CLASSIC_TO_NEW = Object.fromEntries(ROUTE_PAIRS.map(([n, c]) => [c, n]));
 
 function readCookie(name) {
@@ -48,24 +47,28 @@ function writeCookie(name, value) {
     } catch { /* ignore */ }
 }
 
-export function getUiMode() {
+function persistNewMode() {
     try {
-        const fromStore = localStorage.getItem(STORAGE_KEY);
-        if (fromStore === 'classic' || fromStore === 'new') return fromStore;
+        localStorage.setItem(STORAGE_KEY, 'new');
     } catch { /* ignore */ }
-    const fromCookie = readCookie(COOKIE);
-    if (fromCookie === 'classic' || fromCookie === 'new') return fromCookie;
+    writeCookie(COOKIE, 'new');
+    document.documentElement.dataset.uiMode = 'new';
+}
+
+/** @deprecated Classic UI removed — always `new`. */
+export function getUiMode() {
     return 'new';
 }
 
 export function isNewUi() {
-    return getUiMode() !== 'classic';
+    return true;
 }
 
+/** Map legacy classic route keys to New MPA routes (for bookmarks / deep links). */
 export function remapRouteForMode(route, mode = getUiMode()) {
     const key = String(route || '').trim();
     if (!key) return key;
-    if (mode === 'classic') return NEW_TO_CLASSIC[key] || key;
+    if (mode === 'classic') return key;
     return CLASSIC_TO_NEW[key] || key;
 }
 
@@ -85,102 +88,22 @@ export function currentAppRoute() {
     return '';
 }
 
-function persistMode(mode) {
-    try {
-        localStorage.setItem(STORAGE_KEY, mode);
-    } catch { /* ignore */ }
-    writeCookie(COOKIE, mode);
-    document.documentElement.dataset.uiMode = mode;
+/** @deprecated Header toggle removed — no-op. */
+export function setUiMode(_mode, { navigate: _navigate = true } = {}) {
+    persistNewMode();
 }
 
-export function setUiMode(mode, { navigate = true } = {}) {
-    const next = mode === 'classic' ? 'classic' : 'new';
-    persistMode(next);
-    paintUiModeButtons();
-    document.dispatchEvent(new CustomEvent('ui-mode-changed', { detail: { mode: next } }));
-    if (!navigate) return;
-    void goToRouteWithReload(next);
-}
-
-function locationKey() {
-    const path = window.location.pathname.replace(/\/$/, '') || '/';
-    return `${path}${window.location.hash || ''}`;
-}
-
-function hrefKey(href) {
-    try {
-        const u = new URL(href, window.location.origin);
-        const path = u.pathname.replace(/\/$/, '') || '/';
-        return `${path}${u.hash || ''}`;
-    } catch {
-        return href;
-    }
-}
-
-async function goToRouteWithReload(mode) {
-    if (mode === 'classic') {
-        let route = currentAppRoute() || 'dashboard';
-        route = remapRouteForMode(route, 'classic') || 'dashboard';
-        window.location.assign(`/#${route}`);
-        return;
-    }
-    let href = '/home';
-    try {
-        const { hrefForRoute, MPA_ROUTE_PATHS } = await import('./appShell/routes.js');
-        let route = currentAppRoute();
-        if (!route) {
-            const path = window.location.pathname.replace(/\/$/, '') || '/';
-            for (const [r, pathHref] of Object.entries(MPA_ROUTE_PATHS)) {
-                const p = String(pathHref).replace(/\/$/, '') || '/';
-                if (p === path) {
-                    route = r;
-                    break;
-                }
-            }
-        }
-        route = remapRouteForMode(route || 'dashboard', mode) || 'dashboard';
-        href = hrefForRoute(route);
-    } catch {
-        href = '/home';
-    }
-    if (hrefKey(href) === locationKey()) {
-        // Already on the target New MPA page — do not reload (avoids loops on Vercel).
-        return;
-    }
-    window.location.assign(href);
-}
-
+/** @deprecated Header toggle removed — clears legacy classic preference once. */
 export function paintUiModeButtons() {
-    const mode = getUiMode();
-    const classic = mode === 'classic';
-    document.documentElement.dataset.uiMode = mode;
-    document.querySelectorAll('[data-ui-mode-toggle]').forEach((btn) => {
-        btn.setAttribute('aria-pressed', classic ? 'true' : 'false');
-        btn.title = classic
-            ? 'Using classic (Postgres). Click to switch to New (Mongo).'
-            : 'Using New (Mongo identity, RBAC, property, finance). Click to switch to classic (Postgres).';
-        btn.setAttribute('aria-label', classic ? 'Switch to New' : 'Switch to classic');
-        const label = btn.querySelector('[data-ui-mode-label]');
-        if (label) label.textContent = classic ? 'Classic' : 'New';
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.className = classic ? 'fa-solid fa-clock-rotate-left' : 'fa-solid fa-bolt';
-        }
-    });
+    persistNewMode();
 }
 
-function onUiModeToggleClick(e) {
-    const btn = e.target.closest?.('[data-ui-mode-toggle]');
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setUiMode(getUiMode() === 'classic' ? 'new' : 'classic');
-}
-
+/** @deprecated Header toggle removed — clears legacy classic preference once. */
 export function wireUiModeToggle() {
-    persistMode(getUiMode());
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        const cookie = readCookie(COOKIE);
+        if (stored === 'classic' || cookie === 'classic') persistNewMode();
+    } catch { /* ignore */ }
     paintUiModeButtons();
-    if (document.documentElement.dataset.uiModeWired) return;
-    document.documentElement.dataset.uiModeWired = '1';
-    document.addEventListener('click', onUiModeToggleClick, true);
 }

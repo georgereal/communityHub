@@ -262,7 +262,7 @@ const API_DESCRIPTIONS = {
 
 /** Extract route → label → view → subview from src/navigation.js pages. */
 function extractRoutes() {
-  const navPath = path.join(ROOT, 'apps/classic/src/navigation.js');
+  const navPath = path.join(ROOT, 'classic/src/navigation.js');
   if (!fs.existsSync(navPath)) return [];
   const src = fs.readFileSync(navPath, 'utf8');
   const routes = [];
@@ -286,7 +286,9 @@ function mdTable(headers, rows) {
 }
 
 function gather() {
-  const srcTree = renderTree(listFiles(path.join(ROOT, 'apps')))
+  const srcTree = renderTree(listFiles(path.join(ROOT, 'classic')))
+    + '\n--- apps ---\n'
+    + renderTree(listFiles(path.join(ROOT, 'apps')))
     + '\n--- packages ---\n'
     + renderTree(listFiles(path.join(ROOT, 'packages')));
   const apiTree = renderTree(listFiles(path.join(ROOT, 'api')));
@@ -295,11 +297,11 @@ function gather() {
   const publicTree = renderTree(listFiles(path.join(ROOT, 'public')));
 
   const srcFiles = [
-    ...listFileNames(path.join(ROOT, 'apps/classic/src')).map((f) => `classic/${f}`),
+    ...listFileNames(path.join(ROOT, 'classic/src')).map((f) => `classic/${f}`),
     ...listFileNames(path.join(ROOT, 'apps/new/src')).map((f) => `new/${f}`),
   ];
   const srcRows = srcFiles.map((f) => [
-    `apps/${f}`,
+    f.startsWith('classic/') ? f : `apps/${f}`,
     SRC_DESCRIPTIONS[f.split('/').pop()] || f.replace(/\.(js|css)$/, '').replace(/([a-z])([A-Z])/g, '$1 $2'),
   ]);
 
@@ -316,9 +318,9 @@ function gather() {
   const routes = extractRoutes();
   const routeRows = routes.map((r) => [r.route, r.label, r.view, r.subview || '—']);
 
-  const jsCount = countExt(path.join(ROOT, 'apps'), '.js') + countExt(path.join(ROOT, 'api'), '.js');
-  const cssCount = countExt(path.join(ROOT, 'apps'), '.css');
-  const htmlCount = countExt(path.join(ROOT, 'apps'), '.html') + 2;
+  const jsCount = countExt(path.join(ROOT, 'classic'), '.js') + countExt(path.join(ROOT, 'apps'), '.js') + countExt(path.join(ROOT, 'api'), '.js');
+  const cssCount = countExt(path.join(ROOT, 'classic'), '.css') + countExt(path.join(ROOT, 'apps'), '.css');
+  const htmlCount = countExt(path.join(ROOT, 'apps'), '.html') + countExt(path.join(ROOT, 'classic'), '.html') + 2;
 
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const devScripts = Object.entries(pkg.scripts || {})
@@ -339,9 +341,9 @@ function generateRepoMap() {
 
 > **Project:** ApartmentMaintenance (CommunityHub) — two apps, one Vercel project.
 > **Shared (platform):** thin \`api/*.js\` re-exports for Vercel, plus \`packages/auth\` and \`packages/server\`.
-> **Classic:** \`apps/classic/src\`, \`apps/classic/api\`, \`apps/classic/sql\`.
-> **New:** \`apps/new/src\`, \`apps/new/api\`, \`apps/new/pages\`.
-> Same origin until classic is retired; then New can use \`base: '/new/'\` only.
+> **Classic (archived):** \`classic/src\`, \`classic/api\`, \`classic/sql\` — not deployed on Vercel.
+> **New (production):** \`apps/new/src\`, \`apps/new/api\`, \`apps/new/pages\`.
+> **Shared:** \`packages/auth\`, \`packages/server\`, root \`api/*.js\` (Mongo REST + storage).
 
 ---
 
@@ -357,7 +359,7 @@ ${renderTree(listFiles(ROOT))}
 
 ## 2. \`src/\` — Frontend Feature Modules
 
-Classic SPA: \`apps/classic/src/main.js\` boots → store → \`navigation.js\` → lazy views.
+Classic SPA (archived): \`classic/src/main.js\` — not in production build.
 New MPAs: \`apps/new/src/*App\` plus HTML in \`apps/new/pages/\`. New nav is MPA-only.
 
 ### Directory tree
@@ -450,7 +452,7 @@ ${mdTable(['File', 'Purpose'], d.topConfig.map((f) => [f, 'Repo config / entry p
 - **New REST domains (Mongo):** segregate by capability — Finance \`/api/finance\`, Property \`/api/property\`,
   Integrations \`/api/integrations\`, Identity \`/api/rbac-mongo\`. Do **not** hang provider credentials or OCR
   jobs under finance. Full guide: \`docs/ARCHITECTURE_NEW.md\`.
-- **State:** Classic \`apps/classic/src/store.js\` (Postgres). New \`apps/new/src/runtime/state.js\` (Mongo session). Auth in \`packages/auth\`.
+- **State:** Classic \`classic/src/store.js\` (Postgres, archived). New \`apps/new/src/runtime/state.js\` (Mongo session). Auth in \`packages/auth\`.
   partitioned read-only domains via \`stateLoader.js\` / \`stateDomains.js\`.
 - **Data access:** New screens → domain REST (\`/api/finance\`, \`/api/property\`, \`/api/integrations\`). Classic → Supabase
   client and/or legacy \`/api/*\` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.

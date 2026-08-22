@@ -26,6 +26,10 @@
       "destination": "/login.html"
     },
     {
+      "source": "/",
+      "destination": "/home/index.html"
+    },
+    {
       "source": "/residents",
       "destination": "/residents/index.html"
     },
@@ -114,8 +118,8 @@
       "destination": "/finance/:path*"
     },
     {
-      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/|admin/|home/|new/).*)",
-      "destination": "/index.html"
+      "source": "/((?!api/|assets/|finance/|residents/|parking/|units/|admin/|home/|new/|login\\.html|microsoft-auth\\.html).*)",
+      "destination": "/home/index.html"
     }
   ],
   "headers": [
@@ -132,48 +136,18 @@
       ]
     },
     {
-      "source": "/index.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
-    },
-    {
       "source": "/assets/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     }
   ],
-  "crons": [
-    {
-      "path": "/api/sync",
-      "schedule": "0 6 * * *"
-    }
-  ],
   "functions": {
     "api/passbook-parse.js": {
       "maxDuration": 300
     },
-    "api/sync.js": {
-      "maxDuration": 300
-    },
-    "api/state.js": {
-      "maxDuration": 60
-    },
-    "api/db.js": {
-      "maxDuration": 30
-    },
-    "api/storage.js": {
-      "maxDuration": 30
-    },
     "api/external-proxy.js": {
       "maxDuration": 30
-    },
-    "api/rpc.js": {
-      "maxDuration": 15
-    },
-    "api/finance-mutations.js": {
-      "maxDuration": 300
     },
     "api/finance-mongo-mutations.js": {
       "maxDuration": 300
@@ -192,6 +166,9 @@
     },
     "api/activity-rest.js": {
       "maxDuration": 60
+    },
+    "api/storage.js": {
+      "maxDuration": 30
     }
   }
 }

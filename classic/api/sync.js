@@ -1,5 +1,5 @@
-import { createServiceClient } from '../../../packages/server/serverSupabase.js';
-import { requireApartmentPermission } from '../../../packages/server/serverAuth.js';
+import { createServiceClient } from '../../packages/server/serverSupabase.js';
+import { requireApartmentPermission } from '../../packages/server/serverAuth.js';
 import {
     parseLedgerSheet,
     computeSyncHash,

@@ -1,4 +1,4 @@
-import { requireApartmentPermission, requireAnyApartmentPermission, requireApartmentCrud } from '../../../packages/server/serverAuth.js';
+import { requireApartmentPermission, requireAnyApartmentPermission, requireApartmentCrud } from '../../packages/server/serverAuth.js';
 import { prepareImportedStatementLines, computeRunningBalances } from '../src/bankStatementOrdering.js';
 import { inferExpenseCategory, BANK_REJECT_CAT } from '../src/expenseCategories.js';
 import { findMatchingRule } from '../src/bankClassificationRules.js';
@@ -10,7 +10,7 @@ import {
     extForRecordMime,
     attachmentObjectKey,
     isAllowedFinanceDocObjectKey,
-} from '../../../packages/server/r2Storage.js';
+} from '../../packages/server/r2Storage.js';
 
 const RECEIPT_BUCKET = 'transaction-receipts';
 

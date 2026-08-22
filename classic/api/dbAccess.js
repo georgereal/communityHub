@@ -1,6 +1,6 @@
-import { authHeaderFromRequest, requireSession, userHasPermission } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { requireAccountsEditor } from '../../../packages/server/accountsAuth.js';
+import { authHeaderFromRequest, requireSession, userHasPermission } from '../../packages/server/serverAuth.js';
+import { createServiceClient, createUserClient } from '../../packages/server/serverSupabase.js';
+import { requireAccountsEditor } from '../../packages/server/accountsAuth.js';
 
 /** Tables that carry an apartment_id column and require membership checks. */
 export const APARTMENT_SCOPED_TABLES = new Set([

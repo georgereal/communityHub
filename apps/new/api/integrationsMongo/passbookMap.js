@@ -1,5 +1,5 @@
-import { prepareImportedStatementLines } from '../../../classic/src/bankStatementOrdering.js';
-import { extractOcrRowIndexFromTxn } from '../../../classic/src/bankStatementLineUtils.js';
+import { prepareImportedStatementLines } from '../../../../classic/src/bankStatementOrdering.js';
+import { extractOcrRowIndexFromTxn } from '../../../../classic/src/bankStatementLineUtils.js';
 
 const MONTHS_SHORT = {
     jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,

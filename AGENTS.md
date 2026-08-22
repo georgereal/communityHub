@@ -3,7 +3,7 @@
 This file is read by coding agents (Claude Code, Cline, GitHub Copilot, Cursor, Codex, etc.) before every task.
 
 **Project:** ApartmentMaintenance (CommunityHub) — Vite + vanilla JS. Classic SPA on Supabase Postgres; New MPAs on Mongo + Supabase Auth.
-**Stack:** Vite · `apps/classic` · `apps/new` · `packages/auth` · Vercel `api/*.js` · ExcelJS/PDF/Quill.
+**Stack:** Vite · `classic/` (archived) · `apps/new` · `packages/auth` · Vercel `api/*.js` · ExcelJS/PDF/Quill.
 
 ---
 
@@ -26,7 +26,7 @@ API endpoints, views/routes, SQL migrations, architectural patterns, and develop
 
 Reading it first:
 - Gives you instant context without re-exploring the whole codebase.
-- Reveals where features live (`apps/classic/src`, `apps/new/src`, `api/`).
+- Reveals where features live (`classic/src` archived, `apps/new/src` production, `api/` serverless).
 - Surfaces existing patterns (state in `store.js`, routing in `navigation.js`, lazy views in `views/controllers.js`).
 - Keeps your work consistent with current conventions.
 

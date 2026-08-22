@@ -50,40 +50,13 @@ export function consumeLoginNext() {
     }
 }
 
-function isClassicUi() {
-    try {
-        const fromStore = localStorage.getItem('ch_ui_mode');
-        if (fromStore === 'classic') return true;
-        if (fromStore === 'new') return false;
-        return document.cookie.includes('ch_ui_mode=classic');
-    } catch {
-        return false;
-    }
-}
-
-function isNewAppPath(path) {
-    const p = String(path || '').split('?')[0].replace(/\/$/, '') || '/';
-    return p === '/home'
-        || p.startsWith('/home/')
-        || p.startsWith('/admin')
-        || p.startsWith('/finance')
-        || p.startsWith('/residents')
-        || p.startsWith('/parking')
-        || p.startsWith('/units')
-        || p.startsWith('/new');
-}
-
 export function goToApp(hash = '') {
     const next = consumeLoginNext();
     if (next) {
-        if (isClassicUi() && isNewAppPath(next)) {
-            window.location.assign('/#dashboard');
-            return;
-        }
         window.location.assign(next);
         return;
     }
-    if (!isClassicUi() && (!hash || hash === 'dashboard' || hash === '#dashboard')) {
+    if (!hash || hash === 'dashboard' || hash === '#dashboard') {
         window.location.assign('/home');
         return;
     }

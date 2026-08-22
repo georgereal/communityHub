@@ -1,6 +1,6 @@
-import { requireSession } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { readJsonBody } from '../../../packages/server/vercelRequest.js';
+import { requireSession } from '../../packages/server/serverAuth.js';
+import { createServiceClient, createUserClient } from '../../packages/server/serverSupabase.js';
+import { readJsonBody } from '../../packages/server/vercelRequest.js';
 
 const ALLOWED_RPC = new Set(['no_admin_exists', 'get_ledger_sync_service_status']);
 
