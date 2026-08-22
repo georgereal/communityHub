@@ -26,6 +26,7 @@ const ROUTE_PAIRS = [
     ['an-categories', 'admin-subcats'],
     ['an-staff', 'admin-staff'],
     ['an-integrations', 'admin-connections'],
+    ['an-activity', 'admin-activity'],
     ['an-roles', 'admin-access'],
 ];
 

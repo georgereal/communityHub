@@ -18,6 +18,10 @@
       "destination": "/api/integrations-rest?__integrationsPath=:path*"
     },
     {
+      "source": "/api/activity/:path*",
+      "destination": "/api/activity-rest?__activityPath=:path*"
+    },
+    {
       "source": "/login",
       "destination": "/login.html"
     },
@@ -185,6 +189,9 @@
     },
     "api/integrations-rest.js": {
       "maxDuration": 300
+    },
+    "api/activity-rest.js": {
+      "maxDuration": 60
     }
   }
 }

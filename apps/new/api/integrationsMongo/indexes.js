@@ -43,6 +43,35 @@ export async function ensureIntegrationsIndexes(db) {
             PASSBOOK_EXECUTION_INDEX,
             { key: { id: 1 }, unique: true, name: 'uq_passbook_jobs_id' },
         ]),
+        db.collection('ledger_sync_settings').createIndexes([
+            { key: { apartment_id: 1 }, unique: true, name: 'uq_ledger_sync_settings_apartment' },
+        ]),
+        db.collection('ledger_sync_oauth_apps').createIndexes([
+            {
+                key: { apartment_id: 1, provider: 1 },
+                unique: true,
+                name: 'uq_ledger_sync_oauth_apps_apartment_provider',
+            },
+        ]),
+        db.collection('user_oauth_connections').createIndexes([
+            {
+                key: { user_id: 1, apartment_id: 1, provider: 1 },
+                unique: true,
+                name: 'uq_user_oauth_connections_user_apt_provider',
+            },
+            { key: { apartment_id: 1, provider: 1 }, name: 'idx_user_oauth_connections_apartment_provider' },
+        ]),
+        db.collection('ledger_sync_service_accounts').createIndexes([
+            {
+                key: { apartment_id: 1, provider: 1 },
+                unique: true,
+                name: 'uq_ledger_sync_service_accounts_apartment_provider',
+            },
+        ]),
+        db.collection('ledger_sync_runs').createIndexes([
+            { key: { apartment_id: 1, started_at: -1 }, name: 'idx_ledger_sync_runs_apartment_started' },
+            { key: { id: 1 }, unique: true, name: 'uq_ledger_sync_runs_id' },
+        ]),
     ]);
     INDEXED.add(db);
 }

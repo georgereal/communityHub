@@ -104,5 +104,14 @@ export async function markPassbookJobImported(apartmentId, jobId, importInfo = {
     });
     const { ok, json, error } = await readApiJson(res);
     if (!ok) throw new Error(json.error || error || `Could not update passbook job (${res.status}).`);
+    const { logActivity } = await import('./activityAudit.js');
+    void logActivity({
+        entityType: 'BANK_STATEMENT',
+        entityId: jobId,
+        action: 'IMPORT',
+        summary: `Marked passbook OCR job imported (${importInfo.importCount || 0} lines)`,
+        newData: importInfo,
+        apartmentId,
+    });
     return json.job || null;
 }

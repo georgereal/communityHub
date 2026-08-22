@@ -7,6 +7,7 @@ import { bindFinanceNewWindow } from './windowBridge.js';
 import { portalState } from '../store.js';
 import { pullState } from './pull.js';
 import { mongoInsert, mongoUpsert, mongoDelete } from './mongoWrite.js';
+import { logActivity } from '../activityAudit.js';
 import { withButtonBusy } from '../buttonBusy.js';
 
 const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -139,6 +140,13 @@ export async function saveBillingGroup(payload) {
     }));
     await mongoInsert('maintenance_billing_group_units', memberRows);
     await pullState({ packs: ['billing', 'boot'] });
+    void logActivity({
+        entityType: 'BILLING_GROUP',
+        entityId: groupId,
+        action: payload.id ? 'UPDATE' : 'CREATE',
+        summary: `${payload.id ? 'Updated' : 'Added'} billing group ${name}`,
+        newData: { ...row, unitIds },
+    });
 }
 
 export async function deleteBillingGroup(id) {
@@ -146,6 +154,12 @@ export async function deleteBillingGroup(id) {
     try {
         await mongoDelete('maintenance_billing_groups', { id });
         await pullState({ packs: ['billing', 'boot'] });
+        void logActivity({
+            entityType: 'BILLING_GROUP',
+            entityId: id,
+            action: 'DELETE',
+            summary: `Deleted billing group ${id}`,
+        });
     } catch (err) {
         alert(err.message);
     }

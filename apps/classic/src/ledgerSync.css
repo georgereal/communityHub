@@ -222,6 +222,29 @@
   margin-left: auto;
 }
 
+.ledger-clear-filters-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ledger-recalc-btn--stale {
+  border-color: var(--warning, #d97706);
+  color: var(--warning, #b45309);
+}
+
+.ledger-recalc-stale-badge {
+  margin-left: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+
 .ledger-pivot-banner {
   display: flex;
   align-items: center;
@@ -872,6 +895,24 @@
   margin-top: 0.2rem;
 }
 
+.bank-recon-table--ledger .bank-recon-order-btns .ledger-order-pos {
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.bank-recon-table--ledger .bank-recon-order-btns .ledger-move-btn--blocked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bank-recon-table--ledger .bank-recon-order-btns .ledger-move-btn--blocked:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
 .bank-recon-table--ledger .ledger-txn-chip {
   display: inline-block;
   margin-right: 0.25rem;
@@ -1117,6 +1158,169 @@ tr.ledger-txn-row--dirty {
   font-size: 0.65rem;
   line-height: 1;
   min-width: 0.65rem;
+}
+
+/* Excel-style column filter (icon → popover; no always-visible filter inputs) */
+.ledger-excel-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ledger-excel-col--num {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.ledger-excel-col__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-excel-col-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.bank-recon-table thead th:hover .ledger-excel-col-btn,
+.ledger-excel-col-btn:hover,
+.ledger-excel-col-btn:focus-visible,
+.ledger-excel-col-btn--active {
+  opacity: 1;
+  color: var(--accent, #2563eb);
+  background: var(--accent-soft, rgba(37, 99, 235, 0.08));
+}
+
+.ledger-excel-col-btn i {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.ledger-excel-col-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 14rem;
+  max-width: min(18rem, calc(100vw - 1rem));
+  padding: 0.35rem 0;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+}
+
+.ledger-excel-col-menu__item {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.85rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-main, #0f172a);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-excel-col-menu__item:hover,
+.ledger-excel-col-menu__item.is-selected {
+  background: var(--accent-soft, rgba(37, 99, 235, 0.1));
+}
+
+.ledger-excel-col-menu__divider {
+  height: 1px;
+  margin: 0.3rem 0;
+  background: var(--border, #e2e8f0);
+}
+
+.ledger-excel-col-menu__filter {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem 0.55rem;
+}
+
+.ledger-excel-col-menu__label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ledger-excel-col-menu__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.ledger-excel-col-menu__apply {
+  width: 100%;
+  justify-content: center;
+}
+
+.ledger-excel-col-menu--number,
+.ledger-excel-col-menu--passbook {
+  min-width: 16.5rem;
+}
+
+.ledger-excel-col-menu__hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.ledger-excel-col-menu__select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.82rem;
+  background: var(--surface, #fff);
+  color: var(--text-main, #0f172a);
+}
+
+.ledger-excel-col-menu__num-row {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.55rem;
+}
+
+.ledger-excel-col-menu__num-values {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ledger-excel-col-menu__input--to.is-hidden {
+  display: none;
 }
 
 .ledger-context-bar {

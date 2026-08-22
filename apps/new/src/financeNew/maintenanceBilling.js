@@ -1031,6 +1031,13 @@ export async function applyPenaltiesToOverdue({ ruleIds, overrides = {}, asOfDat
 
     await pullState({ packs: ['billing', 'ledger'] });
     renderInvoicesPage();
+    void logActivity({
+        entityType: 'INVOICE',
+        entityId: apartment_id,
+        action: 'UPDATE',
+        summary: `Applied penalties to ${applied} invoice(s) (${linesAdded} line(s))`,
+        newData: { applied, linesAdded, ruleIds },
+    });
     return { applied, linesAdded };
 }
 

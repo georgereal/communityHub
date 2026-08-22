@@ -129,6 +129,26 @@ export function annotateLedgerRunningBalancesInOrder(orderedTxns = []) {
     };
 }
 
+/** Epsilon for passbook ↔ calculated discrepancy (same as ledger cell / filter). */
+export const PASSBOOK_CALC_EPS = 0.01;
+
+/**
+ * Live ledger “calculated” running balance after each BANK row (statement / day order).
+ * This is the paren figure in Passbook / calc and what “Has discrepancy” compares to
+ * passbook — never stored running_balance_after (that can mask same-day order drift).
+ */
+export function ledgerCalculatedBalanceById(txns = null) {
+    const chron = chronologicalBankTxns(getActiveLedgerTxns(txns));
+    return annotateLedgerRunningBalancesInOrder(chron).byId;
+}
+
+/**
+ * Persisted running_balance_after map (Recalculate output). Not used for discrepancy.
+ */
+export function ledgerStoredBalanceById(txns = null) {
+    return storedLedgerRunningById(txns);
+}
+
 /**
  * Recompute running balances from `fromDate` onward (inclusive).
  * Pass `seedById` from a prior full run to keep earlier rows unchanged.

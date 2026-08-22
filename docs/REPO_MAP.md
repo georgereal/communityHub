@@ -22,6 +22,7 @@
 │   │   └── [...path].js
 │   ├── new
 │   │   └── workspace-boot.js
+│   ├── activity-rest.js
 │   ├── auth-session.js
 │   ├── dashboard-summary.js
 │   ├── db.js
@@ -232,6 +233,14 @@
 │   │   └── index.html
 │   └── new
 │       ├── api
+│       │   ├── activityMongo
+│       │   │   ├── routes
+│       │   │   │   └── events.js
+│       │   │   ├── activityStore.js
+│       │   │   ├── errors.js
+│       │   │   ├── http.js
+│       │   │   ├── indexes.js
+│       │   │   └── permissions.js
 │       │   ├── finance
 │       │   │   └── [...path].js
 │       │   ├── financeMongo
@@ -251,6 +260,12 @@
 │       │   │   │   │   │   └── [id]
 │       │   │   │   │   │       └── imported.js
 │       │   │   │   │   └── jobs.js
+│       │   │   │   ├── spreadsheet
+│       │   │   │   │   ├── boot.js
+│       │   │   │   │   ├── oauth-apps.js
+│       │   │   │   │   ├── oauth-connections.js
+│       │   │   │   │   ├── runs.js
+│       │   │   │   │   └── settings.js
 │       │   │   │   └── connections.js
 │       │   │   ├── connectionsStore.js
 │       │   │   ├── errors.js
@@ -260,7 +275,8 @@
 │       │   │   ├── passbookJobsStore.js
 │       │   │   ├── passbookMap.js
 │       │   │   ├── passbookService.js
-│       │   │   └── permissions.js
+│       │   │   ├── permissions.js
+│       │   │   └── spreadsheetStore.js
 │       │   ├── propertyMongo
 │       │   │   ├── routes
 │       │   │   │   ├── residents
@@ -292,6 +308,7 @@
 │       │   ├── rbacMongo
 │       │   │   ├── defaults.js
 │       │   │   └── service.js
+│       │   ├── activity-rest.js
 │       │   ├── dashboard-summary.js
 │       │   ├── evolyxConnection.js
 │       │   ├── external-connections.js
@@ -332,12 +349,14 @@
 │           │   │   ├── PageHeader.jsx
 │           │   │   └── SummaryStrip.jsx
 │           │   ├── pages
+│           │   │   ├── ActivityPage.jsx
 │           │   │   ├── BankPage.jsx
 │           │   │   ├── CategoriesPage.jsx
 │           │   │   ├── IntegrationsPage.jsx
 │           │   │   ├── PeoplePage.jsx
 │           │   │   ├── RolesPage.jsx
 │           │   │   ├── SocietyPage.jsx
+│           │   │   ├── SpreadsheetSyncDialog.jsx
 │           │   │   ├── StaffPage.jsx
 │           │   │   └── VendorsPage.jsx
 │           │   ├── admin-app.css
@@ -367,6 +386,7 @@
 │           │   │   ├── _cash-modal.html
 │           │   │   ├── _header-actions.html
 │           │   │   ├── _ledger-line-modal.html
+│           │   │   ├── _quick-capture.html
 │           │   │   ├── bank-recon.html
 │           │   │   ├── docs.html
 │           │   │   ├── expense-plan.html
@@ -412,6 +432,7 @@
 │           │   ├── ledgerDisplayRows.js
 │           │   ├── ledgerExport.js
 │           │   ├── ledgerFilter.js
+│           │   ├── ledgerColFilter.js
 │           │   ├── ledgerStatementContext.js
 │           │   ├── ledgerSummaryUi.js
 │           │   ├── ledgerTable.js
@@ -425,11 +446,13 @@
 │           │   ├── packCache.js
 │           │   ├── payments.js
 │           │   ├── pull.js
+│           │   ├── quickCapture.js
 │           │   ├── reports.js
 │           │   ├── shell.js
 │           │   ├── state.js
 │           │   ├── vouchers.js
 │           │   ├── voucherStore.js
+│           │   ├── vendors.js
 │           │   └── windowBridge.js
 │           ├── homeApp
 │           │   ├── boot.js
@@ -525,6 +548,7 @@
 │           ├── residentImport.js
 │           ├── residentLinks.js
 │           ├── residents.js
+│           ├── spreadsheetSyncApi.js
 │           ├── store.js
 │           ├── uiMode.js
 │           └── unitDirectory.js
@@ -639,7 +663,9 @@
 │   ├── check-import-boundary.mjs
 │   ├── migrate-finance-to-mongo.mjs
 │   ├── migrate-integrations-to-mongo.mjs
+│   ├── migrate-ledger-sync-to-mongo.mjs
 │   ├── migrate-logs-to-mongo.mjs
+│   ├── consolidate-vendors-mongo.mjs
 │   ├── migrate-property-to-mongo.mjs
 │   ├── migrate-rbac-to-mongo.mjs
 │   ├── mockFinanceState.js
@@ -659,7 +685,7 @@
 
 ```
 
-**Scale:** ~344 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
+**Scale:** ~359 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
 
 ---
 
@@ -857,6 +883,14 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 │   └── index.html
 └── new
     ├── api
+    │   ├── activityMongo
+    │   │   ├── routes
+    │   │   │   └── events.js
+    │   │   ├── activityStore.js
+    │   │   ├── errors.js
+    │   │   ├── http.js
+    │   │   ├── indexes.js
+    │   │   └── permissions.js
     │   ├── finance
     │   │   └── [...path].js
     │   ├── financeMongo
@@ -876,6 +910,12 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   │   │   │   │   └── [id]
     │   │   │   │   │       └── imported.js
     │   │   │   │   └── jobs.js
+    │   │   │   ├── spreadsheet
+    │   │   │   │   ├── boot.js
+    │   │   │   │   ├── oauth-apps.js
+    │   │   │   │   ├── oauth-connections.js
+    │   │   │   │   ├── runs.js
+    │   │   │   │   └── settings.js
     │   │   │   └── connections.js
     │   │   ├── connectionsStore.js
     │   │   ├── errors.js
@@ -885,7 +925,8 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   │   ├── passbookJobsStore.js
     │   │   ├── passbookMap.js
     │   │   ├── passbookService.js
-    │   │   └── permissions.js
+    │   │   ├── permissions.js
+    │   │   └── spreadsheetStore.js
     │   ├── propertyMongo
     │   │   ├── routes
     │   │   │   ├── residents
@@ -917,6 +958,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   ├── rbacMongo
     │   │   ├── defaults.js
     │   │   └── service.js
+    │   ├── activity-rest.js
     │   ├── dashboard-summary.js
     │   ├── evolyxConnection.js
     │   ├── external-connections.js
@@ -957,12 +999,14 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   │   ├── PageHeader.jsx
         │   │   └── SummaryStrip.jsx
         │   ├── pages
+        │   │   ├── ActivityPage.jsx
         │   │   ├── BankPage.jsx
         │   │   ├── CategoriesPage.jsx
         │   │   ├── IntegrationsPage.jsx
         │   │   ├── PeoplePage.jsx
         │   │   ├── RolesPage.jsx
         │   │   ├── SocietyPage.jsx
+        │   │   ├── SpreadsheetSyncDialog.jsx
         │   │   ├── StaffPage.jsx
         │   │   └── VendorsPage.jsx
         │   ├── admin-app.css
@@ -992,6 +1036,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   │   ├── _cash-modal.html
         │   │   ├── _header-actions.html
         │   │   ├── _ledger-line-modal.html
+        │   │   ├── _quick-capture.html
         │   │   ├── bank-recon.html
         │   │   ├── docs.html
         │   │   ├── expense-plan.html
@@ -1037,6 +1082,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   ├── ledgerDisplayRows.js
         │   ├── ledgerExport.js
         │   ├── ledgerFilter.js
+        │   ├── ledgerColFilter.js
         │   ├── ledgerStatementContext.js
         │   ├── ledgerSummaryUi.js
         │   ├── ledgerTable.js
@@ -1050,6 +1096,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   ├── packCache.js
         │   ├── payments.js
         │   ├── pull.js
+        │   ├── quickCapture.js
         │   ├── reports.js
         │   ├── shell.js
         │   ├── state.js
@@ -1150,6 +1197,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         ├── residentImport.js
         ├── residentLinks.js
         ├── residents.js
+        ├── spreadsheetSyncApi.js
         ├── store.js
         ├── uiMode.js
         └── unitDirectory.js
@@ -1217,6 +1265,8 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/classic/financeAnalytics.js | Finance reports & analytics |
 | apps/classic/financeApi.js | Finance API client |
 | apps/classic/financeDocuments.js | Bills & receipts document management |
+| apps/new/src/financeNew/quickCapture.js | Mobile Quick Capture wizard for bills/receipts |
+| apps/new/src/financeNew/ledgerColFilter.js | Excel-style ledger column filter/sort popover |
 | apps/classic/financeMobile.css | Mobile finance styles |
 | apps/classic/financePageHelp.js | classic/finance Page Help |
 | apps/classic/financeReportsExport.js | Export finance reports (Excel) |
@@ -1340,6 +1390,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/new/residentImport.js | Resident import (Excel/CSV) |
 | apps/new/residentLinks.js | Resident ↔ unit link admin |
 | apps/new/residents.js | Residents CRUD |
+| apps/new/spreadsheetSyncApi.js | new/spreadsheet Sync Api |
 | apps/new/store.js | Central state (portalState) + Supabase client + pullState hydration |
 | apps/new/uiMode.js | Classic (Postgres) vs New (Mongo) UI mode |
 | apps/new/unitDirectory.js | Unit directory (block/bhk/area) |
@@ -1434,6 +1485,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │   └── [...path].js
 ├── new
 │   └── workspace-boot.js
+├── activity-rest.js
 ├── auth-session.js
 ├── dashboard-summary.js
 ├── db.js
@@ -1464,6 +1516,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 
 | Endpoint | Purpose |
 | --- | --- |
+| activity-rest.js | Serverless endpoint |
 | auth-session.js | Auth session endpoint |
 | dashboard-summary.js | Dashboard summary endpoint |
 | db.js | DB access (Supabase) |
@@ -1500,8 +1553,10 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 │   └── generate-repo-map.js
 ├── capture-finance-screenshots.mjs
 ├── check-import-boundary.mjs
+├── consolidate-vendors-mongo.mjs
 ├── migrate-finance-to-mongo.mjs
 ├── migrate-integrations-to-mongo.mjs
+├── migrate-ledger-sync-to-mongo.mjs
 ├── migrate-logs-to-mongo.mjs
 ├── migrate-property-to-mongo.mjs
 ├── migrate-rbac-to-mongo.mjs
@@ -1673,6 +1728,8 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run migrate:rbac-mongo` → `node scripts/migrate-rbac-to-mongo.mjs`
 - `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
 - `npm run migrate:integrations-mongo` → `node scripts/migrate-integrations-to-mongo.mjs`
+- `npm run migrate:ledger-sync-mongo` → `node scripts/migrate-ledger-sync-to-mongo.mjs`
+- `npm run consolidate:vendors-mongo` → `node scripts/consolidate-vendors-mongo.mjs` (Title Case **Vendors page only**; `--dry-run` / `--apply --title-case`; `--reset-directory`)
 - `npm run generate-repo-map` → `node scripts/utilities/generate-repo-map.js`
 - `npm run check:import-boundary` → `node scripts/check-import-boundary.mjs`
 - `npm run setup:hooks` → `node scripts/git-hooks/install-hooks.js`

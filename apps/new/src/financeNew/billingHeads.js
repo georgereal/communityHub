@@ -7,6 +7,7 @@ import { bindFinanceNewWindow } from './windowBridge.js';
 import { portalState } from '../store.js';
 import { pullState } from './pull.js';
 import { mongoUpsert, mongoDelete } from './mongoWrite.js';
+import { logActivity } from '../activityAudit.js';
 import { countExtraPoolVehicles, getExtraPoolVehicles } from '../allocation.js';
 import { withButtonBusy } from '../buttonBusy.js';
 
@@ -262,6 +263,13 @@ export async function saveChargeHead(payload) {
 
     await mongoUpsert('maintenance_charge_heads', row);
     await pullState({ packs: ['boot'] });
+    void logActivity({
+        entityType: 'CHARGE_HEAD',
+        entityId: row.id,
+        action: payload.id ? 'UPDATE' : 'CREATE',
+        summary: `${payload.id ? 'Updated' : 'Added'} charge head ${name}`,
+        newData: row,
+    });
 }
 
 export async function deleteChargeHead(id) {
@@ -269,6 +277,12 @@ export async function deleteChargeHead(id) {
     try {
         await mongoDelete('maintenance_charge_heads', { id });
         await pullState({ packs: ['boot'] });
+        void logActivity({
+            entityType: 'CHARGE_HEAD',
+            entityId: id,
+            action: 'DELETE',
+            summary: `Deleted charge head ${id}`,
+        });
     } catch (err) {
         alert(err.message);
     }

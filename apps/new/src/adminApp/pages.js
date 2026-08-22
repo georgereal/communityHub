@@ -45,8 +45,16 @@ export const ADMIN_PAGES = [
         path: '/integrations',
         href: '/admin/integrations',
         label: 'Integrations',
-        subtitle: 'External API connections and ledger spreadsheet sync.',
+        subtitle: 'External services for this society — API connections and spreadsheet sync.',
         icon: 'fa-plug',
+    },
+    {
+        route: 'an-activity',
+        path: '/activity',
+        href: '/admin/activity',
+        label: 'Activity',
+        subtitle: 'Society-wide audit trail and integration job runs.',
+        icon: 'fa-clock-rotate-left',
     },
     {
         route: 'an-roles',

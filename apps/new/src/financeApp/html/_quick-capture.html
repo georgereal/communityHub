@@ -1,0 +1,181 @@
+<div id="fn-quick-capture" class="qc-shell" hidden aria-hidden="true">
+  <div class="qc-shell__panel" role="dialog" aria-modal="true" aria-labelledby="qc-title">
+    <header class="qc-header">
+      <button type="button" class="qc-header__back btn btn-outline btn--icon" id="qc-back" title="Back" aria-label="Back">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+      </button>
+      <div class="qc-header__titles">
+        <h2 id="qc-title" class="qc-header__title">Quick capture</h2>
+        <p class="qc-header__meta" id="qc-step-meta">Step 1 of 6</p>
+      </div>
+      <button type="button" class="qc-header__close btn btn-outline btn--icon" id="qc-close" title="Close" aria-label="Close">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+      </button>
+    </header>
+
+    <div class="qc-progress" aria-hidden="true">
+      <div class="qc-progress__bar" id="qc-progress-bar"></div>
+    </div>
+
+    <div class="qc-body">
+      <!-- Step 1: Type -->
+      <section class="qc-step" data-qc-step="1" hidden>
+        <h3 class="qc-step__heading">What are you recording?</h3>
+        <p class="qc-step__hint">Choose one — you can change later only by starting over.</p>
+        <div class="qc-type-cards">
+          <button type="button" class="qc-type-card" data-qc-kind="OUT">
+            <span class="qc-type-card__icon" aria-hidden="true"><i class="fa-solid fa-file-invoice-dollar"></i></span>
+            <span class="qc-type-card__label">Bill (expense)</span>
+            <span class="qc-type-card__desc">Money paid out</span>
+          </button>
+          <button type="button" class="qc-type-card" data-qc-kind="IN">
+            <span class="qc-type-card__icon" aria-hidden="true"><i class="fa-solid fa-receipt"></i></span>
+            <span class="qc-type-card__label">Receipt (income)</span>
+            <span class="qc-type-card__desc">Money received</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 2: Photo -->
+      <section class="qc-step" data-qc-step="2" hidden>
+        <h3 class="qc-step__heading" id="qc-photo-heading">Add bill photo or PDF</h3>
+        <p class="qc-step__hint">Capture while you have the paperwork — optional if you will attach later.</p>
+        <div class="qc-upload-actions">
+          <label class="qc-upload-btn qc-upload-btn--primary">
+            <i class="fa-solid fa-camera" aria-hidden="true"></i>
+            <span>Take photo</span>
+            <input type="file" id="qc-camera" accept="image/*" capture="environment" hidden />
+          </label>
+          <label class="qc-upload-btn">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+            <span>Choose files</span>
+            <input type="file" id="qc-files" accept="image/*,application/pdf" multiple hidden />
+          </label>
+        </div>
+        <div class="qc-thumbs" id="qc-bill-thumbs"></div>
+        <p class="qc-field-error" id="qc-photo-error" hidden></p>
+      </section>
+
+      <!-- Step 3: Vendor + particulars -->
+      <section class="qc-step" data-qc-step="3" hidden>
+        <h3 class="qc-step__heading" id="qc-vendor-heading">Vendor &amp; particulars</h3>
+        <p class="qc-step__hint" id="qc-vendor-hint">Vendor is optional (for reporting later). Particulars describe what this bill is for.</p>
+        <label class="qc-field">
+          <span class="qc-field__label" id="qc-vendor-label">Vendor <span class="qc-optional">(optional)</span></span>
+          <input type="text" id="qc-vendor" class="qc-input" list="qc-vendor-datalist" autocomplete="organization" placeholder="Pick from list or type a new vendor" />
+          <datalist id="qc-vendor-datalist"></datalist>
+        </label>
+        <p class="qc-step__hint" style="margin-top:-0.35rem;margin-bottom:0.65rem;">Typing a new name adds it to the Vendors list when you save.</p>
+        <div class="qc-chips" id="qc-vendor-chips" aria-label="Recent vendors"></div>
+        <label class="qc-field">
+          <span class="qc-field__label" id="qc-particulars-label">Particulars <abbr title="required">*</abbr></span>
+          <textarea id="qc-particulars" class="qc-input qc-input--area" rows="3" placeholder="e.g. Housekeeping materials, April invoice"></textarea>
+        </label>
+        <label class="qc-field">
+          <span class="qc-field__label" id="qc-invoice-label">Invoice # <span class="qc-optional">(optional)</span></span>
+          <input type="text" id="qc-invoice" class="qc-input" autocomplete="off" placeholder="Optional" />
+        </label>
+        <p class="qc-field-error" id="qc-vendor-error" hidden></p>
+      </section>
+
+      <!-- Step 4: Amount -->
+      <section class="qc-step" data-qc-step="4" hidden>
+        <h3 class="qc-step__heading">Amount &amp; category</h3>
+        <label class="qc-field">
+          <span class="qc-field__label">Amount <abbr title="required">*</abbr></span>
+          <div class="qc-amount-row">
+            <span class="qc-amount-row__prefix" aria-hidden="true">₹</span>
+            <input type="number" id="qc-amount" class="qc-input qc-input--amount" inputmode="decimal" step="0.01" min="0" placeholder="0.00" />
+          </div>
+        </label>
+        <label class="qc-field">
+          <span class="qc-field__label" id="qc-date-label">Bill date <abbr title="required">*</abbr></span>
+          <input type="date" id="qc-date" class="qc-input" />
+        </label>
+        <label class="qc-field">
+          <span class="qc-field__label" id="qc-cat-label">Category <abbr title="required">*</abbr></span>
+          <select id="qc-category" class="qc-input"></select>
+        </label>
+        <label class="qc-field" id="qc-subcat-wrap">
+          <span class="qc-field__label">Sub-category <span class="qc-optional">(optional)</span></span>
+          <input type="text" id="qc-subcat" class="qc-input" list="qc-subcat-datalist" autocomplete="off" placeholder="Optional" />
+          <datalist id="qc-subcat-datalist"></datalist>
+        </label>
+        <p class="qc-field-error" id="qc-amount-error" hidden></p>
+      </section>
+
+      <!-- Step 5: Payment -->
+      <section class="qc-step" data-qc-step="5" hidden>
+        <h3 class="qc-step__heading" id="qc-pay-heading">How was this paid?</h3>
+        <p class="qc-step__hint" id="qc-pay-hint">Mark payment status, or leave unpaid for now.</p>
+        <div class="qc-pay-pills" id="qc-pay-pills" role="group" aria-label="Payment mode">
+          <button type="button" class="qc-pay-pill active" data-qc-pay="unpaid">
+            <i class="fa-solid fa-clock" aria-hidden="true"></i> Unpaid
+          </button>
+          <button type="button" class="qc-pay-pill" data-qc-pay="cash">
+            <i class="fa-solid fa-money-bill" aria-hidden="true"></i> Cash
+          </button>
+          <button type="button" class="qc-pay-pill" data-qc-pay="cheque">
+            <i class="fa-solid fa-money-check" aria-hidden="true"></i> Cheque
+          </button>
+          <button type="button" class="qc-pay-pill" data-qc-pay="online">
+            <i class="fa-solid fa-mobile-screen" aria-hidden="true"></i> Online
+          </button>
+        </div>
+        <label class="qc-field" id="qc-cheque-wrap" hidden>
+          <span class="qc-field__label">Cheque # <abbr title="required">*</abbr></span>
+          <input type="text" id="qc-cheque" class="qc-input" autocomplete="off" placeholder="e.g. 004521" />
+        </label>
+        <label class="qc-field" id="qc-online-wrap" hidden>
+          <span class="qc-field__label">UTR / reference <span class="qc-optional">(optional)</span></span>
+          <input type="text" id="qc-online-ref" class="qc-input" autocomplete="off" placeholder="Optional UTR / UPI ref" />
+        </label>
+        <label class="qc-field" id="qc-paid-date-wrap" hidden>
+          <span class="qc-field__label">Paid on <abbr title="required">*</abbr></span>
+          <input type="date" id="qc-paid-date" class="qc-input" />
+        </label>
+        <div class="qc-pay-proof">
+          <p class="qc-field__label">Payment proof <span class="qc-optional">(optional)</span></p>
+          <div class="qc-upload-actions qc-upload-actions--compact">
+            <label class="qc-upload-btn">
+              <i class="fa-solid fa-camera" aria-hidden="true"></i>
+              <span>Take / upload</span>
+              <input type="file" id="qc-pay-camera" accept="image/*" capture="environment" hidden />
+            </label>
+            <label class="qc-upload-btn">
+              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+              <span>Files</span>
+              <input type="file" id="qc-pay-files" accept="image/*,application/pdf" multiple hidden />
+            </label>
+          </div>
+          <div class="qc-thumbs" id="qc-pay-thumbs"></div>
+        </div>
+        <p class="qc-field-error" id="qc-pay-error" hidden></p>
+      </section>
+
+      <!-- Step 6: Review -->
+      <section class="qc-step" data-qc-step="6" hidden>
+        <h3 class="qc-step__heading">Review</h3>
+        <p class="qc-step__hint">Tap a row to jump back and edit.</p>
+        <div class="qc-review" id="qc-review-list"></div>
+        <div class="qc-review-files">
+          <p class="qc-field__label">Attachments</p>
+          <div class="qc-thumbs" id="qc-review-thumbs"></div>
+          <div class="qc-upload-actions qc-upload-actions--compact">
+            <label class="qc-upload-btn">
+              <i class="fa-solid fa-plus" aria-hidden="true"></i>
+              <span>Add file</span>
+              <input type="file" id="qc-review-files" accept="image/*,application/pdf" multiple hidden />
+            </label>
+          </div>
+        </div>
+        <p class="qc-field-error" id="qc-review-error" hidden></p>
+      </section>
+    </div>
+
+    <footer class="qc-footer" id="qc-footer" hidden>
+      <button type="button" class="btn btn-outline qc-footer__secondary" id="qc-skip" hidden>Skip</button>
+      <button type="button" class="btn btn-primary qc-footer__primary" id="qc-continue">Continue</button>
+    </footer>
+  </div>
+</div>

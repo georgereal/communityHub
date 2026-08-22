@@ -1,4 +1,5 @@
 import { portalState, pullState, upsertSocietyConfig } from '../store.js';
+import { logActivity } from '../activityAudit.js';
 import { EXPENSE_CATS } from '../expenseCategories.js';
 import { buildCategoryOptions, defaultExpenseCategory } from '../classifyOptions.js';
 import {
@@ -19,6 +20,7 @@ import {
     isSocietyAdminUser,
 } from '../rbac.js';
 import { can, assertCan } from '../capabilities.js';
+import { titleCaseVendor } from '../vendorFormat.js';
 import { readApiJson } from '../apiJson.js';
 import {
     getLinksForApartment,
@@ -103,6 +105,13 @@ export async function saveSocietyProfile({ name, car_default, bike_default }) {
     portalState.community.name = name;
     portalState.community.defaults = { cars: car_default, bikes: bike_default };
     await pullState();
+    void logActivity({
+        entityType: 'SOCIETY',
+        entityId: apartment_id,
+        action: 'UPDATE',
+        summary: `Updated society profile (${name})`,
+        newData: { name, car_default, bike_default },
+    });
 }
 
 export async function loadModuleSettings() {
@@ -112,6 +121,13 @@ export async function loadModuleSettings() {
 export async function saveModules(settings) {
     assertCan('admin.society.save');
     await saveApartmentModuleSettings(aptId(), settings);
+    void logActivity({
+        entityType: 'MODULE_ACCESS',
+        entityId: aptId(),
+        action: 'UPDATE',
+        summary: 'Updated society module access',
+        newData: settings,
+    });
 }
 
 export function bankAccount() {
@@ -145,6 +161,13 @@ export async function saveBank(fields) {
     await postFnMutation('patchFinanceConfig', { bankAccount: payload });
     portalState.admin = portalState.admin || {};
     portalState.admin.bankAccount = payload;
+    void logActivity({
+        entityType: 'BANK_ACCOUNT',
+        entityId: payload.id,
+        action: 'UPDATE',
+        summary: `Updated society bank account (${payload.bank_name})`,
+        newData: payload,
+    });
 }
 
 export function vendors() {
@@ -155,7 +178,7 @@ export function vendors() {
 
 export async function saveVendor(row) {
     assertCan('admin.vendors.edit');
-    const name = row.name?.trim();
+    const name = titleCaseVendor(row.name);
     if (!name) throw new Error('Vendor name is required.');
     const payload = {
         id: row.id || crypto.randomUUID(),
@@ -167,12 +190,25 @@ export async function saveVendor(row) {
     };
     const { mongoUpsert } = await import('../financeNew/mongoWrite.js');
     await mongoUpsert('expense_vendors', payload);
+    void logActivity({
+        entityType: 'VENDOR',
+        entityId: payload.id,
+        action: row.id ? 'UPDATE' : 'CREATE',
+        summary: `${row.id ? 'Updated' : 'Added'} vendor ${name}`,
+        newData: payload,
+    });
 }
 
 export async function deleteVendor(id) {
     assertCan('admin.vendors.edit');
     const { mongoDelete } = await import('../financeNew/mongoWrite.js');
     await mongoDelete('expense_vendors', { id });
+    void logActivity({
+        entityType: 'VENDOR',
+        entityId: id,
+        action: 'DELETE',
+        summary: `Deleted vendor ${id}`,
+    });
 }
 
 export function subCategories() {
@@ -195,12 +231,25 @@ export async function saveSubCategory(row) {
     };
     const { mongoUpsert } = await import('../financeNew/mongoWrite.js');
     await mongoUpsert('expense_sub_categories', payload);
+    void logActivity({
+        entityType: 'EXPENSE_CATEGORY',
+        entityId: payload.id,
+        action: row.id ? 'UPDATE' : 'CREATE',
+        summary: `${row.id ? 'Updated' : 'Added'} sub-category ${name}`,
+        newData: payload,
+    });
 }
 
 export async function deleteSubCategory(id) {
     assertCan('admin.categories.edit');
     const { mongoDelete } = await import('../financeNew/mongoWrite.js');
     await mongoDelete('expense_sub_categories', { id });
+    void logActivity({
+        entityType: 'EXPENSE_CATEGORY',
+        entityId: id,
+        action: 'DELETE',
+        summary: `Deleted sub-category ${id}`,
+    });
 }
 
 export function staffMembers() {
@@ -225,12 +274,25 @@ export async function saveStaff(row) {
     };
     const { mongoUpsert } = await import('../financeNew/mongoWrite.js');
     await mongoUpsert('staff_members', payload);
+    void logActivity({
+        entityType: 'STAFF',
+        entityId: payload.id,
+        action: row.id ? 'UPDATE' : 'CREATE',
+        summary: `${row.id ? 'Updated' : 'Added'} staff ${full_name}`,
+        newData: payload,
+    });
 }
 
 export async function deleteStaff(id) {
     assertCan('admin.staff.edit');
     const { mongoDelete } = await import('../financeNew/mongoWrite.js');
     await mongoDelete('staff_members', { id });
+    void logActivity({
+        entityType: 'STAFF',
+        entityId: id,
+        action: 'DELETE',
+        summary: `Deleted staff ${id}`,
+    });
 }
 
 export async function loadPeopleDirectory() {
@@ -302,6 +364,13 @@ export async function assignUserAccess({ email, name, roleKey, apartmentIds }) {
         previousAssignments,
         managedApartmentIds: (portalState.access?.apartments || []).map((a) => a.id),
     });
+    void logActivity({
+        entityType: 'ROLE',
+        entityId: prof.user_id,
+        action: 'GRANT',
+        summary: `Assigned role ${roleKey} to ${email.trim()}`,
+        newData: { roleKey, apartmentIds, email: email.trim() },
+    });
 }
 
 export function portalLinks() {
@@ -342,7 +411,20 @@ export function connections() {
 
 export async function saveConnection(payload) {
     assertCan('admin.integrations.edit');
-    return upsertExternalConnectionRow(payload);
+    const row = await upsertExternalConnectionRow(payload);
+    void logActivity({
+        entityType: 'INTEGRATION',
+        entityId: `${payload.provider}:${payload.connection_key || 'default'}`,
+        action: 'UPDATE',
+        summary: `Updated integration ${payload.provider}${payload.connection_key ? ` / ${payload.connection_key}` : ''}`,
+        newData: {
+            provider: payload.provider,
+            connection_key: payload.connection_key,
+            enabled: payload.enabled,
+            base_url: payload.base_url,
+        },
+    });
+    return row;
 }
 
 export function userDisplayRole(user) {
@@ -425,4 +507,10 @@ export async function saveRbacEditor(draft) {
         moduleEnabled: derived.moduleEnabled,
     });
     applyNavPermissions(new Set(resolveEffectivePermissions()));
+    void logActivity({
+        entityType: 'ROLE',
+        entityId: apartmentId,
+        action: 'UPDATE',
+        summary: 'Updated society role permissions matrix',
+    });
 }

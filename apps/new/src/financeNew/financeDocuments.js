@@ -9,6 +9,7 @@ import { bindFinanceNewWindow } from './windowBridge.js';
  */
 import ExcelJS from 'exceljs';
 import { portalState } from '../store.js';
+import { logActivity } from '../activityAudit.js';
 import {
   normalizeCategoryKey,
   categoryDisplayLabel,
@@ -36,6 +37,14 @@ const formatMoney = (n) =>
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/** List cell: vendor — particulars, without repeating when they match. */
+export function formatVendorParticulars(vendor, particular) {
+  const v = String(vendor || '').trim();
+  const p = String(particular || '').trim();
+  if (v && p && v.toLowerCase() !== p.toLowerCase()) return `${v} — ${p}`;
+  return v || p || '—';
+}
 
 /** Full bills management (link, delete, float, deposit). */
 export const canManageFinanceDocs = () => can('accounts.docs_manage');
@@ -1059,6 +1068,13 @@ async function saveDocumentFromForm() {
   applyDocLocally(result.document);
   resetForm();
   renderFinanceDocumentsPage();
+  void logActivity({
+    entityType: 'VOUCHER',
+    entityId: result.document?.id || editing.id || 'voucher',
+    action: editing.id ? 'UPDATE' : 'CREATE',
+    summary: `${editing.id ? 'Updated' : 'Added'} ${kind === 'IN' ? 'income' : 'expense'} voucher ₹${round2(amount)}`,
+    newData: { kind, amount: round2(amount), cat, vendor_name },
+  });
 }
 
 const isFundingLedgerTxn = (t) => {
@@ -1496,7 +1512,7 @@ const renderAttachDocCandidateRows = (docs) => {
       : '—';
     return `<button type="button" class="fdoc-link-row" data-link-doc="${esc(d.id)}">
       <span class="fdoc-link-row__main">${esc(date)} · ${d.kind === 'IN' ? 'Receipt' : 'Bill'} · ${esc(categoryDisplayLabel(d.cat))} · ${formatMoney(d.amount)}</span>
-      <span class="fdoc-link-row__sub">${esc(d.vendor_name || d.description || '—')} · ${esc(bookStatusLabel(d))}</span>
+      <span class="fdoc-link-row__sub">${esc(formatVendorParticulars(d.vendor_name, d.description))} · ${esc(bookStatusLabel(d))}</span>
     </button>`;
   }).join('');
 };
@@ -1930,9 +1946,8 @@ const parseSheetDocuments = (ws, defaultKind) => {
     const vendorExplicit = vendorCol ? cellStr(cellRaw(row, vendorCol)) : '';
     const cheque = chequeCol ? chequeRefFromCell(cellRaw(row, chequeCol)) : null;
     const paymentNote = cheque ? `Cheque: ${cheque}` : 'Payment: Cash';
-    const vendor_name = vendorExplicit
-      || particulars
-      || (kind === 'IN' ? 'Receipt' : (cheque ? 'Cheque payment' : 'Cash expense'));
+    // Vendor is optional — never copy Description into vendor_name.
+    const vendor_name = vendorExplicit || null;
 
     rows.push({
       kind,
@@ -1979,7 +1994,7 @@ export async function parseFinanceDocumentsExcel(file) {
   }
 
   if (!allRows.length) {
-    throw new Error('No document rows found. Need columns: Date, Cheque No. (optional), Description / Particulars, Amount.');
+    throw new Error('No document rows found. Need columns: Date, Amount, and Description / Particulars (Vendor optional).');
   }
   return { rows: allRows, undated, sheetStats };
 }
@@ -1999,23 +2014,24 @@ export async function downloadFinanceDocumentsTemplate() {
     ws.columns = [
       { width: 12 },
       { width: 14 },
+      { width: 22 },
       { width: 42 },
       { width: 14 },
     ];
   };
 
   const expenses = wb.addWorksheet('Expenses');
-  expenses.addRow(['Date', 'Cheque No.', 'Description / Particulars', 'Amount']);
-  expenses.addRow(['', '', 'Airtel Wifi', 356]);
-  expenses.addRow(['', '', 'Staff - Tea / Coffee / Biscuits', 3080]);
-  expenses.addRow([todayISO(), '27091', 'Tria Solution LLP', 12150.82]);
-  expenses.addRow([todayISO(), '27101', 'B. Munikrishna Petty Cash', 10000]);
+  expenses.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Amount']);
+  expenses.addRow(['', '', 'Airtel', 'Wifi bill - Mar', 356]);
+  expenses.addRow(['', '', '', 'Staff - Tea / Coffee / Biscuits', 3080]);
+  expenses.addRow([todayISO(), '27091', 'Tria Solution LLP', 'Lift AMC invoice', 12150.82]);
+  expenses.addRow([todayISO(), '27101', 'B. Munikrishna', 'Petty cash reimbursement', 10000]);
   styleHeader(expenses);
 
   const income = wb.addWorksheet('Income');
-  income.addRow(['Date', 'Cheque No.', 'Description / Particulars', 'Amount']);
-  income.addRow([todayISO(), '', 'Cash collection - Flat A101', 5000]);
-  income.addRow([todayISO(), '45210', 'Maintenance - Flat B204', 8500]);
+  income.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Amount']);
+  income.addRow([todayISO(), '', '', 'Cash collection - Flat A101', 5000]);
+  income.addRow([todayISO(), '45210', '', 'Maintenance - Flat B204', 8500]);
   styleHeader(income);
 
   // Tip sheet
@@ -2026,8 +2042,10 @@ export async function downloadFinanceDocumentsTemplate() {
   notes.addRow(['• Sheet "Income" → income receipts (IN)']);
   notes.addRow(['• Leave Cheque No. blank (or "-") for cash']);
   notes.addRow(['• Date: use DD/MM/YY or DD/MM/YYYY (e.g. 25/07/26). Blank → today\'s date']);
-  notes.addRow(['• Description / Particulars is used as vendor / payee when needed']);
-  notes.getColumn(1).width = 72;
+  notes.addRow(['• Vendor is optional — leave blank to fill later in the app']);
+  notes.addRow(['• Do not put item / purpose text in Vendor (use Description / Particulars)']);
+  notes.addRow(['• Description / Particulars is never copied into Vendor']);
+  notes.getColumn(1).width = 78;
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
@@ -2691,7 +2709,7 @@ const paintFinanceDocumentsTable = () => {
       <td class="fdoc-cell-open">${esc(date)}</td>
       <td class="fdoc-cell-open">${isIncome ? 'Income' : 'Expense'}</td>
       <td class="fdoc-cat-col">${renderFdocClassifyCell(d, isIncome)}</td>
-      <td class="fdoc-cell-open">${esc(d.vendor_name || d.description || '—')}</td>
+      <td class="fdoc-cell-open">${esc(formatVendorParticulars(d.vendor_name, d.description))}</td>
       <td class="fdoc-cell-open"><span class="${payClass}">${esc(pay.label)}</span></td>
       <td class="cash-float-amt fdoc-cell-open">${formatMoney(d.amount)}</td>
       <td class="fdoc-status-cell">${linkLabel}${renderFdocAttachmentIcons(d)}</td>

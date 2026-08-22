@@ -325,8 +325,44 @@ function getSyncSettings() {
 
 async function saveSyncSettings(patch) {
     const apartment_id = portalState.access?.activeApartmentId;
-    if (!supabase || !apartment_id) return;
-    
+    if (!apartment_id) return;
+
+    const preferMongo = typeof document !== 'undefined' && (
+        document.documentElement.dataset.adminApp === '1'
+        || document.documentElement.dataset.mpaApp === '1'
+        || document.documentElement.dataset.financeApp === '1'
+    );
+
+    if (preferMongo) {
+        try {
+            const res = await fetch(
+                `/api/integrations/spreadsheet/settings?apartment_id=${encodeURIComponent(apartment_id)}`,
+                {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apartment_id, ...patch }),
+                },
+            );
+            const json = await res.json().catch(() => ({}));
+            if (res.ok) {
+                portalState.finances = portalState.finances || {};
+                portalState.finances.ledgerSyncSettings = json.settings || {
+                    ...(portalState.finances.ledgerSyncSettings || {}),
+                    ...patch,
+                    apartment_id,
+                    updated_at: new Date().toISOString(),
+                };
+                return;
+            }
+            console.warn('[ledger sync] Mongo settings save failed, falling back to Supabase:', json.error);
+        } catch (err) {
+            console.warn('[ledger sync] Mongo settings save error, falling back:', err);
+        }
+    }
+
+    if (!supabase) return;
+
     // 1. Get existing settings to know which columns we can safely send
     // This helps avoid 400 errors if the user hasn't run the latest SQL
     const { data: existing } = await supabase

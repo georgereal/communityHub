@@ -98,11 +98,55 @@ export function oauthAppHasClientSecret(provider) {
     return !!getOAuthApp(provider)?.client_secret_set;
 }
 
+function preferMongoSpreadsheetSync() {
+    try {
+        const d = document.documentElement.dataset;
+        return d.adminApp === '1' || d.mpaApp === '1' || d.financeApp === '1';
+    } catch {
+        return false;
+    }
+}
+
 export async function saveOAuthApp({ provider, client_id, tenant_id, client_secret }) {
     if (!hasClientPermission('accounts.edit')) {
         throw new Error('Only accounts managers can configure spreadsheet OAuth apps.');
     }
     const apartment_id = portalState.access?.activeApartmentId;
+
+    if (preferMongoSpreadsheetSync() && apartment_id) {
+        try {
+            const res = await fetch(
+                `/api/integrations/spreadsheet/oauth-apps?apartment_id=${encodeURIComponent(apartment_id)}`,
+                {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        apartment_id,
+                        provider,
+                        client_id: client_id.trim(),
+                        tenant_id: (tenant_id || 'common').trim(),
+                        client_secret: client_secret?.trim() || '',
+                        redirect_uri: provider === 'MICROSOFT' ? getMicrosoftRedirectUri() : redirectUri(),
+                    }),
+                },
+            );
+            const json = await res.json().catch(() => ({}));
+            if (res.ok) {
+                portalState.finances = portalState.finances || {};
+                const apps = [...(portalState.finances.ledgerOAuthApps || [])];
+                const idx = apps.findIndex((a) => a.provider === provider);
+                if (idx >= 0) apps[idx] = json.row;
+                else apps.push(json.row);
+                portalState.finances.ledgerOAuthApps = apps;
+                return;
+            }
+            console.warn('[ledger oauth] Mongo save failed, falling back:', json.error);
+        } catch (err) {
+            console.warn('[ledger oauth] Mongo save error, falling back:', err);
+        }
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     const { data: existing } = await supabase
         .from('ledger_sync_oauth_apps')
@@ -143,6 +187,32 @@ async function upsertConnection(row, apartmentIdOverride) {
         throw new Error('Sign in to CommunityHub before connecting your account.');
     }
 
+    if (preferMongoSpreadsheetSync()) {
+        try {
+            const res = await fetch(
+                `/api/integrations/spreadsheet/oauth-connections?apartment_id=${encodeURIComponent(apartment_id)}`,
+                {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apartment_id, ...row }),
+                },
+            );
+            const json = await res.json().catch(() => ({}));
+            if (res.ok) {
+                portalState.finances = portalState.finances || {};
+                const list = [...(portalState.finances.myOAuthConnections || [])]
+                    .filter((c) => c.provider !== row.provider);
+                list.push(json.row);
+                portalState.finances.myOAuthConnections = list;
+                return;
+            }
+            console.warn('[ledger oauth] Mongo connection upsert failed, falling back:', json.error);
+        } catch (err) {
+            console.warn('[ledger oauth] Mongo connection upsert error, falling back:', err);
+        }
+    }
+
     // Use onConflict to update existing row for this user/apartment/provider combo.
     const { error } = await supabase.from('user_oauth_connections').upsert({
         user_id: user.id,
@@ -167,6 +237,18 @@ async function upsertConnection(row, apartmentIdOverride) {
 
 async function fetchConnectionWithTokens(provider) {
     const apartment_id = portalState.access?.activeApartmentId;
+
+    if (preferMongoSpreadsheetSync() && apartment_id) {
+        try {
+            const res = await fetch(
+                `/api/integrations/spreadsheet/oauth-connections?apartment_id=${encodeURIComponent(apartment_id)}&provider=${encodeURIComponent(provider)}`,
+                { credentials: 'include' },
+            );
+            const json = await res.json().catch(() => ({}));
+            if (res.ok) return json.row || null;
+        } catch { /* fall through */ }
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase
         .from('user_oauth_connections')
@@ -181,6 +263,27 @@ async function fetchConnectionWithTokens(provider) {
 
 export async function disconnectOAuth(provider) {
     const apartment_id = portalState.access?.activeApartmentId;
+
+    if (preferMongoSpreadsheetSync() && apartment_id) {
+        try {
+            const res = await fetch(
+                `/api/integrations/spreadsheet/oauth-connections?apartment_id=${encodeURIComponent(apartment_id)}`,
+                {
+                    method: 'DELETE',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apartment_id, provider }),
+                },
+            );
+            if (res.ok) {
+                portalState.finances = portalState.finances || {};
+                portalState.finances.myOAuthConnections = (portalState.finances.myOAuthConnections || [])
+                    .filter((c) => c.provider !== provider);
+                return;
+            }
+        } catch { /* fall through */ }
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('user_oauth_connections')
         .delete()

@@ -37,6 +37,7 @@ export function propertyHandler({ perms, op, collection = 'property_units', run 
                 method,
                 body: body || {},
                 apartmentId,
+                user: auth.user,
                 id: routeId(req),
             });
             logMongoApi({

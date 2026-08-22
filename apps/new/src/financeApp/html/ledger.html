@@ -57,6 +57,11 @@
                 <option value="">All categories</option>
               </select>
               <span id="fn-cash-txn-count" class="ledger-toolbar__count" aria-live="polite"></span>
+              <button type="button" class="btn btn-outline btn--small ledger-clear-filters-btn" id="fn-ledger-clear-filters" hidden title="Clear search and column filters">
+                <i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i>
+                <span class="fdoc-action-full">Clear filters</span>
+                <span class="fdoc-action-short">Clear</span>
+              </button>
               <div class="ledger-toolbar__actions">
                 <span id="fn-ledger-columns-slot"></span>
                 <details class="bank-recon-columns-picker ledger-opening-picker" id="fn-ledger-opening-picker">
@@ -80,7 +85,7 @@
                     </button>
                   </div>
                 </details>
-                <button type="button" class="btn btn-outline btn--small" id="fn-ledger-recalc-btn" title="Refresh stored Calculated balances">
+                <button type="button" class="btn btn-outline btn--small" id="fn-ledger-recalc-btn" hidden title="Refresh stored Calculated balances">
                   <i class="fa-solid fa-calculator" aria-hidden="true"></i>
                   <span class="fdoc-action-full">Recalculate</span>
                   <span class="fdoc-action-short">Recalc</span>

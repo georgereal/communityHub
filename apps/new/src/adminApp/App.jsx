@@ -7,6 +7,7 @@ import VendorsPage from './pages/VendorsPage.jsx';
 import CategoriesPage from './pages/CategoriesPage.jsx';
 import StaffPage from './pages/StaffPage.jsx';
 import IntegrationsPage from './pages/IntegrationsPage.jsx';
+import ActivityPage from './pages/ActivityPage.jsx';
 import RolesPage from './pages/RolesPage.jsx';
 
 const PAGE_COMPONENTS = {
@@ -16,6 +17,7 @@ const PAGE_COMPONENTS = {
     'an-categories': CategoriesPage,
     'an-staff': StaffPage,
     'an-integrations': IntegrationsPage,
+    'an-activity': ActivityPage,
     'an-roles': RolesPage,
 };
 

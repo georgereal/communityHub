@@ -7,6 +7,7 @@ import { bindFinanceNewWindow } from './windowBridge.js';
  */
 import ExcelJS from 'exceljs';
 import { portalState } from '../store.js';
+import { logActivity } from '../activityAudit.js';
 import { matchFlatFromText, parseNoBrokerCollectionLines } from '../bulkCollectionImport.js';
 import { withButtonBusy, setButtonBusy, clearButtonBusy } from '../buttonBusy.js';
 import { postFnMutation } from './mongoMutations.js';
@@ -382,6 +383,13 @@ export async function importBankStatement(file, lines, { fileLabel, skipDedupe =
         bank_account_id,
         file_name: fileLabel || file?.name || 'import.xlsx',
         lines: orderedLines,
+    });
+    void logActivity({
+        entityType: 'BANK_STATEMENT',
+        entityId: result.importId || apartment_id,
+        action: 'IMPORT',
+        summary: `Imported ${result.count} bank statement line(s)`,
+        newData: { count: result.count, skipped, file: fileLabel || file?.name },
     });
     return { importId: result.importId, count: result.count, skipped, skippedExisting, skippedBatch };
 }
@@ -1416,20 +1424,46 @@ const renderSortHeader = (label, key, extraClass = '') => {
 
 export async function matchBankLine(lineId, transactionId) {
     await postFnMutation('matchBankLine', { line_id: lineId, transaction_id: transactionId });
+    void logActivity({
+        entityType: 'BANK_MATCH',
+        entityId: lineId,
+        action: 'MATCH',
+        summary: `Matched bank line to transaction ${transactionId}`,
+        newData: { line_id: lineId, transaction_id: transactionId },
+    });
 }
 
 export async function unmatchBankLine(lineId) {
     await postFnMutation('unmatchBankLine', { line_id: lineId });
+    void logActivity({
+        entityType: 'BANK_MATCH',
+        entityId: lineId,
+        action: 'UNMATCH',
+        summary: `Unmatched bank line ${lineId}`,
+    });
 }
 
 export async function unmatchBankLines(lineIds = []) {
     const ids = [...new Set((lineIds || []).filter(Boolean))];
     if (!ids.length) return;
     await postFnMutation('unmatchBankLines', { line_ids: ids });
+    void logActivity({
+        entityType: 'BANK_MATCH',
+        entityId: ids[0],
+        action: 'UNMATCH',
+        summary: `Unmatched ${ids.length} bank line(s)`,
+        newData: { line_ids: ids },
+    });
 }
 
 export async function ignoreBankLine(lineId) {
     await postFnMutation('ignoreBankLine', { line_id: lineId });
+    void logActivity({
+        entityType: 'BANK_MATCH',
+        entityId: lineId,
+        action: 'IGNORE',
+        summary: `Ignored bank line ${lineId}`,
+    });
 }
 
 export async function updateBankStatementLine(lineId, patch) {
@@ -1453,6 +1487,13 @@ export async function deleteBankStatementLines(lineIds) {
     const ids = [...new Set(lineIds)].filter(Boolean);
     if (!ids.length) return;
     await postFnMutation('deleteBankStatementLines', { line_ids: ids });
+    void logActivity({
+        entityType: 'BANK_STATEMENT',
+        entityId: ids[0],
+        action: 'DELETE',
+        summary: `Deleted ${ids.length} bank statement line(s)`,
+        newData: { line_ids: ids },
+    });
 }
 
 export async function clearAllBankStatementData() {
@@ -1463,6 +1504,12 @@ export async function clearAllBankStatementData() {
     if (!lines.length) return { deleted: 0 };
 
     await postFnMutation('clearBankStatementData', { apartment_id });
+    void logActivity({
+        entityType: 'BANK_STATEMENT',
+        entityId: apartment_id,
+        action: 'DELETE',
+        summary: `Cleared all bank statement data (${lines.length} lines)`,
+    });
 
     return { deleted: lines.length };
 }

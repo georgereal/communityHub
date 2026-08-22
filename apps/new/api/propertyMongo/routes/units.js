@@ -1,16 +1,17 @@
 import { propertyHandler } from '../http.js';
 import { UNIT_EDIT_PERMS } from '../permissions.js';
+import { auditFromUser } from '../audit.js';
 import { saveUnit } from '../service.js';
 
 export const handle = propertyHandler({
     perms: UNIT_EDIT_PERMS,
     op: 'units.create',
-    run: async ({ method, body, apartmentId }) => {
+    run: async ({ method, body, apartmentId , user}) => {
         if (method !== 'POST') {
             const err = new Error('Method not allowed');
             err.status = 405;
             throw err;
         }
-        return saveUnit(apartmentId, body, null);
+        return saveUnit(apartmentId, body, null, auditFromUser(user));
     },
 });

@@ -14,6 +14,8 @@
     "migrate:rbac-mongo": "node scripts/migrate-rbac-to-mongo.mjs",
     "migrate:logs-mongo": "node scripts/migrate-logs-to-mongo.mjs",
     "migrate:integrations-mongo": "node scripts/migrate-integrations-to-mongo.mjs",
+    "migrate:ledger-sync-mongo": "node scripts/migrate-ledger-sync-to-mongo.mjs",
+    "consolidate:vendors-mongo": "node scripts/consolidate-vendors-mongo.mjs",
     "generate-repo-map": "node scripts/utilities/generate-repo-map.js",
     "check:import-boundary": "node scripts/check-import-boundary.mjs",
     "setup:hooks": "node scripts/git-hooks/install-hooks.js"

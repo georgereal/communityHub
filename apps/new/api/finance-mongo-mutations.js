@@ -314,16 +314,46 @@ async function recalculateLedgerBalances(db, apartmentId, body = {}) {
     };
 }
 
+function titleCaseVendorName(name) {
+    const ACRONYMS = new Set(['llp', 'pvt', 'ltd', 'llc', 'opc', 'gst', 'dg', 'upi', 'neft', 'rtgs', 'imps', 'bescom', 'bwssb', 'act']);
+    const raw = String(name || '').trim().replace(/\s+/g, ' ');
+    if (!raw) return '';
+    return raw.split(/(\s+|-)/).map((part) => {
+        if (!part || /^\s+$/.test(part) || part === '-') return part;
+        const lower = part.toLowerCase();
+        const bare = lower.replace(/\./g, '');
+        if (ACRONYMS.has(bare)) return bare.toUpperCase();
+        if (/^\d+[a-z]+$/i.test(part)) {
+            return part.replace(/^(\d+)([a-z]+)$/i, (_, n, letters) => n + letters.toUpperCase());
+        }
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    }).join('');
+}
+
 async function touchVendor(db, apartmentId, name) {
     if (!name) return;
+    const titled = titleCaseVendorName(name);
+    if (!titled) return;
     const cfg = await ensureConfig(db, apartmentId);
     const list = [...(cfg.vendors || [])];
-    const idx = list.findIndex((v) => String(v.name || '').toLowerCase() === String(name).toLowerCase());
+    const idx = list.findIndex((v) => String(v.name || '').toLowerCase() === titled.toLowerCase());
     if (idx >= 0) {
-        list[idx] = { ...list[idx], use_count: (list[idx].use_count || 0) + 1, last_used_at: nowIso() };
+        list[idx] = {
+            ...list[idx],
+            name: titled,
+            use_count: (list[idx].use_count || 0) + 1,
+            last_used_at: nowIso(),
+        };
     } else {
         list.push({
-            id: uid(), apartment_id: apartmentId, name, use_count: 1, last_used_at: nowIso(),
+            id: uid(),
+            apartment_id: apartmentId,
+            name: titled,
+            notes: null,
+            contact_phone: null,
+            contact_email: null,
+            use_count: 1,
+            last_used_at: nowIso(),
         });
     }
     await saveConfig(db, apartmentId, { vendors: list });
@@ -418,10 +448,23 @@ async function saveTransaction(db, apartmentId, body) {
 
     if (doc.vendor_name) await touchVendor(db, apartmentId, doc.vendor_name);
 
-    const affectsBank = isBankTxn(doc) || isBankTxn(existing)
-        || !!existing?.excluded_from_ledger !== !!doc.excluded_from_ledger;
+    // Only amount / type / wallet / date / exclusion change running balances.
+    // Description, category, vendor, etc. must not force Recalculate.
+    const balanceSnap = (t) => (t ? {
+        amount: roundMoney(t.amount),
+        type: t.type === 'IN' ? 'IN' : 'OUT',
+        wallet: String(t.wallet || 'CASH').toUpperCase() === 'BANK' ? 'BANK' : 'CASH',
+        date: String(t.date || '').slice(0, 10),
+        excluded_from_ledger: !!t.excluded_from_ledger,
+    } : null);
+    const beforeBal = balanceSnap(existing);
+    const afterBal = balanceSnap(doc);
+    const balanceFieldsChanged = !beforeBal
+        || ['amount', 'type', 'wallet', 'date', 'excluded_from_ledger']
+            .some((k) => beforeBal[k] !== afterBal[k]);
+    const touchesBankLedger = isBankTxn(doc) || isBankTxn(existing);
     let ledgerBalance = null;
-    if (affectsBank) {
+    if (balanceFieldsChanged && touchesBankLedger) {
         ledgerBalance = await markLedgerBalanceDirty(
             db,
             apartmentId,
@@ -551,6 +594,7 @@ async function saveFinanceDocument(db, apartmentId, userId, body) {
         status: resolveVoucherStatus(raw, transactionId),
         attachment_urls: [...kept, ...uploaded],
         source: raw.source === 'excel' ? 'excel' : (raw.source || 'manual'),
+        vendor_name: raw.vendor_name ? titleCaseVendorName(raw.vendor_name) : (raw.vendor_name ?? existing?.vendor_name ?? null),
         updated_at: nowIso(),
         _schema: 'v2',
         _remodeledAt: new Date(),
@@ -1159,7 +1203,7 @@ async function bulkUpdateTransactions(db, apartmentId, body) {
         updated += res.modifiedCount || 0;
         const balanceTouched = ['amount', 'type', 'wallet', 'date', 'excluded_from_ledger']
             .some((k) => Object.prototype.hasOwnProperty.call(patch, k));
-        if (balanceTouched || isBankTxn(existing) || isBankTxn({ ...existing, ...patch })) {
+        if (balanceTouched) {
             dirtyFrom = minDay(dirtyFrom, minDay(existing?.date, patch.date || existing?.date));
         }
     }
@@ -1302,8 +1346,11 @@ async function tableWrite(db, apartmentId, body) {
             for (const row of rows) {
                 const id = row.id || uid();
                 const next = { ...row, id, apartment_id: apartmentId };
+                if (table === 'expense_vendors' && next.name) {
+                    next.name = titleCaseVendorName(next.name);
+                }
                 const idx = list.findIndex((x) => String(x.id) === String(id)
-                    || (table === 'expense_vendors' && String(x.name).toLowerCase() === String(row.name || '').toLowerCase())
+                    || (table === 'expense_vendors' && String(x.name).toLowerCase() === String(next.name || '').toLowerCase())
                     || (table === 'expense_sub_categories'
                         && x.category === row.category && String(x.name).toLowerCase() === String(row.name || '').toLowerCase()));
                 if (idx >= 0) list[idx] = { ...list[idx], ...next };

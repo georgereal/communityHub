@@ -35,13 +35,15 @@ export const ACCOUNTS_PAGE_HELP = {
         title: 'Bills & receipts',
         blurb: 'Vendor bills and income receipts — track paperwork before or alongside ledger posting.',
         steps: [
-            'Add bill or Add receipt from the header to capture a document with amount, vendor, and attachments.',
+            'Use Quick capture for a phone-friendly step flow: type → photo → vendor → amount → payment → review.',
+            'Or use Add bill / Add receipt for the full form on desktop.',
             'Use status and search filters to find unpaid, partial, or settled items.',
             'Open a row for details, funding links, and to connect the document to ledger lines when ready.',
             'Bank Sync remains available if you need to cross-check a bank balance while working bills.',
         ],
         tips: [
             'Bills & receipts are the document trail; the Ledger is the society passbook.',
+            'Association staff with bills entry can Quick capture without ledger linking tools.',
         ],
     },
     'expense-plan': {

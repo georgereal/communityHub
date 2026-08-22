@@ -8,11 +8,12 @@ import { fnFinances, fnLedger, ensureFnClassicShape } from './classicState.js';
  * the filtered ledger so drill-down matches the pivot (bank + Bills & receipts).
  */
 import { normalizeCategoryKey, categoryDisplayLabel } from '../expenseCategories.js';
-import { getActiveLedgerTxns, ledgerTxnDayKey } from './ledgerBalance.js';
+import { getActiveLedgerTxns, ledgerTxnDayKey, ledgerCalculatedBalanceById, PASSBOOK_CALC_EPS } from './ledgerBalance.js';
 import { isTransactionReconciled } from './bankStatementQueries.js';
 import {
     buildLedgerStatementContext,
     compareLedgerTxnStatementOrder,
+    enrichTxnWithStatementLine,
 } from './ledgerStatementContext.js';
 import {
     getCashExpenseReportingMode,
@@ -84,7 +85,80 @@ const pivotKeyOnTxn = (txn, dimension) => {
 let ledgerPivotFilter = null;
 let ledgerCategoryFilter = null;
 let ledgerSort = { field: 'date', dir: 'desc' };
+/** @type {Record<string, string|object>} Excel-style per-column filters (text string or structured) */
+let ledgerColumnFilters = {};
 let activityTimer = null;
+
+const PASSBOOK_MISMATCH_EPS = PASSBOOK_CALC_EPS;
+
+const parseFilterNumber = (raw) => {
+    if (raw == null || raw === '') return null;
+    const n = parseFloat(String(raw).replace(/[₹,\s]/g, ''));
+    return Number.isFinite(n) ? n : null;
+};
+
+const isNumberSpecActive = (spec) => {
+    if (!spec || typeof spec !== 'object') return false;
+    if (spec.op === 'between') {
+        return parseFilterNumber(spec.value) != null || parseFilterNumber(spec.value2) != null;
+    }
+    return parseFilterNumber(spec.value) != null;
+};
+
+/** Whether a stored column filter is active (text or structured). */
+export const isLedgerColumnFilterActive = (value) => {
+    if (value == null) return false;
+    if (typeof value === 'string') return Boolean(value.trim());
+    if (typeof value !== 'object') return false;
+    if (value.kind === 'number') return isNumberSpecActive(value);
+    if (value.kind === 'passbook') {
+        if (value.discrepancy === 'mismatch' || value.discrepancy === 'match') return true;
+        return isNumberSpecActive(value.passbook) || isNumberSpecActive(value.calc);
+    }
+    return false;
+};
+
+const matchesNumberOp = (actual, spec) => {
+    if (!isNumberSpecActive(spec)) return true;
+    if (actual == null || !Number.isFinite(Number(actual))) return false;
+    const n = Number(actual);
+    const v = parseFilterNumber(spec.value);
+    const v2 = parseFilterNumber(spec.value2);
+    switch (spec.op) {
+        case 'eq':
+            return v != null && Math.abs(n - v) < 0.005;
+        case 'gt':
+            return v != null && n > v;
+        case 'gte':
+            return v != null && n >= v;
+        case 'lt':
+            return v != null && n < v;
+        case 'lte':
+            return v != null && n <= v;
+        case 'between': {
+            if (v == null && v2 == null) return true;
+            if (v == null) return n <= v2;
+            if (v2 == null) return n >= v;
+            const lo = Math.min(v, v2);
+            const hi = Math.max(v, v2);
+            return n >= lo && n <= hi;
+        }
+        default:
+            return true;
+    }
+};
+
+const signedTxnAmount = (txn) => {
+    const amt = parseFloat(txn?.amount) || 0;
+    return txn?.type === 'IN' ? amt : -amt;
+};
+
+const txnCalcBalance = (txn) => {
+    // Prefer live map via caller; this fallback is only for non-filter text search.
+    const c = txn?._ledgerComputedBalance;
+    if (c != null && Number.isFinite(Number(c))) return Number(c);
+    return null;
+};
 
 export const getLedgerPivotFilter = () => ledgerPivotFilter;
 
@@ -100,11 +174,134 @@ export const setLedgerCategoryFilter = (cat) => {
 export const clearAllLedgerFilters = () => {
     ledgerPivotFilter = null;
     ledgerCategoryFilter = null;
+    ledgerColumnFilters = {};
     const searchEl = document.getElementById('fn-cash-search');
     if (searchEl) searchEl.value = '';
     const catSel = document.getElementById('fn-ledger-cat-filter');
     if (catSel) catSel.value = '';
     renderLedgerPivotBanner();
+};
+
+export const getLedgerColumnFilters = () => ({ ...ledgerColumnFilters });
+
+export const setLedgerColumnFilter = (key, value) => {
+    if (value == null || value === '') {
+        delete ledgerColumnFilters[key];
+        return;
+    }
+    if (typeof value === 'object') {
+        if (!isLedgerColumnFilterActive(value)) delete ledgerColumnFilters[key];
+        else ledgerColumnFilters[key] = value;
+        return;
+    }
+    const q = String(value).trim();
+    if (!q) delete ledgerColumnFilters[key];
+    else ledgerColumnFilters[key] = q;
+};
+
+export const clearLedgerColumnFilter = (key) => {
+    delete ledgerColumnFilters[key];
+};
+
+/** Text used for Excel-style text column filters. */
+export const ledgerTxnColumnText = (txn, key) => {
+    if (!txn) return '';
+    if (key === 'date') return String(txn.date || '').slice(0, 10);
+    if (key === 'description') {
+        return [txn.description, txn.bank_reference, txn.vendor_invoice].filter(Boolean).join(' ');
+    }
+    if (key === 'amount') {
+        const amt = parseFloat(txn.amount) || 0;
+        const signed = txn.type === 'IN' ? amt : -amt;
+        return `${txn.type === 'IN' ? '+' : '−'}${amt} ${signed}`;
+    }
+    if (key === 'type') {
+        const bits = [
+            txn.type === 'IN' ? 'income' : 'expense',
+            txn.exclude_from_reports ? 'no reports' : '',
+            isTransactionReconciled(txn.id) ? 'reconciled' : '',
+        ];
+        return bits.filter(Boolean).join(' ');
+    }
+    if (key === 'cat') {
+        return [
+            categoryDisplayLabel(txn.cat),
+            txn.sub_category,
+            txn.vendor_name,
+        ].filter(Boolean).join(' ');
+    }
+    if (key === 'wallet') return String(txn.wallet || '');
+    if (key === 'passbook') {
+        const calc = txnCalcBalance(txn);
+        return calc != null ? String(calc) : '';
+    }
+    if (key === 'bills') {
+        const id = txn.id;
+        const n = (fnFinances().financeDocuments || []).filter(
+            (d) => d.transaction_id === id || d.ledgerEntryId === id,
+        ).length;
+        return n ? `linked ${n}` : '';
+    }
+    return '';
+};
+
+const txnMatchesAmountFilter = (txn, spec) => {
+    if (!isLedgerColumnFilterActive(spec)) return true;
+    if (spec.kind === 'number') return matchesNumberOp(signedTxnAmount(txn), spec);
+    // Legacy plain-text amount filter
+    if (typeof spec === 'string') {
+        return ledgerTxnColumnText(txn, 'amount').toLowerCase().includes(spec.trim().toLowerCase());
+    }
+    return true;
+};
+
+const txnMatchesPassbookFilter = (txn, spec, statementCtx, calcById) => {
+    if (!isLedgerColumnFilterActive(spec)) return true;
+    if (typeof spec === 'string') {
+        const stmt = enrichTxnWithStatementLine(txn, statementCtx);
+        const hay = [
+            stmt.passbookBalance != null ? String(stmt.passbookBalance) : '',
+            ledgerTxnColumnText(txn, 'passbook'),
+        ].join(' ').toLowerCase();
+        return hay.includes(spec.trim().toLowerCase());
+    }
+    if (spec.kind !== 'passbook') return true;
+
+    const stmt = enrichTxnWithStatementLine(txn, statementCtx);
+    const passbook = stmt.passbookBalance != null && Number.isFinite(Number(stmt.passbookBalance))
+        ? Number(stmt.passbookBalance)
+        : null;
+    // Discrepancy = passbook (statement balance) <> live ledger calculated — never stored.
+    const calc = (calcById?.has(txn.id) ? Number(calcById.get(txn.id)) : null);
+    const hasBoth = passbook != null && calc != null && Number.isFinite(calc);
+    const mismatch = hasBoth && Math.abs(calc - passbook) > PASSBOOK_MISMATCH_EPS;
+
+    if (spec.discrepancy === 'mismatch' && !mismatch) return false;
+    if (spec.discrepancy === 'match') {
+        if (!hasBoth || mismatch) return false;
+    }
+    if (!matchesNumberOp(passbook, spec.passbook)) return false;
+    if (!matchesNumberOp(calc, spec.calc)) return false;
+    return true;
+};
+
+const txnMatchesColumnFilters = (txn, statementCtx, calcById) => {
+    for (const [key, raw] of Object.entries(ledgerColumnFilters)) {
+        if (!isLedgerColumnFilterActive(raw)) continue;
+        if (key === 'amount') {
+            if (!txnMatchesAmountFilter(txn, raw)) return false;
+            continue;
+        }
+        if (key === 'passbook') {
+            if (!txnMatchesPassbookFilter(txn, raw, statementCtx, calcById)) return false;
+            continue;
+        }
+        const q = String(raw || '').trim().toLowerCase();
+        if (!q) continue;
+        const hay = ledgerTxnColumnText(txn, key).toLowerCase();
+        if (!hay.includes(q)) return false;
+    }
+    return true;
 };
 
 export const setLedgerSearchBusy = (busy) => {
@@ -154,20 +351,30 @@ export const pivotMatchingCashBills = () => {
 
 export const applyLedgerTableFilters = (txns) => {
     const q = (document.getElementById('fn-cash-search')?.value || '').trim();
+    const passbookFilterOn = isLedgerColumnFilterActive(ledgerColumnFilters.passbook);
+    const statementCtx = passbookFilterOn ? buildLedgerStatementContext() : null;
+    // Same full-ledger calc map the Passbook / calc cell uses — required for discrepancy.
+    const calcById = passbookFilterOn ? ledgerCalculatedBalanceById(txns) : null;
     const ledgerRows = getActiveLedgerTxns(txns).filter((t) =>
         txnMatchesLedgerPivotFilter(t)
         && txnMatchesLedgerSearch(t, q)
+        && txnMatchesColumnFilters(t, statementCtx, calcById)
         && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
     );
     const bills = pivotMatchingCashBills();
     if (!bills.length) return ledgerRows;
     const seen = new Set(ledgerRows.map((t) => t.id));
-    return [...ledgerRows, ...bills.filter((b) => !seen.has(b.id))];
+    return [...ledgerRows, ...bills.filter((b) => !seen.has(b.id) && txnMatchesColumnFilters(b, statementCtx, calcById))];
 };
 
 export const ledgerHasActiveFilters = () => {
     const q = (document.getElementById('fn-cash-search')?.value || '').trim();
-    return Boolean(q || ledgerCategoryFilter || ledgerPivotFilter);
+    return Boolean(
+        q
+        || ledgerCategoryFilter
+        || ledgerPivotFilter
+        || Object.values(ledgerColumnFilters).some((v) => isLedgerColumnFilterActive(v)),
+    );
 };
 
 export const getLedgerSort = () => ({ ...ledgerSort });
@@ -179,6 +386,11 @@ export const toggleLedgerSort = (field) => {
         // Date defaults to newest-first; other columns start ascending
         ledgerSort = { field, dir: field === 'date' ? 'desc' : 'asc' };
     }
+};
+
+export const setLedgerSort = (field, dir = 'asc') => {
+    if (!field) return;
+    ledgerSort = { field, dir: dir === 'desc' ? 'desc' : 'asc' };
 };
 
 /** Oldest → newest (statement order) for running Calculated balances. */
@@ -207,6 +419,18 @@ export const sortLedgerTxns = (txns) => {
         }
         if (field === 'cat') return mul * String(a.cat || '').localeCompare(String(b.cat || ''));
         if (field === 'wallet') return mul * String(a.wallet || '').localeCompare(String(b.wallet || ''));
+        if (field === 'description') {
+            return mul * String(a.description || '').localeCompare(String(b.description || ''), undefined, {
+                sensitivity: 'base',
+                numeric: true,
+            });
+        }
+        if (field === 'type') {
+            const typeRank = (t) => (t.type === 'IN' ? 0 : 1);
+            const cmp = typeRank(a) - typeRank(b);
+            if (cmp) return mul * cmp;
+            return mul * String(a.type || '').localeCompare(String(b.type || ''));
+        }
         if (field === 'dr' || field === 'cr' || field === 'amount') {
             const signed = (t) => {
                 const amt = parseFloat(t.amount) || 0;
@@ -219,10 +443,19 @@ export const sortLedgerTxns = (txns) => {
             const bv = b.exclude_from_reports ? 1 : 0;
             return mul * (av - bv);
         }
-        if (field === 'computedBalance') {
-            const av = a._ledgerComputedBalance ?? Number.NEGATIVE_INFINITY;
-            const bv = b._ledgerComputedBalance ?? Number.NEGATIVE_INFINITY;
-            return mul * (av - bv);
+        if (field === 'passbook' || field === 'computedBalance') {
+            const bal = (t) => {
+                const c = t._ledgerComputedBalance;
+                if (c != null && Number.isFinite(Number(c))) return Number(c);
+                return Number.NEGATIVE_INFINITY;
+            };
+            return mul * (bal(a) - bal(b));
+        }
+        if (field === 'bills') {
+            const count = (t) => (fnFinances().financeDocuments || []).filter(
+                (d) => d.transaction_id === t.id || d.ledgerEntryId === t.id,
+            ).length;
+            return mul * (count(a) - count(b));
         }
         return 0;
     });
@@ -394,6 +627,18 @@ export const updateLedgerSortIndicators = () => {
             icon.textContent = active ? (ledgerSort.dir === 'asc' ? '↑' : '↓') : '';
         }
         btn.setAttribute('aria-sort', active ? (ledgerSort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+    });
+    document.querySelectorAll('.ledger-excel-col-btn').forEach((btn) => {
+        const sortField = btn.dataset.ledgerSortField;
+        const filterKey = btn.dataset.ledgerFilterKey;
+        const sorted = sortField && ledgerSort.field === sortField;
+        const filtered = isLedgerColumnFilterActive(ledgerColumnFilters[filterKey]);
+        btn.classList.toggle('ledger-excel-col-btn--active', sorted || filtered);
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        icon.className = 'fa-solid fa-filter';
+        if (sorted && ledgerSort.dir === 'asc') icon.className = 'fa-solid fa-arrow-up-short-wide';
+        else if (sorted && ledgerSort.dir === 'desc') icon.className = 'fa-solid fa-arrow-down-wide-short';
     });
 };
 

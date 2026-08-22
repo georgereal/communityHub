@@ -35,6 +35,9 @@ async function main() {
         const { initFinanceDocumentsPage, renderFinanceDocumentsPage } = await import('../../financeNew/financeDocuments.js');
         initFinanceDocumentsPage();
         renderFinanceDocumentsPage();
+
+        const { initQuickCapture } = await import('../../financeNew/quickCapture.js');
+        initQuickCapture();
     } catch (err) {
         console.error('[finance/docs]', err);
         const host = document.getElementById('app-shell-page') || document.getElementById('app-shell-root');

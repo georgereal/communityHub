@@ -111,6 +111,7 @@ export const NAV_MODULES = [
             { route: 'an-categories' },
             { route: 'an-staff' },
             { route: 'an-integrations' },
+            { route: 'an-activity' },
             { route: 'an-roles' },
         ],
         pages: [
@@ -120,6 +121,7 @@ export const NAV_MODULES = [
             { route: 'an-categories', label: 'Sub-categories', icon: 'fa-tags', permission: 'setup.edit', altPermissions: ['accounts.edit'] },
             { route: 'an-staff', label: 'Staff directory', icon: 'fa-users-gear', permission: 'setup.edit' },
             { route: 'an-integrations', label: 'Integrations', icon: 'fa-plug', permission: 'setup.view' },
+            { route: 'an-activity', label: 'Activity', icon: 'fa-clock-rotate-left', permission: 'accounts.view', altPermissions: ['setup.view', 'rbac.view'] },
             { route: 'an-roles', label: 'Roles', icon: 'fa-user-lock', permission: 'rbac.edit' },
         ],
     },

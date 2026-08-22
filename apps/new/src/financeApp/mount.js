@@ -108,11 +108,16 @@ async function injectModals({ ledgerOnly = false, bankRecon = false } = {}) {
         const { default: ledgerLineModalHtml } = await import('./html/_ledger-line-modal.html?raw');
         parts.push(ledgerLineModalHtml);
     } else {
-        const [{ default: cashModalHtml }, { default: ledgerLineModalHtml }] = await Promise.all([
+        const [
+            { default: cashModalHtml },
+            { default: ledgerLineModalHtml },
+            { default: quickCaptureHtml },
+        ] = await Promise.all([
             import('./html/_cash-modal.html?raw'),
             import('./html/_ledger-line-modal.html?raw'),
+            import('./html/_quick-capture.html?raw'),
         ]);
-        parts.push(cashModalHtml, ledgerLineModalHtml);
+        parts.push(cashModalHtml, ledgerLineModalHtml, quickCaptureHtml);
     }
     if (bankRecon) {
         const { default: bankReconModalsHtml } = await import('./html/_bank-recon-modals.html?raw');

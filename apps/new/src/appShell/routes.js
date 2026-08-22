@@ -23,6 +23,7 @@ export const MPA_ROUTE_PATHS = {
     'an-categories': '/admin/categories',
     'an-staff': '/admin/staff',
     'an-integrations': '/admin/integrations',
+    'an-activity': '/admin/activity',
     'an-roles': '/admin/roles',
 };
 

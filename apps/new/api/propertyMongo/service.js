@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { badRequest, notFound } from './errors.js';
 import { PropertySlot, PropertyUnit } from './models.js';
+import { logParkingVehicle, logPropertyActivity } from './audit.js';
 
 const SCHEMA = 1;
 
@@ -93,7 +94,7 @@ async function getUnitDoc(apartmentId, unitId) {
     }).lean();
 }
 
-export async function saveResident(apartmentId, payload, residentId = null) {
+export async function saveResident(apartmentId, payload, residentId = null, audit = {}) {
     const unit_number = normUnit(payload.unit_number);
     const full_name = String(payload.full_name || '').trim();
     if (!unit_number || !full_name) throw badRequest('Flat and name are required.');
@@ -129,26 +130,45 @@ export async function saveResident(apartmentId, payload, residentId = null) {
     };
 
     const idx = residentId ? residents.findIndex((r) => String(r.id) === String(residentId)) : -1;
-    if (idx >= 0) residents[idx] = { ...residents[idx], ...row, id: residents[idx].id };
+    const isUpdate = idx >= 0;
+    if (isUpdate) residents[idx] = { ...residents[idx], ...row, id: residents[idx].id };
     else residents.push(row);
 
     await PropertyUnit.updateOne(
         { _id: unit._id },
         { $set: { residents, updated_at: new Date().toISOString() } },
     );
+    void logPropertyActivity(apartmentId, {
+        entityType: 'RESIDENT',
+        entityId: row.id,
+        action: isUpdate ? 'UPDATE' : 'CREATE',
+        summary: `${isUpdate ? 'Updated' : 'Added'} resident ${full_name} (${unit_number})`,
+        newData: row,
+        audit,
+    });
     return { resident: row };
 }
 
-export async function deleteResident(apartmentId, residentId) {
+export async function deleteResident(apartmentId, residentId, audit = {}) {
+    const unit = await PropertyUnit.findOne({ apartment_id: apartmentId, 'residents.id': residentId }).lean();
+    const prev = (unit?.residents || []).find((r) => String(r.id) === String(residentId));
     const result = await PropertyUnit.updateOne(
         { apartment_id: apartmentId, 'residents.id': residentId },
         { $pull: { residents: { id: residentId } }, $set: { updated_at: new Date().toISOString() } },
     );
     if (!result.matchedCount) throw notFound('Resident not found.');
+    void logPropertyActivity(apartmentId, {
+        entityType: 'RESIDENT',
+        entityId: residentId,
+        action: 'DELETE',
+        summary: `Deleted resident ${prev?.full_name || residentId}${prev?.unit_number ? ` (${prev.unit_number})` : ''}`,
+        oldData: prev || null,
+        audit,
+    });
     return {};
 }
 
-export async function importResidents(apartmentId, rows = [], mode = 'update_listed') {
+export async function importResidents(apartmentId, rows = [], mode = 'update_listed', audit = {}) {
     if (!Array.isArray(rows) || !rows.length) return { count: 0 };
     const units = await PropertyUnit.find(aptFilter(apartmentId)).lean();
     const byNumber = new Map(units.map((u) => [normUnit(u.number), u]));
@@ -217,10 +237,18 @@ export async function importResidents(apartmentId, rows = [], mode = 'update_lis
         unit.residents = residents;
     }
 
+    void logPropertyActivity(apartmentId, {
+        entityType: 'RESIDENT',
+        entityId: apartmentId,
+        action: 'IMPORT',
+        summary: `Imported ${count} resident row(s) (mode ${mode})`,
+        newData: { count, mode },
+        audit,
+    });
     return { count };
 }
 
-export async function saveUnit(apartmentId, payload, unitId = null) {
+export async function saveUnit(apartmentId, payload, unitId = null, audit = {}) {
     const number = normUnit(payload.number);
     if (!number && !unitId) throw badRequest('Flat number is required.');
 
@@ -250,7 +278,16 @@ export async function saveUnit(apartmentId, payload, unitId = null) {
             if (!doc) throw notFound('Flat not found.');
             await PropertyUnit.updateOne({ _id: doc._id }, { $set: patch });
         }
-        return { unit: publicUnit({ ...doc, ...patch }) };
+        const unit = publicUnit({ ...doc, ...patch });
+        void logPropertyActivity(apartmentId, {
+            entityType: 'UNIT',
+            entityId: unit.id,
+            action: 'UPDATE',
+            summary: `Updated unit ${unit.number}`,
+            newData: patch,
+            audit,
+        });
+        return { unit };
     }
 
     const existing = await PropertyUnit.findOne({ apartment_id: apartmentId, number }).lean();
@@ -274,10 +311,19 @@ export async function saveUnit(apartmentId, payload, unitId = null) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     });
-    return { unit: publicUnit(created.toObject()) };
+    const unit = publicUnit(created.toObject());
+    void logPropertyActivity(apartmentId, {
+        entityType: 'UNIT',
+        entityId: unit.id,
+        action: 'CREATE',
+        summary: `Created unit ${unit.number}`,
+        newData: unit,
+        audit,
+    });
+    return { unit };
 }
 
-export async function bulkPatchParkingLimits(apartmentId, unitIds, { car_limit, bike_limit } = {}) {
+export async function bulkPatchParkingLimits(apartmentId, unitIds, { car_limit, bike_limit } = {}, audit = {}) {
     const ids = [...new Set((unitIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
     if (!ids.length) throw badRequest('Pick at least one flat.');
     const patch = { updated_at: new Date().toISOString() };
@@ -293,13 +339,29 @@ export async function bulkPatchParkingLimits(apartmentId, unitIds, { car_limit, 
         },
         { $set: patch },
     );
+    void logPropertyActivity(apartmentId, {
+        entityType: 'UNIT',
+        entityId: apartmentId,
+        action: 'UPDATE',
+        summary: `Updated parking limits on ${result.modifiedCount} unit(s)`,
+        newData: { unitIds: ids, car_limit, bike_limit },
+        audit,
+    });
     return { updated: result.modifiedCount, matched: result.matchedCount };
 }
 
-export async function deleteUnit(apartmentId, unitIdOrNumber) {
+export async function deleteUnit(apartmentId, unitIdOrNumber, audit = {}) {
     const doc = await getUnitDoc(apartmentId, unitIdOrNumber);
     if (!doc) throw notFound('Flat not found.');
     await PropertyUnit.deleteOne({ _id: doc._id });
+    void logPropertyActivity(apartmentId, {
+        entityType: 'UNIT',
+        entityId: String(doc._id),
+        action: 'DELETE',
+        summary: `Deleted unit ${doc.number}`,
+        oldData: { number: doc.number, residents: (doc.residents || []).length },
+        audit,
+    });
     return {
         unitDeleted: true,
         residentsDeleted: (doc.residents || []).length,
@@ -307,7 +369,12 @@ export async function deleteUnit(apartmentId, unitIdOrNumber) {
     };
 }
 
-export async function importUnits(apartmentId, { unitRows = [], residents = [], createMissing = true, residentImportMode = 'update_listed' } = {}) {
+export async function importUnits(apartmentId, {
+    unitRows = [],
+    residents = [],
+    createMissing = true,
+    residentImportMode = 'update_listed',
+} = {}, audit = {}) {
     const stats = { updated: 0, created: 0, residents: 0, skipped: 0, errors: [] };
     for (const row of unitRows) {
         try {
@@ -357,13 +424,21 @@ export async function importUnits(apartmentId, { unitRows = [], residents = [], 
         }
     }
     if (residents?.length) {
-        const out = await importResidents(apartmentId, residents, residentImportMode);
+        const out = await importResidents(apartmentId, residents, residentImportMode, audit);
         stats.residents = out.count;
     }
+    void logPropertyActivity(apartmentId, {
+        entityType: 'UNIT',
+        entityId: apartmentId,
+        action: 'IMPORT',
+        summary: `Imported units (created ${stats.created}, updated ${stats.updated}, residents ${stats.residents})`,
+        newData: stats,
+        audit,
+    });
     return stats;
 }
 
-export async function saveVehicle(apartmentId, { unitId, plate, type }, vehicleId = null) {
+export async function saveVehicle(apartmentId, { unitId, plate, type }, vehicleId = null, audit = {}) {
     const normalizedPlate = String(plate || '').trim().toUpperCase();
     if (!normalizedPlate) throw badRequest('Plate number is required.');
     const vehicleType = type === 'BIKE' ? 'BIKE' : 'CAR';
@@ -381,6 +456,7 @@ export async function saveVehicle(apartmentId, { unitId, plate, type }, vehicleI
     if (vehicleId) {
         const unit = await PropertyUnit.findOne({ apartment_id: apartmentId, 'vehicles.id': vehicleId }).lean();
         if (!unit) throw notFound('Vehicle not found.');
+        const before = (unit.vehicles || []).find((v) => v.id === vehicleId);
         const vehicles = (unit.vehicles || []).map((v) => (
             v.id === vehicleId ? { ...v, plate: normalizedPlate, type: vehicleType } : v
         ));
@@ -388,7 +464,19 @@ export async function saveVehicle(apartmentId, { unitId, plate, type }, vehicleI
             { _id: unit._id },
             { $set: { vehicles, updated_at: new Date().toISOString() } },
         );
-        return { vehicle: vehicles.find((v) => v.id === vehicleId) };
+        const vehicle = vehicles.find((v) => v.id === vehicleId);
+        void logParkingVehicle(apartmentId, {
+            action: 'update',
+            vehicleId,
+            unitNumber: unit.number,
+            plate: normalizedPlate,
+            changes: [
+                ...(before?.plate !== normalizedPlate ? [{ field: 'plate', old: before?.plate, new: normalizedPlate }] : []),
+                ...(before?.type !== vehicleType ? [{ field: 'type', old: before?.type, new: vehicleType }] : []),
+            ],
+            audit,
+        });
+        return { vehicle };
     }
 
     const unit = await getUnitDoc(apartmentId, unitId);
@@ -405,6 +493,14 @@ export async function saveVehicle(apartmentId, { unitId, plate, type }, vehicleI
         { _id: unit._id },
         { $push: { vehicles: vehicle }, $set: { updated_at: new Date().toISOString() } },
     );
+    void logParkingVehicle(apartmentId, {
+        action: 'insert',
+        vehicleId: vehicle.id,
+        unitNumber: unit.number,
+        plate: normalizedPlate,
+        changes: [{ field: 'plate', old: null, new: normalizedPlate }],
+        audit,
+    });
     return { vehicle };
 }
 
@@ -415,9 +511,10 @@ async function clearVehicleSlots(apartmentId, vehicleId) {
     );
 }
 
-export async function patchVehicle(apartmentId, vehicleId, patch = {}) {
+export async function patchVehicle(apartmentId, vehicleId, patch = {}, audit = {}) {
     const unit = await PropertyUnit.findOne({ apartment_id: apartmentId, 'vehicles.id': vehicleId }).lean();
     if (!unit) throw notFound('Vehicle not found.');
+    const before = (unit.vehicles || []).find((v) => v.id === vehicleId);
     const vehicles = (unit.vehicles || []).map((v) => {
         if (v.id !== vehicleId) return v;
         const next = { ...v };
@@ -441,20 +538,44 @@ export async function patchVehicle(apartmentId, vehicleId, patch = {}) {
     );
 
     if (vehicle.allocation_type === 'COMMON' && vehicle.allocation_target_id) {
-        await assignVehicleToSlot(apartmentId, vehicle.allocation_target_id, vehicleId);
+        await assignVehicleToSlot(apartmentId, vehicle.allocation_target_id, vehicleId, audit);
     } else if (vehicle.allocation_type !== 'COMMON') {
         await clearVehicleSlots(apartmentId, vehicleId);
     }
+    const changes = [];
+    for (const field of ['plate', 'type', 'is_parking_active', 'allocation_type', 'allocation_target_id']) {
+        if (before?.[field] !== vehicle?.[field]) {
+            changes.push({ field, old: before?.[field] ?? null, new: vehicle?.[field] ?? null });
+        }
+    }
+    void logParkingVehicle(apartmentId, {
+        action: 'update',
+        vehicleId,
+        unitNumber: unit.number,
+        plate: vehicle?.plate,
+        changes,
+        audit,
+    });
     return { vehicle };
 }
 
-export async function deleteVehicle(apartmentId, vehicleId) {
+export async function deleteVehicle(apartmentId, vehicleId, audit = {}) {
+    const unit = await PropertyUnit.findOne({ apartment_id: apartmentId, 'vehicles.id': vehicleId }).lean();
+    const prev = (unit?.vehicles || []).find((v) => v.id === vehicleId);
     await clearVehicleSlots(apartmentId, vehicleId);
     const result = await PropertyUnit.updateOne(
         { apartment_id: apartmentId, 'vehicles.id': vehicleId },
         { $pull: { vehicles: { id: vehicleId } }, $set: { updated_at: new Date().toISOString() } },
     );
     if (!result.matchedCount) throw notFound('Vehicle not found.');
+    void logParkingVehicle(apartmentId, {
+        action: 'delete',
+        vehicleId,
+        unitNumber: unit?.number,
+        plate: prev?.plate,
+        changes: [],
+        audit,
+    });
     return {};
 }
 
@@ -493,7 +614,7 @@ export async function deletePoolSlot(apartmentId, slotId) {
     return {};
 }
 
-export async function assignVehicleToSlot(apartmentId, slotId, vehicleId) {
+export async function assignVehicleToSlot(apartmentId, slotId, vehicleId, audit = {}) {
     const slot = await PropertySlot.findOne({
         apartment_id: apartmentId,
         $or: [{ _id: slotId }, { id: slotId }],
@@ -518,10 +639,18 @@ export async function assignVehicleToSlot(apartmentId, slotId, vehicleId) {
         { _id: unit._id },
         { $set: { vehicles, updated_at: new Date().toISOString() } },
     );
+    void logParkingVehicle(apartmentId, {
+        action: 'update',
+        vehicleId,
+        unitNumber: unit.number,
+        plate: vehicle?.plate,
+        changes: [{ field: 'allocation_target_id', old: null, new: String(slot.id || slot._id) }],
+        audit,
+    });
     return { slotId: String(slot.id || slot._id), vehicleId };
 }
 
-export async function releaseSlot(apartmentId, slotId) {
+export async function releaseSlot(apartmentId, slotId, audit = {}) {
     const slot = await PropertySlot.findOne({
         apartment_id: apartmentId,
         $or: [{ _id: slotId }, { id: slotId }],
@@ -532,6 +661,7 @@ export async function releaseSlot(apartmentId, slotId) {
     if (vehicleId) {
         const unit = await PropertyUnit.findOne({ apartment_id: apartmentId, 'vehicles.id': vehicleId }).lean();
         if (unit) {
+            const vehicle = (unit.vehicles || []).find((v) => v.id === vehicleId);
             const vehicles = (unit.vehicles || []).map((v) => (
                 v.id === vehicleId ? { ...v, allocation_type: 'BASE', allocation_target_id: null } : v
             ));
@@ -539,12 +669,20 @@ export async function releaseSlot(apartmentId, slotId) {
                 { _id: unit._id },
                 { $set: { vehicles, updated_at: new Date().toISOString() } },
             );
+            void logParkingVehicle(apartmentId, {
+                action: 'update',
+                vehicleId,
+                unitNumber: unit.number,
+                plate: vehicle?.plate,
+                changes: [{ field: 'allocation_target_id', old: String(slot.id || slot._id), new: null }],
+                audit,
+            });
         }
     }
     return {};
 }
 
-export async function importVehicles(apartmentId, rows = []) {
+export async function importVehicles(apartmentId, rows = [], audit = {}) {
     let added = 0;
     const errors = [];
     for (const row of rows) {
@@ -561,11 +699,19 @@ export async function importVehicles(apartmentId, rows = []) {
                 unitId: String(unit._id),
                 plate: row.plate,
                 type: row.type,
-            });
+            }, null, audit);
             added += 1;
         } catch (err) {
             errors.push(`${row.plate || row.unit_number}: ${err.message}`);
         }
     }
+    void logPropertyActivity(apartmentId, {
+        entityType: 'PARKING',
+        entityId: apartmentId,
+        action: 'IMPORT',
+        summary: `Imported ${added} vehicle(s)`,
+        newData: { added, errors: errors.length, total: rows.length },
+        audit,
+    });
     return { added, errors, total: rows.length };
 }

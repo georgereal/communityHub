@@ -1194,6 +1194,12 @@
     align-items: start;
   }
 
+  #cash-ledger-items .bank-recon-table tr.ledger-txn-row.bank-recon-table__row--mismatch {
+    background: color-mix(in srgb, var(--danger, #dc2626) 8%, #fff);
+    border-color: color-mix(in srgb, var(--danger, #dc2626) 22%, #eef0f3);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--danger, #dc2626) 45%, #fff);
+  }
+
   #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row {
     grid-template-columns: 1fr auto;
     grid-template-areas:

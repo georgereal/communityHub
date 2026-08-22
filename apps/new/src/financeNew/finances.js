@@ -5,25 +5,37 @@ import { bindFinanceNewWindow } from './windowBridge.js';
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist } from '../store.js';
+import { logActivity } from '../activityAudit.js';
 import { pullState } from './pull.js';
 import { mongoUpsert } from './mongoWrite.js';
 import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection, setLedgerViewRefresh } from './ledgerTable.js';
-import { renderLedgerPivotBanner, sortLedgerTxns, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter, ledgerHasActiveFilters } from './ledgerFilter.js';
+import {
+    renderLedgerPivotBanner,
+    sortLedgerTxns,
+    toggleLedgerSort,
+    updateLedgerSortIndicators,
+    applyLedgerTableFilters,
+    setLedgerCategoryFilter,
+    ledgerHasActiveFilters,
+    clearAllLedgerFilters,
+} from './ledgerFilter.js';
 import { ACCOUNTS_SUBVIEW_ROUTES, applyNavPermissions, getFinanceNewAccountsPages } from '../navigation.js';
 import { isApartmentAdminUser } from '../rbac.js';
 import { can } from '../capabilities.js';
 import { filesToBase64Payload, postFnMutation } from './mongoMutations.js';
-import { getLedgerBankBalance, getActiveLedgerTxns, getLedgerBalanceMeta, recalculateLedgerBalances } from './ledgerBalance.js';
+import { getLedgerBankBalance, getActiveLedgerTxns, getLedgerBalanceMeta, recalculateLedgerBalances, ledgerCalculatedBalanceById } from './ledgerBalance.js';
 import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
 import {
     getPassbookClosingBalance,
     getBankOpeningConfig,
+    getBankBalanceReconciliation,
 } from './bankStatementQueries.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { ACCOUNTS_PAGE_HELP, applyFinancePageHeader, wireFinancePageHelp } from '../financePageHelp.js';
 import { EXPENSE_CATS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, CATEGORY_LABELS, categoryDisplayLabel } from '../expenseCategories.js';
 import { buildCategoryOptions, buildSubCategoryOptions } from '../classifyOptions.js';
 import { getCashWalletLeft } from './financeDocuments.js';
+import { ensureVendorInDirectory, listDirectoryVendors } from './vendors.js';
 
 async function loadMaintenanceBilling() {
     return import('./maintenanceBilling.js');
@@ -172,20 +184,17 @@ const populateSubCatDatalist = (catKey) => {
 const populateVendorDatalist = () => {
     const list = document.getElementById('expense-vendor-datalist');
     if (!list) return;
-    let vendors = (fnFinances().vendors || []).map((row) => row.name).filter(Boolean);
-    if (!vendors.length) {
-        vendors = [...new Set(
-            fnFinances().txns
-                .filter((t) => t.vendor_name)
-                .map((t) => t.vendor_name.trim()),
-        )];
-    }
-    vendors = [...new Set(vendors)].sort((a, b) => a.localeCompare(b));
-    list.innerHTML = vendors.map((v) => `<option value="${v}"></option>`).join('');
+    const vendors = listDirectoryVendors();
+    list.innerHTML = vendors.map((v) => `<option value="${escAttr(v)}"></option>`).join('');
 
     const incomeList = document.getElementById('income-vendor-datalist');
     if (incomeList) incomeList.innerHTML = list.innerHTML;
 };
+
+const escAttr = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
 
 export const syncIncomeExtraSection = (catKey, txn = null) => {
     const section = document.getElementById('income-extra-section');
@@ -271,24 +280,7 @@ const findSubCategoryRow = (category, name) => {
 };
 
 async function rememberVendor(apartment_id, name) {
-    if (!name) return;
-    const normalized = name.trim();
-    const existing = findVendorRow(normalized);
-    const payload = {
-        id: existing?.id || crypto.randomUUID(),
-        apartment_id,
-        name: normalized,
-        use_count: (existing?.use_count || 0) + 1,
-        last_used_at: new Date().toISOString(),
-    };
-    try {
-        await mongoUpsert('expense_vendors', payload, { rehydrate: false });
-        const idx = (fnFinances().vendors || []).findIndex((v) => String(v.id) === String(payload.id));
-        if (idx >= 0) fnFinances().vendors[idx] = payload;
-        else fnFinances().vendors = [...(fnFinances().vendors || []), payload];
-    } catch (err) {
-        console.warn('Could not cache vendor:', err.message);
-    }
+    return ensureVendorInDirectory(apartment_id, name);
 }
 
 async function rememberSubCategory(apartment_id, category, name) {
@@ -953,27 +945,21 @@ export const renderCashLedger = () => {
 
     renderLedgerPivotBanner();
     const active = getActiveLedgerTxns([...fnFinances().txns]);
+    // Live ledger walk — same figure as Passbook/(calc) and “Has discrepancy”.
+    const calcById = ledgerCalculatedBalanceById(active);
     const filtered = applyLedgerTableFilters(active);
-    const sorted = sortLedgerTxns(filtered);
-    // Prefer stored running_balance_after; blank under filters.
-    const showCalculated = !ledgerHasActiveFilters();
-    const storedById = showCalculated
-        ? new Map(
-            filtered
-                .filter((t) => t.running_balance_after != null && t.running_balance_after !== '')
-                .map((t) => [t.id, parseFloat(t.running_balance_after)]),
-        )
-        : new Map();
-    const enrichedSorted = sorted.map((t) => ({
+    const enriched = filtered.map((t) => ({
         ...t,
-        _ledgerComputedBalance: showCalculated && storedById.has(t.id) ? storedById.get(t.id) : null,
+        _ledgerComputedBalance: calcById.has(t.id) ? calcById.get(t.id) : null,
     }));
+    const sorted = sortLedgerTxns(enriched);
     updateLedgerSortIndicators();
     syncLedgerBalanceStaleUi();
+    syncLedgerClearFiltersUi();
 
     const total = getActiveLedgerTxns().length;
-    const showing = enrichedSorted.length;
-    const cashBillCount = enrichedSorted.filter((t) => t._fromFinanceDocument).length;
+    const showing = sorted.length;
+    const cashBillCount = sorted.filter((t) => t._fromFinanceDocument).length;
     const bankCount = showing - cashBillCount;
 
     const countEl = document.getElementById('fn-cash-txn-count');
@@ -987,7 +973,7 @@ export const renderCashLedger = () => {
         }
     }
 
-    renderEditableLedgerRows(enrichedSorted, { formatTxnDetail, getAllAttachmentPaths });
+    renderEditableLedgerRows(sorted, { formatTxnDetail, getAllAttachmentPaths });
     renderExcludedLedgerSection({ formatTxnDetailPlain });
     updateLedgerSortIndicators();
     syncLedgerOpeningFields();
@@ -1431,7 +1417,11 @@ export const saveCashData = async () => {
     }
 
     if (isNaN(amt) || amt <= 0) return alert('Enter a valid amount.');
-    if (!isIncome && !vendor_name) return alert('Enter the vendor name.');
+    if (saveTarget === 'bill') {
+        if (!desc?.trim()) return alert('Enter the particulars.');
+    } else if (!isIncome && !vendor_name) {
+        return alert('Enter the vendor name.');
+    }
     if (isIncome) {
         const extra = INCOME_EXTRA_BY_CAT[cat];
         if (extra?.vendor?.required && !vendor_name) {
@@ -1454,6 +1444,9 @@ export const saveCashData = async () => {
             return alert('Enter the payment date.');
         }
         const notes = billPaymentNotes(payMode, chequeNo, onlineRef, paidOn);
+        const savedVendor = vendor_name
+            ? await ensureVendorInDirectory(apartment_id, vendor_name)
+            : null;
 
         const existing = portalState.editingFinanceDocId
             ? (fnFinances().financeDocuments || []).find((d) => d.id === portalState.editingFinanceDocId)
@@ -1478,7 +1471,7 @@ export const saveCashData = async () => {
                     doc_date: dateStr,
                     amount: amt,
                     cat,
-                    vendor_name: vendor_name || (isIncome ? 'Receipt' : null),
+                    vendor_name: savedVendor,
                     description: [desc, vendor_invoice ? `Inv ${vendor_invoice}` : null].filter(Boolean).join(' · ') || null,
                     sub_category,
                     notes,
@@ -1499,6 +1492,7 @@ export const saveCashData = async () => {
                 if (idx >= 0) list[idx] = result.document;
                 else list.unshift(result.document);
             }
+            populateVendorDatalist();
             const linkedFromLedger = !!portalState.linkBillToTxnId;
             portalState.pendingReceiptFiles = [];
             portalState.pendingReceiptPaths = [];
@@ -1800,9 +1794,41 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     const payDesc = document.getElementById('bill-payment-desc');
     const docsTitle = billDocs?.querySelector('.bill-docs__title');
     const docsDesc = billDocs?.querySelector('.bill-docs__desc');
+    const expenseVendorLabel = document.querySelector('#fn-expense-form-view .expense-form__section--vendor .expense-label');
+    const cashDescLabel = document.querySelector('#fn-expense-form-view label[for="cash-desc"]');
+    const cashDesc = document.getElementById('cash-desc');
+    const expenseVendorInput = document.getElementById('expense-vendor-input');
 
     modal?.classList.toggle('cash-modal--bill', !!isBill);
     modal?.classList.toggle('cash-modal--ledger', !isBill);
+
+    if (isBill && !isIncome) {
+        if (expenseVendorLabel) {
+            expenseVendorLabel.innerHTML = 'Vendor <span class="expense-optional">(optional — type new or pick)</span>';
+        }
+        if (expenseVendorInput) {
+            expenseVendorInput.placeholder = 'Pick from list or type a new vendor';
+        }
+        if (cashDescLabel) {
+            cashDescLabel.innerHTML = 'Particulars';
+        }
+        if (cashDesc) {
+            cashDesc.placeholder = 'What this bill is for';
+            cashDesc.required = true;
+        }
+    } else if (!isIncome) {
+        if (expenseVendorLabel) expenseVendorLabel.textContent = 'Vendor';
+        if (expenseVendorInput) {
+            expenseVendorInput.placeholder = 'e.g. ABC Elevators, Sharma Plumbing';
+        }
+        if (cashDescLabel) {
+            cashDescLabel.innerHTML = 'Notes <span class="expense-optional">(optional)</span>';
+        }
+        if (cashDesc) {
+            cashDesc.placeholder = 'Work done, payment terms, or other details';
+            cashDesc.required = false;
+        }
+    }
 
     if (billDocs) billDocs.hidden = !isBill;
     if (walletSection) walletSection.hidden = !!isBill;
@@ -1868,6 +1894,38 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     }
     if (receiptHint) {
         receiptHint.textContent = 'Images or PDFs · invoice and payment proof';
+    }
+
+    const incomeExtra = document.getElementById('income-extra-section');
+    const incomeVendorWrap = document.getElementById('income-extra-vendor-wrap');
+    const incomeVendorLabel = document.getElementById('income-vendor-label');
+    const incomeVendorInput = document.getElementById('income-vendor-input');
+    const incomeDescLabel = document.querySelector('#fn-income-form-view label[for="income-desc"]');
+    const incomeDesc = document.getElementById('income-desc');
+    if (isBill && isIncome) {
+        if (incomeExtra) incomeExtra.hidden = false;
+        if (incomeVendorWrap) incomeVendorWrap.hidden = false;
+        if (incomeVendorLabel) {
+            incomeVendorLabel.innerHTML = 'Vendor <span class="expense-optional">(optional — type new or pick)</span>';
+        }
+        if (incomeVendorInput) {
+            incomeVendorInput.placeholder = 'Pick from list or type a new vendor';
+            incomeVendorInput.required = false;
+        }
+        if (incomeDescLabel) incomeDescLabel.innerHTML = 'Particulars';
+        if (incomeDesc) {
+            incomeDesc.placeholder = 'What this receipt is for';
+            incomeDesc.required = true;
+        }
+        populateVendorDatalist();
+    } else if (isIncome) {
+        if (incomeDescLabel) {
+            incomeDescLabel.innerHTML = 'Notes <span class="expense-optional">(optional)</span>';
+        }
+        if (incomeDesc) {
+            incomeDesc.placeholder = 'e.g. Monthly maintenance collection from Block A';
+            incomeDesc.required = false;
+        }
     }
 
     if (!isBill) {
@@ -2282,6 +2340,14 @@ export const saveLedgerLineData = async () => {
         renderCashLedger();
         portalState.editingTxnId = null;
         document.getElementById('ledger-line-modal')?.classList.remove('active');
+        const txn = result.transaction;
+        void logActivity({
+            entityType: 'TRANSACTION',
+            entityId: txn?.id || editingId || apartment_id,
+            action: editingId ? 'UPDATE' : 'CREATE',
+            summary: `${editingId ? 'Updated' : 'Added'} ledger ${isIncome ? 'income' : 'expense'} ₹${amt}`,
+            newData: { amount: amt, cat, wallet, type: isIncome ? 'IN' : 'OUT' },
+        });
     } catch (err) {
         alert(err?.message || 'Could not save ledger line.');
     }
@@ -2382,6 +2448,12 @@ export const delTxn = async (id) => {
         removeTransactionLocally(id);
         processFinances();
         renderCashLedger();
+        void logActivity({
+            entityType: 'TRANSACTION',
+            entityId: id,
+            action: 'DELETE',
+            summary: `Deleted ledger transaction ${id}`,
+        });
         if (typeof window.renderInvoicesPage === 'function') window.renderInvoicesPage();
         if (document.getElementById('fn-subview-reports')?.style.display !== 'none') {
             void import('./financeAnalytics.js').then((m) => m.renderFinanceAnalytics());
@@ -2616,26 +2688,96 @@ const initLedgerOpeningBalance = () => {
     syncLedgerOpeningFields();
 };
 
-const syncLedgerBalanceStaleUi = () => {
+/** Show Recalculate only for passbook↔calc discrepancies or real amount-related drift (not desc/category). */
+const ledgerNeedsRecalcAction = () => {
+    let recon = { hasDiscrepancy: false, mismatchCount: 0 };
+    try {
+        recon = getBankBalanceReconciliation() || recon;
+    } catch {
+        /* ignore if bank pack not loaded */
+    }
+    const mismatches = Number(recon.mismatchCount) || 0;
+    if (mismatches > 0 || recon.hasDiscrepancy) {
+        return {
+            show: true,
+            stale: true,
+            title: mismatches > 0
+                ? `${mismatches} passbook ↔ calc discrepanc${mismatches === 1 ? 'y' : 'ies'} — recalculate to refresh`
+                : 'Passbook closing balance differs from calculated — recalculate to refresh',
+            badge: mismatches > 0 ? `${mismatches} mismatch${mismatches === 1 ? '' : 'es'}` : 'Mismatch',
+        };
+    }
+
     const meta = getLedgerBalanceMeta();
+    if (!meta.needsRecalc) {
+        return { show: false, stale: false, title: '', badge: '' };
+    }
+
+    // needsRecalc can stick after old category/description saves — only surface it when
+    // stored balances actually look out of date vs a live amount walk.
+    const bankTxns = getActiveLedgerTxns().filter(
+        (t) => String(t.wallet || '').toUpperCase() === 'BANK',
+    );
+    const missingStored = bankTxns.some(
+        (t) => t.running_balance_after == null || t.running_balance_after === '',
+    );
+    let closingDrift = false;
+    try {
+        const live = getLedgerBankBalance();
+        if (meta.closing != null && live?.balance != null) {
+            closingDrift = Math.abs(Number(meta.closing) - Number(live.balance)) > 0.05;
+        } else if (meta.closing == null && live?.balance != null && bankTxns.length) {
+            closingDrift = true;
+        }
+    } catch {
+        /* ignore */
+    }
+    if (!missingStored && !closingDrift) {
+        return { show: false, stale: false, title: '', badge: '' };
+    }
+
+    return {
+        show: true,
+        stale: true,
+        title: meta.dirtyFromDate
+            ? `Calculated balances need refresh from ${meta.dirtyFromDate} onward (amount/date/type/wallet changed)`
+            : 'Calculated balances need a full recalculation (amount-related data changed)',
+        badge: 'Needs refresh',
+    };
+};
+
+const syncLedgerBalanceStaleUi = () => {
     const btn = document.getElementById('fn-ledger-recalc-btn');
     const badge = document.getElementById('fn-ledger-recalc-stale-badge');
     const status = document.getElementById('fn-ledger-recalc-status');
+    const running = status && !status.hidden;
+    const need = ledgerNeedsRecalcAction();
     if (btn) {
-        btn.classList.toggle('ledger-recalc-btn--stale', meta.needsRecalc);
-        btn.title = meta.needsRecalc
-            ? (meta.dirtyFromDate
-                ? `Calculated balances need refresh from ${meta.dirtyFromDate} onward`
-                : 'Calculated balances need a full recalculation')
-            : 'Refresh stored Calculated balances (and statement balances for Passbook compare)';
+        // Keep visible while a recalc run is in progress.
+        btn.hidden = !(need.show || running);
+        btn.classList.toggle('ledger-recalc-btn--stale', need.stale);
+        btn.title = need.title || 'Refresh stored Calculated balances';
     }
     if (badge) {
-        badge.hidden = !meta.needsRecalc;
-        badge.textContent = meta.needsRecalc ? 'Needs refresh' : '';
+        badge.hidden = !need.show || !need.badge;
+        badge.textContent = need.badge || '';
     }
-    if (status && meta.needsRecalc && status.hidden) {
-        // leave status alone while a run is in progress (hidden=false with message)
-    }
+};
+
+const syncLedgerClearFiltersUi = () => {
+    const btn = document.getElementById('fn-ledger-clear-filters');
+    if (!btn) return;
+    btn.hidden = !ledgerHasActiveFilters();
+};
+
+const initLedgerClearFilters = () => {
+    const btn = document.getElementById('fn-ledger-clear-filters');
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+        clearAllLedgerFilters();
+        renderCashLedger();
+    });
 };
 
 const initLedgerRecalculate = () => {
@@ -2681,6 +2823,7 @@ const initLedgerTableControls = () => {
     bindFinanceNewWindow('renderCashLedger', renderCashLedger);
     initLedgerSearch();
     initLedgerCategoryFilter();
+    initLedgerClearFilters();
     void import('./ledgerExport.js').then((m) => m.initLedgerExport());
     initLedgerOpeningBalance();
     initLedgerRecalculate();

@@ -15,14 +15,16 @@ import {
 import { buildCategoryOptionGroups } from '../classifyOptions.js';
 import { isTransactionReconciled, getBankOpeningConfig } from './bankStatementQueries.js';
 import { withButtonBusy } from '../buttonBusy.js';
-import { setLedgerActivity, ledgerHasActiveFilters, sortLedgerTxnsChronological } from './ledgerFilter.js';
+import { setLedgerActivity, ledgerHasActiveFilters, getLedgerSort } from './ledgerFilter.js';
+import { pullState } from './pull.js';
+import { renderExcelColHeader, wireLedgerExcelColFilters } from './ledgerColFilter.js';
 import {
     getActiveLedgerTxns,
     getExcludedLedgerTxns,
     patchAffectsLedgerBalance,
     getLedgerBalanceMeta,
-    storedLedgerRunningById,
-    annotateLedgerRunningBalancesInOrder,
+    ledgerCalculatedBalanceById,
+    PASSBOOK_CALC_EPS,
 } from './ledgerBalance.js';
 import {
     wireClassifyCombobox,
@@ -413,9 +415,6 @@ const isBankNarrationVendor = (vendor, description) => {
     return dn.startsWith(vn) || vn.startsWith(dn.slice(0, Math.min(vn.length + 4, dn.length)));
 };
 
-const renderSortHeader = (label, field, extraClass = '') =>
-    `<button type="button" class="ledger-sort-btn ${extraClass}" data-sort="${field}" aria-sort="none">${label} <span class="ledger-sort-indicator"></span></button>`;
-
 /** Category / vendor — display + pencil, edit with save/cancel (same as Bills & receipts). */
 const renderLedgerClassifyDisplay = (t, isIncome) => {
     const catKey = t.cat ? (normalizeCategoryKey(t.cat) || t.cat) : '';
@@ -461,18 +460,49 @@ const renderLedgerClassifyCell = (t, isIncome) => `
     </div>
   </div>`;
 
+/** Ledger default is date desc — same-day rows are reversed vs passbook order. */
+const isLedgerDateSortDescending = () => {
+    const { field, dir } = getLedgerSort();
+    return field === 'date' && dir === 'desc';
+};
+
 const renderLedgerOrderButtons = (txnId, orderMeta) => {
     const o = orderMeta.get(txnId);
     if (!o || o.count <= 1) {
         return '<td class="bank-recon-table__cell bank-recon-table__cell--order"></td>';
     }
-    const upDisabled = o.index === 0 ? ' disabled' : '';
-    const downDisabled = o.index === o.count - 1 ? ' disabled' : '';
+    const pos = o.index + 1;
+    const inverted = isLedgerDateSortDescending();
+    const canEarlier = o.index > 0;
+    const canLater = o.index < o.count - 1;
+    const dateLabel = o.date ? formatDisplayDate(o.date) : 'this date';
+    const tableHint = inverted ? ' — toward the row below in this table' : '';
+    const earlierTitle = !canEarlier
+        ? `Already first in passbook order on ${dateLabel} (1 of ${o.count})`
+        : `Move earlier in passbook order (${pos} of ${o.count})${tableHint}`;
+    const laterTitle = !canLater
+        ? `Already last in passbook order on ${dateLabel} (${o.count} of ${o.count}) — use the other arrow to move earlier`
+        : `Move later in passbook order (${pos} of ${o.count})`;
+    const earlierIcon = inverted ? 'fa-chevron-down' : 'fa-chevron-up';
+    const laterIcon = inverted ? 'fa-chevron-up' : 'fa-chevron-down';
+    const earlierBlocked = !canEarlier ? ' ledger-move-btn--blocked' : '';
+    const laterBlocked = !canLater ? ' ledger-move-btn--blocked' : '';
+    const earlierAria = !canEarlier ? ' aria-disabled="true"' : '';
+    const laterAria = !canLater ? ' aria-disabled="true"' : '';
+    const maxStep = Math.max(1, o.count - 1);
+    const stepInput = `<input type="number" class="bank-recon-move-step expense-combobox ledger-move-step" min="1" max="${maxStep}" value="1" title="Passbook positions to move on this date" aria-label="Passbook positions to move" />`;
+    const posTitle = inverted
+        ? `Passbook ${pos} of ${o.count} on ${dateLabel}. Ledger is newest-first — ↓ moves earlier (toward rows below).`
+        : `Passbook ${pos} of ${o.count} on ${dateLabel}.`;
+    const earlierBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-earlier${earlierBlocked}" data-txn="${txnId}" title="${esc(earlierTitle)}" aria-label="Move earlier in passbook order"${earlierAria}><i class="fa-solid ${earlierIcon}" aria-hidden="true"></i></button>`;
+    const laterBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-later${laterBlocked}" data-txn="${txnId}" title="${esc(laterTitle)}" aria-label="Move later in passbook order"${laterAria}><i class="fa-solid ${laterIcon}" aria-hidden="true"></i></button>`;
+    const controls = inverted
+        ? `${laterBtn}${stepInput}${earlierBtn}`
+        : `${earlierBtn}${stepInput}${laterBtn}`;
     return `<td class="bank-recon-table__cell bank-recon-table__cell--order">
-      <div class="bank-recon-order-btns">
-        <button type="button" class="btn btn-outline btn--small btn--icon ledger-move-up" data-txn="${txnId}" title="Move up (same day)" aria-label="Move up"${upDisabled}><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
-        <input type="number" class="bank-recon-move-step expense-combobox ledger-move-step" min="1" max="${Math.max(1, o.count - 1)}" value="1" title="Number of positions to move" aria-label="Rows to move" />
-        <button type="button" class="btn btn-outline btn--small btn--icon ledger-move-down" data-txn="${txnId}" title="Move down (same day)" aria-label="Move down"${downDisabled}><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+      <div class="bank-recon-order-btns" data-order-index="${o.index}" data-order-count="${o.count}" data-order-date="${esc(o.date || '')}">
+        <span class="ledger-order-pos" title="${esc(posTitle)}">${pos}/${o.count}</span>
+        ${controls}
       </div>
     </td>`;
 };
@@ -548,20 +578,17 @@ const renderPassbookBalanceCell = ({
 
     const passbookLabel = passbookNum != null ? formatMoney(passbookNum) : '—';
     const calcShown = showCalculated && ledgerCalcNum != null;
-    const passbookMismatch = balancesTrusted
-        && passbookNum != null
+    const passbookMismatch = passbookNum != null
         && ledgerCalcNum != null
-        && Math.abs(ledgerCalcNum - passbookNum) > 0.01;
+        && Math.abs(ledgerCalcNum - passbookNum) > PASSBOOK_CALC_EPS;
     const mismatchClass = passbookMismatch ? ' bank-recon-balance--mismatch' : '';
-    const calcTitle = !showCalculated
-        ? 'Calculated balance hidden while ledger filters are active'
-        : (!balancesTrusted
-            ? 'Ledger calculated may be stale — click Recalculate'
-            : (calcShown
-                ? (passbookMismatch
-                    ? `Ledger calculated ${formatMoney(ledgerCalcNum)} ≠ passbook ${formatMoney(passbookNum)}`
-                    : 'Passbook balance; calculated running balance in parentheses')
-                : (needsOpening ? 'Set opening balance to calculate' : 'Passbook balance from matched statement line')));
+    const calcTitle = !calcShown
+        ? (needsOpening ? 'Set opening balance to calculate' : 'Passbook balance from matched statement line')
+        : (passbookMismatch
+            ? `Ledger calculated ${formatMoney(ledgerCalcNum)} ≠ passbook ${formatMoney(passbookNum)}`
+            : (!balancesTrusted
+                ? 'Passbook + calculated (stored/full-ledger; may need Recalculate)'
+                : 'Passbook balance; calculated running balance in parentheses'));
     const calcHtml = calcShown
         ? `<span class="ledger-passbook-calc${balancesTrusted ? '' : ' ledger-passbook-calc--stale'}" title="Ledger calculated running balance">(${esc(formatMoney(ledgerCalcNum))})</span>`
         : '';
@@ -623,10 +650,9 @@ const renderLedgerRow = (raw, {
         ? runningBalances.get(t.id)
         : null;
     const passbookNum = stmt.passbookBalance;
-    const passbookMismatch = balancesTrusted
-        && passbookNum != null
+    const passbookMismatch = passbookNum != null
         && ledgerCalcNum != null
-        && Math.abs(ledgerCalcNum - passbookNum) > 0.01;
+        && Math.abs(ledgerCalcNum - passbookNum) > PASSBOOK_CALC_EPS;
     const passbookCell = renderPassbookBalanceCell({
         visibleColumns,
         passbookNum,
@@ -845,18 +871,9 @@ const saveLedgerClassifyRow = async (row) => {
     }
 };
 
-/** Running balances for the Passbook / calculated cell — stored when trusted, else client walk. */
-function ledgerRunningBalancesForDisplay(showCalculated) {
-    if (!showCalculated) return new Map();
-    const chron = sortLedgerTxnsChronological(getActiveLedgerTxns());
-    const clientById = annotateLedgerRunningBalancesInOrder(chron).byId;
-    const storedById = storedLedgerRunningById();
-    const balanceMeta = getLedgerBalanceMeta();
-    if (balanceMeta.needsRecalc || storedById.size === 0) return clientById;
-    // Prefer persisted values; fill any gaps from the client walk.
-    const merged = new Map(clientById);
-    for (const [id, n] of storedById) merged.set(id, n);
-    return merged;
+/** Running balances for the Passbook / calculated cell — same map as discrepancy filter. */
+function ledgerRunningBalancesForDisplay() {
+    return ledgerCalculatedBalanceById();
 }
 
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
@@ -864,26 +881,24 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
     if (!list) return;
 
     const visibleColumns = { ...ledgerVisibleColumns };
-    // Running balance: prefer persisted running_balance_after; fall back to client walk.
-    // Blank under filters so filtered subsets do not show a misleading partial roll-forward.
-    const showCalculated = !ledgerHasActiveFilters();
+    const filtersActive = ledgerHasActiveFilters();
     const balanceMeta = getLedgerBalanceMeta();
-    const balancesTrusted = showCalculated && !balanceMeta.needsRecalc;
-    const runningBalances = ledgerRunningBalancesForDisplay(showCalculated);
+    const balancesTrusted = !filtersActive && !balanceMeta.needsRecalc;
+    // Always the full-ledger calculated figure (same as “Has discrepancy” filter).
+    const runningBalances = ledgerRunningBalancesForDisplay();
+    const showCalculated = true;
     const opening = getBankOpeningConfig();
     const statementCtx = buildLedgerStatementContext();
     const orderMeta = buildSameDayLedgerOrderMeta(statementCtx);
-    const passbookHeaderHint = !showCalculated
-        ? ' title="Passbook balance (calculated hidden while filters are active)"'
-        : (balanceMeta.needsRecalc
-            ? ' title="Passbook / calculated — ledger calculated may be stale; click Recalculate"'
-            : ' title="Passbook balance; ledger calculated running balance in parentheses"');
+    const passbookHeaderHint = balanceMeta.needsRecalc
+        ? ' title="Passbook (bank) vs calculated (ledger walk). Calculated may be stale — Recalculate to persist."'
+        : ' title="Passbook = bank statement balance; (calc) = ledger running balance from opening + movements"';
     const rowOpts = {
         formatTxnDetail,
         getAllAttachmentPaths,
         visibleColumns,
         runningBalances,
-        needsOpening: showCalculated && opening.amount == null,
+        needsOpening: opening.amount == null,
         statementCtx,
         orderMeta,
         showCalculated,
@@ -917,14 +932,14 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
                   <input type="checkbox" id="ledger-header-select-all" aria-label="Select all" />
                 </th>
                 ${visibleColumns.ocrRow ? '<th class="bank-recon-table__th--num bank-recon-table__th--ocr" title="OCR / statement row sequence">OCR #</th>' : ''}
-                <th class="bank-recon-table__th--date">${renderSortHeader('Date', 'date')}</th>
-                <th class="bank-recon-table__th--desc">Description</th>
-                <th class="bank-recon-table__th--num">${renderSortHeader('Amount', 'amount', 'ledger-sort-btn--num')}</th>
-                ${visibleColumns.passbookBalance ? `<th class="bank-recon-table__th--num"${passbookHeaderHint}>${renderSortHeader('Passbook / calc', 'passbook', 'ledger-sort-btn--num')}</th>` : ''}
-                <th class="bank-recon-table__th--type">Type</th>
-                <th class="bank-recon-table__th--classify">${renderSortHeader('Category / vendor', 'cat')}</th>
-                ${visibleColumns.wallet ? `<th class="bank-recon-table__th--ledger">${renderSortHeader('Ledger', 'wallet')}</th>` : ''}
-                <th class="bank-recon-table__th--bills" title="Bills & receipts linked to this ledger row">Bills</th>
+                <th class="bank-recon-table__th--date">${renderExcelColHeader('Date', { filterKey: 'date', sortField: 'date' })}</th>
+                <th class="bank-recon-table__th--desc">${renderExcelColHeader('Description', { filterKey: 'description', sortField: 'description' })}</th>
+                <th class="bank-recon-table__th--num">${renderExcelColHeader('Amount', { filterKey: 'amount', sortField: 'amount', align: 'right' })}</th>
+                ${visibleColumns.passbookBalance ? `<th class="bank-recon-table__th--num"${passbookHeaderHint}>${renderExcelColHeader('Passbook / calc', { filterKey: 'passbook', sortField: 'passbook', align: 'right' })}</th>` : ''}
+                <th class="bank-recon-table__th--type">${renderExcelColHeader('Type', { filterKey: 'type', sortField: 'type' })}</th>
+                <th class="bank-recon-table__th--classify">${renderExcelColHeader('Category / vendor', { filterKey: 'cat', sortField: 'cat' })}</th>
+                ${visibleColumns.wallet ? `<th class="bank-recon-table__th--ledger">${renderExcelColHeader('Ledger', { filterKey: 'wallet', sortField: 'wallet' })}</th>` : ''}
+                <th class="bank-recon-table__th--bills" title="Bills & receipts linked to this ledger row">${renderExcelColHeader('Bills', { filterKey: 'bills', sortField: 'bills' })}</th>
                 <th class="bank-recon-table__th--actions"></th>
               </tr>
             </thead>
@@ -1263,13 +1278,15 @@ const applyBulkToSelected = () => {
     );
 };
 
-const LEDGER_EVENTS_VERSION = 'ledger-events-v8';
+const LEDGER_EVENTS_VERSION = 'ledger-events-v10';
 
 export const wireLedgerTableEvents = () => {
     syncLedgerBulkBar();
 
     const list = document.getElementById('fn-cash-ledger-items');
     if (!list) return;
+
+    wireLedgerExcelColFilters(list);
 
     // Rebind when handler version changes (avoids stale HMR listeners with no ↑ ↓ handlers).
     if (list.dataset.editWired === LEDGER_EVENTS_VERSION) return;
@@ -1320,21 +1337,45 @@ export const wireLedgerTableEvents = () => {
             return;
         }
 
-        const moveBtn = e.target.closest('.ledger-move-up, .ledger-move-down');
+        const moveBtn = e.target.closest('.ledger-move-earlier, .ledger-move-later');
         if (moveBtn) {
             e.preventDefault();
             e.stopPropagation();
-            if (moveBtn.disabled || moveBtn.dataset.busy === '1') return;
+            if (moveBtn.dataset.busy === '1') return;
+            const wrap = moveBtn.closest('.bank-recon-order-btns');
+            const idx = parseInt(wrap?.dataset.orderIndex, 10);
+            const count = parseInt(wrap?.dataset.orderCount, 10);
+            const orderDate = wrap?.dataset.orderDate || '';
+            const blocked = moveBtn.getAttribute('aria-disabled') === 'true';
+            const goingEarlier = moveBtn.classList.contains('ledger-move-earlier');
+            if (blocked) {
+                const pos = Number.isFinite(idx) ? idx + 1 : '?';
+                const total = Number.isFinite(count) ? count : '?';
+                const when = orderDate ? formatDisplayDate(orderDate) : 'this date';
+                const hint = goingEarlier
+                    ? `Already first in passbook order on ${when} (1 of ${total}).`
+                    : `Already last in passbook order on ${when} (${total} of ${total}). Use ↓ (earlier) to move toward rows below.`;
+                setLedgerActivity(hint, { flashMs: 4500 });
+                return;
+            }
             const txnId = moveBtn.dataset.txn;
             if (!txnId) return;
-            const direction = moveBtn.classList.contains('ledger-move-up') ? -1 : 1;
-            const stepInput = moveBtn.closest('.bank-recon-order-btns')?.querySelector('.ledger-move-step');
-            const steps = Math.max(1, parseInt(stepInput?.value, 10) || 1);
+            const direction = goingEarlier ? -1 : 1;
+            const stepInput = wrap?.querySelector('.ledger-move-step');
+            let steps = Math.max(1, parseInt(stepInput?.value, 10) || 1);
+            if (Number.isFinite(idx) && Number.isFinite(count)) {
+                const maxSteps = direction < 0 ? idx : (count - 1 - idx);
+                if (maxSteps <= 0) {
+                    setLedgerActivity('No room to move on this date.', { flashMs: 3500 });
+                    return;
+                }
+                if (steps > maxSteps) steps = maxSteps;
+            }
             try {
                 await withButtonBusy(moveBtn, '…', async () => {
                     await moveLedgerTxnInDay(txnId, direction, { steps, recalculate: true });
-                    window.processFinances?.();
-                    window.renderCashLedger?.();
+                    await pullState({ packs: ['ledger', 'bank', 'boot'] });
+                    refreshAfterLedgerSave();
                 });
             } catch (err) {
                 console.error('Ledger row reorder failed', err);

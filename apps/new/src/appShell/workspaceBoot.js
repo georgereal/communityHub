@@ -88,5 +88,8 @@ export function applyMongoBoot(boot, ctx) {
     if (boot.moduleAccess) portalState.moduleAccess = boot.moduleAccess;
     if (boot.pageAccess) portalState.pageAccess = boot.pageAccess;
     setActiveApartmentIdForApi(ctx.apartmentId);
+    void import('../activityAudit.js')
+        .then((m) => m.installActivityOutboxFlushers())
+        .catch(() => {});
     return ctx;
 }

@@ -1,23 +1,28 @@
 /**
  * Top-level Vercel function for Integrations REST (Mongo).
- * Domain: external provider credentials + Evolyx passbook OCR jobs.
- * Not under /api/finance — integrations are cross-cutting Admin config.
+ * Domain: external provider credentials + Evolyx passbook OCR + ledger spreadsheet sync.
  *
  * Rewrites in vercel.json send /api/integrations/* here.
  *
  * Resources:
- *   GET  /api/integrations/connections?apartment_id=
- *   POST /api/integrations/connections
- *   GET  /api/integrations/passbook/jobs?apartment_id=
- *   GET  /api/integrations/passbook/jobs/:id?apartment_id=
- *   POST /api/integrations/passbook/jobs          { apartment_id, files, requestId }
- *   POST /api/integrations/passbook/jobs/:id/imported
+ *   GET/POST /api/integrations/connections
+ *   GET/POST /api/integrations/passbook/jobs…
+ *   GET      /api/integrations/spreadsheet/boot
+ *   GET/POST /api/integrations/spreadsheet/settings
+ *   GET/POST /api/integrations/spreadsheet/oauth-apps
+ *   GET/POST/DELETE /api/integrations/spreadsheet/oauth-connections
+ *   GET      /api/integrations/spreadsheet/runs
  *
  * Public Evolyx callback remains POST /api/passbook-webhook (Mongo-backed).
  */
 import { handle as connections } from './integrationsMongo/routes/connections.js';
 import { handle as passbookJobs } from './integrationsMongo/routes/passbook/jobs.js';
 import { handle as passbookJobImported } from './integrationsMongo/routes/passbook/jobs/[id]/imported.js';
+import { handle as spreadsheetBoot } from './integrationsMongo/routes/spreadsheet/boot.js';
+import { handle as spreadsheetSettings } from './integrationsMongo/routes/spreadsheet/settings.js';
+import { handle as spreadsheetOAuthApps } from './integrationsMongo/routes/spreadsheet/oauth-apps.js';
+import { handle as spreadsheetOAuthConnections } from './integrationsMongo/routes/spreadsheet/oauth-connections.js';
+import { handle as spreadsheetRuns } from './integrationsMongo/routes/spreadsheet/runs.js';
 
 function pathPartsFromReq(req) {
     const rewritten = req.query?.__integrationsPath;
@@ -47,6 +52,13 @@ function resolveIntegrationsRoute(parts) {
         return { handler: passbookJobs, id: c };
     }
     if (a === 'passbook' && b === 'jobs' && !c) return { handler: passbookJobs };
+    if (a === 'spreadsheet' && b === 'boot' && !c) return { handler: spreadsheetBoot };
+    if (a === 'spreadsheet' && b === 'settings' && !c) return { handler: spreadsheetSettings };
+    if (a === 'spreadsheet' && b === 'oauth-apps' && !c) return { handler: spreadsheetOAuthApps };
+    if (a === 'spreadsheet' && b === 'oauth-connections' && !c) {
+        return { handler: spreadsheetOAuthConnections };
+    }
+    if (a === 'spreadsheet' && b === 'runs' && !c) return { handler: spreadsheetRuns };
     return null;
 }
 
