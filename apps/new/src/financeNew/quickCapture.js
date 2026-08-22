@@ -3,7 +3,7 @@
  * Reuses saveFinanceDocument + R2 attachment upload; in-memory draft until Save.
  */
 import { portalState } from '../store.js';
-import { can } from '../capabilities.js';
+import { canEnterFinanceDocs } from './financePermissions.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { categoryDisplayLabel } from '../expenseCategories.js';
 import { buildCategoryOptions, buildSubCategoryOptions } from '../classifyOptions.js';
@@ -84,7 +84,7 @@ function kindLabel() {
 }
 
 function canEnter() {
-    return can('accounts.bills_enter');
+    return canEnterFinanceDocs();
 }
 
 function isDirty() {

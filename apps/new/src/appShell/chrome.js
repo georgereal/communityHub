@@ -5,6 +5,8 @@
 import { clearFinanceCtx, readFinanceCtx } from '../financeApp/session.js';
 import { clearMpaCtx, readMpaCtx } from './mpaSession.js';
 import { goToLogin } from '../authRedirect.js';
+import { signOutAuth } from '../authClient.js';
+import { v2KeyToLabel } from '../rbac.js';
 import { restoreMpaNavPref, wireHoverSidebar, syncHamburgerToHoverNav, applyMpaNavCollapsed } from './navPref.js';
 import { paintUiModeButtons, wireUiModeToggle, isNewUi } from '../uiMode.js';
 
@@ -51,7 +53,8 @@ function fillApartmentSelects(ctx) {
 function fillUserChrome(ctx) {
     const name = ctx.userName || ctx.userEmail || 'User';
     const email = ctx.userEmail || '';
-    const role = 'Member';
+    const roleKey = ctx.effectiveRoleKey || '';
+    const roleLabel = roleKey ? (v2KeyToLabel(roleKey) || roleKey) : 'Member';
     const initials = initialsFrom(name, email);
 
     const setText = (id, val) => {
@@ -59,13 +62,17 @@ function fillUserChrome(ctx) {
         if (el) el.textContent = val;
     };
     setText('sidebar-user-name', name);
-    setText('sidebar-user-role', role);
+    setText('sidebar-user-role', roleLabel);
     setText('topbar-user-name', name);
-    setText('topbar-user-role', email || role);
+    setText('topbar-user-role', roleLabel);
     setText('sidebar-user-initials', initials);
     setText('topbar-user-initials', initials);
     const avatar = document.getElementById('sidebar-user-initials');
-    if (avatar) avatar.title = name;
+    if (avatar) avatar.title = email ? `${name} · ${email}` : name;
+    const topAvatar = document.getElementById('topbar-user-initials');
+    if (topAvatar) topAvatar.title = email ? `${name} · ${email}` : name;
+    const userBtn = document.getElementById('topbar-user-btn');
+    if (userBtn && email) userBtn.title = `${roleLabel} · ${email}`;
 }
 
 async function signOut() {
@@ -75,9 +82,7 @@ async function signOut() {
     try {
         clearMpaCtx();
     } catch { /* ignore */ }
-    try {
-        await fetch('/api/auth-session', { method: 'DELETE', credentials: 'include' });
-    } catch { /* ignore */ }
+    await signOutAuth();
     goToLogin('Signed out.');
 }
 

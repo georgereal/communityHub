@@ -1,34 +1,34 @@
 <div class="ledger-page-header__actions" id="fn-accounts-header-actions">
             <div class="accounts-header-actions-group" data-accounts-actions="ledger">
-              <button class="btn btn-primary" type="button" id="fn-btn-ledger-add-expense" title="Add ledger expense">
+              <button class="btn btn-primary" type="button" id="fn-btn-ledger-add-expense" data-cap="accounts.edit" title="Add ledger expense">
                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Add ledger expense</span>
                 <span class="fdoc-action-short">Expense</span>
               </button>
-              <button class="btn btn-outline" type="button" id="fn-btn-ledger-add-income" title="Record ledger income">
+              <button class="btn btn-outline" type="button" id="fn-btn-ledger-add-income" data-cap="accounts.edit" title="Record ledger income">
                 <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Record ledger income</span>
                 <span class="fdoc-action-short">Income</span>
               </button>
             </div>
             <div class="accounts-header-actions-group" data-accounts-actions="bills" hidden>
-              <button class="btn btn-primary" type="button" id="fn-btn-quick-capture" title="Quick capture">
+              <button class="btn btn-primary" type="button" id="fn-btn-quick-capture" data-cap="accounts.bills_enter" title="Quick capture">
                 <i class="fa-solid fa-camera" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Quick capture</span>
                 <span class="fdoc-action-short">Capture</span>
               </button>
-              <button class="btn btn-outline" type="button" id="fn-btn-bill-add-expense" title="Add bill">
+              <button class="btn btn-outline" type="button" id="fn-btn-bill-add-expense" data-cap="accounts.docs_manage" title="Add bill">
                 <i class="fa-solid fa-plus" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Add bill</span>
                 <span class="fdoc-action-short">Bill</span>
               </button>
-              <button class="btn btn-outline" type="button" id="fn-btn-bill-add-income" title="Add receipt">
+              <button class="btn btn-outline" type="button" id="fn-btn-bill-add-income" data-cap="accounts.docs_manage" title="Add receipt">
                 <i class="fa-solid fa-arrow-down-to-bracket" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Add receipt</span>
                 <span class="fdoc-action-short">Receipt</span>
               </button>
             </div>
-            <button id="fn-btn-accounts-bank-sync" class="btn btn-outline btn--icon-label" type="button" onclick="window.openBankSnapshot()" title="Bank Sync">
+            <button id="fn-btn-accounts-bank-sync" class="btn btn-outline btn--icon-label" type="button" data-cap="accounts.bank_sync" onclick="window.openBankSnapshot()" title="Bank Sync">
               <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
               <span class="fdoc-action-full">Bank Sync</span>
               <span class="fdoc-action-short">Sync</span>

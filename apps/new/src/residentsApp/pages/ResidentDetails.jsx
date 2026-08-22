@@ -43,8 +43,8 @@ import { useNavigate, useLocation, useParams, useSearchParams } from 'react-rout
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { navigateBackToList, navigateToDetail } from '../utils/listNavigation.js';
 import ResidentFormDialog from '../components/ResidentFormDialog.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import {
-    canEditResidents,
     deleteFlat,
     deleteResident,
     fetchResidentsBundle,
@@ -83,7 +83,6 @@ export default function ResidentDetails() {
     const queryClient = useQueryClient();
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-    const canEdit = canEditResidents();
 
     const tab = searchParams.get('tab') || 'overview';
     const setTab = (next) => {
@@ -230,35 +229,40 @@ export default function ResidentDetails() {
                             </Stack>
                         </Box>
                     </Stack>
-                    {canEdit && isMobile ? (
-                        <>
-                            <IconButton
-                                aria-label="Resident actions"
-                                onClick={(e) => setActionsEl(e.currentTarget)}
-                                sx={{ alignSelf: 'flex-start' }}
-                            >
-                                <MoreVertIcon />
-                            </IconButton>
-                            <Menu anchorEl={actionsEl} open={Boolean(actionsEl)} onClose={() => setActionsEl(null)}>
-                                <MenuItem onClick={() => { setActionsEl(null); setEditOpen(true); }}>Edit</MenuItem>
-                                <MenuItem onClick={() => { setActionsEl(null); setDeleteOpen(true); }}>Delete</MenuItem>
-                                <MenuItem onClick={() => { setActionsEl(null); setDeleteFlatOpen(true); }}>Delete flat…</MenuItem>
-                            </Menu>
-                        </>
-                    ) : null}
-                    {canEdit && !isMobile ? (
-                        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setEditOpen(true)}>
-                                Edit
-                            </Button>
-                            <Button color="error" variant="outlined" startIcon={<DeleteIcon />} onClick={() => setDeleteOpen(true)}>
-                                Delete
-                            </Button>
-                            <Button color="error" variant="text" onClick={() => setDeleteFlatOpen(true)}>
-                                Delete flat…
-                            </Button>
-                        </Stack>
-                    ) : null}
+                    <CapGate cap="residents.update">
+                        {isMobile ? (
+                            <>
+                                <IconButton
+                                    aria-label="Resident actions"
+                                    onClick={(e) => setActionsEl(e.currentTarget)}
+                                    sx={{ alignSelf: 'flex-start' }}
+                                >
+                                    <MoreVertIcon />
+                                </IconButton>
+                                <Menu anchorEl={actionsEl} open={Boolean(actionsEl)} onClose={() => setActionsEl(null)}>
+                                    <MenuItem onClick={() => { setActionsEl(null); setEditOpen(true); }}>Edit</MenuItem>
+                                    <CapGate cap="residents.delete">
+                                        <MenuItem onClick={() => { setActionsEl(null); setDeleteOpen(true); }}>Delete</MenuItem>
+                                        <MenuItem onClick={() => { setActionsEl(null); setDeleteFlatOpen(true); }}>Delete flat…</MenuItem>
+                                    </CapGate>
+                                </Menu>
+                            </>
+                        ) : (
+                            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                                <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setEditOpen(true)}>
+                                    Edit
+                                </Button>
+                                <CapGate cap="residents.delete">
+                                    <Button color="error" variant="outlined" startIcon={<DeleteIcon />} onClick={() => setDeleteOpen(true)}>
+                                        Delete
+                                    </Button>
+                                    <Button color="error" variant="text" onClick={() => setDeleteFlatOpen(true)}>
+                                        Delete flat…
+                                    </Button>
+                                </CapGate>
+                            </Stack>
+                        )}
+                    </CapGate>
                 </Stack>
             </Paper>
 

@@ -22,6 +22,7 @@ import {
 import { ACCOUNTS_SUBVIEW_ROUTES, applyNavPermissions, getFinanceNewAccountsPages } from '../navigation.js';
 import { isApartmentAdminUser } from '../rbac.js';
 import { can } from '../capabilities.js';
+import { refreshCapabilityGates } from '../capUi.js';
 import { filesToBase64Payload, postFnMutation } from './mongoMutations.js';
 import { getLedgerBankBalance, getActiveLedgerTxns, getLedgerBalanceMeta, recalculateLedgerBalances, ledgerCalculatedBalanceById } from './ledgerBalance.js';
 import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
@@ -2368,6 +2369,11 @@ export const syncAccountsHeaderActions = (sv) => {
     const bankSync = document.getElementById('fn-btn-accounts-bank-sync')
         || document.querySelector('#accounts-header-actions [onclick*="openBankSnapshot"]');
     if (bankSync) bankSync.hidden = !ledger || standalone || !canUseBankSync;
+
+    refreshCapabilityGates(document.getElementById('fn-accounts-header-actions') || document);
+    if (bills || ledger) {
+        refreshCapabilityGates(document.getElementById('fn-subview-finance-docs') || document.getElementById('app-shell-page') || document);
+    }
 
     // Activity Log is Administration — hide the Finance tab strip there.
     const tabs = document.querySelector('#view-finance-new-accounts .accounts-subview-tabs');

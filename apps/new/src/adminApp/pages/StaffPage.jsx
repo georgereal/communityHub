@@ -8,8 +8,9 @@ import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, Refresh as Refr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader.jsx';
 import SummaryStrip from '../components/SummaryStrip.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import ExcelColHeader, { sortAndFilterRows } from '../../listUi/ExcelColHeader.jsx';
-import { canEditSetup, deleteStaff, refreshAdminState, saveStaff, STAFF_ROLES, staffMembers } from '../api.js';
+import { deleteStaff, refreshAdminState, saveStaff, STAFF_ROLES, staffMembers } from '../api.js';
 
 const COLS = [
     { key: 'name', label: 'Name', canSort: true, canFilter: true },
@@ -21,7 +22,6 @@ const COLS = [
 
 export default function StaffPage() {
     const qc = useQueryClient();
-    const canEdit = canEditSetup();
     const [error, setError] = useState('');
     const [form, setForm] = useState(null);
     const [statusFilter, setStatusFilter] = useState('all');
@@ -65,7 +65,9 @@ export default function StaffPage() {
                 actions={(
                     <>
                         <Tooltip title="Refresh"><IconButton size="small" onClick={invalidate}>{q.isFetching ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}</IconButton></Tooltip>
-                        {canEdit ? <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setForm({ full_name: '', role_title: STAFF_ROLES[0], phone: '', email: '', notes: '', active: true })}>Add</Button> : null}
+                        <CapGate cap="admin.staff.edit">
+                            <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setForm({ full_name: '', role_title: STAFF_ROLES[0], phone: '', email: '', notes: '', active: true })}>Add</Button>
+                        </CapGate>
                     </>
                 )}
             />
@@ -93,15 +95,15 @@ export default function StaffPage() {
                                     <TableCell>{s.email || '—'}</TableCell>
                                     <TableCell><Chip size="small" label={s.active !== false ? 'Active' : 'Inactive'} color={s.active !== false ? 'success' : 'default'} /></TableCell>
                                     <TableCell align="right">
-                                        {canEdit ? (
-                                            <>
-                                                <IconButton size="small" onClick={() => setForm({ ...s, active: s.active !== false })}><EditIcon fontSize="small" /></IconButton>
-                                                <IconButton size="small" color="error" onClick={async () => {
-                                                    if (!window.confirm('Delete this staff record?')) return;
-                                                    try { await deleteStaff(s.id); invalidate(); } catch (err) { setError(err.message); }
-                                                }}><DeleteIcon fontSize="small" /></IconButton>
-                                            </>
-                                        ) : null}
+                                        <CapGate cap="admin.staff.edit">
+                                            <IconButton size="small" onClick={() => setForm({ ...s, active: s.active !== false })}><EditIcon fontSize="small" /></IconButton>
+                                        </CapGate>
+                                        <CapGate cap="admin.staff.edit">
+                                            <IconButton size="small" color="error" onClick={async () => {
+                                                if (!window.confirm('Delete this staff record?')) return;
+                                                try { await deleteStaff(s.id); invalidate(); } catch (err) { setError(err.message); }
+                                            }}><DeleteIcon fontSize="small" /></IconButton>
+                                        </CapGate>
                                     </TableCell>
                                 </TableRow>
                             )) : <TableRow><TableCell colSpan={6}><Typography color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No staff records yet.</Typography></TableCell></TableRow>}
@@ -112,22 +114,26 @@ export default function StaffPage() {
             <Dialog open={Boolean(form)} onClose={() => setForm(null)} fullWidth maxWidth="sm">
                 <DialogTitle>{form?.id ? 'Edit staff' : 'Add staff'}</DialogTitle>
                 <DialogContent>
-                    <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
-                        <TextField label="Name" size="small" value={form?.full_name || ''} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-                        <TextField select label="Role" size="small" value={form?.role_title || STAFF_ROLES[0]} onChange={(e) => setForm({ ...form, role_title: e.target.value })}>
-                            {STAFF_ROLES.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
-                        </TextField>
-                        <TextField label="Phone" size="small" value={form?.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-                        <TextField label="Email" size="small" value={form?.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                        <TextField label="Notes" size="small" multiline minRows={2} value={form?.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-                        <FormControlLabel control={<Switch checked={form?.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} />} label="Active" />
-                    </Box>
+                    <CapGate cap="admin.staff.edit" mode="disable">
+                        <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
+                            <TextField label="Name" size="small" value={form?.full_name || ''} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+                            <TextField select label="Role" size="small" value={form?.role_title || STAFF_ROLES[0]} onChange={(e) => setForm({ ...form, role_title: e.target.value })}>
+                                {STAFF_ROLES.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+                            </TextField>
+                            <TextField label="Phone" size="small" value={form?.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                            <TextField label="Email" size="small" value={form?.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                            <TextField label="Notes" size="small" multiline minRows={2} value={form?.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                            <FormControlLabel control={<Switch checked={form?.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} />} label="Active" />
+                        </Box>
+                    </CapGate>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setForm(null)}>Cancel</Button>
-                    <Button variant="contained" onClick={async () => {
-                        try { await saveStaff(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
-                    }}>Save</Button>
+                    <CapGate cap="admin.staff.edit">
+                        <Button variant="contained" onClick={async () => {
+                            try { await saveStaff(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
+                        }}>Save</Button>
+                    </CapGate>
                 </DialogActions>
             </Dialog>
         </Box>

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, TextField, Typography } from '@mui/material';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
 import {
     annotateUnitVehicles,
     poolSlotLabel,
@@ -9,7 +11,8 @@ import {
 } from './api.js';
 import { effectiveAllocationType } from '../../allocation.js';
 
-function Tag({ vehicle, onEdit, onRemove, canEdit }) {
+function Tag({ vehicle, onEdit, onRemove, editable = true }) {
+    const canUpdate = editable && can('parking.update');
     const alloc = effectiveAllocationType(vehicle);
     const tone = vehicle.status === 'OVERLIMIT'
         ? 'overlimit'
@@ -29,7 +32,7 @@ function Tag({ vehicle, onEdit, onRemove, canEdit }) {
         setEditing(false);
     }, [vehicle.plate, vehicle.id]);
 
-    if (editing && canEdit) {
+    if (editing && canUpdate) {
         return (
             <TextField
                 autoFocus
@@ -55,13 +58,13 @@ function Tag({ vehicle, onEdit, onRemove, canEdit }) {
 
     return (
         <span className={`parking-vchip parking-vchip--${tone}`}>
-            <button type="button" className="parking-vchip__plate" onClick={() => canEdit && setEditing(true)}>
+            <button type="button" className="parking-vchip__plate" onClick={() => canUpdate && setEditing(true)}>
                 {vehicle.plate}
                 {extra ? ` · ${extra}` : ''}
             </button>
-            {canEdit ? (
-                <button type="button" className="parking-vchip__x" title="Remove" onClick={() => onRemove()}>×</button>
-            ) : null}
+            <CapGate cap="parking.delete">
+                <button type="button" className="parking-vchip__x" title="Remove" onClick={() => onRemove()} disabled={!editable}>×</button>
+            </CapGate>
         </span>
     );
 }
@@ -74,7 +77,8 @@ function splitPlates(raw) {
         .filter(Boolean);
 }
 
-export function TypeEditor({ title, type, unit, canEdit, onSaved, setError }) {
+export function TypeEditor({ title, type, unit, onSaved, setError }) {
+    const canUpdate = can('parking.update');
     const [draft, setDraft] = useState('');
     const [busy, setBusy] = useState(false);
     const inputRef = useRef(null);
@@ -105,13 +109,13 @@ export function TypeEditor({ title, type, unit, canEdit, onSaved, setError }) {
             ) : null}
             <div
                 className="parking-chip-input"
-                onClick={() => canEdit && inputRef.current?.focus()}
+                onClick={() => canUpdate && inputRef.current?.focus()}
             >
                 {vehicles.map((v) => (
                     <Tag
                         key={v.id}
                         vehicle={v}
-                        canEdit={canEdit && !busy}
+                        editable={!busy}
                         onEdit={async (plate) => {
                             setError?.('');
                             try {
@@ -133,7 +137,7 @@ export function TypeEditor({ title, type, unit, canEdit, onSaved, setError }) {
                         }}
                     />
                 ))}
-                {canEdit ? (
+                <CapGate cap="parking.update">
                     <input
                         ref={inputRef}
                         className="parking-chip-input__field"
@@ -169,9 +173,8 @@ export function TypeEditor({ title, type, unit, canEdit, onSaved, setError }) {
                             if (draft.trim()) addPlates(draft);
                         }}
                     />
-                ) : null}
+                </CapGate>
             </div>
         </Box>
     );
 }
-

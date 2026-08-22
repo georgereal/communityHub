@@ -24,7 +24,8 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     property_manager: [
         'vehicle_registry.view', 'vehicle_registry.edit',
         'apartment_mgmt.view', 'apartment_mgmt.edit',
-        'portal.view', 'security.view', 'accounts.bills_entry',
+        'portal.view', 'security.view',
+        'accounts.view', 'accounts.bills_entry',
     ],
     accounts_manager: [
         'accounts.view', 'accounts.edit', 'accounts.bills_entry',

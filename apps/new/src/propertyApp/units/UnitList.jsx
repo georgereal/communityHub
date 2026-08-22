@@ -45,8 +45,9 @@ import { portalState } from '../../store.js';
 import UnitFormDialog from './UnitFormDialog.jsx';
 import UnitDetailDialog from './UnitDetailDialog.jsx';
 import UnitImportDialog from './UnitImportDialog.jsx';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
 import {
-    canEditUnits,
     deleteFlatWithResidents,
     downloadUnitsTemplate,
     fetchUnitsBundle,
@@ -57,7 +58,7 @@ import {
 } from './api.js';
 import ExcelColHeader, { sortAndFilterRows } from '../../listUi/ExcelColHeader.jsx';
 
-function RowMenu({ unit, canEdit, onView, onEdit, onDelete }) {
+function RowMenu({ unit, onView, onEdit, onDelete }) {
     const [anchor, setAnchor] = useState(null);
     return (
         <>
@@ -68,16 +69,16 @@ function RowMenu({ unit, canEdit, onView, onEdit, onDelete }) {
                 <MenuItem onClick={() => { setAnchor(null); onView(unit); }}>
                     <ViewIcon fontSize="small" sx={{ mr: 1 }} /> View
                 </MenuItem>
-                {canEdit ? (
+                <CapGate cap="units.update">
                     <MenuItem onClick={() => { setAnchor(null); onEdit(unit); }}>
                         <EditIcon fontSize="small" sx={{ mr: 1 }} /> Edit
                     </MenuItem>
-                ) : null}
-                {canEdit ? (
+                </CapGate>
+                <CapGate cap="units.delete">
                     <MenuItem onClick={() => { setAnchor(null); onDelete(unit); }}>
                         <DeleteIcon fontSize="small" sx={{ mr: 1 }} color="error" /> Delete flat
                     </MenuItem>
-                ) : null}
+                </CapGate>
             </Menu>
         </>
     );
@@ -119,7 +120,6 @@ export default function UnitList() {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const queryClient = useQueryClient();
-    const canEdit = canEditUnits();
 
     const [search, setSearch] = useState('');
     const [debounced, setDebounced] = useState('');
@@ -200,7 +200,7 @@ export default function UnitList() {
                 </Box>
                 {isMobile ? (
                     <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, alignItems: 'center' }}>
-                        {canEdit ? (
+                        <CapGate cap="units.create">
                             <Button
                                 variant="contained"
                                 size="small"
@@ -209,7 +209,7 @@ export default function UnitList() {
                             >
                                 <AddIcon fontSize="small" />
                             </Button>
-                        ) : null}
+                        </CapGate>
                         <IconButton size="small" aria-label="Page actions" onClick={(e) => setActionsEl(e.currentTarget)}>
                             <MoreVertIcon />
                         </IconButton>
@@ -227,9 +227,9 @@ export default function UnitList() {
                             >
                                 Download template
                             </MenuItem>
-                            {canEdit ? (
+                            <CapGate cap="units.create">
                                 <MenuItem onClick={() => { setActionsEl(null); setImportOpen(true); }}>Import Excel</MenuItem>
-                            ) : null}
+                            </CapGate>
                         </Menu>
                     </Stack>
                 ) : (
@@ -257,14 +257,14 @@ export default function UnitList() {
                             </IconButton>
                         </span>
                     </Tooltip>
-                    {canEdit ? (
+                    <CapGate cap="units.create">
                         <Tooltip title="Import Excel">
                             <IconButton size="small" onClick={() => setImportOpen(true)}>
                                 <UploadIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
-                    ) : null}
-                    {canEdit ? (
+                    </CapGate>
+                    <CapGate cap="units.create">
                         <Tooltip title="Add flat">
                             <Button
                                 variant="contained"
@@ -276,7 +276,7 @@ export default function UnitList() {
                                 <Box component="span" sx={{ ml: 0.5, display: { xs: 'none', sm: 'inline' } }}>Add</Box>
                             </Button>
                         </Tooltip>
-                    ) : null}
+                    </CapGate>
                 </Stack>
                 )}
             </Stack>
@@ -351,7 +351,6 @@ export default function UnitList() {
                                 </Box>
                                 <RowMenu
                                     unit={u}
-                                    canEdit={canEdit}
                                     onView={openView}
                                     onEdit={openEdit}
                                     onDelete={setDeleteUnit}
@@ -392,7 +391,6 @@ export default function UnitList() {
                                     <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                                         <RowMenu
                                             unit={u}
-                                            canEdit={canEdit}
                                             onView={openView}
                                             onEdit={openEdit}
                                             onDelete={setDeleteUnit}

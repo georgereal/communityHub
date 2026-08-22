@@ -19,6 +19,7 @@ import { processFinances } from './finances.js';
 import {
   NO_SOCIETY_ACCESS_RESIDENT_MESSAGE,
   waitForBootAuthSession,
+  isSupabaseAuthRedirect,
 } from './socialAuth.js';
 import {
   clearAuthUserKind,
@@ -441,6 +442,12 @@ const finishAuthSession = async (session) => {
 };
 
 const boot = async () => {
+  // New UI sign-in uses /login.html — forward Supabase ?code= callbacks that still land on /.
+  if (isNewUi() && isSupabaseAuthRedirect()) {
+    window.location.replace(`/login.html${window.location.search}`);
+    return;
+  }
+
   document.body.prepend(Object.assign(document.createElement('div'), { id: 'sentry-boot-loader', innerHTML: '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; color:#fff;"><i class="fa-solid fa-hotel fa-spin" style="font-size:2rem; margin-bottom:1rem; color:var(--accent);"></i><div style="font-weight:900; letter-spacing:1px; text-transform:uppercase; font-size:0.75rem;">Initializing CommunityHub</div></div>' }));
 
   let bootHasSupabaseSession = false;

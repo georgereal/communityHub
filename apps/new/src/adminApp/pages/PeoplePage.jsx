@@ -9,6 +9,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader.jsx';
 import SummaryStrip from '../components/SummaryStrip.jsx';
 import ExcelColHeader, { sortAndFilterRows } from '../../listUi/ExcelColHeader.jsx';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
 import {
     approveRequest, assignUserAccess, denyRequest,
     loadPeopleDirectory, ROLE_OPTIONS, userDisplayRole,
@@ -25,7 +27,6 @@ const COLS = [
 
 export default function PeoplePage() {
     const qc = useQueryClient();
-    const canEdit = can('admin.people.assign');
     const [filter, setFilter] = useState({ name: '', role: '', access: '' });
     const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
     const [error, setError] = useState('');
@@ -86,7 +87,7 @@ export default function PeoplePage() {
                                 {usersQ.isFetching ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
                             </IconButton>
                         </Tooltip>
-                        {canEdit ? (
+                        <CapGate cap="admin.people.assign">
                             <Button
                                 variant="contained"
                                 size="small"
@@ -100,7 +101,7 @@ export default function PeoplePage() {
                             >
                                 Assign
                             </Button>
-                        ) : null}
+                        </CapGate>
                     </>
                 )}
             />
@@ -122,7 +123,7 @@ export default function PeoplePage() {
                                         {r.message ? ` · ${r.message}` : ''}
                                     </Typography>
                                 </Box>
-                                {canEdit ? (
+                                <CapGate cap="admin.people.assign">
                                     <Stack direction="row" spacing={0.5}>
                                         <Button size="small" startIcon={<CheckIcon />} onClick={async () => {
                                             try {
@@ -137,7 +138,7 @@ export default function PeoplePage() {
                                             } catch (err) { setError(err.message); }
                                         }}>Deny</Button>
                                     </Stack>
-                                ) : null}
+                                </CapGate>
                             </Stack>
                         ))}
                     </Stack>
@@ -167,12 +168,12 @@ export default function PeoplePage() {
                         </TableHead>
                         <TableBody>
                             {rows.length ? rows.map((u) => (
-                                <TableRow key={u.id} hover onClick={() => canEdit && setForm({
+                                <TableRow key={u.id} hover onClick={() => can('admin.people.assign') && setForm({
                                     name: u.name || '',
                                     email: u.email || '',
                                     roleKey: u.role || 'resident_viewer',
                                     apartmentIds: u.apartment_ids || [],
-                                })} sx={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                                })} sx={{ cursor: can('admin.people.assign') ? 'pointer' : 'default' }}>
                                     <TableCell>
                                         <Typography fontWeight={600}>{u.name || '—'}</Typography>
                                         <Typography variant="caption" color="text.secondary">{u.email}</Typography>

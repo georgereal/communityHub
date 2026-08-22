@@ -3,9 +3,9 @@
  * On success, redirects into the main app shell.
  */
 import { supabase } from './store.js';
-import { getEnabledSocialProviders, signInWithSocialProvider } from './socialAuth.js';
+import { getEnabledSocialProviders, signInWithSocialProvider, waitForBootAuthSession } from './socialAuth.js';
 import { goToApp, takeAuthFlash } from './authRedirect.js';
-import { ensureAuthInitialized } from '@auth/authClient.js';
+import { resetAuthInit } from '@auth/authClient.js';
 
 const card = document.getElementById('login-card');
 const form = document.getElementById('auth-form');
@@ -85,8 +85,9 @@ const renderSocialAuthButtons = () => {
       setBusy(true);
       setError('');
       try {
-        const { error } = await signInWithSocialProvider(supabase, provider.id);
+        const { data, error } = await signInWithSocialProvider(supabase, provider.id);
         if (error) setError(error.message);
+        else if (data?.url) window.location.assign(data.url);
       } catch (err) {
         setError(err?.message || 'Social sign-in failed.');
       } finally {
@@ -186,21 +187,27 @@ renderSocialAuthButtons();
 setMode(false);
 
 const flash = takeAuthFlash();
-if (flash) setError(flash);
+const oauthParams = new URLSearchParams(window.location.search);
+const hasOAuthCallback = !!oauthParams.get('code')
+    || oauthParams.get('error')
+    || window.location.hash.includes('access_token=');
+const justSignedOut = /signed out/i.test(String(flash || '')) && !hasOAuthCallback;
+if (flash && !justSignedOut && !hasOAuthCallback) setError(flash);
+if (hasOAuthCallback && oauthParams.get('error')) {
+    setError(oauthParams.get('error_description') || oauthParams.get('error') || 'Social sign-in failed.');
+}
 
 (async () => {
   if (!supabase) {
     setError('Supabase is not configured.');
     return;
   }
+  if (justSignedOut) return;
+  if (hasOAuthCallback) resetAuthInit();
   try {
-    const primed = await ensureAuthInitialized();
-    if (primed?.session) {
-      await enterApp(primed.session);
-      return;
-    }
-    const { data } = await supabase.auth.getSession();
-    if (data?.session) await enterApp(data.session);
+    const { session, error } = await waitForBootAuthSession(supabase);
+    if (error?.message) setError(error.message);
+    if (session) await enterApp(session);
   } catch (err) {
     console.warn('[login] session check failed:', err?.message || err);
   }

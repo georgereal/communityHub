@@ -29,12 +29,13 @@ export function defaultCrudFromPermKeys(resourceKey, permKeys = []) {
     const set = new Set(permKeys || []);
     const view = set.has(`${resourceKey}.view`);
     const edit = set.has(`${resourceKey}.edit`);
+    const billsEntry = resourceKey === 'accounts' && set.has('accounts.bills_entry');
     if (resourceKey === 'portal' || resourceKey === 'security') {
         return { create: view, read: view, update: view, delete: false };
     }
     return {
-        create: edit,
-        read: view || edit,
+        create: edit || billsEntry,
+        read: view || edit || billsEntry,
         update: edit,
         delete: false,
     };

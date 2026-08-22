@@ -53,9 +53,10 @@ import useListQueryParams from '../hooks/useListQueryParams.js';
 import { navigateToDetail } from '../utils/listNavigation.js';
 import ResidentFormDialog from '../components/ResidentFormDialog.jsx';
 import ResidentImportDialog from '../components/ResidentImportDialog.jsx';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
 import {
     OCCUPANCY_SUMMARY,
-    canEditResidents,
     deleteFlat,
     deleteResident,
     exportResidentsExcel,
@@ -97,7 +98,6 @@ function KindChip({ kind }) {
 
 function RowMenu({
     resident,
-    canEdit,
     onView,
     onEdit,
     onDeletePerson,
@@ -124,21 +124,21 @@ function RowMenu({
                 <MenuItem onClick={() => { setAnchor(null); onView(resident); }}>
                     <ViewIcon fontSize="small" sx={{ mr: 1 }} /> View
                 </MenuItem>
-                {canEdit ? (
+                <CapGate cap="residents.update">
                     <MenuItem onClick={() => { setAnchor(null); onEdit(resident); }}>
                         <EditIcon fontSize="small" sx={{ mr: 1 }} /> Edit
                     </MenuItem>
-                ) : null}
-                {canEdit ? (
+                </CapGate>
+                <CapGate cap="residents.delete">
                     <MenuItem onClick={() => { setAnchor(null); onDeletePerson(resident); }}>
                         <DeleteIcon fontSize="small" sx={{ mr: 1 }} /> Delete person
                     </MenuItem>
-                ) : null}
-                {canEdit ? (
+                </CapGate>
+                <CapGate cap="units.delete">
                     <MenuItem onClick={() => { setAnchor(null); onDeleteFlat(resident); }}>
                         <DeleteIcon fontSize="small" sx={{ mr: 1 }} color="error" /> Delete flat…
                     </MenuItem>
-                ) : null}
+                </CapGate>
             </Menu>
         </>
     );
@@ -178,7 +178,6 @@ export default function ResidentList() {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const queryClient = useQueryClient();
-    const canEdit = canEditResidents();
 
     const { values: listParams, setParams: setListParams, clearParams } = useListQueryParams(LIST_DEFAULTS);
 
@@ -408,7 +407,7 @@ export default function ResidentList() {
                 </Box>
                 {isMobile ? (
                     <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, alignItems: 'center' }}>
-                        {canEdit ? (
+                        <CapGate cap="residents.update">
                             <Button
                                 variant="contained"
                                 size="small"
@@ -417,16 +416,16 @@ export default function ResidentList() {
                             >
                                 <AddIcon fontSize="small" />
                             </Button>
-                        ) : null}
+                        </CapGate>
                         <IconButton size="small" aria-label="Page actions" onClick={(e) => setActionsEl(e.currentTarget)}>
                             <MoreVertIcon />
                         </IconButton>
                         <Menu anchorEl={actionsEl} open={Boolean(actionsEl)} onClose={() => setActionsEl(null)}>
                             <MenuItem disabled={isFetching} onClick={() => { invalidate(); setActionsEl(null); }}>Refresh</MenuItem>
                             <MenuItem disabled={exporting || isLoading} onClick={() => { setActionsEl(null); handleExport(); }}>Export Excel</MenuItem>
-                            {canEdit ? (
+                            <CapGate cap="residents.update">
                                 <MenuItem onClick={() => { setActionsEl(null); setImportOpen(true); }}>Import file</MenuItem>
-                            ) : null}
+                            </CapGate>
                             <MenuItem onClick={() => { setActionsEl(null); setFilterOpen(true); }}>
                                 Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ''}
                             </MenuItem>
@@ -453,13 +452,13 @@ export default function ResidentList() {
                             </IconButton>
                         </span>
                     </Tooltip>
-                    {canEdit ? (
+                    <CapGate cap="residents.update">
                         <Tooltip title="Import file">
                             <IconButton size="small" onClick={() => setImportOpen(true)} aria-label="Import">
                                 <UploadIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
-                    ) : null}
+                    </CapGate>
                     <Tooltip title="Filters">
                         <Badge color="primary" overlap="circular" badgeContent={activeFiltersCount || null}>
                             <IconButton size="small" onClick={() => setFilterOpen(true)} aria-label="Filters">
@@ -467,7 +466,7 @@ export default function ResidentList() {
                             </IconButton>
                         </Badge>
                     </Tooltip>
-                    {canEdit ? (
+                    <CapGate cap="residents.update">
                         <Tooltip title="Add resident">
                             <Button
                                 variant="contained"
@@ -482,7 +481,7 @@ export default function ResidentList() {
                                 <Box component="span" sx={{ ml: 0.5, display: { xs: 'none', sm: 'inline' } }}>Add</Box>
                             </Button>
                         </Tooltip>
-                    ) : null}
+                    </CapGate>
                 </Stack>
                 )}
             </Stack>
@@ -598,7 +597,6 @@ export default function ResidentList() {
                                         <KindChip kind={r.kind} />
                                         <RowMenu
                                             resident={r}
-                                            canEdit={canEdit}
                                             onView={(x) => openDetail(x.id)}
                                             onEdit={openEdit}
                                             onDeletePerson={(x) => setDeleteTarget({ type: 'person', resident: x })}
@@ -680,7 +678,6 @@ export default function ResidentList() {
                                         <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                                             <RowMenu
                                                 resident={r}
-                                                canEdit={canEdit}
                                                 onView={(x) => openDetail(x.id)}
                                                 onEdit={openEdit}
                                                 onDeletePerson={(x) => setDeleteTarget({ type: 'person', resident: x })}

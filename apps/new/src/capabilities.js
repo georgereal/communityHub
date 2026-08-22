@@ -33,7 +33,7 @@ export const CAPABILITIES = [
     { id: 'accounts.bills_enter', label: 'Enter bills & receipts', app: 'finance-new', crud: ['accounts', 'create'] },
     { id: 'accounts.docs_manage', label: 'Manage finance documents', app: 'finance-new', crud: ['accounts', 'update'] },
     { id: 'accounts.plan_edit', label: 'Edit expense plan', app: 'finance-new', crud: ['accounts', 'update'] },
-    { id: 'accounts.bank_sync', label: 'Bank passbook / sync', app: 'finance-new', crud: ['accounts', 'read'] },
+    { id: 'accounts.bank_sync', label: 'Bank passbook / sync', app: 'finance-new', crud: ['accounts', 'update'] },
 
     { id: 'setup.edit', label: 'Edit society setup', app: 'admin-new', anyCrud: [['setup', 'update'], ['rbac', 'update']] },
     { id: 'admin.society.save', label: 'Save society profile & modules', app: 'admin-new', anyCrud: [['setup', 'update'], ['rbac', 'update']] },
@@ -54,9 +54,7 @@ export function capabilityById(id) {
 }
 
 function crudPairOk(resource, action) {
-    if (canCrud(resource, action)) return true;
-    if (action === 'update' && (canCrud(resource, 'create') || canCrud(resource, 'delete'))) return true;
-    return false;
+    return canCrud(resource, action);
 }
 
 function capAllowed(cap) {

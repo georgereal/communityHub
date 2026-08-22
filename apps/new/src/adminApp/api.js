@@ -500,11 +500,12 @@ export async function saveRbacEditor(draft) {
     const { applyNavPermissions } = await import('../navigation.js');
     const { resolveEffectivePermissions } = await import('../rbac.js');
     const crud = draft.crud || {};
-    const derived = derivePagesAndModulesFromCrud(crud, Object.keys(crud));
+    const roleKeys = Object.keys(crud);
+    const derived = derivePagesAndModulesFromCrud(crud, roleKeys);
     await saveRbacMatrix(apartmentId, {
         crud,
-        pages: derived.pages,
-        moduleEnabled: derived.moduleEnabled,
+        pages: draft.pages || {},
+        moduleEnabled: draft.moduleEnabled || derived.moduleEnabled,
     });
     applyNavPermissions(new Set(resolveEffectivePermissions()));
     void logActivity({

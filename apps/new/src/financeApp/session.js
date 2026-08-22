@@ -17,6 +17,7 @@ export function readFinanceCtx() {
             userId: ctx.userId ? String(ctx.userId) : '',
             userName: ctx.userName ? String(ctx.userName) : '',
             userEmail: ctx.userEmail ? String(ctx.userEmail) : '',
+            effectiveRoleKey: ctx.effectiveRoleKey ? String(ctx.effectiveRoleKey) : '',
             permissions: Array.isArray(ctx.permissions) ? ctx.permissions.map(String) : [],
             permScope: ctx.permScope || '',
             apartments: Array.isArray(ctx.apartments) ? ctx.apartments : [],
@@ -35,6 +36,7 @@ export function writeFinanceCtx(partial = {}) {
         userId: partial.userId ?? prev.userId ?? '',
         userName: partial.userName ?? prev.userName ?? '',
         userEmail: partial.userEmail ?? prev.userEmail ?? '',
+        effectiveRoleKey: partial.effectiveRoleKey ?? prev.effectiveRoleKey ?? '',
         permissions: [...new Set((partial.permissions ?? prev.permissions ?? []).map(String))],
         permScope: PERM_SCOPE,
         apartments: Array.isArray(partial.apartments)
@@ -68,6 +70,7 @@ export function writeFinanceCtxFromPortal(portalState) {
         userId: auth.id || portalState.access?.activeUserId || '',
         userName: auth.name || auth.full_name || auth.email || '',
         userEmail: auth.email || '',
+        effectiveRoleKey: auth.effectiveRoleKey || '',
         permissions: perms,
         apartments: (portalState.access?.apartments || []).map((a) => ({
             id: a.id,

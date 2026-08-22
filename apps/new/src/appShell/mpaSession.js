@@ -16,6 +16,7 @@ export function readMpaCtx() {
             userId: ctx.userId ? String(ctx.userId) : '',
             userName: ctx.userName ? String(ctx.userName) : '',
             userEmail: ctx.userEmail ? String(ctx.userEmail) : '',
+            effectiveRoleKey: ctx.effectiveRoleKey ? String(ctx.effectiveRoleKey) : '',
             permissions: Array.isArray(ctx.permissions) ? ctx.permissions.map(String) : [],
             apartments: Array.isArray(ctx.apartments) ? ctx.apartments : [],
             updatedAt: ctx.updatedAt || null,
@@ -33,6 +34,7 @@ export function writeMpaCtx(partial = {}) {
         userId: partial.userId ?? prev.userId ?? '',
         userName: partial.userName ?? prev.userName ?? '',
         userEmail: partial.userEmail ?? prev.userEmail ?? '',
+        effectiveRoleKey: partial.effectiveRoleKey ?? prev.effectiveRoleKey ?? '',
         permissions: Array.isArray(partial.permissions)
             ? partial.permissions.map(String)
             : (prev.permissions || []),
@@ -67,6 +69,7 @@ export function writeMpaCtxFromPortal(portalState) {
         userId: auth.id || portalState.access?.activeUserId || '',
         userName: auth.name || auth.full_name || auth.email || '',
         userEmail: auth.email || '',
+        effectiveRoleKey: auth.effectiveRoleKey || '',
         permissions: perms,
         apartments: (portalState.access?.apartments || []).map((a) => ({
             id: a.id,

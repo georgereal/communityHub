@@ -44,10 +44,9 @@ import PoolAssignDialog from './PoolAssignDialog.jsx';
 import PoolSlotDialog from './PoolSlotDialog.jsx';
 import NeighborRentDialog from './NeighborRentDialog.jsx';
 import BaseSlotsDialog from './BaseSlotsDialog.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import {
     addPoolSlot,
-    canEditBaseSlots,
-    canEditParking,
     computeParkingSummary,
     deletePoolSlot,
     exportParkingExcel,
@@ -144,7 +143,7 @@ function PlateChips({ unit, vehicles, type, overallocated = false }) {
     );
 }
 
-function PoolStrip({ title, kind, canEdit, onEdit, onEditSlot, onAdd, onDelete, compact = false }) {
+function PoolStrip({ title, kind, onEdit, onEditSlot, onAdd, onDelete, compact = false }) {
     const slots = listPoolSlots(kind);
     const [expanded, setExpanded] = useState(false);
     const preview = 2;
@@ -156,12 +155,12 @@ function PoolStrip({ title, kind, canEdit, onEdit, onEditSlot, onAdd, onDelete, 
             <Stack direction="row" sx={{ mb: 1, justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Typography fontWeight={700}>{title}</Typography>
                 <Stack direction="row" spacing={0.5}>
-                    {canEdit ? (
+                    <CapGate cap="parking.update">
                         <Button size="small" onClick={onEdit}>Add vehicle</Button>
-                    ) : null}
-                    {canEdit ? (
+                    </CapGate>
+                    <CapGate cap="parking.base_slots">
                         <Button size="small" startIcon={<AddIcon />} onClick={onAdd}>Add slot</Button>
-                    ) : null}
+                    </CapGate>
                 </Stack>
             </Stack>
             {slots.length === 0 ? (
@@ -187,19 +186,21 @@ function PoolStrip({ title, kind, canEdit, onEdit, onEditSlot, onAdd, onDelete, 
                                 ) : (
                                     <span className="parking-pool-tile__alloc">Open</span>
                                 )}
-                                {canEdit && !occupied ? (
-                                    <span
-                                        className="parking-pool-tile__remove"
-                                        role="button"
-                                        tabIndex={0}
-                                        title="Delete slot"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onDelete(s);
-                                        }}
-                                    >
-                                        ×
-                                    </span>
+                                { !occupied ? (
+                                    <CapGate cap="parking.delete">
+                                        <span
+                                            className="parking-pool-tile__remove"
+                                            role="button"
+                                            tabIndex={0}
+                                            title="Delete slot"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onDelete(s);
+                                            }}
+                                        >
+                                            ×
+                                        </span>
+                                    </CapGate>
                                 ) : null}
                             </button>
                         );
@@ -225,8 +226,6 @@ export default function VehicleList() {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const queryClient = useQueryClient();
-    const canEdit = canEditParking();
-    const canAdminSlots = canEditBaseSlots();
     const fileRef = useRef(null);
 
     const [search, setSearch] = useState('');
@@ -395,24 +394,24 @@ export default function VehicleList() {
                             >
                                 Download Excel
                             </MenuItem>
-                            {canEdit ? (
+                            <CapGate cap="parking.update">
                                 <MenuItem
                                     disabled={importing}
                                     onClick={() => { setActionsEl(null); fileRef.current?.click(); }}
                                 >
                                     Import CSV
                                 </MenuItem>
-                            ) : null}
-                            {canAdminSlots ? (
+                            </CapGate>
+                            <CapGate cap="parking.base_slots">
                                 <MenuItem onClick={() => { setActionsEl(null); setSlotsOpen(true); }}>
                                     Base slots
                                 </MenuItem>
-                            ) : null}
-                            {canEdit ? (
+                            </CapGate>
+                            <CapGate cap="parking.update">
                                 <MenuItem onClick={() => { setActionsEl(null); setRentOpen(true); }}>
                                     Rent from flat
                                 </MenuItem>
-                            ) : null}
+                            </CapGate>
                         </Menu>
                     </>
                 ) : (
@@ -429,7 +428,7 @@ export default function VehicleList() {
                             </IconButton>
                         </span>
                     </Tooltip>
-                    {canEdit ? (
+                    <CapGate cap="parking.update">
                         <Tooltip title="Import CSV">
                             <span>
                                 <IconButton size="small" onClick={() => fileRef.current?.click()} disabled={importing}>
@@ -437,13 +436,13 @@ export default function VehicleList() {
                                 </IconButton>
                             </span>
                         </Tooltip>
-                    ) : null}
-                    {canAdminSlots ? (
+                    </CapGate>
+                    <CapGate cap="parking.base_slots">
                         <Button size="small" onClick={() => setSlotsOpen(true)}>Base slots</Button>
-                    ) : null}
-                    {canEdit ? (
+                    </CapGate>
+                    <CapGate cap="parking.update">
                         <Button size="small" onClick={() => setRentOpen(true)}>Rent from flat</Button>
-                    ) : null}
+                    </CapGate>
                 </Stack>
                 )}
                 <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={(e) => handleImport(e.target.files?.[0])} />
@@ -495,7 +494,6 @@ export default function VehicleList() {
                 title="Association car pool (EH)"
                 kind="car"
                 compact={isMobile}
-                canEdit={canEdit}
                 onEdit={() => setPoolKind('car')}
                 onEditSlot={(s) => setPoolSlot(s)}
                 onAdd={() => addPoolSlot('car').then(invalidate).catch((err) => setActionError(err.message))}
@@ -508,7 +506,6 @@ export default function VehicleList() {
                 title="Association bike pool (BH)"
                 kind="bike"
                 compact={isMobile}
-                canEdit={canEdit}
                 onEdit={() => setPoolKind('bike')}
                 onEditSlot={(s) => setPoolSlot(s)}
                 onAdd={() => addPoolSlot('bike').then(invalidate).catch((err) => setActionError(err.message))}
@@ -572,8 +569,8 @@ export default function VehicleList() {
                             </Stack>
                             {editingId === u.id ? (
                                 <Stack spacing={1} sx={{ mt: 1 }}>
-                                    <TypeEditor title="Cars" type="CAR" unit={u} canEdit={canEdit} onSaved={invalidate} setError={setActionError} />
-                                    <TypeEditor title="Bikes" type="BIKE" unit={u} canEdit={canEdit} onSaved={invalidate} setError={setActionError} />
+                                    <TypeEditor title="Cars" type="CAR" unit={u} onSaved={invalidate} setError={setActionError} />
+                                    <TypeEditor title="Bikes" type="BIKE" unit={u} onSaved={invalidate} setError={setActionError} />
                                     <Typography variant="caption" color="error">Overallocated</Typography>
                                     <PlateChips unit={u} vehicles={u.vehicles} overallocated />
                                 </Stack>
@@ -613,14 +610,14 @@ export default function VehicleList() {
                                     <TableCell><Typography fontWeight={600}>{u.number}</Typography></TableCell>
                                     <TableCell>
                                         {editingId === u.id ? (
-                                            <TypeEditor type="CAR" unit={u} canEdit={canEdit} onSaved={invalidate} setError={setActionError} />
+                                            <TypeEditor type="CAR" unit={u} onSaved={invalidate} setError={setActionError} />
                                         ) : (
                                             <PlateChips unit={u} vehicles={u.vehicles} type="CAR" />
                                         )}
                                     </TableCell>
                                     <TableCell>
                                         {editingId === u.id ? (
-                                            <TypeEditor type="BIKE" unit={u} canEdit={canEdit} onSaved={invalidate} setError={setActionError} />
+                                            <TypeEditor type="BIKE" unit={u} onSaved={invalidate} setError={setActionError} />
                                         ) : (
                                             <PlateChips unit={u} vehicles={u.vehicles} type="BIKE" />
                                         )}

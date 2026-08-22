@@ -46,6 +46,7 @@ import {
 import { formatOcrRowDisplay } from '../bankStatementLineUtils.js';
 import { isBankPettyFunding } from './cashFloatPredicates.js';
 import { can } from '../capabilities.js';
+import { refreshCapabilityGates } from '../capUi.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
@@ -432,7 +433,7 @@ const renderLedgerClassifyDisplay = (t, isIncome) => {
         ].filter(Boolean);
         main = parts.length ? parts.join(' · ') : 'Set category…';
     }
-    return `<button type="button" class="fdoc-cat-display${catLabel ? '' : ' fdoc-cat-display--empty'}" data-ledger-cat-edit="${esc(t.id)}" title="Edit category">
+    return `<button type="button" class="fdoc-cat-display${catLabel ? '' : ' fdoc-cat-display--empty'}" data-cap="accounts.edit" data-ledger-cat-edit="${esc(t.id)}" title="Edit category">
     <span class="fdoc-cat-display__main">${esc(main)}</span>
     <i class="fa-solid fa-pen fdoc-cat-display__pen" aria-hidden="true"></i>
   </button>`;
@@ -494,8 +495,8 @@ const renderLedgerOrderButtons = (txnId, orderMeta) => {
     const posTitle = inverted
         ? `Passbook ${pos} of ${o.count} on ${dateLabel}. Ledger is newest-first — ↓ moves earlier (toward rows below).`
         : `Passbook ${pos} of ${o.count} on ${dateLabel}.`;
-    const earlierBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-earlier${earlierBlocked}" data-txn="${txnId}" title="${esc(earlierTitle)}" aria-label="Move earlier in passbook order"${earlierAria}><i class="fa-solid ${earlierIcon}" aria-hidden="true"></i></button>`;
-    const laterBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-later${laterBlocked}" data-txn="${txnId}" title="${esc(laterTitle)}" aria-label="Move later in passbook order"${laterAria}><i class="fa-solid ${laterIcon}" aria-hidden="true"></i></button>`;
+    const earlierBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-earlier${earlierBlocked}" data-cap="accounts.edit" data-txn="${txnId}" title="${esc(earlierTitle)}" aria-label="Move earlier in passbook order"${earlierAria}><i class="fa-solid ${earlierIcon}" aria-hidden="true"></i></button>`;
+    const laterBtn = `<button type="button" class="btn btn-outline btn--small btn--icon ledger-move-later${laterBlocked}" data-cap="accounts.edit" data-txn="${txnId}" title="${esc(laterTitle)}" aria-label="Move later in passbook order"${laterAria}><i class="fa-solid ${laterIcon}" aria-hidden="true"></i></button>`;
     const controls = inverted
         ? `${laterBtn}${stepInput}${earlierBtn}`
         : `${earlierBtn}${stepInput}${laterBtn}`;
@@ -706,13 +707,11 @@ const renderLedgerRow = (raw, {
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
           ${receiptBtn}
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-bill-btn" data-txn="${t.id}" title="Bill / receipt — create, link, or edit" aria-label="Bill or receipt"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i></button>
-          <button type="button" class="btn btn-outline btn--small btn--icon" onclick="window.editTxn('${t.id}')" title="Edit ledger line" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-          ${canDeleteAccounts()
-            ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
-            : ''}
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-cap="accounts.edit" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-cap="accounts.edit" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-bill-btn" data-cap="accounts.bills_enter" data-txn="${t.id}" title="Bill / receipt — create, link, or edit" aria-label="Bill or receipt"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.edit" onclick="window.editTxn('${t.id}')" title="Edit ledger line" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-cap="accounts.delete" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
         </div>
       </td>
     </tr>`;
@@ -950,6 +949,7 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
 
         wireLedgerTableEvents();
         syncLedgerBulkBar();
+        refreshCapabilityGates(list);
     };
 
     paint();

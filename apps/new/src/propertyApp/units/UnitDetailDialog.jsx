@@ -36,10 +36,11 @@ import {
     ExpandLess as ExpandLessIcon,
     ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
 import { deleteResident, saveResident } from '../../residentsApp/api.js';
 import {
     annotateUnitVehicles,
-    canEditParking,
     listIncomingRentals,
     removeVehicle,
     saveVehicle,
@@ -47,7 +48,6 @@ import {
 import { effectiveAllocationType } from '../../allocation.js';
 import {
     OCCUPANCY_STATUS_VALUES,
-    canEditUnits,
     listDirectoryUnits,
     loadUnitFinance,
     occupancyLabel,
@@ -166,8 +166,8 @@ export default function UnitDetailDialog({
     onSaved,
     onModeChange,
 }) {
-    const canEditMaster = canEditUnits();
-    const canEditCars = canEditParking();
+    const canEditMaster = can('units.update');
+    const canEditCars = can('parking.update');
     const editing = mode === 'edit' && canEditMaster;
     const [tab, setTab] = useState('overview');
     const [form, setForm] = useState({});
@@ -410,11 +410,13 @@ export default function UnitDetailDialog({
                         ) : null}
                     </Stack>
                     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                        {canEditMaster && !editing ? (
-                            <Button size="small" variant="contained" sx={{ bgcolor: '#fff', color: '#0f766e', '&:hover': { bgcolor: '#ecfdf5' } }} startIcon={<EditIcon />} onClick={() => onModeChange?.('edit')}>
-                                Edit
-                            </Button>
-                        ) : null}
+                        <CapGate cap="units.update">
+                            {!editing ? (
+                                <Button size="small" variant="contained" sx={{ bgcolor: '#fff', color: '#0f766e', '&:hover': { bgcolor: '#ecfdf5' } }} startIcon={<EditIcon />} onClick={() => onModeChange?.('edit')}>
+                                    Edit
+                                </Button>
+                            ) : null}
+                        </CapGate>
                         {editing ? (
                             <Button size="small" variant="contained" sx={{ bgcolor: '#fff', color: '#0f766e' }} onClick={handleSaveMaster} disabled={saving}>
                                 {saving ? <CircularProgress size={14} /> : 'Save'}
@@ -488,10 +490,12 @@ export default function UnitDetailDialog({
                     <Box>
                         <Stack direction="row" sx={{ mb: 0.4, alignItems: 'center', justifyContent: 'space-between' }}>
                             <Typography variant="subtitle2" fontWeight={700}>On this flat</Typography>
-                            {editing && canEditCars ? (
-                                <Button size="small" startIcon={<AddIcon />} onClick={() => setVehicleDraft({ id: null, plate: '', type: 'CAR' })}>
-                                    Add
-                                </Button>
+                            {editing ? (
+                                <CapGate cap="parking.update">
+                                    <Button size="small" startIcon={<AddIcon />} onClick={() => setVehicleDraft({ id: null, plate: '', type: 'CAR' })}>
+                                        Add
+                                    </Button>
+                                </CapGate>
                             ) : null}
                         </Stack>
                         <Table size="small" sx={{ bgcolor: '#fff', mb: 1 }}>

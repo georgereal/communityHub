@@ -299,6 +299,7 @@
 │       │   │   │   ├── state.js
 │       │   │   │   ├── units.js
 │       │   │   │   └── vehicles.js
+│       │   │   ├── audit.js
 │       │   │   ├── errors.js
 │       │   │   ├── http.js
 │       │   │   ├── models.js
@@ -429,10 +430,10 @@
 │           │   ├── invoicesRaisedPage.js
 │           │   ├── ledger.js
 │           │   ├── ledgerBalance.js
+│           │   ├── ledgerColFilter.js
 │           │   ├── ledgerDisplayRows.js
 │           │   ├── ledgerExport.js
 │           │   ├── ledgerFilter.js
-│           │   ├── ledgerColFilter.js
 │           │   ├── ledgerStatementContext.js
 │           │   ├── ledgerSummaryUi.js
 │           │   ├── ledgerTable.js
@@ -450,9 +451,9 @@
 │           │   ├── reports.js
 │           │   ├── shell.js
 │           │   ├── state.js
+│           │   ├── vendors.js
 │           │   ├── vouchers.js
 │           │   ├── voucherStore.js
-│           │   ├── vendors.js
 │           │   └── windowBridge.js
 │           ├── homeApp
 │           │   ├── boot.js
@@ -522,6 +523,7 @@
 │           ├── bulkInvoiceImport.js
 │           ├── buttonBusy.js
 │           ├── capabilities.js
+│           ├── capUi.js
 │           ├── classifyCombobox.js
 │           ├── classifyOptions.js
 │           ├── dbClient.js
@@ -551,7 +553,8 @@
 │           ├── spreadsheetSyncApi.js
 │           ├── store.js
 │           ├── uiMode.js
-│           └── unitDirectory.js
+│           ├── unitDirectory.js
+│           └── vendorFormat.js
 ├── docs
 │   ├── screenshots
 │   │   ├── finance-bank-recon-mock.png
@@ -661,11 +664,11 @@
 │   │   └── generate-repo-map.js
 │   ├── capture-finance-screenshots.mjs
 │   ├── check-import-boundary.mjs
+│   ├── consolidate-vendors-mongo.mjs
 │   ├── migrate-finance-to-mongo.mjs
 │   ├── migrate-integrations-to-mongo.mjs
 │   ├── migrate-ledger-sync-to-mongo.mjs
 │   ├── migrate-logs-to-mongo.mjs
-│   ├── consolidate-vendors-mongo.mjs
 │   ├── migrate-property-to-mongo.mjs
 │   ├── migrate-rbac-to-mongo.mjs
 │   ├── mockFinanceState.js
@@ -685,7 +688,7 @@
 
 ```
 
-**Scale:** ~359 JavaScript modules, ~17 CSS files, ~40 HTML entry pages.
+**Scale:** ~364 JavaScript modules, ~17 CSS files, ~41 HTML entry pages.
 
 ---
 
@@ -949,6 +952,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   │   │   ├── state.js
     │   │   │   ├── units.js
     │   │   │   └── vehicles.js
+    │   │   ├── audit.js
     │   │   ├── errors.js
     │   │   ├── http.js
     │   │   ├── models.js
@@ -1079,10 +1083,10 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   ├── invoicesRaisedPage.js
         │   ├── ledger.js
         │   ├── ledgerBalance.js
+        │   ├── ledgerColFilter.js
         │   ├── ledgerDisplayRows.js
         │   ├── ledgerExport.js
         │   ├── ledgerFilter.js
-        │   ├── ledgerColFilter.js
         │   ├── ledgerStatementContext.js
         │   ├── ledgerSummaryUi.js
         │   ├── ledgerTable.js
@@ -1100,6 +1104,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   ├── reports.js
         │   ├── shell.js
         │   ├── state.js
+        │   ├── vendors.js
         │   ├── vouchers.js
         │   ├── voucherStore.js
         │   └── windowBridge.js
@@ -1200,7 +1205,8 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         ├── spreadsheetSyncApi.js
         ├── store.js
         ├── uiMode.js
-        └── unitDirectory.js
+        ├── unitDirectory.js
+        └── vendorFormat.js
 
 --- packages ---
 ├── auth
@@ -1265,8 +1271,6 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/classic/financeAnalytics.js | Finance reports & analytics |
 | apps/classic/financeApi.js | Finance API client |
 | apps/classic/financeDocuments.js | Bills & receipts document management |
-| apps/new/src/financeNew/quickCapture.js | Mobile Quick Capture wizard for bills/receipts |
-| apps/new/src/financeNew/ledgerColFilter.js | Excel-style ledger column filter/sort popover |
 | apps/classic/financeMobile.css | Mobile finance styles |
 | apps/classic/financePageHelp.js | classic/finance Page Help |
 | apps/classic/financeReportsExport.js | Export finance reports (Excel) |
@@ -1364,6 +1368,8 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/new/bulkInvoiceImport.js | Bulk invoice import |
 | apps/new/buttonBusy.js | Busy-state button helper |
 | apps/new/capabilities.js | Named action capabilities for new screens (can / assertCan) |
+| apps/new/capUi.js | Declarative RBAC UI — `data-cap` annotations + `refreshCapabilityGates()` |
+| apps/new/components/CapGate.jsx | React wrapper — hide/disable children by capability id |
 | apps/new/classifyCombobox.js | Classification combobox |
 | apps/new/classifyOptions.js | Classification options |
 | apps/new/dbClient.js | Supabase client + apartment state fetch |
@@ -1394,6 +1400,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 | apps/new/store.js | Central state (portalState) + Supabase client + pullState hydration |
 | apps/new/uiMode.js | Classic (Postgres) vs New (Mongo) UI mode |
 | apps/new/unitDirectory.js | Unit directory (block/bhk/area) |
+| apps/new/vendorFormat.js | new/vendor Format |
 
 ---
 
@@ -1708,7 +1715,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
   Admin + Finance-New call `/api/integrations/*`; public Evolyx callback remains `/api/passbook-webhook`.
 - **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
 - **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
-  UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
+  UI actions use `src/capabilities.js` with declarative gates: HTML `data-cap="…"` + `capUi.refreshCapabilityGates()`, or React `<CapGate cap="…">`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
 - **Deployment:** Vercel (`vercel.json`) — SPA rewrite to `index.html`, `api/*` serverless, cron sync, immutable assets.
 
@@ -1729,11 +1736,11 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
 - `npm run migrate:integrations-mongo` → `node scripts/migrate-integrations-to-mongo.mjs`
 - `npm run migrate:ledger-sync-mongo` → `node scripts/migrate-ledger-sync-to-mongo.mjs`
-- `npm run consolidate:vendors-mongo` → `node scripts/consolidate-vendors-mongo.mjs` (Title Case **Vendors page only**; `--dry-run` / `--apply --title-case`; `--reset-directory`)
+- `npm run consolidate:vendors-mongo` → `node scripts/consolidate-vendors-mongo.mjs`
 - `npm run generate-repo-map` → `node scripts/utilities/generate-repo-map.js`
 - `npm run check:import-boundary` → `node scripts/check-import-boundary.mjs`
 - `npm run setup:hooks` → `node scripts/git-hooks/install-hooks.js`
 
 ---
 
-*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-21.*
+*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-22.*

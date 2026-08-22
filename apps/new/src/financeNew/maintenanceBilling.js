@@ -71,6 +71,7 @@ import { deriveBlockFromFlat } from '../parkingImport.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { INVOICE_PAGE_HELP, applyFinancePageHeader, wireFinancePageHelp } from '../financePageHelp.js';
 import { can } from '../capabilities.js';
+import { refreshCapabilityGates } from '../capUi.js';
 
 const canDeleteAccounts = () => can('accounts.delete');
 
@@ -1314,9 +1315,7 @@ const syncInvoiceListBulkBar = () => {
             : (n ? `${n} selected` : '0 selected');
     }
     if (deleteBtn) {
-        const allowDelete = canDeleteAccounts();
-        deleteBtn.hidden = !allowDelete;
-        deleteBtn.disabled = !allowDelete || deletable.length === 0;
+        deleteBtn.disabled = deletable.length === 0;
         deleteBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected${deletable.length ? ` (${deletable.length})` : ''}`;
     }
     if (clearBtn) clearBtn.disabled = n === 0;
@@ -1615,15 +1614,16 @@ export const renderInvoiceList = () => {
               data-inv-action="pdf" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-file-pdf"></i></button>
             <button type="button" class="btn btn-outline btn--small" title="View details"
               data-inv-action="view" data-id="${escAttr(inv.id)}"><i class="fa-solid fa-eye"></i></button>
-            ${canDeleteAccounts() ? `<button type="button" class="btn btn-outline btn--small btn--danger" title="${hasPayments ? 'Has payments applied' : 'Delete'}"
+            <button type="button" class="btn btn-outline btn--small btn--danger" data-cap="accounts.delete" title="${hasPayments ? 'Has payments applied' : 'Delete'}"
               data-inv-action="delete" data-id="${escAttr(inv.id)}" ${hasPayments ? 'disabled' : ''}>
               <i class="fa-solid fa-trash-can"></i>
-            </button>` : ''}
+            </button>
           </div>`;
         list.appendChild(row);
     });
 
     syncInvoiceListBulkBar();
+    refreshCapabilityGates(list);
 };
 
 export const renderInvoiceCollections = () => {
@@ -1669,6 +1669,7 @@ export const renderInvoicesPage = () => {
     else if (activeInvoiceSubView === 'batches') renderBillingRunsList();
     else if (activeInvoiceSubView === 'aging') void renderAgingPage();
     else renderInvoiceCollections();
+    refreshCapabilityGates(document.getElementById('view-finance-new-invoices') || document);
 };
 
 const INVOICE_SUBVIEW_LABELS = {

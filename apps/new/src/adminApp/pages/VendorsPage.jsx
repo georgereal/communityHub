@@ -8,8 +8,9 @@ import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, Refresh as Refr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader.jsx';
 import SummaryStrip from '../components/SummaryStrip.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import ExcelColHeader, { sortAndFilterRows } from '../../listUi/ExcelColHeader.jsx';
-import { canEditSetup, deleteVendor, refreshAdminState, saveVendor, vendors } from '../api.js';
+import { deleteVendor, refreshAdminState, saveVendor, vendors } from '../api.js';
 import { titleCaseVendor } from '../../vendorFormat.js';
 
 const COLS = [
@@ -22,7 +23,6 @@ const COLS = [
 
 export default function VendorsPage() {
     const qc = useQueryClient();
-    const canEdit = canEditSetup();
     const [error, setError] = useState('');
     const [form, setForm] = useState(null);
     const [filter, setFilter] = useState({ name: '', notes: '', phone: '', email: '', use: '' });
@@ -68,7 +68,7 @@ export default function VendorsPage() {
                 actions={(
                     <>
                         <Tooltip title="Refresh"><IconButton size="small" onClick={invalidate}>{q.isFetching ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}</IconButton></Tooltip>
-                        {canEdit ? (
+                        <CapGate cap="admin.vendors.edit">
                             <Button
                                 variant="contained"
                                 size="small"
@@ -77,7 +77,7 @@ export default function VendorsPage() {
                             >
                                 Add
                             </Button>
-                        ) : null}
+                        </CapGate>
                     </>
                 )}
             />
@@ -116,15 +116,15 @@ export default function VendorsPage() {
                                     <TableCell>{v.contact_email || '—'}</TableCell>
                                     <TableCell>{v.use_count || 0}</TableCell>
                                     <TableCell align="right">
-                                        {canEdit ? (
-                                            <>
-                                                <IconButton size="small" onClick={() => setForm({ ...v, notes: v.notes || '' })}><EditIcon fontSize="small" /></IconButton>
-                                                <IconButton size="small" color="error" onClick={async () => {
-                                                    if (!window.confirm('Delete this vendor?')) return;
-                                                    try { await deleteVendor(v.id); invalidate(); } catch (err) { setError(err.message); }
-                                                }}><DeleteIcon fontSize="small" /></IconButton>
-                                            </>
-                                        ) : null}
+                                        <CapGate cap="admin.vendors.edit">
+                                            <IconButton size="small" onClick={() => setForm({ ...v, notes: v.notes || '' })}><EditIcon fontSize="small" /></IconButton>
+                                        </CapGate>
+                                        <CapGate cap="admin.vendors.edit">
+                                            <IconButton size="small" color="error" onClick={async () => {
+                                                if (!window.confirm('Delete this vendor?')) return;
+                                                try { await deleteVendor(v.id); invalidate(); } catch (err) { setError(err.message); }
+                                            }}><DeleteIcon fontSize="small" /></IconButton>
+                                        </CapGate>
                                     </TableCell>
                                 </TableRow>
                             )) : (
@@ -141,35 +141,39 @@ export default function VendorsPage() {
             <Dialog open={Boolean(form)} onClose={() => setForm(null)} fullWidth maxWidth="sm">
                 <DialogTitle>{form?.id ? 'Edit vendor' : 'Add vendor'}</DialogTitle>
                 <DialogContent>
-                    <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
-                        <TextField
-                            label="Name"
-                            size="small"
-                            required
-                            value={form?.name || ''}
-                            onChange={(e) => setForm({ ...form, name: e.target.value })}
-                            onBlur={() => setForm((f) => (f ? { ...f, name: titleCaseVendor(f.name) } : f))}
-                            helperText="Saved as Title Case (e.g. Siddeshwar Electrical)"
-                        />
-                        <TextField
-                            label="Notes"
-                            size="small"
-                            multiline
-                            minRows={2}
-                            value={form?.notes || ''}
-                            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                            placeholder="e.g. Electrical spares & AMC, Diesel for DG"
-                            helperText="What they do — trade, service, or identifier"
-                        />
-                        <TextField label="Phone" size="small" value={form?.contact_phone || ''} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
-                        <TextField label="Email" size="small" value={form?.contact_email || ''} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
-                    </Box>
+                    <CapGate cap="admin.vendors.edit" mode="disable">
+                        <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
+                            <TextField
+                                label="Name"
+                                size="small"
+                                required
+                                value={form?.name || ''}
+                                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                                onBlur={() => setForm((f) => (f ? { ...f, name: titleCaseVendor(f.name) } : f))}
+                                helperText="Saved as Title Case (e.g. Siddeshwar Electrical)"
+                            />
+                            <TextField
+                                label="Notes"
+                                size="small"
+                                multiline
+                                minRows={2}
+                                value={form?.notes || ''}
+                                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                                placeholder="e.g. Electrical spares & AMC, Diesel for DG"
+                                helperText="What they do — trade, service, or identifier"
+                            />
+                            <TextField label="Phone" size="small" value={form?.contact_phone || ''} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
+                            <TextField label="Email" size="small" value={form?.contact_email || ''} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
+                        </Box>
+                    </CapGate>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setForm(null)}>Cancel</Button>
-                    <Button variant="contained" onClick={async () => {
-                        try { await saveVendor(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
-                    }}>Save</Button>
+                    <CapGate cap="admin.vendors.edit">
+                        <Button variant="contained" onClick={async () => {
+                            try { await saveVendor(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
+                        }}>Save</Button>
+                    </CapGate>
                 </DialogActions>
             </Dialog>
         </Box>

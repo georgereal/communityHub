@@ -16,9 +16,11 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader.jsx';
 import SummaryStrip from '../components/SummaryStrip.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import SpreadsheetSyncDialog from './SpreadsheetSyncDialog.jsx';
+import { can } from '../../capabilities.js';
 import {
-    canEditAccounts, canEditSetup, CONNECTION_CATALOG, loadConnections, saveConnection,
+    CONNECTION_CATALOG, loadConnections, saveConnection,
 } from '../api.js';
 import { getConnectionRow } from '../../externalConnections.js';
 import { loadSpreadsheetSyncBoot, spreadsheetStatusFromBoot } from '../../spreadsheetSyncApi.js';
@@ -41,7 +43,7 @@ function connectionStatus(row, enabled) {
     return { key: 'ready', label: 'Configured', tone: 'success' };
 }
 
-function EvolyxEditForm({ def, canEdit, onClose, onSaved }) {
+function EvolyxEditForm({ def, onClose, onSaved }) {
     const row = getConnectionRow(def.provider, def.connectionKey);
     const [form, setForm] = useState({
         base_url: row?.base_url || def.defaults.base_url,
@@ -65,24 +67,23 @@ function EvolyxEditForm({ def, canEdit, onClose, onSaved }) {
             <DialogContent dividers>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{def.description}</Typography>
                 {error ? <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert> : null}
+                <CapGate cap="admin.integrations.edit" mode="disable">
                 <Box sx={{ display: 'grid', gap: 2 }}>
                     <TextField
                         label="Evolyx API URL"
                         size="small"
                         value={form.base_url}
                         onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-                        disabled={!canEdit}
                         helperText="Evolyx service endpoint — not this app’s URL."
                     />
-                    <TextField label="Client ID" size="small" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} disabled={!canEdit} />
-                    <TextField label="Workflow ID" size="small" value={form.workflow_id} onChange={(e) => setForm({ ...form, workflow_id: e.target.value })} disabled={!canEdit} />
+                    <TextField label="Client ID" size="small" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                    <TextField label="Workflow ID" size="small" value={form.workflow_id} onChange={(e) => setForm({ ...form, workflow_id: e.target.value })} />
                     <TextField
                         label="API key"
                         type="password"
                         size="small"
                         value={form.api_key}
                         onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                        disabled={!canEdit}
                         placeholder={row?.api_key_set ? 'Leave blank to keep current' : 'evx_…'}
                     />
                     <TextField
@@ -90,19 +91,19 @@ function EvolyxEditForm({ def, canEdit, onClose, onSaved }) {
                         size="small"
                         value={form.webhook_base_url}
                         onChange={(e) => setForm({ ...form, webhook_base_url: e.target.value })}
-                        disabled={!canEdit}
                         placeholder="https://your-tunnel.example"
                         helperText="Leave blank to use this API server (recommended in production). For local tunnels, set the https origin so Evolyx can reach your machine."
                     />
                     <FormControlLabel
-                        control={<Switch checked={form.enabled} disabled={!canEdit} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />}
+                        control={<Switch checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />}
                         label="Enabled"
                     />
                 </Box>
+                </CapGate>
             </DialogContent>
             <DialogActions>
                 <Button onClick={onClose}>Close</Button>
-                {canEdit ? (
+                <CapGate cap="admin.integrations.edit">
                     <Button
                         variant="contained"
                         startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
@@ -137,7 +138,7 @@ function EvolyxEditForm({ def, canEdit, onClose, onSaved }) {
                     >
                         Save connection
                     </Button>
-                ) : null}
+                </CapGate>
             </DialogActions>
         </>
     );
@@ -151,8 +152,8 @@ function statusChip(status) {
 export default function IntegrationsPage() {
     const qc = useQueryClient();
     const navigate = useNavigate();
-    const canEdit = canEditSetup();
-    const canSync = canEditAccounts() || canEdit;
+    const canEditIntegrations = can('admin.integrations.edit');
+    const canSyncIntegrations = can('admin.integrations.sync') || canEditIntegrations;
     const [error, setError] = useState('');
     const [activeFilter, setActiveFilter] = useState('');
     const [evolyxDef, setEvolyxDef] = useState(null);
@@ -185,7 +186,7 @@ export default function IntegrationsPage() {
                 typeLabel: 'API connection',
                 status,
                 canOpen: true,
-                canEdit: canEdit,
+                canEdit: canEditIntegrations,
             };
         });
         const sheetStatus = spreadsheetStatusFromBoot(q.data?.sheetBoot);
@@ -196,11 +197,11 @@ export default function IntegrationsPage() {
             description: b.description,
             typeLabel: 'Spreadsheet',
             status: sheetStatus,
-            canOpen: canSync,
-            canEdit: canSync,
+            canOpen: canSyncIntegrations,
+            canEdit: canSyncIntegrations,
         }));
         return [...apiItems, ...builtins];
-    }, [q.data, canEdit, canSync, q.dataUpdatedAt]);
+    }, [q.data, canEditIntegrations, canSyncIntegrations, q.dataUpdatedAt]);
 
     const filtered = useMemo(() => {
         if (!activeFilter) return items;
@@ -220,7 +221,7 @@ export default function IntegrationsPage() {
     const openItem = (item) => {
         setError('');
         if (item.kind === 'spreadsheet') {
-            if (!canSync) {
+            if (!canSyncIntegrations) {
                 setError('You need accounts or setup edit permission to manage spreadsheet sync.');
                 return;
             }
@@ -324,7 +325,6 @@ export default function IntegrationsPage() {
                 {evolyxDef ? (
                     <EvolyxEditForm
                         def={evolyxDef}
-                        canEdit={canEdit}
                         onClose={() => setEvolyxDef(null)}
                         onSaved={invalidate}
                     />
@@ -333,7 +333,6 @@ export default function IntegrationsPage() {
 
             <SpreadsheetSyncDialog
                 open={spreadsheetOpen}
-                canEdit={canSync}
                 onClose={() => {
                     setSpreadsheetOpen(false);
                     invalidate();

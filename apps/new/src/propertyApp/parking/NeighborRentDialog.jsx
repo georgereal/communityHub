@@ -18,9 +18,9 @@ import {
     Typography,
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
+import CapGate from '../../components/CapGate.jsx';
 import { portalState } from '../../store.js';
 import {
-    canEditParking,
     listFlatRentals,
     listUnitOptions,
     saveVehicle,
@@ -44,7 +44,6 @@ function findVehicle(vehicleId) {
 }
 
 export default function NeighborRentDialog({ open, onClose, onSaved }) {
-    const canEdit = canEditParking();
     const flats = listUnitOptions();
     const [rev, setRev] = useState(0);
     const [kindTab, setKindTab] = useState(0);
@@ -226,8 +225,8 @@ export default function NeighborRentDialog({ open, onClose, onSaved }) {
                                             primary={`${r.plate} · ${r.tenantLabel} from ${r.sourceLabel}`}
                                             sx={{ pr: 1 }}
                                         />
-                                        {canEdit ? (
-                                            editingId === r.vehicleId ? (
+                                        <CapGate cap="parking.update">
+                                            {editingId === r.vehicleId ? (
                                                 <Stack direction="row" spacing={0.75} sx={{ width: '100%', mt: 0.5 }}>
                                                     <TextField
                                                         size="small"
@@ -250,19 +249,21 @@ export default function NeighborRentDialog({ open, onClose, onSaved }) {
                                                     >
                                                         Edit
                                                     </Button>
-                                                    <Button size="small" color="error" disabled={busy} onClick={() => remove(r.vehicleId)}>
-                                                        Remove
-                                                    </Button>
+                                                    <CapGate cap="parking.delete">
+                                                        <Button size="small" color="error" disabled={busy} onClick={() => remove(r.vehicleId)}>
+                                                            Remove
+                                                        </Button>
+                                                    </CapGate>
                                                 </Stack>
-                                            )
-                                        ) : null}
+                                            )}
+                                        </CapGate>
                                     </ListItemButton>
                                 ))}
                             </List>
                         )}
                     </Stack>
 
-                    {canEdit ? (
+                    <CapGate cap="parking.update">
                         <Stack spacing={1} sx={{ flex: 1.15, minWidth: 0 }}>
                             <Typography fontWeight={700}>Add rentals</Typography>
                             <Tabs value={kindTab} onChange={(_, v) => { setKindTab(v); setFillTab(0); setPickedVehicleId(''); setHostFlat(null); }} variant="fullWidth">
@@ -365,7 +366,7 @@ export default function NeighborRentDialog({ open, onClose, onSaved }) {
                                 </Stack>
                             )}
                         </Stack>
-                    ) : null}
+                    </CapGate>
                     </Stack>
                 </Stack>
             </DialogContent>

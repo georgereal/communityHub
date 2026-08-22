@@ -44,5 +44,6 @@ export function setAppShellPageContent(html) {
     if (!host) return null;
     host.innerHTML = html;
     host.classList.add('active', 'content-view');
+    void import('../capUi.js').then(({ applyCapabilityGates }) => applyCapabilityGates(host));
     return host;
 }

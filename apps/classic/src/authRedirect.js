@@ -1,4 +1,5 @@
 /** Shared redirects between the main app and `/login`. */
+import { consumeOAuthNext } from '@auth/oauthRedirect.js';
 
 export const AUTH_FLASH_KEY = 'communityhub_auth_flash';
 
@@ -36,6 +37,8 @@ export function goToLogin(msg = '', { next } = {}) {
 
 /** Safe post-login destination from ?next= (same-origin path only). */
 export function consumeLoginNext() {
+    const fromOAuth = consumeOAuthNext();
+    if (fromOAuth) return fromOAuth;
     try {
         const params = new URLSearchParams(window.location.search);
         const next = params.get('next') || '';

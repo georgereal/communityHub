@@ -10,7 +10,7 @@ import { buildCategoryOptions } from '../classifyOptions.js';
 import { postFnMutation } from './mongoMutations.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { getBookBalanceSummary } from './financeAnalytics.js';
-import { can } from '../capabilities.js';
+import { refreshCapabilityGates } from '../capUi.js';
 import { wireClassifyCombobox, setClassifyInputState } from '../classifyCombobox.js';
 
 const formatMoney = (n) =>
@@ -33,18 +33,12 @@ let lastTimeline = [];
 let editingItemId = null;
 let editingRecurringId = null;
 
-const canEditPlan = () => can('accounts.plan_edit');
-const canDeletePlan = () => can('accounts.delete');
-
 const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
-  if (!canEditPlan()) return '';
-  const del = canDeletePlan()
-    ? `<button type="button" class="btn btn-outline btn--small btn--icon" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
+  const del = `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.delete" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
       <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-    </button>`
-    : '';
-  return `<td class="eplan-actions">
-    <button type="button" class="btn btn-outline btn--small btn--icon" ${editAttr}="${esc(editValue)}" title="Edit" aria-label="Edit">
+    </button>`;
+  return `<td class="eplan-actions" data-cap="accounts.plan_edit">
+    <button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.plan_edit" ${editAttr}="${esc(editValue)}" title="Edit" aria-label="Edit">
       <i class="fa-solid fa-pen" aria-hidden="true"></i>
     </button>
     ${del}
@@ -52,14 +46,11 @@ const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
 };
 
 const detailActionsHtml = ({ editAttr, editValue, delAttr, delValue, delLabel }) => {
-  if (!canEditPlan()) return '';
-  const del = canDeletePlan()
-    ? `<button type="button" class="btn btn-outline btn--small btn--danger" ${delAttr}="${esc(delValue)}">
+  const del = `<button type="button" class="btn btn-outline btn--small btn--danger" data-cap="accounts.delete" ${delAttr}="${esc(delValue)}">
       <i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${esc(delLabel || 'Delete')}
-    </button>`
-    : '';
-  return `<div class="eplan-detail__actions">
-    <button type="button" class="btn btn-outline btn--small" ${editAttr}="${esc(editValue)}">
+    </button>`;
+  return `<div class="eplan-detail__actions" data-cap="accounts.plan_edit">
+    <button type="button" class="btn btn-outline btn--small" data-cap="accounts.plan_edit" ${editAttr}="${esc(editValue)}">
       <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
     </button>
     ${del}
@@ -617,6 +608,7 @@ const showDetail = (row) => {
         delLabel: 'Remove from plan',
       })}
     `;
+    refreshCapabilityGates(body);
     return;
   }
 
@@ -647,6 +639,7 @@ const showDetail = (row) => {
       })
       : ''}
   `;
+  refreshCapabilityGates(body);
 };
 
 const showTemplateDetail = (t) => {
@@ -684,6 +677,7 @@ const showTemplateDetail = (t) => {
       delLabel: 'Delete template',
     })}
   `;
+  refreshCapabilityGates(body);
 };
 
 const monthLabel = (y, m) =>
@@ -957,7 +951,7 @@ const renderTimeline = (timeline) => {
     el.innerHTML = '<p class="fa-panel__hint">Nothing planned in this horizon yet. Use <strong>Add one-off</strong> or <strong>Add recurring</strong>.</p>';
     return;
   }
-  const showActions = canEditPlan();
+  const showActions = true;
   const rows = timeline.map((r) => {
     const selected = r.key === selectedKey ? ' eplan-row--selected' : '';
     const badge = r.source === 'recurring'
@@ -997,10 +991,11 @@ const renderTimeline = (timeline) => {
       <th class="cash-float-amt">Amount</th>
       <th>Planned</th>
       <th>Due by</th>
-      ${showActions ? '<th class="eplan-actions"></th>' : ''}
+      ${showActions ? '<th class="eplan-actions" data-cap="accounts.plan_edit"></th>' : ''}
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+  refreshCapabilityGates(el);
 };
 
 const renderRecurringList = () => {
@@ -1013,11 +1008,11 @@ const renderRecurringList = () => {
     el.innerHTML = '<p class="fa-panel__hint">No recurring templates yet.</p>';
     return;
   }
-  const showActions = canEditPlan();
+  const showActions = true;
   el.innerHTML = `<table class="fa-pivot-table cash-float-table eplan-table">
     <thead><tr>
       <th>Title</th><th>Cadence</th><th>Term</th><th class="cash-float-amt">Amount</th><th>Active</th>
-      ${showActions ? '<th class="eplan-actions"></th>' : ''}
+      ${showActions ? '<th class="eplan-actions" data-cap="accounts.plan_edit"></th>' : ''}
     </tr></thead>
     <tbody>${rows.map((t) => {
       const termLabel = t.term_count
@@ -1044,6 +1039,7 @@ const renderRecurringList = () => {
     </tr>`;
     }).join('')}</tbody>
   </table>`;
+  refreshCapabilityGates(el);
 };
 
 export const renderExpensePlanPage = () => {
@@ -1051,17 +1047,13 @@ export const renderExpensePlanPage = () => {
   if (horizonEl && !horizonEl.dataset.touched) {
     horizonEl.value = String(horizonMonths);
   }
-  const edit = canEditPlan();
-  const addOne = document.getElementById('fn-eplan-add-oneoff');
-  const addRec = document.getElementById('fn-eplan-add-recurring');
-  if (addOne) addOne.hidden = !edit;
-  if (addRec) addRec.hidden = !edit;
 
   lastTimeline = buildTimeline();
   renderSummary(lastTimeline);
   renderMonthPivot(lastTimeline);
   renderTimeline(lastTimeline);
   renderRecurringList();
+  refreshCapabilityGates(document.getElementById('fn-subview-expense-plan') || document);
 
   // Book balance needs unpaid / cheque-ready bills + bank recon helpers.
   void (async () => {

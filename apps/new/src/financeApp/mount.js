@@ -94,6 +94,9 @@ async function injectHeaderActions(meta) {
     });
     const bankSync = document.getElementById('fn-btn-accounts-bank-sync');
     if (bankSync) bankSync.hidden = meta.actions !== 'ledger';
+
+    const { applyCapabilityGates } = await import('../capUi.js');
+    applyCapabilityGates(document.getElementById('fn-accounts-header-actions') || document);
 }
 
 async function injectModals({ ledgerOnly = false, bankRecon = false } = {}) {

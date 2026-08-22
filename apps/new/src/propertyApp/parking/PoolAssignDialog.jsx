@@ -16,10 +16,10 @@ import {
     Typography,
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
+import CapGate from '../../components/CapGate.jsx';
 import { portalState } from '../../store.js';
 import {
     assignPoolSlot,
-    canEditParking,
     firstOpenPoolSlot,
     listPoolSlots,
     listUnitOptions,
@@ -45,7 +45,6 @@ function vehicleOnFlat(unitId, plate) {
 }
 
 export default function PoolAssignDialog({ open, kind = 'car', onClose, onSaved }) {
-    const canEdit = canEditParking();
     const label = kind === 'bike' ? 'BH' : 'EH';
     const type = kind === 'bike' ? 'BIKE' : 'CAR';
     const flats = listUnitOptions();
@@ -181,18 +180,20 @@ export default function PoolAssignDialog({ open, kind = 'car', onClose, onSaved 
                                         key={s.id}
                                         alignItems="flex-start"
                                         sx={{ gap: 1, flexWrap: 'wrap' }}
-                                        secondaryAction={canEdit ? (
-                                            <Button size="small" color="error" disabled={busy} onClick={() => release(s)}>
-                                                Remove
-                                            </Button>
-                                        ) : null}
+                                        secondaryAction={(
+                                            <CapGate cap="parking.delete">
+                                                <Button size="small" color="error" disabled={busy} onClick={() => release(s)}>
+                                                    Remove
+                                                </Button>
+                                            </CapGate>
+                                        )}
                                     >
                                         <ListItemText
                                             primary={`${s.occupant || '—'} · ${s.unit_num || '—'}`}
                                             secondary={s.name}
                                             sx={{ pr: 8, minWidth: 160 }}
                                         />
-                                        {canEdit ? (
+                                        <CapGate cap="parking.update">
                                             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ width: '100%', mt: 0.5 }}>
                                                 <TextField
                                                     size="small"
@@ -203,14 +204,14 @@ export default function PoolAssignDialog({ open, kind = 'car', onClose, onSaved 
                                                 />
                                                 <Button size="small" disabled={busy} onClick={() => correctPlate(s)}>Save</Button>
                                             </Stack>
-                                        ) : null}
+                                        </CapGate>
                                     </ListItem>
                                 ))}
                             </List>
                         )}
                     </Stack>
 
-                    {canEdit ? (
+                    <CapGate cap="parking.update">
                         <Stack spacing={1}>
                             <Typography fontWeight={700}>Add to {label}</Typography>
                             <Autocomplete
@@ -235,7 +236,7 @@ export default function PoolAssignDialog({ open, kind = 'car', onClose, onSaved 
                                 Add and assign
                             </Button>
                         </Stack>
-                    ) : null}
+                    </CapGate>
                 </Stack>
             </DialogContent>
             <DialogActions>

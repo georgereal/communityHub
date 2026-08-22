@@ -192,14 +192,22 @@ export async function loadSocietyPolicy(apartmentId) {
 
 export async function saveSocietyPolicy(apartmentId, { pages = {}, modules = {}, crud = {} }) {
     const { policies } = await collections();
+    const existing = (await policies.findOne({ apartment_id: apartmentId })) || {};
+    const mergeRoleMaps = (prev = {}, next = {}) => {
+        const out = { ...prev };
+        for (const [roleKey, row] of Object.entries(next || {})) {
+            out[roleKey] = { ...(out[roleKey] || {}), ...(row || {}) };
+        }
+        return out;
+    };
     await policies.updateOne(
         { apartment_id: apartmentId },
         {
             $set: {
                 apartment_id: apartmentId,
-                pages,
-                modules,
-                crud,
+                pages: mergeRoleMaps(existing.pages, pages),
+                modules: mergeRoleMaps(existing.modules, modules),
+                crud: mergeRoleMaps(existing.crud, crud),
                 updated_at: new Date(),
             },
         },

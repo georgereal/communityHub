@@ -11,19 +11,19 @@
               <p id="fn-fdoc-meta" class="raised-page-meta"></p>
             </div>
             <div class="raised-page-toolbar__actions">
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-template-btn">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-template-btn" data-cap="accounts.docs_manage">
                 <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Template
               </button>
-              <button type="button" class="btn btn-primary btn--small" id="fn-fdoc-upload-btn">
+              <button type="button" class="btn btn-primary btn--small" id="fn-fdoc-upload-btn" data-cap="accounts.docs_manage">
                 <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Import Excel
               </button>
               <input type="file" id="fn-fdoc-file" accept=".xlsx,.xls" hidden />
             </div>
           </div>
 
-          <section id="fn-fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" aria-label="Cash float store"></section>
+          <section id="fn-fdoc-float-kpis" class="ledger-kpi-bar cash-float-kpi fdoc-float-kpis" data-cap="accounts.docs_manage" aria-label="Cash float store"></section>
 
-          <details class="fdoc-funding-details" id="fn-fdoc-funding-details">
+          <details class="fdoc-funding-details" id="fn-fdoc-funding-details" data-cap="accounts.docs_manage">
             <summary class="fdoc-funding-details__summary">
               <span class="fdoc-funding-details__title">Petty Cash float</span>
               <span id="fn-fdoc-funding-summary-meta" class="fdoc-funding-details__meta"></span>
@@ -97,22 +97,22 @@
                 <span class="fdoc-action-full">Newest first</span>
                 <span class="fdoc-action-short">Top</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-bulk-link" disabled title="Link selected">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-bulk-link" data-cap="accounts.docs_manage" disabled title="Link selected">
                 <i class="fa-solid fa-link" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Link selected</span>
                 <span class="fdoc-action-short">Link</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-deposit-wallet" title="Deposit wallet to bank">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-deposit-wallet" data-cap="accounts.docs_manage" title="Deposit wallet to bank">
                 <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Deposit wallet to bank</span>
                 <span class="fdoc-action-short">Deposit</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-sync-cats" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-sync-cats" data-cap="accounts.docs_manage" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
                 <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Sync categories</span>
                 <span class="fdoc-action-short">Sync</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-fdoc-bulk-delete" disabled title="Delete selected">
+              <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-fdoc-bulk-delete" data-cap="accounts.delete" disabled title="Delete selected">
                 <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Delete selected</span>
                 <span class="fdoc-action-short">Delete</span>
@@ -124,7 +124,7 @@
             <table class="fa-pivot-table cash-float-table">
               <thead>
                 <tr>
-                  <th class="fdoc-check-col">
+                  <th class="fdoc-check-col" data-cap="accounts.docs_manage">
                     <input type="checkbox" id="fn-fdoc-select-all" title="Select all rows" aria-label="Select all bills" />
                   </th>
                   <th>Date</th>

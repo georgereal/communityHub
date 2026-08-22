@@ -8,8 +8,9 @@ import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, Refresh as Refr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader.jsx';
 import SummaryStrip from '../components/SummaryStrip.jsx';
+import CapGate from '../../components/CapGate.jsx';
 import ExcelColHeader, { sortAndFilterRows } from '../../listUi/ExcelColHeader.jsx';
-import { canEditSetup, deleteSubCategory, defaultExpenseCategory, expenseCategoryOptions, refreshFinanceCategoryCatalog, saveSubCategory, subCategories } from '../api.js';
+import { defaultExpenseCategory, deleteSubCategory, expenseCategoryOptions, refreshFinanceCategoryCatalog, saveSubCategory, subCategories } from '../api.js';
 
 const COLS = [
     { key: 'category', label: 'Category', canSort: true, canFilter: true },
@@ -19,7 +20,6 @@ const COLS = [
 
 export default function CategoriesPage() {
     const qc = useQueryClient();
-    const canEdit = canEditSetup();
     const [error, setError] = useState('');
     const [form, setForm] = useState(null);
     const [catFilter, setCatFilter] = useState('');
@@ -62,7 +62,9 @@ export default function CategoriesPage() {
                             {catOptions.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
                         </TextField>
                         <Tooltip title="Refresh"><IconButton size="small" onClick={invalidate}>{q.isFetching ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}</IconButton></Tooltip>
-                        {canEdit ? <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setForm({ category: catOptions[0] || defaultExpenseCategory(), name: '' })}>Add</Button> : null}
+                        <CapGate cap="admin.categories.edit">
+                            <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setForm({ category: catOptions[0] || defaultExpenseCategory(), name: '' })}>Add</Button>
+                        </CapGate>
                     </>
                 )}
             />
@@ -88,15 +90,15 @@ export default function CategoriesPage() {
                                     <TableCell><Typography fontWeight={600}>{r.name}</Typography></TableCell>
                                     <TableCell>{r.use_count || 0}</TableCell>
                                     <TableCell align="right">
-                                        {canEdit ? (
-                                            <>
-                                                <IconButton size="small" onClick={() => setForm({ ...r })}><EditIcon fontSize="small" /></IconButton>
-                                                <IconButton size="small" color="error" onClick={async () => {
-                                                    if (!window.confirm('Delete this sub-category?')) return;
-                                                    try { await deleteSubCategory(r.id); invalidate(); } catch (err) { setError(err.message); }
-                                                }}><DeleteIcon fontSize="small" /></IconButton>
-                                            </>
-                                        ) : null}
+                                        <CapGate cap="admin.categories.edit">
+                                            <IconButton size="small" onClick={() => setForm({ ...r })}><EditIcon fontSize="small" /></IconButton>
+                                        </CapGate>
+                                        <CapGate cap="admin.categories.edit">
+                                            <IconButton size="small" color="error" onClick={async () => {
+                                                if (!window.confirm('Delete this sub-category?')) return;
+                                                try { await deleteSubCategory(r.id); invalidate(); } catch (err) { setError(err.message); }
+                                            }}><DeleteIcon fontSize="small" /></IconButton>
+                                        </CapGate>
                                     </TableCell>
                                 </TableRow>
                             )) : <TableRow><TableCell colSpan={4}><Typography color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>No sub-categories yet.</Typography></TableCell></TableRow>}
@@ -107,18 +109,22 @@ export default function CategoriesPage() {
             <Dialog open={Boolean(form)} onClose={() => setForm(null)} fullWidth maxWidth="sm">
                 <DialogTitle>{form?.id ? 'Edit sub-category' : 'Add sub-category'}</DialogTitle>
                 <DialogContent>
-                    <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
-                        <TextField select label="Category" size="small" value={form?.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                            {[...new Set([...catOptions, form?.category].filter(Boolean))].map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                        </TextField>
-                        <TextField label="Name" size="small" value={form?.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-                    </Box>
+                    <CapGate cap="admin.categories.edit" mode="disable">
+                        <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
+                            <TextField select label="Category" size="small" value={form?.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                                {[...new Set([...catOptions, form?.category].filter(Boolean))].map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                            </TextField>
+                            <TextField label="Name" size="small" value={form?.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                        </Box>
+                    </CapGate>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setForm(null)}>Cancel</Button>
-                    <Button variant="contained" onClick={async () => {
-                        try { await saveSubCategory(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
-                    }}>Save</Button>
+                    <CapGate cap="admin.categories.edit">
+                        <Button variant="contained" onClick={async () => {
+                            try { await saveSubCategory(form); setForm(null); invalidate(); } catch (err) { setError(err.message); }
+                        }}>Save</Button>
+                    </CapGate>
                 </DialogActions>
             </Dialog>
         </Box>

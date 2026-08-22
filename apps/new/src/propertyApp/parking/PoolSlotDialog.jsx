@@ -18,10 +18,10 @@ import {
     Typography,
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
+import CapGate from '../../components/CapGate.jsx';
 import { portalState } from '../../store.js';
 import {
     assignPoolSlot,
-    canEditParking,
     listPoolSlots,
     listUnitOptions,
     releasePoolSlot,
@@ -53,7 +53,6 @@ function vehicleOnFlat(unitId, plate) {
 }
 
 export default function PoolSlotDialog({ open, slot: slotProp, onClose, onSaved }) {
-    const canEdit = canEditParking();
     const [rev, setRev] = useState(0);
     const slot = liveSlot(slotProp);
     const kind = slot ? slotKind(slot) || 'car' : 'car';
@@ -179,26 +178,26 @@ export default function PoolSlotDialog({ open, slot: slotProp, onClose, onSaved 
                             <Typography variant="body2" color="text.secondary">
                                 This slot is assigned. Edit the plate or remove it; then you can fill the slot.
                             </Typography>
-                            {editingPlate && canEdit ? (
-                                <Stack direction="row" spacing={0.75} alignItems="center">
-                                    <TextField
-                                        autoFocus
-                                        size="small"
-                                        label="Vehicle plate"
-                                        value={plateDraft}
-                                        onChange={(e) => setPlateDraft(e.target.value.toUpperCase())}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') savePlate(); }}
-                                        sx={{ flex: 1 }}
-                                    />
-                                    <Button size="small" variant="contained" onClick={savePlate} disabled={busy}>Save</Button>
-                                    <Button size="small" onClick={() => setEditingPlate(false)}>Cancel</Button>
-                                </Stack>
-                            ) : (
-                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                                    <span className="parking-vchip parking-vchip--pool">
-                                        <span className="parking-vchip__plate">{plate} · {flatNo}</span>
-                                    </span>
-                                    {canEdit ? (
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                                <span className="parking-vchip parking-vchip--pool">
+                                    <span className="parking-vchip__plate">{plate} · {flatNo}</span>
+                                </span>
+                                <CapGate cap="parking.update">
+                                    {editingPlate ? (
+                                        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ width: '100%', mt: 0.5 }}>
+                                            <TextField
+                                                autoFocus
+                                                size="small"
+                                                label="Vehicle plate"
+                                                value={plateDraft}
+                                                onChange={(e) => setPlateDraft(e.target.value.toUpperCase())}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') savePlate(); }}
+                                                sx={{ flex: 1 }}
+                                            />
+                                            <Button size="small" variant="contained" onClick={savePlate} disabled={busy}>Save</Button>
+                                            <Button size="small" onClick={() => setEditingPlate(false)}>Cancel</Button>
+                                        </Stack>
+                                    ) : (
                                         <>
                                             <Button
                                                 size="small"
@@ -209,15 +208,18 @@ export default function PoolSlotDialog({ open, slot: slotProp, onClose, onSaved 
                                             >
                                                 Edit plate
                                             </Button>
-                                            <Button size="small" color="error" disabled={busy} onClick={remove}>
-                                                Remove
-                                            </Button>
+                                            <CapGate cap="parking.delete">
+                                                <Button size="small" color="error" disabled={busy} onClick={remove}>
+                                                    Remove
+                                                </Button>
+                                            </CapGate>
                                         </>
-                                    ) : null}
-                                </Stack>
-                            )}
+                                    )}
+                                </CapGate>
+                            </Stack>
                         </Stack>
-                    ) : canEdit ? (
+                    ) : (
+                        <CapGate cap="parking.update" fallback={<Typography color="text.secondary">This slot is empty.</Typography>}>
                         <Stack spacing={1}>
                             <Typography variant="body2" color="text.secondary">
                                 Slot is empty. Assign an overallocated vehicle or add a new one.
@@ -274,8 +276,7 @@ export default function PoolSlotDialog({ open, slot: slotProp, onClose, onSaved 
                                 </Stack>
                             )}
                         </Stack>
-                    ) : (
-                        <Typography color="text.secondary">This slot is empty.</Typography>
+                        </CapGate>
                     )}
                 </Stack>
             </DialogContent>

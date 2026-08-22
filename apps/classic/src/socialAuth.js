@@ -2,14 +2,14 @@
  * Supabase social login (OAuth) for app sign-in.
  * Configure providers in Supabase Dashboard → Authentication → Providers.
  */
-
-const LEDGER_OAUTH_PENDING_KEYS = [
-    'ledger_oauth_pending',
-    'google_service_oauth_pending',
-    'ms_oauth_pending',
-    'ms_web_oauth_pending',
-    'ms_service_oauth_pending',
-];
+import {
+    clearLedgerOAuthPendingMarkers,
+    prepareSupabaseAuthCallback,
+} from '@auth/oauthMarkers.js';
+import {
+    getSupabaseAuthRedirectUrl,
+    stashOAuthNextFromUrl,
+} from '@auth/oauthRedirect.js';
 
 export const SOCIAL_AUTH_PROVIDERS = [
     { id: 'google', label: 'Google', iconClass: 'fa-brands fa-google' },
@@ -34,22 +34,7 @@ export function getEnabledSocialProviders() {
 }
 
 export function getAuthRedirectUrl() {
-    // Use origin root so redirect matches Supabase allowlist (localhost + production).
-    return `${window.location.origin}/`;
-}
-
-function hasActiveLedgerOAuthPending() {
-    try {
-        if (sessionStorage.getItem('ledger_oauth_pending')) return true;
-        if (sessionStorage.getItem('google_service_oauth_pending')) return true;
-        if (sessionStorage.getItem('ms_web_oauth_pending')) return true;
-        if (sessionStorage.getItem('ms_service_oauth_pending')) return true;
-        const msPending = sessionStorage.getItem('ms_oauth_pending') || localStorage.getItem('ms_oauth_pending');
-        if (msPending && sessionStorage.getItem('ledger_oauth_pkce_verifier')) return true;
-        return false;
-    } catch {
-        return false;
-    }
+    return getSupabaseAuthRedirectUrl();
 }
 
 /** True when URL looks like a Supabase Auth PKCE callback (not ledger spreadsheet OAuth). */
@@ -57,29 +42,23 @@ export function isSupabaseAuthRedirect() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     if (!code) return false;
-    if (hasActiveLedgerOAuthPending()) return false;
+    prepareSupabaseAuthCallback();
     return true;
 }
 
 export function clearStaleLedgerOAuthMarkersForSupabaseAuth() {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get('code') || hasActiveLedgerOAuthPending()) return;
-    try {
-        LEDGER_OAUTH_PENDING_KEYS.forEach((key) => {
-            sessionStorage.removeItem(key);
-            localStorage.removeItem(key);
-        });
-        sessionStorage.removeItem('ledger_oauth_pkce_verifier');
-        sessionStorage.removeItem('ledger_oauth_return_hash');
-    } catch {
-        /* ignore */
-    }
+    prepareSupabaseAuthCallback();
 }
 
 export function cleanAuthRedirectFromUrl() {
     const hash = window.location.hash || '';
     const keepHash = hash && !hash.includes('access_token=') ? hash : '';
-    window.history.replaceState({}, document.title, `${window.location.pathname}${keepHash}`);
+    const params = new URLSearchParams(window.location.search);
+    params.delete('code');
+    params.delete('error');
+    params.delete('error_description');
+    const q = params.toString();
+    window.history.replaceState({}, document.title, `${window.location.pathname}${q ? `?${q}` : ''}${keepHash}`);
 }
 
 /** Exchange PKCE code (or read session if auto-detect already ran). */
@@ -122,7 +101,7 @@ export async function resolveSessionAfterOAuthRedirect(supabase) {
     };
 }
 
-import { authClient, ensureAuthInitialized } from '@auth/authClient.js';
+import { authClient, ensureAuthInitialized, resetAuthInit } from '@auth/authClient.js';
 
 /** Wait for Supabase session after OAuth redirect or stored session. */
 export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs = 250 } = {}) {
@@ -177,6 +156,10 @@ export async function signInWithSocialProvider(supabase, provider) {
         return { data: null, error: { message: 'Supabase is not configured.' } };
     }
 
+    stashOAuthNextFromUrl();
+    clearLedgerOAuthPendingMarkers();
+    resetAuthInit();
+
     const options = {
         redirectTo: getAuthRedirectUrl(),
     };
@@ -188,5 +171,10 @@ export async function signInWithSocialProvider(supabase, provider) {
         };
     }
 
-    return client.auth.signInWithOAuth({ provider, options });
+    console.log('[auth] oauth-start', { provider, redirectTo: options.redirectTo });
+    const result = await client.auth.signInWithOAuth({ provider, options });
+    if (!result.error && result.data?.url) {
+        window.location.assign(result.data.url);
+    }
+    return result;
 }

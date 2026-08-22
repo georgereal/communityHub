@@ -16,6 +16,11 @@
   <script>
     (function () {
       try {
+        var search = location.search || '';
+        if (search.indexOf('code=') !== -1 || search.indexOf('error=') !== -1 || String(location.hash || '').indexOf('access_token=') !== -1) {
+          location.replace('/login.html' + search + (location.hash || ''));
+          return;
+        }
         var stored = '';
         try { stored = localStorage.getItem('ch_ui_mode') || ''; } catch (e) {}
         var cookie = (document.cookie.match(/(?:^|; )ch_ui_mode=([^;]*)/) || [])[1];

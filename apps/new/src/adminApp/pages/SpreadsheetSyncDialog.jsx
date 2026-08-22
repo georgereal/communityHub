@@ -6,6 +6,7 @@ import {
 import { Close as CloseIcon, History as HistoryIcon, Save as SaveIcon } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import CapGate from '../../components/CapGate.jsx';
 import {
     fetchSpreadsheetSyncBoot,
     saveSpreadsheetOAuthApp,
@@ -28,7 +29,7 @@ function oauthAppFor(boot, provider) {
 /**
  * New Admin spreadsheet sync editor — Mongo only (no classic panel / portalState bridge).
  */
-export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
+export default function SpreadsheetSyncDialog({ open, onClose }) {
     const qc = useQueryClient();
     const navigate = useNavigate();
     const [provider, setProvider] = useState('MICROSOFT');
@@ -217,13 +218,13 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                 Society-level app registration. Redirect URI: <code>{redirectHint}</code>
                                 {app?.client_secret_set ? ' · Client secret on file' : ''}
                             </Typography>
+                            <CapGate cap="admin.integrations.edit" mode="disable">
                             <Stack spacing={2}>
                                 <TextField
                                     label="Client ID"
                                     size="small"
                                     value={oauthForm.client_id}
                                     onChange={(e) => setOauthForm({ ...oauthForm, client_id: e.target.value })}
-                                    disabled={!canEdit}
                                     fullWidth
                                 />
                                 {provider === 'MICROSOFT' ? (
@@ -232,7 +233,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         size="small"
                                         value={oauthForm.tenant_id}
                                         onChange={(e) => setOauthForm({ ...oauthForm, tenant_id: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                     />
                                 ) : null}
@@ -242,12 +242,11 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                     size="small"
                                     value={oauthForm.client_secret}
                                     onChange={(e) => setOauthForm({ ...oauthForm, client_secret: e.target.value })}
-                                    disabled={!canEdit}
                                     fullWidth
                                     placeholder={app?.client_secret_set ? 'Leave blank to keep current' : 'Required for background sync'}
                                     helperText={myConn?.account_email ? `Your linked account: ${myConn.account_email}` : 'Connect a user account from Finance after saving the app.'}
                                 />
-                                {canEdit ? (
+                                <CapGate cap="admin.integrations.edit">
                                     <Box>
                                         <Button
                                             variant="contained"
@@ -259,8 +258,9 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                             Save OAuth app
                                         </Button>
                                     </Box>
-                                ) : null}
+                                </CapGate>
                             </Stack>
+                            </CapGate>
                         </Box>
 
                         <Divider />
@@ -270,6 +270,7 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                                 Spreadsheet URL and sheet bounds used for ledger sync.
                             </Typography>
+                            <CapGate any={['admin.integrations.sync', 'admin.integrations.edit']} mode="disable">
                             <Stack spacing={2}>
                                 <TextField
                                     select
@@ -277,7 +278,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                     size="small"
                                     value={bookForm.provider}
                                     onChange={(e) => setBookForm({ ...bookForm, provider: e.target.value })}
-                                    disabled={!canEdit}
                                     fullWidth
                                 >
                                     <MenuItem value="MICROSOFT">Microsoft Excel Online</MenuItem>
@@ -288,7 +288,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                     size="small"
                                     value={bookForm.spreadsheet_url}
                                     onChange={(e) => setBookForm({ ...bookForm, spreadsheet_url: e.target.value })}
-                                    disabled={!canEdit}
                                     fullWidth
                                 />
                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -297,7 +296,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         size="small"
                                         value={bookForm.sheet_name}
                                         onChange={(e) => setBookForm({ ...bookForm, sheet_name: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                     />
                                     <TextField
@@ -305,7 +303,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         size="small"
                                         value={bookForm.range_a1}
                                         onChange={(e) => setBookForm({ ...bookForm, range_a1: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                     />
                                 </Stack>
@@ -316,7 +313,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         type="number"
                                         value={bookForm.header_row}
                                         onChange={(e) => setBookForm({ ...bookForm, header_row: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                     />
                                     <TextField
@@ -325,7 +321,6 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         type="number"
                                         value={bookForm.footer_row}
                                         onChange={(e) => setBookForm({ ...bookForm, footer_row: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                     />
                                     <TextField
@@ -334,12 +329,11 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                         type="number"
                                         value={bookForm.sync_interval_minutes}
                                         onChange={(e) => setBookForm({ ...bookForm, sync_interval_minutes: e.target.value })}
-                                        disabled={!canEdit}
                                         fullWidth
                                         helperText="0 = manual only"
                                     />
                                 </Stack>
-                                {canEdit ? (
+                                <CapGate any={['admin.integrations.sync', 'admin.integrations.edit']}>
                                     <Box>
                                         <Button
                                             variant="contained"
@@ -351,8 +345,9 @@ export default function SpreadsheetSyncDialog({ open, onClose, canEdit }) {
                                             Save workbook
                                         </Button>
                                     </Box>
-                                ) : null}
+                                </CapGate>
                             </Stack>
+                            </CapGate>
                         </Box>
                     </Stack>
                 )}

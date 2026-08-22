@@ -3,6 +3,7 @@
  * detectSessionInUrl is OFF — boot exchanges ?code= manually to avoid races.
  */
 import { createClient } from '@supabase/supabase-js';
+import { clearLedgerOAuthPendingMarkers, prepareSupabaseAuthCallback } from './oauthMarkers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -19,20 +20,6 @@ export const authClient = (SUPABASE_URL && SUPABASE_ANON_KEY)
     : null;
 
 let authInitPromise = null;
-
-function hasActiveLedgerOAuthPending() {
-    try {
-        if (sessionStorage.getItem('ledger_oauth_pending')) return true;
-        if (sessionStorage.getItem('google_service_oauth_pending')) return true;
-        if (sessionStorage.getItem('ms_web_oauth_pending')) return true;
-        if (sessionStorage.getItem('ms_service_oauth_pending')) return true;
-        const msPending = sessionStorage.getItem('ms_oauth_pending') || localStorage.getItem('ms_oauth_pending');
-        if (msPending && sessionStorage.getItem('ledger_oauth_pkce_verifier')) return true;
-        return false;
-    } catch {
-        return false;
-    }
-}
 
 function logAuth(step, detail = {}) {
     console.log('[auth]', step, detail);
@@ -53,10 +40,7 @@ export async function primeAuthSessionFromUrl() {
 
     const code = search.get('code');
     if (code) {
-        if (hasActiveLedgerOAuthPending()) {
-            logAuth('skip-exchange-ledger-pending', {});
-            return { session: null, error: null };
-        }
+        prepareSupabaseAuthCallback();
         logAuth('exchange-code-start', { hasCode: true });
         const { data, error } = await authClient.auth.exchangeCodeForSession(code);
         if (!error && data?.session) {
@@ -106,4 +90,26 @@ export function ensureAuthInitialized() {
         authInitPromise = primeAuthSessionFromUrl();
     }
     return authInitPromise;
+}
+
+/** Drop cached boot auth so the next page can exchange ?code= fresh. */
+export function resetAuthInit() {
+    authInitPromise = null;
+}
+
+/** Clear httpOnly cookie + Supabase persisted session (MPA logout). */
+export async function signOutAuth() {
+    try {
+        await fetch('/api/auth-session', { method: 'DELETE', credentials: 'include' });
+    } catch { /* ignore */ }
+
+    authInitPromise = null;
+
+    clearLedgerOAuthPendingMarkers();
+
+    if (authClient) {
+        try {
+            await authClient.auth.signOut();
+        } catch { /* ignore */ }
+    }
 }

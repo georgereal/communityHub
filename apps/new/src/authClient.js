@@ -1,1 +1,1 @@
-export { authClient, ensureAuthInitialized, primeAuthSessionFromUrl } from '@auth/authClient.js';
+export { authClient, ensureAuthInitialized, primeAuthSessionFromUrl, resetAuthInit, signOutAuth } from '@auth/authClient.js';

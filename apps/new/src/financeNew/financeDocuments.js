@@ -29,7 +29,15 @@ import {
   setClassifyInputState,
   isExactListMatch,
 } from '../classifyCombobox.js';
-import { can } from '../capabilities.js';
+import {
+  canManageFinanceDocs,
+  canDeleteFinanceDocs,
+  canEnterFinanceDocs,
+  isStaffBillsOnly,
+} from './financePermissions.js';
+import { refreshCapabilityGates } from '../capUi.js';
+
+export { canManageFinanceDocs, canDeleteFinanceDocs, canEnterFinanceDocs, isStaffBillsOnly };
 
 const formatMoney = (n) =>
   `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -46,33 +54,13 @@ export function formatVendorParticulars(vendor, particular) {
   return v || p || '—';
 }
 
-/** Full bills management (link, delete, float, deposit). */
-export const canManageFinanceDocs = () => can('accounts.docs_manage');
-export const canDeleteFinanceDocs = () => can('accounts.delete') || can('accounts.docs_manage');
-
-/** Add / upload / view bills (includes staff entry). */
-export const canEnterFinanceDocs = () => can('accounts.bills_enter');
-
-const isStaffBillsOnly = () =>
-  can('accounts.bills_enter') && !can('accounts.edit');
-
-const applyFinanceDocsStaffMode = () => {
+export const applyFinanceDocsStaffMode = () => {
   const root = document.getElementById('fn-subview-finance-docs');
   if (!root) return;
   const staffOnly = isStaffBillsOnly();
   root.classList.toggle('fdoc-staff-mode', staffOnly);
-  const funding = document.getElementById('fn-fdoc-funding-details');
-  const kpis = document.getElementById('fn-fdoc-float-kpis');
-  if (funding) funding.hidden = staffOnly;
-  if (kpis) kpis.hidden = staffOnly;
-  ['fn-fdoc-bulk-link', 'fn-fdoc-deposit-wallet', 'fn-fdoc-sync-cats'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.hidden = staffOnly;
-  });
-  const bulkDel = document.getElementById('fn-fdoc-bulk-delete');
-  if (bulkDel) bulkDel.hidden = staffOnly || !canDeleteFinanceDocs();
-  const checkCol = root.querySelector('.fdoc-check-col');
-  if (checkCol) checkCol.hidden = staffOnly;
+  refreshCapabilityGates(root);
+  refreshCapabilityGates(document.getElementById('fn-accounts-header-actions') || document);
 };
 
 const esc = (s) => String(s ?? '')
@@ -2583,13 +2571,13 @@ const syncBulkActionButtons = () => {
   const delBtn = document.getElementById('fn-fdoc-bulk-delete');
   if (delBtn) {
     const allowDelete = canDeleteFinanceDocs();
-    delBtn.hidden = isStaffBillsOnly() || !allowDelete;
     delBtn.disabled = !allowDelete || selectedIds.length === 0;
     const count = selectedIds.length ? ` (${selectedIds.length})` : '';
     const full = `Delete selected${count}`;
     delBtn.title = full;
     delBtn.innerHTML = `<i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${actionLabel(full, `Delete${count}`)}`;
   }
+  refreshCapabilityGates(document.getElementById('fn-subview-finance-docs') || document);
 };
 
 const selectedDocIds = () =>
@@ -2687,11 +2675,14 @@ const paintFinanceDocumentsTable = () => {
       : `<span class="fdoc-status ${statusClass}">${esc(statusText)}</span>`;
     const linkBtn = manage
       ? (status === 'linked'
-        ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
-        : `<button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-link="${esc(d.id)}" title="Link to ledger" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
+        ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
+        : `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-link="${esc(d.id)}" title="Link to ledger" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
       : '';
     const delBtn = manage && canDeleteFinanceDocs()
-      ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+      ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-cap="accounts.delete" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
+      : '';
+    const editBtn = manage
+      ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-edit="${esc(d.id)}" title="Edit" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`
       : '';
     const pay = paymentInfo(d);
     const payClass = pay.mode === 'cash'
@@ -2703,7 +2694,7 @@ const paintFinanceDocumentsTable = () => {
           : (pay.mode === 'unpaid' ? 'fdoc-pay fdoc-pay--unpaid' : 'fdoc-pay');
     const isIncome = d.kind === 'IN';
     return `<tr class="fdoc-row fdoc-row--clickable" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}" title="Click row to view details">
-      <td class="fdoc-check-col"${staffOnly ? ' hidden' : ''}>
+      <td class="fdoc-check-col"${staffOnly ? ' hidden' : ''} data-cap="accounts.docs_manage">
         <input type="checkbox" class="fdoc-row-check" value="${esc(d.id)}" aria-label="Select bill" ${staffOnly ? 'disabled' : ''} />
       </td>
       <td class="fdoc-cell-open">${esc(date)}</td>
@@ -2716,12 +2707,13 @@ const paintFinanceDocumentsTable = () => {
       <td class="fdoc-actions">
         ${linkBtn}
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-view="${esc(d.id)}" title="View details" aria-label="View details"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
-        <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-edit="${esc(d.id)}" title="Edit" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+        ${editBtn}
         ${delBtn}
       </td>
     </tr>`;
   }).join('');
   syncBulkActionButtons();
+  refreshCapabilityGates(document.getElementById('fn-subview-finance-docs') || body);
 };
 
 export function renderFinanceDocumentsPage() {

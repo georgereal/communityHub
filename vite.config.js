@@ -12,10 +12,21 @@ function loginPathRewritePlugin() {
     return {
         name: 'login-path-rewrite',
         configureServer(server) {
-            server.middlewares.use((req, _res, next) => {
+            server.middlewares.use((req, res, next) => {
                 const url = req.url || '';
                 if (url === '/login' || url.startsWith('/login?')) {
                     req.url = url.replace(/^\/login/, '/login.html');
+                    next();
+                    return;
+                }
+                const qIndex = url.indexOf('?');
+                const pathOnly = qIndex === -1 ? url : url.slice(0, qIndex);
+                const search = qIndex === -1 ? '' : url.slice(qIndex);
+                if ((pathOnly === '/' || pathOnly === '/index.html') && search.includes('code=')) {
+                    res.statusCode = 302;
+                    res.setHeader('Location', `/login.html${search}`);
+                    res.end();
+                    return;
                 }
                 next();
             });

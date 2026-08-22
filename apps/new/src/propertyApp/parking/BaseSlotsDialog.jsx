@@ -20,10 +20,11 @@ import {
     Typography,
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
-import { canEditBaseSlots, listParkingUnits, saveUnitParkingLimits, saveUnitParkingLimitsBulk } from './api.js';
+import CapGate from '../../components/CapGate.jsx';
+import { can } from '../../capabilities.js';
+import { listParkingUnits, saveUnitParkingLimits, saveUnitParkingLimitsBulk } from './api.js';
 
 export default function BaseSlotsDialog({ open, onClose, onSaved }) {
-    const canEdit = canEditBaseSlots();
     const [tab, setTab] = useState(0);
     const [q, setQ] = useState('');
     const [unitId, setUnitId] = useState('');
@@ -131,12 +132,12 @@ export default function BaseSlotsDialog({ open, onClose, onSaved }) {
                     <Typography variant="body2" color="text.secondary">
                         Each flat’s included car and bike slots. Raising a limit moves extra vehicles out of overallocated automatically.
                     </Typography>
-                    {canEdit ? (
+                    <CapGate cap="parking.base_slots">
                         <Tabs value={tab} onChange={(_, v) => { setTab(v); setError(''); }} variant="fullWidth">
                             <Tab label="One flat" />
                             <Tab label="Bulk update" />
                         </Tabs>
-                    ) : null}
+                    </CapGate>
                     <TextField
                         size="small"
                         label="Search flat"
@@ -144,16 +145,18 @@ export default function BaseSlotsDialog({ open, onClose, onSaved }) {
                         onChange={(e) => setQ(e.target.value)}
                         fullWidth
                     />
-                    {tab === 1 && canEdit ? (
-                        <Stack direction="row" alignItems="center">
-                            <Checkbox checked={allPicked} indeterminate={picked.size > 0 && !allPicked} onChange={toggleAll} />
-                            <Typography variant="body2">Select all {flats.length} listed</Typography>
-                        </Stack>
-                    ) : null}
+                    <CapGate cap="parking.base_slots">
+                        {tab === 1 ? (
+                            <Stack direction="row" alignItems="center">
+                                <Checkbox checked={allPicked} indeterminate={picked.size > 0 && !allPicked} onChange={toggleAll} />
+                                <Typography variant="body2">Select all {flats.length} listed</Typography>
+                            </Stack>
+                        ) : null}
+                    </CapGate>
                     <Stack sx={{ maxHeight: 240, overflow: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                         {flats.length === 0 ? (
                             <Typography sx={{ p: 2 }} color="text.secondary">No matching flats.</Typography>
-                        ) : tab === 1 && canEdit ? (
+                        ) : tab === 1 && can('parking.base_slots') ? (
                             <List dense>
                                 {flats.map((u) => (
                                     <ListItem key={u.id} disablePadding>
@@ -186,69 +189,71 @@ export default function BaseSlotsDialog({ open, onClose, onSaved }) {
                             </List>
                         )}
                     </Stack>
-                    {canEdit && tab === 0 && selected ? (
-                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                            <TextField
-                                size="small"
-                                type="number"
-                                label="Car slots"
-                                value={carLimit}
-                                onChange={(e) => setCarLimit(e.target.value)}
-                                sx={{ width: 120 }}
-                                inputProps={{ min: 0 }}
-                            />
-                            <TextField
-                                size="small"
-                                type="number"
-                                label="Bike slots"
-                                value={bikeLimit}
-                                onChange={(e) => setBikeLimit(e.target.value)}
-                                sx={{ width: 120 }}
-                                inputProps={{ min: 0 }}
-                            />
-                            <Button variant="contained" onClick={saveOne} disabled={busy}>
-                                Save slots
-                            </Button>
-                        </Stack>
-                    ) : null}
-                    {canEdit && tab === 1 ? (
-                        <Stack spacing={1}>
-                            <Typography variant="body2" color="text.secondary">
-                                Fill only the counts you want to change. Leave a field blank to keep each flat’s current value.
-                                {picked.size ? ` ${picked.size} selected.` : ''}
-                            </Typography>
+                    <CapGate cap="parking.base_slots">
+                        {tab === 0 && selected ? (
                             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                                 <TextField
                                     size="small"
                                     type="number"
                                     label="Car slots"
-                                    placeholder="Keep"
-                                    value={bulkCar}
-                                    onChange={(e) => setBulkCar(e.target.value)}
-                                    sx={{ width: 130 }}
+                                    value={carLimit}
+                                    onChange={(e) => setCarLimit(e.target.value)}
+                                    sx={{ width: 120 }}
                                     inputProps={{ min: 0 }}
                                 />
                                 <TextField
                                     size="small"
                                     type="number"
                                     label="Bike slots"
-                                    placeholder="Keep"
-                                    value={bulkBike}
-                                    onChange={(e) => setBulkBike(e.target.value)}
-                                    sx={{ width: 130 }}
+                                    value={bikeLimit}
+                                    onChange={(e) => setBikeLimit(e.target.value)}
+                                    sx={{ width: 120 }}
                                     inputProps={{ min: 0 }}
                                 />
-                                <Button
-                                    variant="contained"
-                                    onClick={saveBulk}
-                                    disabled={busy || picked.size === 0 || (String(bulkCar).trim() === '' && String(bulkBike).trim() === '')}
-                                >
-                                    Update selected
+                                <Button variant="contained" onClick={saveOne} disabled={busy}>
+                                    Save slots
                                 </Button>
                             </Stack>
-                        </Stack>
-                    ) : null}
-                    {!canEdit ? (
+                        ) : null}
+                        {tab === 1 ? (
+                            <Stack spacing={1}>
+                                <Typography variant="body2" color="text.secondary">
+                                    Fill only the counts you want to change. Leave a field blank to keep each flat’s current value.
+                                    {picked.size ? ` ${picked.size} selected.` : ''}
+                                </Typography>
+                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                                    <TextField
+                                        size="small"
+                                        type="number"
+                                        label="Car slots"
+                                        placeholder="Keep"
+                                        value={bulkCar}
+                                        onChange={(e) => setBulkCar(e.target.value)}
+                                        sx={{ width: 130 }}
+                                        inputProps={{ min: 0 }}
+                                    />
+                                    <TextField
+                                        size="small"
+                                        type="number"
+                                        label="Bike slots"
+                                        placeholder="Keep"
+                                        value={bulkBike}
+                                        onChange={(e) => setBulkBike(e.target.value)}
+                                        sx={{ width: 130 }}
+                                        inputProps={{ min: 0 }}
+                                    />
+                                    <Button
+                                        variant="contained"
+                                        onClick={saveBulk}
+                                        disabled={busy || picked.size === 0 || (String(bulkCar).trim() === '' && String(bulkBike).trim() === '')}
+                                    >
+                                        Update selected
+                                    </Button>
+                                </Stack>
+                            </Stack>
+                        ) : null}
+                    </CapGate>
+                    {!can('parking.base_slots') ? (
                         <Alert severity="info">Only apartment admins can change base slot counts.</Alert>
                     ) : null}
                 </Stack>
