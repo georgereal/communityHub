@@ -6,6 +6,54 @@
   "trailingSlash": false,
   "rewrites": [
     {
+      "source": "/api/auth-session",
+      "destination": "/api/auth-rest?__authPath=session"
+    },
+    {
+      "source": "/api/auth-password",
+      "destination": "/api/auth-rest?__authPath=password"
+    },
+    {
+      "source": "/api/rbac-mongo",
+      "destination": "/api/identity-rest?__identityPath=rbac"
+    },
+    {
+      "source": "/api/dashboard-summary",
+      "destination": "/api/identity-rest?__identityPath=dashboard-summary"
+    },
+    {
+      "source": "/api/new/workspace-boot",
+      "destination": "/api/identity-rest?__identityPath=workspace-boot"
+    },
+    {
+      "source": "/api/workspace-boot",
+      "destination": "/api/identity-rest?__identityPath=workspace-boot"
+    },
+    {
+      "source": "/api/external-connections",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/external-connections"
+    },
+    {
+      "source": "/api/passbook-jobs",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/passbook-jobs"
+    },
+    {
+      "source": "/api/passbook-parse",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/passbook-parse"
+    },
+    {
+      "source": "/api/external-proxy",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/external-proxy"
+    },
+    {
+      "source": "/api/oauth-microsoft",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/oauth-microsoft"
+    },
+    {
+      "source": "/api/oauth-service",
+      "destination": "/api/integrations-rest?__integrationsPath=_legacy/oauth-service"
+    },
+    {
       "source": "/api/finance/:path*",
       "destination": "/api/finance-rest?__financePath=:path*"
     },
@@ -143,32 +191,29 @@
     }
   ],
   "functions": {
-    "api/passbook-parse.js": {
-      "maxDuration": 300
-    },
-    "api/external-proxy.js": {
-      "maxDuration": 30
-    },
-    "api/finance-mongo-mutations.js": {
-      "maxDuration": 300
-    },
-    "api/finance/[...path].js": {
-      "maxDuration": 300
-    },
     "api/finance-rest.js": {
-      "maxDuration": 300
+      "maxDuration": 10
     },
     "api/property-rest.js": {
-      "maxDuration": 60
+      "maxDuration": 10
     },
     "api/integrations-rest.js": {
-      "maxDuration": 300
+      "maxDuration": 10
     },
     "api/activity-rest.js": {
-      "maxDuration": 60
+      "maxDuration": 10
+    },
+    "api/identity-rest.js": {
+      "maxDuration": 10
+    },
+    "api/auth-rest.js": {
+      "maxDuration": 10
     },
     "api/storage.js": {
-      "maxDuration": 30
+      "maxDuration": 10
+    },
+    "api/passbook-webhook.js": {
+      "maxDuration": 10
     }
   }
 }

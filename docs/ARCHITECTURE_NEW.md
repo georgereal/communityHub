@@ -12,11 +12,16 @@ Each product domain owns:
 
 | Domain | Public REST prefix | Implementation | Mongo collections (examples) |
 | --- | --- | --- | --- |
+| **Auth** | `/api/auth-session`, `/api/auth-password` | `apps/new/api/auth-rest.js` (rewrites) | sessions via cookie; password hashes on `rbac_directory` |
 | **Finance** | `/api/finance/*` | `apps/new/api/finance-rest.js` → `finance/[...path].js`, `financeMongo/` | `finance_config`, `ledger_entries`, `vouchers`, `bank_imports`, … |
 | **Property** | `/api/property/*` | `apps/new/api/property-rest.js` → `propertyMongo/` | units, vehicles, residents, slots |
-| **Integrations** | `/api/integrations/*` | `apps/new/api/integrations-rest.js` → `integrationsMongo/` | `external_connections`, `passbook_ocr_jobs`, `ledger_sync_*`, `user_oauth_connections` |
-| **Identity / RBAC** | `/api/rbac-mongo` (and related) | `apps/new/api/rbacMongo/` | `rbac_*` |
+| **Integrations** | `/api/integrations/*` (+ legacy `/api/passbook-*`, `/api/oauth-*`, …) | `apps/new/api/integrations-rest.js` → `integrationsMongo/` | `external_connections`, `passbook_ocr_jobs`, `ledger_sync_*`, `user_oauth_connections` |
+| **Identity / admin** | `/api/rbac-mongo`, `/api/new/workspace-boot`, `/api/dashboard-summary` | `apps/new/api/identity-rest.js` | `rbac_*` |
 | **Activity** | `/api/activity/*` | `apps/new/api/activity-rest.js` → `activityMongo/` | `activity_audit_log` |
+| **Storage** | `/api/storage` | `classic/api/storage.js` (R2) | — |
+| **Passbook webhook** | `POST /api/passbook-webhook` | `apps/new/api/passbook-webhook.js` | same passbook jobs store |
+
+**Vercel Hobby:** root `api/*.js` counts as serverless functions (max **12**). Deploy only the eight domain entry files above; keep public URLs via `vercel.json` rewrites.
 
 **Rules**
 
@@ -24,8 +29,8 @@ Each product domain owns:
    Passbook OCR credentials are **Integrations**, even though Bank Reconciliation (Finance UI) starts a scan.
 2. **Do not add** Evolyx / OAuth-provider / webhook config under `/api/finance/...`.
 3. **Cross-domain use is allowed** (Finance UI → Integrations API). Crossing stores is not: Finance ledger stays in finance collections; integration secrets stay in `external_connections`.
-4. **Auth uses Firebase ID tokens**; New domain data is Mongo. Prefer `requireApartmentPermission` / `requireAnyApartmentPermission` from `packages/server/serverAuth.js`. See [FIREBASE_AUTH.md](./FIREBASE_AUTH.md).
-
+4. **Auth:** social = Firebase ID tokens; email/password = Mongo session JWT. Prefer `requireApartmentPermission` / `requireAnyApartmentPermission` from `packages/server/serverAuth.js`. See [FIREBASE_AUTH.md](./FIREBASE_AUTH.md).
+5. **Do not add new root `api/*.js` files** without consolidating or upgrading off Hobby — prefer a rewrite into an existing `*-rest.js`.
 ---
 
 ## 2. REST shape (Property / Integrations pattern)
@@ -78,7 +83,7 @@ Kept outside `/api/integrations/*` so tunnel URLs and Evolyx config stay stable.
 
 ### Legacy shims (compat)
 
-`/api/external-connections`, `/api/passbook-parse`, `/api/passbook-jobs` remain as thin wrappers over the same Mongo stores. **New UI must call `/api/integrations/...`.** Classic may keep legacy paths until migrated.
+`/api/external-connections`, `/api/passbook-parse`, `/api/passbook-jobs` rewrite into `integrations-rest` (same Mongo stores). **New UI must call `/api/integrations/...`.** Classic may keep legacy paths until migrated.
 
 ---
 

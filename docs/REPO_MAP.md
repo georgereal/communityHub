@@ -18,28 +18,13 @@
 │   └── workflows
 │       └── repo-map-check.yml
 ├── api
-│   ├── finance
-│   │   └── [...path].js
-│   ├── new
-│   │   └── workspace-boot.js
 │   ├── activity-rest.js
-│   ├── auth-password.js
-│   ├── auth-session.js
-│   ├── dashboard-summary.js
-│   ├── external-connections.js
-│   ├── external-proxy.js
-│   ├── finance-mongo-mutations.js
-│   ├── finance-mongo-reports.js
-│   ├── finance-mongo.js
+│   ├── auth-rest.js
 │   ├── finance-rest.js
+│   ├── identity-rest.js
 │   ├── integrations-rest.js
-│   ├── oauth-microsoft.js
-│   ├── oauth-service.js
-│   ├── passbook-jobs.js
-│   ├── passbook-parse.js
 │   ├── passbook-webhook.js
 │   ├── property-rest.js
-│   ├── rbac-mongo.js
 │   └── storage.js
 ├── apps
 │   └── new
@@ -121,6 +106,7 @@
 │       │   │   ├── defaults.js
 │       │   │   └── service.js
 │       │   ├── activity-rest.js
+│       │   ├── auth-rest.js
 │       │   ├── dashboard-summary.js
 │       │   ├── evolyxConnection.js
 │       │   ├── external-connections.js
@@ -129,6 +115,7 @@
 │       │   ├── finance-mongo-reports.js
 │       │   ├── finance-mongo.js
 │       │   ├── finance-rest.js
+│       │   ├── identity-rest.js
 │       │   ├── integrations-rest.js
 │       │   ├── passbook-jobs.js
 │       │   ├── passbook-parse.js
@@ -700,7 +687,7 @@
 
 ```
 
-**Scale:** ~362 JavaScript modules, ~17 CSS files, ~42 HTML entry pages.
+**Scale:** ~351 JavaScript modules, ~17 CSS files, ~42 HTML entry pages.
 
 ---
 
@@ -977,6 +964,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   │   ├── defaults.js
     │   │   └── service.js
     │   ├── activity-rest.js
+    │   ├── auth-rest.js
     │   ├── dashboard-summary.js
     │   ├── evolyxConnection.js
     │   ├── external-connections.js
@@ -985,6 +973,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
     │   ├── finance-mongo-reports.js
     │   ├── finance-mongo.js
     │   ├── finance-rest.js
+    │   ├── identity-rest.js
     │   ├── integrations-rest.js
     │   ├── passbook-jobs.js
     │   ├── passbook-parse.js
@@ -1513,28 +1502,13 @@ cron (`/api/sync` daily 06:00 UTC). During local dev, `viteApiDev.js` mounts the
 proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 
 ```
-├── finance
-│   └── [...path].js
-├── new
-│   └── workspace-boot.js
 ├── activity-rest.js
-├── auth-password.js
-├── auth-session.js
-├── dashboard-summary.js
-├── external-connections.js
-├── external-proxy.js
-├── finance-mongo-mutations.js
-├── finance-mongo-reports.js
-├── finance-mongo.js
+├── auth-rest.js
 ├── finance-rest.js
+├── identity-rest.js
 ├── integrations-rest.js
-├── oauth-microsoft.js
-├── oauth-service.js
-├── passbook-jobs.js
-├── passbook-parse.js
 ├── passbook-webhook.js
 ├── property-rest.js
-├── rbac-mongo.js
 └── storage.js
 
 ```
@@ -1543,24 +1517,13 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 
 | Endpoint | Purpose |
 | --- | --- |
-| activity-rest.js | Serverless endpoint |
-| auth-password.js | Mongo email/password login & signup |
-| auth-session.js | Auth session cookie bridge (Firebase or Mongo JWT) |
-| dashboard-summary.js | Dashboard summary endpoint |
-| external-connections.js | Legacy external connections shim → Mongo |
-| external-proxy.js | External API proxy |
-| finance-mongo-mutations.js | Serverless endpoint |
-| finance-mongo-reports.js | Serverless endpoint |
-| finance-mongo.js | Serverless endpoint |
+| activity-rest.js | Activity audit REST entry |
+| auth-rest.js | Auth domain (session cookie + Mongo password) |
 | finance-rest.js | Finance-New REST entry |
-| integrations-rest.js | Integrations REST entry (connections + passbook) |
-| oauth-microsoft.js | Microsoft OAuth flow |
-| oauth-service.js | OAuth service helper |
-| passbook-jobs.js | Legacy passbook jobs shim → Mongo |
-| passbook-parse.js | Legacy passbook parse shim → Mongo |
+| identity-rest.js | Identity/admin (RBAC, workspace boot, dashboard) |
+| integrations-rest.js | Integrations REST entry (connections + passbook + legacy OAuth) |
 | passbook-webhook.js | Passbook webhook (public, Mongo) |
 | property-rest.js | Property-New REST entry |
-| rbac-mongo.js | Mongo identity + RBAC (New UI) |
 | storage.js | File storage |
 
 ---
@@ -1732,7 +1695,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
   client and/or legacy `/api/*` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.
 - **Integrations:** Evolyx passbook OCR config + jobs live in Mongo (`external_connections`, `passbook_ocr_jobs`).
   Admin + Finance-New call `/api/integrations/*`; public Evolyx callback remains `/api/passbook-webhook`.
-- **Auth:** Dual path — email/password via Mongo (`POST /api/auth-password`, app JWT) + social via Firebase (`packages/auth/authClient.js`, `classic/src/socialAuth.js`). Same email → same `user_id` (`auth_class`: local|social|hybrid). Cookie bridge `/api/auth-session`. Setup: `docs/FIREBASE_AUTH.md`. Spreadsheet OAuth remains separate.
+- **Auth:** Dual path — email/password via Mongo + social via Firebase. Domain routers: `auth-rest`, `identity-rest`, `finance-rest`, `property-rest`, `integrations-rest`, `activity-rest`, `storage`, `passbook-webhook` (8 Hobby functions; legacy URLs via `vercel.json` rewrites). Setup: `docs/FIREBASE_AUTH.md`, `docs/ARCHITECTURE_NEW.md`.
 - **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
   UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
@@ -1764,4 +1727,4 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 
 ---
 
-*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-09-11.*
+*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-09-12.*

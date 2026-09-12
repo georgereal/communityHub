@@ -3,15 +3,8 @@
  * Domain: external provider credentials + Evolyx passbook OCR + ledger spreadsheet sync.
  *
  * Rewrites in vercel.json send /api/integrations/* here.
- *
- * Resources:
- *   GET/POST /api/integrations/connections
- *   GET/POST /api/integrations/passbook/jobs…
- *   GET      /api/integrations/spreadsheet/boot
- *   GET/POST /api/integrations/spreadsheet/settings
- *   GET/POST /api/integrations/spreadsheet/oauth-apps
- *   GET/POST/DELETE /api/integrations/spreadsheet/oauth-connections
- *   GET      /api/integrations/spreadsheet/runs
+ * Legacy classic paths (/api/external-connections, /api/passbook-*, /api/oauth-*, /api/external-proxy)
+ * also rewrite here so Hobby stays under the 12-function limit.
  *
  * Public Evolyx callback remains POST /api/passbook-webhook (Mongo-backed).
  */
@@ -23,6 +16,12 @@ import { handle as spreadsheetSettings } from './integrationsMongo/routes/spread
 import { handle as spreadsheetOAuthApps } from './integrationsMongo/routes/spreadsheet/oauth-apps.js';
 import { handle as spreadsheetOAuthConnections } from './integrationsMongo/routes/spreadsheet/oauth-connections.js';
 import { handle as spreadsheetRuns } from './integrationsMongo/routes/spreadsheet/runs.js';
+import legacyExternalConnections from './external-connections.js';
+import legacyPassbookJobs from './passbook-jobs.js';
+import legacyPassbookParse from './passbook-parse.js';
+import legacyExternalProxy from './external-proxy.js';
+import legacyOauthMicrosoft from '../../../packages/server/oauth-microsoft.js';
+import legacyOauthService from '../../../packages/server/oauth-service.js';
 
 function pathPartsFromReq(req) {
     const rewritten = req.query?.__integrationsPath;
@@ -44,6 +43,15 @@ function pathPartsFromReq(req) {
 
 function resolveIntegrationsRoute(parts) {
     const [a, b, c, d] = parts;
+    if (a === '_legacy') {
+        if (b === 'external-connections' && !c) return { handler: legacyExternalConnections };
+        if (b === 'passbook-jobs' && !c) return { handler: legacyPassbookJobs };
+        if (b === 'passbook-parse' && !c) return { handler: legacyPassbookParse };
+        if (b === 'external-proxy' && !c) return { handler: legacyExternalProxy };
+        if (b === 'oauth-microsoft' && !c) return { handler: legacyOauthMicrosoft };
+        if (b === 'oauth-service' && !c) return { handler: legacyOauthService };
+        return null;
+    }
     if (a === 'connections' && !b) return { handler: connections };
     if (a === 'passbook' && b === 'jobs' && c && d === 'imported') {
         return { handler: passbookJobImported, id: c };

@@ -63,6 +63,7 @@ function isDir(p) {
  *   /api/db                         → api/db.js
  *   /api/finance/x                  → api/finance-rest.js
  *   /api/property/slots/:id/assign  → api/property-rest.js
+ *   /api/auth-session               → api/auth-rest.js (Hobby consolidation)
  */
 function resolveApiModule(urlPath) {
     const apiRoot = resolve(process.cwd(), 'api');
@@ -80,6 +81,54 @@ function resolveApiModule(urlPath) {
     }
     if (parts[0] === 'activity') {
         return { file: resolve(apiRoot, 'activity-rest.js'), pathParts: parts.slice(1) };
+    }
+
+    // Domain consolidations (same as vercel.json rewrites — Hobby ≤12 functions).
+    if (parts[0] === 'auth-session' && parts.length === 1) {
+        return { file: resolve(apiRoot, 'auth-rest.js'), pathParts: ['session'], domain: 'auth' };
+    }
+    if (parts[0] === 'auth-password' && parts.length === 1) {
+        return { file: resolve(apiRoot, 'auth-rest.js'), pathParts: ['password'], domain: 'auth' };
+    }
+    if (parts[0] === 'auth') {
+        return { file: resolve(apiRoot, 'auth-rest.js'), pathParts: parts.slice(1), domain: 'auth' };
+    }
+    if (parts[0] === 'rbac-mongo' && parts.length === 1) {
+        return { file: resolve(apiRoot, 'identity-rest.js'), pathParts: ['rbac'], domain: 'identity' };
+    }
+    if (parts[0] === 'dashboard-summary' && parts.length === 1) {
+        return {
+            file: resolve(apiRoot, 'identity-rest.js'),
+            pathParts: ['dashboard-summary'],
+            domain: 'identity',
+        };
+    }
+    if ((parts[0] === 'workspace-boot' && parts.length === 1)
+        || (parts[0] === 'new' && parts[1] === 'workspace-boot' && parts.length === 2)) {
+        return {
+            file: resolve(apiRoot, 'identity-rest.js'),
+            pathParts: ['workspace-boot'],
+            domain: 'identity',
+        };
+    }
+    if (parts[0] === 'identity') {
+        return { file: resolve(apiRoot, 'identity-rest.js'), pathParts: parts.slice(1), domain: 'identity' };
+    }
+
+    const legacyIntegrations = {
+        'external-connections': ['_legacy', 'external-connections'],
+        'passbook-jobs': ['_legacy', 'passbook-jobs'],
+        'passbook-parse': ['_legacy', 'passbook-parse'],
+        'external-proxy': ['_legacy', 'external-proxy'],
+        'oauth-microsoft': ['_legacy', 'oauth-microsoft'],
+        'oauth-service': ['_legacy', 'oauth-service'],
+    };
+    if (parts.length === 1 && legacyIntegrations[parts[0]]) {
+        return {
+            file: resolve(apiRoot, 'integrations-rest.js'),
+            pathParts: legacyIntegrations[parts[0]],
+            domain: 'integrations',
+        };
     }
 
     const exact = resolve(apiRoot, `${parts.join('/')}.js`);
@@ -160,11 +209,47 @@ export function viteApiDevPlugin(env = {}) {
                     }
                     if (resolved.pathParts?.length) {
                         const top = name.split('/')[0];
-                        if (top === 'finance') req.__financePath = resolved.pathParts;
-                        if (top === 'property') req.__propertyPath = resolved.pathParts;
-                        if (top === 'integrations') req.__integrationsPath = resolved.pathParts;
-                        if (top === 'activity') req.__activityPath = resolved.pathParts;
-                        req.query = { ...(req.query || {}), path: resolved.pathParts };
+                        if (top === 'finance' || resolved.domain === 'finance') {
+                            req.__financePath = resolved.pathParts;
+                            req.query = {
+                                ...(req.query || {}),
+                                path: resolved.pathParts,
+                                __financePath: resolved.pathParts.join('/'),
+                            };
+                        } else if (top === 'property' || resolved.domain === 'property') {
+                            req.__propertyPath = resolved.pathParts;
+                            req.query = {
+                                ...(req.query || {}),
+                                path: resolved.pathParts,
+                                __propertyPath: resolved.pathParts.join('/'),
+                            };
+                        } else if (top === 'integrations' || resolved.domain === 'integrations') {
+                            req.__integrationsPath = resolved.pathParts;
+                            req.query = {
+                                ...(req.query || {}),
+                                path: resolved.pathParts,
+                                __integrationsPath: resolved.pathParts.join('/'),
+                            };
+                        } else if (top === 'activity' || resolved.domain === 'activity') {
+                            req.__activityPath = resolved.pathParts;
+                            req.query = {
+                                ...(req.query || {}),
+                                path: resolved.pathParts,
+                                __activityPath: resolved.pathParts.join('/'),
+                            };
+                        } else if (resolved.domain === 'auth') {
+                            req.query = {
+                                ...(req.query || {}),
+                                __authPath: resolved.pathParts.join('/'),
+                            };
+                        } else if (resolved.domain === 'identity') {
+                            req.query = {
+                                ...(req.query || {}),
+                                __identityPath: resolved.pathParts.join('/'),
+                            };
+                        } else {
+                            req.query = { ...(req.query || {}), path: resolved.pathParts };
+                        }
                     }
                     const mod = await server.ssrLoadModule(resolved.file);
                     const handler = mod.default;
