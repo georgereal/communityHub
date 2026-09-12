@@ -25,7 +25,7 @@ APIs accept **either** Bearer token type (`getUserFromAuthHeader`).
 5. **Project settings → Service accounts → Generate new private key**:
    - **Local (recommended):** save as `firebase-service-account.json` in the repo root (gitignored) and set:
      `FIREBASE_SERVICE_ACCOUNT_FILE=./firebase-service-account.json`
-   - **Vercel:** paste the JSON as a **single line** into `FIREBASE_SERVICE_ACCOUNT_JSON`, or use base64 in `FIREBASE_SERVICE_ACCOUNT_BASE64`.
+   - **Vercel:** do **not** set `FIREBASE_SERVICE_ACCOUNT_FILE` (the file is not in the deploy). Paste the JSON as a **single line** into `FIREBASE_SERVICE_ACCOUNT_JSON`, or use base64 in `FIREBASE_SERVICE_ACCOUNT_BASE64`.
    - Multiline JSON in `.env` is **not** supported and will break social login (redirect loop).
    Set `FIREBASE_PROJECT_ID` to the same project id.
 

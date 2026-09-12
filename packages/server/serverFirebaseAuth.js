@@ -71,20 +71,25 @@ function parseJsonObject(raw, label) {
 /**
  * Load Admin credentials from:
  * 1) FIREBASE_SERVICE_ACCOUNT_FILE (path to JSON — preferred locally)
- * 2) FIREBASE_SERVICE_ACCOUNT_JSON (single-line JSON string)
- * 3) FIREBASE_SERVICE_ACCOUNT_BASE64 (base64 of the JSON)
+ * 2) FIREBASE_SERVICE_ACCOUNT_BASE64 (base64 of the JSON)
+ * 3) FIREBASE_SERVICE_ACCOUNT_JSON (single-line JSON string)
+ *
+ * On Vercel the JSON file is not deployed — leave FILE unset and use JSON/BASE64.
+ * If FILE is set but missing, we fall through so JSON still works.
  */
 function parseServiceAccount() {
     const filePath = (process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim();
     if (filePath) {
         const abs = resolve(process.cwd(), filePath);
-        if (!existsSync(abs)) {
-            throw Object.assign(
-                new Error(`FIREBASE_SERVICE_ACCOUNT_FILE not found: ${abs}`),
-                { status: 500 },
-            );
+        if (existsSync(abs)) {
+            return parseJsonObject(readFileSync(abs, 'utf8'), 'FIREBASE_SERVICE_ACCOUNT_FILE');
         }
-        return parseJsonObject(readFileSync(abs, 'utf8'), 'FIREBASE_SERVICE_ACCOUNT_FILE');
+        // Common misconfig: FILE copied to Vercel where /var/task has no JSON file.
+        console.warn(
+            `[serverFirebaseAuth] FIREBASE_SERVICE_ACCOUNT_FILE not found (${abs}). `
+            + 'Falling back to FIREBASE_SERVICE_ACCOUNT_JSON / BASE64. '
+            + 'On Vercel, unset FILE and set FIREBASE_SERVICE_ACCOUNT_JSON (single-line).',
+        );
     }
 
     const b64 = (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '').trim();
@@ -101,13 +106,26 @@ function parseServiceAccount() {
     }
 
     const raw = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
-    if (!raw) return null;
+    if (!raw) {
+        if (filePath) {
+            throw Object.assign(
+                new Error(
+                    `FIREBASE_SERVICE_ACCOUNT_FILE not found (${resolve(process.cwd(), filePath)}) `
+                    + 'and FIREBASE_SERVICE_ACCOUNT_JSON / BASE64 are empty. '
+                    + 'On Vercel: remove FIREBASE_SERVICE_ACCOUNT_FILE and set FIREBASE_SERVICE_ACCOUNT_JSON '
+                    + 'to the full service-account JSON on one line.',
+                ),
+                { status: 500 },
+            );
+        }
+        return null;
+    }
     // Multline .env values often collapse to "{" — fail with a clear message.
     if (raw === '{' || (!raw.includes('private_key') && raw.length < 80)) {
         throw Object.assign(
             new Error(
                 'FIREBASE_SERVICE_ACCOUNT_JSON looks truncated (multiline .env values are not supported). '
-                + 'Prefer FIREBASE_SERVICE_ACCOUNT_FILE=./firebase-service-account.json',
+                + 'On Vercel paste the entire JSON as a single line, or use FIREBASE_SERVICE_ACCOUNT_BASE64.',
             ),
             { status: 500 },
         );
