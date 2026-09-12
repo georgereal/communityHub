@@ -1695,7 +1695,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
   client and/or legacy `/api/*` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.
 - **Integrations:** Evolyx passbook OCR config + jobs live in Mongo (`external_connections`, `passbook_ocr_jobs`).
   Admin + Finance-New call `/api/integrations/*`; public Evolyx callback remains `/api/passbook-webhook`.
-- **Auth:** Dual path — email/password via Mongo + social via Firebase. Domain routers: `auth-rest`, `identity-rest`, `finance-rest`, `property-rest`, `integrations-rest`, `activity-rest`, `storage`, `passbook-webhook` (8 Hobby functions; legacy URLs via `vercel.json` rewrites). Setup: `docs/FIREBASE_AUTH.md`, `docs/ARCHITECTURE_NEW.md`.
+- **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
 - **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
   UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.

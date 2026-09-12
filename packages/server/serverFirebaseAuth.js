@@ -1,6 +1,10 @@
 /**
  * Firebase Auth verification for API routes.
  * Maps Firebase UID → stable app user_id via Mongo rbac_directory.
+ *
+ * firebase-admin is loaded lazily so Mongo session JWT verification
+ * (and /api/auth-password) does not pull jwks-rsa/jose at module init.
+ * package.json overrides pin jose@4 (CJS) for Vercel ERR_REQUIRE_ESM.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,8 +16,23 @@ import {
 import { isAppSessionToken, verifyAppSessionToken } from './appSessionJwt.js';
 
 const require = createRequire(import.meta.url);
-const { initializeApp, getApps, getApp, cert, applicationDefault } = require('firebase-admin/app');
-const { getAuth } = require('firebase-admin/auth');
+
+let firebaseAdmin = null;
+
+function loadFirebaseAdmin() {
+    if (firebaseAdmin) return firebaseAdmin;
+    const app = require('firebase-admin/app');
+    const auth = require('firebase-admin/auth');
+    firebaseAdmin = {
+        initializeApp: app.initializeApp,
+        getApps: app.getApps,
+        getApp: app.getApp,
+        cert: app.cert,
+        applicationDefault: app.applicationDefault,
+        getAuth: auth.getAuth,
+    };
+    return firebaseAdmin;
+}
 
 const USER_CACHE_TTL_MS = 60_000;
 const userByToken = new Map();
@@ -97,6 +116,14 @@ function parseServiceAccount() {
 }
 
 export function getFirebaseAdminApp() {
+    const {
+        getApps,
+        getApp,
+        initializeApp,
+        cert,
+        applicationDefault,
+    } = loadFirebaseAdmin();
+
     const existing = getApps();
     if (existing.length) return getApp();
 
@@ -128,7 +155,6 @@ export function getFirebaseAdminApp() {
         });
     }
 
-    // Application Default Credentials (local gcloud / GCP)
     return initializeApp({
         credential: applicationDefault(),
         projectId,
@@ -136,6 +162,7 @@ export function getFirebaseAdminApp() {
 }
 
 export function getFirebaseAuth() {
+    const { getAuth } = loadFirebaseAdmin();
     getFirebaseAdminApp();
     return getAuth();
 }

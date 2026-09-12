@@ -14,6 +14,8 @@ Same email can use either method. Linking keeps the **same `user_id`**, so permi
 
 APIs accept **either** Bearer token type (`getUserFromAuthHeader`).
 
+> **Vercel note:** `firebase-admin` → `jwks-rsa` needs a CJS-compatible `jose`. This repo pins `"overrides": { "jose": "4.15.9" }` so serverless does not throw `ERR_REQUIRE_ESM`.
+
 ## 1. Firebase (social only)
 
 1. Open [Firebase Console](https://console.firebase.google.com) → Add project.

@@ -1,10 +1,8 @@
 /**
  * Auth domain router — Mongo password + Firebase/app session cookie.
  * vercel.json rewrites keep /api/auth-session and /api/auth-password URLs.
+ * Handlers are loaded lazily so password login does not pull firebase-admin.
  */
-import authSession from '../../../packages/server/auth-session.js';
-import authPassword from '../../../packages/server/auth-password.js';
-
 function authPathFromReq(req) {
     const rewritten = req.query?.__authPath;
     if (typeof rewritten === 'string' && rewritten) return rewritten.replace(/^\/+|\/+$/g, '');
@@ -23,9 +21,11 @@ function authPathFromReq(req) {
 export default async function handler(req, res) {
     const path = authPathFromReq(req);
     if (path === 'session' || path === 'auth-session') {
+        const { default: authSession } = await import('../../../packages/server/auth-session.js');
         return authSession(req, res);
     }
     if (path === 'password' || path === 'auth-password') {
+        const { default: authPassword } = await import('../../../packages/server/auth-password.js');
         return authPassword(req, res);
     }
     return res.status(404).json({
