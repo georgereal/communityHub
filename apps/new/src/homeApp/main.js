@@ -5,7 +5,7 @@ import './home-app.css';
 
 async function main() {
     const status = document.querySelector('#app-shell-root .home-mpa-status');
-    if (status) status.textContent = 'Signing in…';
+    if (status) status.textContent = 'Loading…';
 
     try {
         const ctx = await bootHomeApp();

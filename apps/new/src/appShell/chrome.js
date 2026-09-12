@@ -76,14 +76,48 @@ function fillUserChrome(ctx) {
 }
 
 async function signOut() {
+    if (document.documentElement.dataset.signingOut === '1') return;
+    document.documentElement.dataset.signingOut = '1';
+
+    closeUserMenu();
     try {
-        clearFinanceCtx();
+        const { showNavProgress, markHardNavPending } = await import('./navProgress.js');
+        showNavProgress({ cover: true, label: 'Signing out…' });
+        markHardNavPending();
     } catch { /* ignore */ }
+
+    // Disable logout controls so double-clicks don't stack work.
+    ['topbar-logout-btn', 'user-menu-logout'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = true;
+    });
+
     try {
-        clearMpaCtx();
-    } catch { /* ignore */ }
-    await signOutAuth();
-    goToLogin('Signed out.');
+        try {
+            clearFinanceCtx();
+        } catch { /* ignore */ }
+        try {
+            clearMpaCtx();
+        } catch { /* ignore */ }
+        try {
+            const { clearWorkspaceSessionCaches } = await import('./workspaceBoot.js');
+            clearWorkspaceSessionCaches();
+        } catch { /* ignore */ }
+        await signOutAuth();
+        goToLogin('Signed out.');
+    } catch (err) {
+        document.documentElement.dataset.signingOut = '';
+        try {
+            const { hideNavProgress } = await import('./navProgress.js');
+            hideNavProgress();
+        } catch { /* ignore */ }
+        ['topbar-logout-btn', 'user-menu-logout'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = false;
+        });
+        console.warn('[chrome] sign-out failed:', err?.message || err);
+        alert(err?.message || 'Sign-out failed. Try again.');
+    }
 }
 
 function wireShellControls({ onApartmentChange } = {}) {

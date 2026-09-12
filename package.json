@@ -12,6 +12,7 @@
     "migrate:finance-mongo-remodel": "node scripts/remodel-finance-mongo.mjs",
     "migrate:property-mongo": "node scripts/migrate-property-to-mongo.mjs",
     "migrate:rbac-mongo": "node scripts/migrate-rbac-to-mongo.mjs",
+    "migrate:auth-firebase": "node scripts/migrate-auth-to-firebase.mjs",
     "migrate:logs-mongo": "node scripts/migrate-logs-to-mongo.mjs",
     "migrate:integrations-mongo": "node scripts/migrate-integrations-to-mongo.mjs",
     "migrate:ledger-sync-mongo": "node scripts/migrate-ledger-sync-to-mongo.mjs",
@@ -22,6 +23,7 @@
     "setup:hooks": "node scripts/git-hooks/install-hooks.js"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@vitejs/plugin-react": "^6.0.5",
     "playwright": "^1.61.1",
     "vite": "^8.0.1"
@@ -36,8 +38,11 @@
     "@mui/material": "^9.3.1",
     "@supabase/supabase-js": "^2.108.2",
     "@tanstack/react-query": "^5.101.4",
+    "bcryptjs": "^3.0.3",
     "dompurify": "^3.4.10",
     "exceljs": "^4.4.0",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.4.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.1",

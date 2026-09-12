@@ -1,7 +1,7 @@
 /**
- * Supabase Auth session for API routes. No table reads.
+ * Firebase Auth session for API routes. No table reads beyond identity link.
  */
-import { getUserFromAuthHeader } from '../server/serverSupabase.js';
+import { getUserFromAuthHeader } from '../server/serverFirebaseAuth.js';
 
 const SESSION_COOKIE = 'communityhub_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 8;

@@ -22,7 +22,7 @@ export async function mountPropertyReactPage({
     renderApp,
 }) {
     const status = document.querySelector('#app-shell-root .property-mpa-status');
-    if (status) status.textContent = 'Signing in…';
+    if (status) status.textContent = 'Loading…';
 
     const boot = await bootPropertyApp({ page, route });
     if (!boot) return null;

@@ -229,7 +229,8 @@ const SRC_DESCRIPTIONS = {
 
 const API_DESCRIPTIONS = {
   'accountsAuth.js': 'Accounts/session auth endpoint',
-  'auth-session.js': 'Auth session endpoint',
+  'auth-session.js': 'Auth session cookie bridge (Firebase or Mongo JWT)',
+  'auth-password.js': 'Mongo email/password login & signup',
   'serverAuth.js': 'Server-side auth helpers',
   'dashboard-summary.js': 'Dashboard summary endpoint',
   'db.js': 'DB access (Supabase)',

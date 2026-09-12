@@ -2,6 +2,7 @@
  * Full document navigations between MPA shells (admin HTML vs finance HTML, etc.).
  * Soft history changes must never leave the wrong JS document on another app's URL.
  */
+import { beginHardNavigation, showNavProgress, markHardNavPending } from './navProgress.js';
 
 const LATCH_KEY = 'ch_wrong_shell_nav';
 
@@ -53,6 +54,8 @@ export function forceDocumentNavigation(href) {
         try {
             sessionStorage.setItem(LATCH_KEY, targetPath);
         } catch { /* ignore */ }
+        showNavProgress({ cover: true, label: 'Loading' });
+        markHardNavPending();
         window.location.reload();
         return true;
     }
@@ -60,7 +63,7 @@ export function forceDocumentNavigation(href) {
     try {
         sessionStorage.removeItem(LATCH_KEY);
     } catch { /* ignore */ }
-    window.location.assign(href);
+    beginHardNavigation(href);
     return true;
 }
 

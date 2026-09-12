@@ -1,11 +1,16 @@
 /**
- * Dedicated /login page — email/password + social providers.
- * On success, redirects into the main app shell.
+ * Login: email/password via Mongo (/api/auth-password);
+ * social via Firebase. Same email → same Mongo user_id.
  */
-import { supabase } from './store.js';
+import { authClient } from './store.js';
 import { getEnabledSocialProviders, signInWithSocialProvider, waitForBootAuthSession } from './socialAuth.js';
 import { goToApp, takeAuthFlash } from './authRedirect.js';
-import { resetAuthInit } from '@auth/authClient.js';
+import {
+    resetAuthInit,
+    setMongoSession,
+    clearMongoSession,
+    firebaseAuth,
+} from '@auth/authClient.js';
 
 const card = document.getElementById('login-card');
 const form = document.getElementById('auth-form');
@@ -65,7 +70,7 @@ const renderSocialAuthButtons = () => {
   const container = document.getElementById('auth-social-buttons');
   if (!section || !container) return;
 
-  const providers = supabase ? getEnabledSocialProviders() : [];
+  const providers = firebaseAuth ? getEnabledSocialProviders() : [];
   container.replaceChildren();
   if (!providers.length) {
     section.hidden = true;
@@ -85,9 +90,10 @@ const renderSocialAuthButtons = () => {
       setBusy(true);
       setError('');
       try {
-        const { data, error } = await signInWithSocialProvider(supabase, provider.id);
+        clearMongoSession();
+        const { data, error } = await signInWithSocialProvider(authClient, provider.id);
         if (error) setError(error.message);
-        else if (data?.url) window.location.assign(data.url);
+        else if (data?.session) await enterApp(data.session);
       } catch (err) {
         setError(err?.message || 'Social sign-in failed.');
       } finally {
@@ -98,63 +104,113 @@ const renderSocialAuthButtons = () => {
   });
 };
 
+const LOGIN_REDIRECT_GUARD_KEY = 'ch_login_redirect_guard';
+let enteringApp = false;
+
 const syncBackendSession = async (session) => {
   const accessToken = session?.access_token;
-  if (!accessToken) return;
-  try {
-    await fetch('/api/auth-session', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-  } catch {
-    /* main app will retry */
+  if (!accessToken) {
+    const err = new Error('No access token.');
+    err.status = 401;
+    throw err;
   }
+  const res = await fetch('/api/auth-session', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json?.error || `Could not establish session (${res.status}).`);
+    err.status = res.status;
+    throw err;
+  }
+  return json;
 };
 
 const enterApp = async (session) => {
-  await syncBackendSession(session);
-  goToApp();
-};
-
-const signIn = async () => {
-  if (!supabase) return setError('Supabase is not configured.');
-  const email = (emailEl?.value || '').trim();
-  const password = (passEl?.value || '').trim();
-  if (!email || !password) return setError('Email and password required.');
-  setBusy(true);
-  setError('');
+  if (enteringApp) return;
+  enteringApp = true;
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return setError(error.message);
-    await enterApp(data.session);
-  } catch (err) {
-    setError(err?.message || 'Sign-in failed.');
-  } finally {
-    setBusy(false);
-  }
-};
+    try {
+      const n = Number(sessionStorage.getItem(LOGIN_REDIRECT_GUARD_KEY) || '0');
+      if (n >= 3) {
+        sessionStorage.removeItem(LOGIN_REDIRECT_GUARD_KEY);
+        setError(
+          'Sign-in loop stopped. Could not establish an app session. '
+          + 'Check AUTH_SESSION_SECRET / Firebase Admin env (see docs/FIREBASE_AUTH.md).',
+        );
+        return;
+      }
+      sessionStorage.setItem(LOGIN_REDIRECT_GUARD_KEY, String(n + 1));
+    } catch { /* ignore */ }
 
-const signUp = async () => {
-  if (!supabase) return setError('Supabase is not configured.');
-  const email = (emailEl?.value || '').trim();
-  const password = (passEl?.value || '').trim();
-  if (!email || !password) return setError('Email and password required.');
-  setBusy(true);
-  setError('');
-  try {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return setError(error.message);
-    if (!data.session) {
-      setMode(false);
-      return setError('Account created. Please verify your email, then sign in.', { ok: true });
+    await syncBackendSession(session);
+    try {
+      const {
+        clearWorkspaceSessionCaches,
+        hydrateWorkspaceSession,
+      } = await import('@new/appShell/workspaceBoot.js');
+      clearWorkspaceSessionCaches();
+      await hydrateWorkspaceSession({ force: true });
+    } catch (err) {
+      console.warn('[login] workspace hydrate failed:', err?.message || err);
     }
-    await enterApp(data.session);
+    try {
+      sessionStorage.removeItem(LOGIN_REDIRECT_GUARD_KEY);
+    } catch { /* ignore */ }
+    goToApp();
   } catch (err) {
-    setError(err?.message || 'Could not create account.');
+    enteringApp = false;
+    setError(err?.message || 'Signed in, but the app session failed.');
+  }
+};
+
+async function passwordAuth(action) {
+  const email = (emailEl?.value || '').trim();
+  const password = (passEl?.value || '').trim();
+  if (!email || !password) return setError('Email and password required.');
+  setBusy(true);
+  setError('');
+  try {
+    const res = await fetch('/api/auth-password', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, email, password }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(json.error || 'Authentication failed.');
+      return;
+    }
+    setMongoSession({
+      access_token: json.access_token,
+      user: json.user,
+    });
+    // Prefer Mongo session over any leftover Firebase client session.
+    if (firebaseAuth?.currentUser) {
+      try {
+        const { signOut: fbSignOut } = await import('firebase/auth');
+        await fbSignOut(firebaseAuth);
+      } catch { /* ignore */ }
+    }
+    await enterApp({
+      access_token: json.access_token,
+      user: {
+        id: json.user.id,
+        email: json.user.email,
+      },
+    });
+  } catch (err) {
+    setError(err?.message || (action === 'signup' ? 'Could not create account.' : 'Sign-in failed.'));
   } finally {
     setBusy(false);
   }
-};
+}
+
+const signIn = () => passwordAuth('login');
+const signUp = () => passwordAuth('signup');
 
 form?.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -198,14 +254,10 @@ if (hasOAuthCallback && oauthParams.get('error')) {
 }
 
 (async () => {
-  if (!supabase) {
-    setError('Supabase is not configured.');
-    return;
-  }
   if (justSignedOut) return;
   if (hasOAuthCallback) resetAuthInit();
   try {
-    const { session, error } = await waitForBootAuthSession(supabase);
+    const { session, error } = await waitForBootAuthSession(authClient);
     if (error?.message) setError(error.message);
     if (session) await enterApp(session);
   } catch (err) {

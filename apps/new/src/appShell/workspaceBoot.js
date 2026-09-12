@@ -1,10 +1,15 @@
 /**
- * Mongo workspace boot for New MPAs. Auth JWT only; identity/RBAC from /api/new/workspace-boot.
+ * Mongo workspace hydrate for New MPAs.
+ * Cookie/JWT proves identity on every /api call. workspace-boot is only for
+ * client chrome (societies + permissions) and is cached in sessionStorage —
+ * fetched on login (cold cache) or society switch, not on every page load.
  */
 import { portalState } from '../store.js';
 import { setActiveApartmentIdForApi } from '../dbClient.js';
+import { readMpaCtx, writeMpaCtx, clearMpaCtx } from './mpaSession.js';
 
 const BOOT_TIMEOUT_MS = 20_000;
+const BOOT_CACHE_KEY = 'ch_workspace_boot_v1';
 
 export async function fetchWorkspaceBoot(apartmentId = null) {
     const q = apartmentId ? `?apartment_id=${encodeURIComponent(apartmentId)}` : '';
@@ -92,4 +97,105 @@ export function applyMongoBoot(boot, ctx) {
         .then((m) => m.installActivityOutboxFlushers())
         .catch(() => {});
     return ctx;
+}
+
+export function readCachedWorkspaceBoot() {
+    try {
+        const raw = sessionStorage.getItem(BOOT_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.boot?.profile?.id || !parsed?.apartmentId) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+export function writeCachedWorkspaceBoot(boot, apartmentId) {
+    if (!boot?.profile?.id || !apartmentId) return;
+    try {
+        sessionStorage.setItem(BOOT_CACHE_KEY, JSON.stringify({
+            apartmentId: String(apartmentId),
+            userId: String(boot.profile.id),
+            boot,
+            cachedAt: new Date().toISOString(),
+        }));
+    } catch { /* ignore quota */ }
+}
+
+export function clearCachedWorkspaceBoot() {
+    try {
+        sessionStorage.removeItem(BOOT_CACHE_KEY);
+    } catch { /* ignore */ }
+}
+
+function cacheMatchesHint(cached, apartmentHint) {
+    if (!cached) return false;
+    if (!apartmentHint) return true;
+    return String(cached.apartmentId) === String(apartmentHint);
+}
+
+async function syncCtxStores(fields) {
+    writeMpaCtx(fields);
+    try {
+        const { writeFinanceCtx } = await import('../financeApp/session.js');
+        writeFinanceCtx(fields);
+    } catch { /* finance session optional */ }
+}
+
+/**
+ * Hydrate portalState + session ctx from cache, or fetch workspace-boot once.
+ * @param {{ apartmentHint?: string|null, force?: boolean }} opts
+ *   force — society switch / explicit refresh (always hits network)
+ */
+export async function hydrateWorkspaceSession({ apartmentHint = null, force = false } = {}) {
+    const hint = apartmentHint
+        || readMpaCtx()?.apartmentId
+        || null;
+
+    let boot = null;
+    let fromCache = false;
+
+    if (!force) {
+        const cached = readCachedWorkspaceBoot();
+        if (cached && cacheMatchesHint(cached, hint)) {
+            boot = cached.boot;
+            fromCache = true;
+        }
+    }
+
+    if (!boot) {
+        boot = await fetchWorkspaceBoot(force ? (apartmentHint || hint) : hint);
+        fromCache = false;
+    }
+
+    const apartments = apartmentsFromBoot(boot, hint);
+    const apartmentId = (force && apartmentHint)
+        ? apartmentHint
+        : (boot.activeApartmentId || apartments[0]?.id || hint);
+    if (!apartmentId) {
+        throw new Error('No society assigned to this account.');
+    }
+
+    // If we forced a different society, ensure boot payload matches (network path already queried it).
+    if (!fromCache) {
+        writeCachedWorkspaceBoot(boot, apartmentId);
+    } else if (String(boot.activeApartmentId || '') !== String(apartmentId)) {
+        // Cache for this apartment but active id drift — keep cached apartmentId.
+    }
+
+    const ctx = sessionFieldsFromBoot(boot, apartmentId, apartments);
+    await syncCtxStores(ctx);
+    applyMongoBoot(boot, ctx);
+
+    return { boot, ctx, apartmentId, fromCache };
+}
+
+/** Clear chrome session caches (logout). Does not clear the httpOnly cookie by itself. */
+export function clearWorkspaceSessionCaches() {
+    clearCachedWorkspaceBoot();
+    clearMpaCtx();
+    try {
+        sessionStorage.removeItem('ch_finance_ctx');
+    } catch { /* ignore */ }
 }

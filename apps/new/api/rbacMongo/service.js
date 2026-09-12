@@ -48,6 +48,10 @@ export async function ensureRbacIndexes() {
         societies.createIndex({ apartment_id: 1 }, { unique: true }),
         directory.createIndex({ user_id: 1 }, { unique: true }),
         directory.createIndex({ email: 1 }),
+        directory.createIndex(
+            { firebase_uid: 1 },
+            { unique: true, partialFilterExpression: { firebase_uid: { $type: 'string' } } },
+        ),
     ]);
 }
 
@@ -135,6 +139,186 @@ export async function findDirectoryByEmail(email) {
     if (!key) return null;
     const { directory } = await collections();
     return directory.findOne({ email: key });
+}
+
+export async function findDirectoryByFirebaseUid(firebaseUid) {
+    const uid = String(firebaseUid || '').trim();
+    if (!uid) return null;
+    const { directory } = await collections();
+    return directory.findOne({ firebase_uid: uid });
+}
+
+/**
+ * Map a Firebase Auth user to a stable app user_id (Mongo rbac_directory).
+ * Same email as a password (Mongo) user reuses that user_id and becomes hybrid.
+ */
+export async function resolveAppUserFromFirebase({
+    firebaseUid,
+    email,
+    emailVerified = false,
+    displayName = '',
+    providers = [],
+    preferredUserId = null,
+} = {}) {
+    const uid = String(firebaseUid || '').trim();
+    if (!uid) {
+        throw Object.assign(new Error('Missing Firebase user id.'), { status: 401 });
+    }
+
+    const emailKey = String(email || '').trim().toLowerCase();
+    const { directory } = await collections();
+    const now = new Date();
+    const providerList = [...new Set((providers || []).map((p) => String(p || '').trim()).filter(Boolean))];
+
+    const classify = (methods = []) => {
+        const set = [...new Set(methods.map(String).filter(Boolean))];
+        const hasPassword = set.includes('password');
+        const hasSocial = set.some((m) => m !== 'password');
+        let auth_class = 'local';
+        if (hasPassword && hasSocial) auth_class = 'hybrid';
+        else if (hasSocial) auth_class = 'social';
+        return { auth_methods: set, auth_class };
+    };
+
+    const byUid = await findDirectoryByFirebaseUid(uid);
+    if (byUid?.user_id) {
+        const methods = classify([
+            ...(byUid.auth_methods || []),
+            ...(byUid.auth_providers || []),
+            ...providerList,
+            ...(byUid.password_hash ? ['password'] : []),
+        ]);
+        const $set = {
+            updated_at: now,
+            firebase_uid: uid,
+            auth_methods: methods.auth_methods,
+            auth_class: methods.auth_class,
+        };
+        if (emailKey) $set.email = emailKey;
+        if (displayName) $set.full_name = displayName;
+        if (providerList.length) $set.auth_providers = providerList;
+        if (!byUid.legacy_supabase_uid && byUid.user_id) {
+            $set.legacy_supabase_uid = byUid.user_id;
+        }
+        await directory.updateOne({ user_id: byUid.user_id }, { $set });
+        return {
+            userId: byUid.user_id,
+            email: emailKey || byUid.email || '',
+            fullName: displayName || byUid.full_name || '',
+            created: false,
+        };
+    }
+
+    // Link by email: verified social email, or existing Mongo password account for that email.
+    if (emailKey) {
+        const byEmail = await findDirectoryByEmail(emailKey);
+        const canLink = !!byEmail?.user_id && (
+            emailVerified
+            || !!byEmail.password_hash
+            || (byEmail.auth_methods || []).includes('password')
+        );
+        if (canLink) {
+            if (byEmail.firebase_uid && byEmail.firebase_uid !== uid) {
+                throw Object.assign(
+                    new Error('This email is already linked to a different social account. Contact an admin.'),
+                    { status: 409 },
+                );
+            }
+            const methods = classify([
+                ...(byEmail.auth_methods || []),
+                ...(byEmail.auth_providers || []),
+                ...providerList,
+                ...(byEmail.password_hash ? ['password'] : []),
+            ]);
+            const $set = {
+                firebase_uid: uid,
+                email: emailKey,
+                auth_methods: methods.auth_methods,
+                auth_class: methods.auth_class,
+                updated_at: now,
+            };
+            if (displayName) $set.full_name = displayName;
+            if (providerList.length) $set.auth_providers = providerList;
+            if (!byEmail.legacy_supabase_uid) $set.legacy_supabase_uid = byEmail.user_id;
+            await directory.updateOne({ user_id: byEmail.user_id }, { $set });
+            return {
+                userId: byEmail.user_id,
+                email: emailKey,
+                fullName: displayName || byEmail.full_name || '',
+                created: false,
+            };
+        }
+        if (byEmail?.user_id && !byEmail.firebase_uid && !emailVerified) {
+            throw Object.assign(
+                new Error('Verify your email before linking this account, or sign in with a verified provider.'),
+                { status: 403 },
+            );
+        }
+    }
+
+    const preferred = preferredUserId ? String(preferredUserId).trim() : '';
+    if (preferred) {
+        const byPreferred = await getDirectoryProfile(preferred);
+        if (byPreferred?.user_id) {
+            if (byPreferred.firebase_uid && byPreferred.firebase_uid !== uid) {
+                throw Object.assign(
+                    new Error('This account claim conflicts with an existing sign-in. Contact an admin.'),
+                    { status: 409 },
+                );
+            }
+            const methods = classify([
+                ...(byPreferred.auth_methods || []),
+                ...(byPreferred.auth_providers || []),
+                ...providerList,
+                ...(byPreferred.password_hash ? ['password'] : []),
+            ]);
+            const $set = {
+                firebase_uid: uid,
+                auth_methods: methods.auth_methods,
+                auth_class: methods.auth_class,
+                updated_at: now,
+            };
+            if (emailKey) $set.email = emailKey;
+            if (displayName) $set.full_name = displayName;
+            if (providerList.length) $set.auth_providers = providerList;
+            if (!byPreferred.legacy_supabase_uid) $set.legacy_supabase_uid = byPreferred.user_id;
+            await directory.updateOne({ user_id: byPreferred.user_id }, { $set });
+            return {
+                userId: byPreferred.user_id,
+                email: emailKey || byPreferred.email || '',
+                fullName: displayName || byPreferred.full_name || '',
+                created: false,
+            };
+        }
+    }
+
+    const userId = preferred || crypto.randomUUID();
+    const methods = classify([...providerList]);
+    await directory.updateOne(
+        { user_id: userId },
+        {
+            $set: {
+                user_id: userId,
+                firebase_uid: uid,
+                email: emailKey || null,
+                full_name: displayName || null,
+                auth_providers: providerList,
+                auth_methods: methods.auth_methods,
+                auth_class: methods.auth_class,
+                legacy_supabase_uid: preferred || null,
+                updated_at: now,
+            },
+            $setOnInsert: { created_at: now },
+        },
+        { upsert: true },
+    );
+
+    return {
+        userId,
+        email: emailKey,
+        fullName: displayName || '',
+        created: true,
+    };
 }
 
 export async function listDirectoryByIds(userIds = []) {

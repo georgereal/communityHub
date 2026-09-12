@@ -3,8 +3,11 @@
  */
 import layoutHtml from './html/layout.html?raw';
 import { paintAppShellChrome } from './chrome.js';
+import { hideNavProgress, installNavProgressBoot } from './navProgress.js';
 import '@classic/style.css';
 import './shell.css';
+
+installNavProgressBoot();
 
 /**
  * Ensure shell DOM exists, paint chrome, return the page content host.
@@ -28,12 +31,16 @@ export function mountAppShell(opts) {
 
     if (!document.getElementById('app-shell-layout')) {
         root.innerHTML = layoutHtml;
+    } else {
+        // Hard nav may leave a boot splash inside the root — remove it once shell exists.
+        document.getElementById('ch-boot-splash')?.remove();
     }
 
     // Remove legacy finance-only chrome container if present
     document.getElementById('finance-app-root')?.remove();
 
     paintAppShellChrome(opts);
+    hideNavProgress();
 
     return document.getElementById('app-shell-page');
 }

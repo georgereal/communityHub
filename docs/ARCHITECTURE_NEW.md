@@ -24,7 +24,7 @@ Each product domain owns:
    Passbook OCR credentials are **Integrations**, even though Bank Reconciliation (Finance UI) starts a scan.
 2. **Do not add** Evolyx / OAuth-provider / webhook config under `/api/finance/...`.
 3. **Cross-domain use is allowed** (Finance UI → Integrations API). Crossing stores is not: Finance ledger stays in finance collections; integration secrets stay in `external_connections`.
-4. **Auth stays Supabase JWT**; New domain data is Mongo. Prefer `requireApartmentPermission` / `requireAnyApartmentPermission` from `packages/server/serverAuth.js`.
+4. **Auth uses Firebase ID tokens**; New domain data is Mongo. Prefer `requireApartmentPermission` / `requireAnyApartmentPermission` from `packages/server/serverAuth.js`. See [FIREBASE_AUTH.md](./FIREBASE_AUTH.md).
 
 ---
 

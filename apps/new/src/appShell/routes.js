@@ -3,6 +3,7 @@
  * Grow this as modules leave the SPA.
  */
 import { FINANCE_PAGES } from '../financeApp/session.js';
+import { beginHardNavigation, beginSoftNavigation } from './navProgress.js';
 
 /** @type {Record<string, string>} */
 export const MPA_ROUTE_PATHS = {
@@ -60,7 +61,7 @@ function normalizeMpaHref(href) {
 export function navigateToRoute(route) {
     const href = normalizeMpaHref(hrefForRoute(route));
     if (href.startsWith('/#') || href === '/') {
-        window.location.assign(href);
+        beginHardNavigation(href);
         return;
     }
     const path = window.location.pathname.replace(/\/$/, '') || '/';
@@ -88,10 +89,11 @@ export function navigateToRoute(route) {
     const there = mpaShellKey(targetUrl.pathname);
     // Same React shell → in-app. Different app → full document load.
     if (here && there && here === there) {
+        beginSoftNavigation();
         window.dispatchEvent(new CustomEvent('ch-mpa-inapp-nav', {
             detail: { href: `${targetUrl.pathname}${targetUrl.search || ''}`, route },
         }));
         return;
     }
-    window.location.assign(href);
+    beginHardNavigation(href);
 }

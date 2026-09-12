@@ -1,15 +1,10 @@
 /**
- * Finance MPA boot — cookie session + Mongo identity/RBAC.
+ * Finance MPA boot — cookie session + cached workspace chrome.
  */
-import { readFinanceCtx, writeFinanceCtx, clearFinanceCtx } from './session.js';
+import { readFinanceCtx, clearFinanceCtx } from './session.js';
 import { goToLogin } from '../authRedirect.js';
 import { restoreMpaNavPref } from '../appShell/navPref.js';
-import {
-    applyMongoBoot,
-    fetchWorkspaceBoot,
-    apartmentsFromBoot,
-    sessionFieldsFromBoot,
-} from '../appShell/workspaceBoot.js';
+import { hydrateWorkspaceSession } from '../appShell/workspaceBoot.js';
 
 export async function bootFinanceApp(opts = {}) {
     document.documentElement.dataset.financeApp = '1';
@@ -27,12 +22,7 @@ export async function bootFinanceApp(opts = {}) {
     }
 
     const hint = readFinanceCtx();
-    const boot = await fetchWorkspaceBoot(hint?.apartmentId);
-    const apartments = apartmentsFromBoot(boot, hint?.apartmentId);
-    const apartmentId = boot.activeApartmentId || apartments[0]?.id || hint?.apartmentId;
-    if (!apartmentId) throw new Error('No society assigned to this account.');
-    const ctx = writeFinanceCtx(sessionFieldsFromBoot(boot, apartmentId, apartments));
-    applyMongoBoot(boot, ctx);
+    const { ctx } = await hydrateWorkspaceSession({ apartmentHint: hint?.apartmentId || null });
     document.documentElement.dataset.financePage = opts.page || '';
 
     try {
@@ -54,9 +44,7 @@ export async function switchFinanceApartment(apartmentId) {
         clearFinancePackCache(prev?.apartmentId);
         clearFinancePackCache(apartmentId);
     } catch { /* ignore */ }
-    const boot = await fetchWorkspaceBoot(apartmentId);
-    const apartments = apartmentsFromBoot(boot, apartmentId);
-    writeFinanceCtx(sessionFieldsFromBoot(boot, apartmentId, apartments));
+    await hydrateWorkspaceSession({ apartmentHint: apartmentId, force: true });
     window.location.reload();
 }
 

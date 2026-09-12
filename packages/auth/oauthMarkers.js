@@ -1,4 +1,4 @@
-/** Spreadsheet / ledger OAuth markers — must not block Supabase sign-in PKCE. */
+/** Spreadsheet / ledger OAuth markers — must not interfere with app sign-in. */
 
 export const LEDGER_OAUTH_PENDING_KEYS = [
     'ledger_oauth_pending',
@@ -35,9 +35,12 @@ export function clearLedgerOAuthPendingMarkers() {
     }
 }
 
-/** Supabase auth callback (?code=) — clear stale ledger markers so PKCE exchange can run. */
-export function prepareSupabaseAuthCallback() {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get('code') && !window.location.hash.includes('access_token=')) return;
+/** Clear stale ledger markers before app auth redirect handling. */
+export function prepareAuthCallback() {
     clearLedgerOAuthPendingMarkers();
+}
+
+/** @deprecated Use prepareAuthCallback */
+export function prepareSupabaseAuthCallback() {
+    prepareAuthCallback();
 }

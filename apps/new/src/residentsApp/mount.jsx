@@ -9,7 +9,7 @@ import './residents-app.css';
 
 export async function mountResidentsReactApp() {
     const status = document.querySelector('#app-shell-root .finance-mpa-status, #app-shell-root .residents-mpa-status');
-    if (status) status.textContent = 'Signing in…';
+    if (status) status.textContent = 'Loading…';
 
     const ctx = await bootResidentsApp({ page: 'list' });
     if (!ctx) return null;

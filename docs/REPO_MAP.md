@@ -23,6 +23,7 @@
 │   ├── new
 │   │   └── workspace-boot.js
 │   ├── activity-rest.js
+│   ├── auth-password.js
 │   ├── auth-session.js
 │   ├── dashboard-summary.js
 │   ├── external-connections.js
@@ -179,6 +180,7 @@
 │           │   └── pages.js
 │           ├── appShell
 │           │   ├── html
+│           │   │   ├── boot-splash.html
 │           │   │   └── layout.html
 │           │   ├── chrome.js
 │           │   ├── ensureChartJs.js
@@ -188,6 +190,7 @@
 │           │   ├── mpaSession.js
 │           │   ├── nav.js
 │           │   ├── navPref.js
+│           │   ├── navProgress.js
 │           │   ├── routes.js
 │           │   ├── shell.css
 │           │   └── workspaceBoot.js
@@ -629,6 +632,7 @@
 │   ├── ARCHITECTURE_NEW.md
 │   ├── finance-reports-preview.html
 │   ├── finance-reports-preview.md
+│   ├── FIREBASE_AUTH.md
 │   ├── PHASED_REQUIREMENTS.md
 │   └── REPO_MAP.md
 ├── packages
@@ -641,13 +645,17 @@
 │   │   └── server.js
 │   └── server
 │       ├── accountsAuth.js
+│       ├── appSessionJwt.js
+│       ├── auth-password.js
 │       ├── auth-session.js
 │       ├── mongoClient.js
 │       ├── mongoLog.js
+│       ├── mongoPasswordAuth.js
 │       ├── oauth-microsoft.js
 │       ├── oauth-service.js
 │       ├── r2Storage.js
 │       ├── serverAuth.js
+│       ├── serverFirebaseAuth.js
 │       ├── serverSupabase.js
 │       ├── supabaseRest.js
 │       ├── uiMode.js
@@ -666,6 +674,7 @@
 │   ├── capture-finance-screenshots.mjs
 │   ├── check-import-boundary.mjs
 │   ├── consolidate-vendors-mongo.mjs
+│   ├── migrate-auth-to-firebase.mjs
 │   ├── migrate-finance-to-mongo.mjs
 │   ├── migrate-integrations-to-mongo.mjs
 │   ├── migrate-ledger-sync-to-mongo.mjs
@@ -678,8 +687,10 @@
 │   ├── verify-vercel-api.mjs
 │   └── write-api-shims.mjs
 ├── .cursorrules
+├── .env.example
 ├── .gitignore
 ├── AGENTS.md
+├── firebase-service-account.json
 ├── package-lock.json
 ├── package.json
 ├── vercel.json
@@ -689,7 +700,7 @@
 
 ```
 
-**Scale:** ~360 JavaScript modules, ~17 CSS files, ~41 HTML entry pages.
+**Scale:** ~362 JavaScript modules, ~17 CSS files, ~42 HTML entry pages.
 
 ---
 
@@ -1025,6 +1036,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   └── pages.js
         ├── appShell
         │   ├── html
+        │   │   ├── boot-splash.html
         │   │   └── layout.html
         │   ├── chrome.js
         │   ├── ensureChartJs.js
@@ -1034,6 +1046,7 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
         │   ├── mpaSession.js
         │   ├── nav.js
         │   ├── navPref.js
+        │   ├── navProgress.js
         │   ├── routes.js
         │   ├── shell.css
         │   └── workspaceBoot.js
@@ -1225,13 +1238,17 @@ New MPAs: `apps/new/src/*App` plus HTML in `apps/new/pages/`. New nav is MPA-onl
 │   └── server.js
 └── server
     ├── accountsAuth.js
+    ├── appSessionJwt.js
+    ├── auth-password.js
     ├── auth-session.js
     ├── mongoClient.js
     ├── mongoLog.js
+    ├── mongoPasswordAuth.js
     ├── oauth-microsoft.js
     ├── oauth-service.js
     ├── r2Storage.js
     ├── serverAuth.js
+    ├── serverFirebaseAuth.js
     ├── serverSupabase.js
     ├── supabaseRest.js
     ├── uiMode.js
@@ -1501,6 +1518,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── new
 │   └── workspace-boot.js
 ├── activity-rest.js
+├── auth-password.js
 ├── auth-session.js
 ├── dashboard-summary.js
 ├── external-connections.js
@@ -1526,7 +1544,8 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 | Endpoint | Purpose |
 | --- | --- |
 | activity-rest.js | Serverless endpoint |
-| auth-session.js | Auth session endpoint |
+| auth-password.js | Mongo email/password login & signup |
+| auth-session.js | Auth session cookie bridge (Firebase or Mongo JWT) |
 | dashboard-summary.js | Dashboard summary endpoint |
 | external-connections.js | Legacy external connections shim → Mongo |
 | external-proxy.js | External API proxy |
@@ -1558,6 +1577,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── capture-finance-screenshots.mjs
 ├── check-import-boundary.mjs
 ├── consolidate-vendors-mongo.mjs
+├── migrate-auth-to-firebase.mjs
 ├── migrate-finance-to-mongo.mjs
 ├── migrate-integrations-to-mongo.mjs
 ├── migrate-ledger-sync-to-mongo.mjs
@@ -1658,6 +1678,7 @@ proxies `/api` to the deployed origin (`communityhub.evolyx.in`).
 ├── ARCHITECTURE_NEW.md
 ├── finance-reports-preview.html
 ├── finance-reports-preview.md
+├── FIREBASE_AUTH.md
 ├── PHASED_REQUIREMENTS.md
 └── REPO_MAP.md
 
@@ -1691,6 +1712,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 | File | Purpose |
 | --- | --- |
 | AGENTS.md | Repo config / entry point |
+| firebase-service-account.json | Repo config / entry point |
 | package.json | Repo config / entry point |
 | vercel.json | Repo config / entry point |
 | vite.config.js | Repo config / entry point |
@@ -1710,7 +1732,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
   client and/or legacy `/api/*` shims. Spreadsheet sync via ledger OAuth; Excel push via Microsoft Graph.
 - **Integrations:** Evolyx passbook OCR config + jobs live in Mongo (`external_connections`, `passbook_ocr_jobs`).
   Admin + Finance-New call `/api/integrations/*`; public Evolyx callback remains `/api/passbook-webhook`.
-- **Auth:** `authClient.js` + `socialAuth.js` (Google/Microsoft), MSAL callback (`microsoft-auth.html`, `ms-callback.js`).
+- **Auth:** Dual path — email/password via Mongo (`POST /api/auth-password`, app JWT) + social via Firebase (`packages/auth/authClient.js`, `classic/src/socialAuth.js`). Same email → same `user_id` (`auth_class`: local|social|hybrid). Cookie bridge `/api/auth-session`. Setup: `docs/FIREBASE_AUTH.md`. Spreadsheet OAuth remains separate.
 - **RBAC & access:** `ch_ui_mode` cookie selects the store. New: Mongo identity (`rbac_directory`, `rbac_societies`, assignments) + policy. Classic: Postgres profiles/memberships/RBAC tables. Auth JWT remains Supabase.
   UI actions use `src/capabilities.js`. Fallback remains `rbac.js` / `rbacMatrix.js` until Mongo is populated.
 - **Views:** lazy-activated per route (`views/controllers.js`), each `views/inits/*.js` wires view-specific init.
@@ -1730,6 +1752,7 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 - `npm run migrate:finance-mongo-remodel` → `node scripts/remodel-finance-mongo.mjs`
 - `npm run migrate:property-mongo` → `node scripts/migrate-property-to-mongo.mjs`
 - `npm run migrate:rbac-mongo` → `node scripts/migrate-rbac-to-mongo.mjs`
+- `npm run migrate:auth-firebase` → `node scripts/migrate-auth-to-firebase.mjs`
 - `npm run migrate:logs-mongo` → `node scripts/migrate-logs-to-mongo.mjs`
 - `npm run migrate:integrations-mongo` → `node scripts/migrate-integrations-to-mongo.mjs`
 - `npm run migrate:ledger-sync-mongo` → `node scripts/migrate-ledger-sync-to-mongo.mjs`
@@ -1741,4 +1764,4 @@ Schema + RLS migrations. **Run manually** in the Supabase SQL Editor (see `docs/
 
 ---
 
-*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-08-22.*
+*Auto-generated by `scripts/utilities/generate-repo-map.js`. Last updated: 2026-09-11.*

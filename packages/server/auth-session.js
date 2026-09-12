@@ -1,4 +1,5 @@
 import { authHeaderFromRequest, clearSessionCookie, requireSession, setSessionCookie } from './serverAuth.js';
+import { getUserFromAuthHeader } from './serverFirebaseAuth.js';
 
 export default async function handler(req, res) {
     if (req.method === 'POST') {
@@ -6,8 +7,19 @@ export default async function handler(req, res) {
         if (!authHeader?.startsWith('Bearer ')) {
             return res.status(401).json({ error: 'Sign in required.' });
         }
+        const { user, error, claimsUpdated } = await getUserFromAuthHeader(authHeader, { setClaims: true });
+        if (error || !user?.id) {
+            return res.status(401).json({ error: error || 'Sign in required.' });
+        }
         setSessionCookie(res, authHeader.slice('Bearer '.length));
-        return res.status(200).json({ ok: true });
+        return res.status(200).json({
+            ok: true,
+            claimsUpdated: !!claimsUpdated,
+            user: {
+                id: user.id,
+                email: user.email || '',
+            },
+        });
     }
 
     if (req.method === 'DELETE') {

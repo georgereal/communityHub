@@ -1,0 +1,28 @@
+<!-- Immediate first-paint loader (before app JS). Replaced when the shell mounts. -->
+<div id="ch-boot-splash" class="ch-boot-splash" role="status" aria-live="polite" aria-busy="true" aria-label="Loading">
+  <style>
+    .ch-boot-splash {
+      position: fixed; inset: 0; z-index: 99999;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0; padding: 0;
+      background: #f4f6f9;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+    }
+    .ch-boot-splash__inner {
+      display: flex; flex-direction: column; align-items: center; gap: 0.85rem;
+    }
+    .ch-boot-splash__spinner {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid #dbe3ee; border-top-color: #2563eb;
+      animation: ch-boot-spin 0.7s linear infinite;
+    }
+    .ch-boot-splash__label {
+      margin: 0; font-size: 0.875rem; font-weight: 500; color: #475569;
+    }
+    @keyframes ch-boot-spin { to { transform: rotate(360deg); } }
+  </style>
+  <div class="ch-boot-splash__inner">
+    <div class="ch-boot-splash__spinner" aria-hidden="true"></div>
+    <p class="ch-boot-splash__label">Loading</p>
+  </div>
+</div>

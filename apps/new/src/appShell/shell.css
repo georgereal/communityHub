@@ -377,3 +377,25 @@ html[data-admin-app="1"] .MuiTypography-caption {
   font-size: var(--text-xs, 0.75rem) !important;
 }
 
+/* In-shell page placeholder while content mounts */
+.ch-page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+  padding: 2.5rem 1rem;
+}
+
+.ch-page-loading__spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #dbe3ee;
+  border-top-color: #2563eb;
+  animation: ch-page-spin 0.7s linear infinite;
+}
+
+@keyframes ch-page-spin {
+  to { transform: rotate(360deg); }
+}
+

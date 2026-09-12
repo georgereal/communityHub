@@ -23,7 +23,7 @@ function esc(s) {
 
 async function main() {
     try {
-        setStatus('Signing in…');
+        setStatus('Loading…');
         const { mountFinancePage } = await import('../mount.js');
         const ctx = await mountFinancePage({ page: 'reports', fragmentHtml });
         if (!ctx) return;

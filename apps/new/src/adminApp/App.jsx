@@ -37,6 +37,7 @@ function InAppNav() {
             }
             let path = pathOnly.replace(/^\/admin/, '') || '/';
             if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+            void import('../appShell/navProgress.js').then((m) => m.beginSoftNavigation());
             navigate(path || '/');
         };
         window.addEventListener('ch-mpa-inapp-nav', onNav);
@@ -58,6 +59,7 @@ function ShellSync() {
         }
         document.title = `${page.label} · CommunityHub`;
         import('../appShell/nav.js').then((m) => m.setActiveNavRoute?.(page.route));
+        void import('../appShell/navProgress.js').then((m) => m.endSoftNavigation());
     }, [loc.pathname]);
     return null;
 }

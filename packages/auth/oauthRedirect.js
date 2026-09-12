@@ -1,9 +1,14 @@
-/** OAuth redirect URL + post-login destination (avoid query strings in Supabase allowlist). */
+/** OAuth redirect URL + post-login destination (avoid query strings in allowlists). */
 
 export const AUTH_OAUTH_NEXT_KEY = 'ch_auth_oauth_next';
 
-export function getSupabaseAuthRedirectUrl() {
+export function getAuthRedirectUrl() {
     return `${window.location.origin}/login.html`;
+}
+
+/** @deprecated Use getAuthRedirectUrl — name kept for older imports. */
+export function getSupabaseAuthRedirectUrl() {
+    return getAuthRedirectUrl();
 }
 
 export function stashOAuthNextFromUrl() {

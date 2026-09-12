@@ -55,6 +55,9 @@ export function clearFinanceCtx() {
     try {
         sessionStorage.removeItem(CTX_KEY);
     } catch { /* ignore */ }
+    try {
+        sessionStorage.removeItem('ch_workspace_boot_v1');
+    } catch { /* ignore */ }
 }
 
 /** Map SPA portalState → finance ctx before navigating to /finance/*.html */

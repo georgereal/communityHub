@@ -14,7 +14,7 @@ function esc(s) {
 
 async function main() {
     try {
-        setStatus('Signing in…');
+        setStatus('Loading…');
         const { mountFinancePage } = await import('../mount.js');
         const ctx = await mountFinancePage({ page: 'docs', fragmentHtml, withModals: true });
         if (!ctx) return;

@@ -1,7 +1,6 @@
 /**
- * Cookie session for MPA pages. The SPA stores the user in Supabase localStorage;
- * /api/* uses an httpOnly cookie. Refresh the access token before posting it so
- * /api/state and /api/db are not called with an expired JWT.
+ * Cookie session for MPA pages. Browser holds the Firebase ID token;
+ * /api/* uses an httpOnly cookie. Refresh the ID token before posting it.
  */
 import { ensureAuthInitialized, authClient } from '../authClient.js';
 
@@ -48,6 +47,7 @@ async function postCookie(accessToken) {
         err.status = res.status;
         throw err;
     }
+    return res.json().catch(() => ({}));
 }
 
 /**
@@ -57,7 +57,14 @@ export async function ensureMpaCookieSession() {
     const token = await getAccessToken({ refreshIfNeeded: true });
     if (token) {
         try {
-            await postCookie(token);
+            const json = await postCookie(token);
+            if (json?.claimsUpdated) {
+                try {
+                    await authClient?.auth?.refreshSession?.();
+                    const again = await getAccessToken({ refreshIfNeeded: false });
+                    if (again) await postCookie(again);
+                } catch { /* cookie already set */ }
+            }
             return true;
         } catch { /* cookie POST failed — try existing cookie */ }
     }

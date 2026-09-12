@@ -1,15 +1,13 @@
 /**
- * Supabase social login (OAuth) for app sign-in.
- * Configure providers in Supabase Dashboard → Authentication → Providers.
+ * Social login (OAuth) via Firebase Auth for app sign-in.
+ * Configure providers in Firebase Console → Authentication → Sign-in method.
  */
+import { clearLedgerOAuthPendingMarkers } from '@auth/oauthMarkers.js';
 import {
-    clearLedgerOAuthPendingMarkers,
-    prepareSupabaseAuthCallback,
-} from '@auth/oauthMarkers.js';
-import {
-    getSupabaseAuthRedirectUrl,
+    getAuthRedirectUrl,
     stashOAuthNextFromUrl,
 } from '@auth/oauthRedirect.js';
+import { authClient, ensureAuthInitialized, resetAuthInit } from '@auth/authClient.js';
 
 export const SOCIAL_AUTH_PROVIDERS = [
     { id: 'google', label: 'Google', iconClass: 'fa-brands fa-google' },
@@ -33,21 +31,15 @@ export function getEnabledSocialProviders() {
     return SOCIAL_AUTH_PROVIDERS.filter((p) => ['google', 'github'].includes(p.id));
 }
 
-export function getAuthRedirectUrl() {
-    return getSupabaseAuthRedirectUrl();
-}
+export { getAuthRedirectUrl };
 
-/** True when URL looks like a Supabase Auth PKCE callback (not ledger spreadsheet OAuth). */
+/** @deprecated Firebase uses popup/redirect; kept for login page URL cleanup. */
 export function isSupabaseAuthRedirect() {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (!code) return false;
-    prepareSupabaseAuthCallback();
-    return true;
+    return false;
 }
 
 export function clearStaleLedgerOAuthMarkersForSupabaseAuth() {
-    prepareSupabaseAuthCallback();
+    clearLedgerOAuthPendingMarkers();
 }
 
 export function cleanAuthRedirectFromUrl() {
@@ -57,78 +49,37 @@ export function cleanAuthRedirectFromUrl() {
     params.delete('code');
     params.delete('error');
     params.delete('error_description');
+    params.delete('apiKey');
+    params.delete('mode');
+    params.delete('oobCode');
     const q = params.toString();
     window.history.replaceState({}, document.title, `${window.location.pathname}${q ? `?${q}` : ''}${keepHash}`);
 }
 
-/** Exchange PKCE code (or read session if auto-detect already ran). */
-export async function resolveSessionAfterOAuthRedirect(supabase) {
-    if (!supabase) {
-        return { session: null, error: { message: 'Supabase is not configured.' } };
-    }
+/** Wait for Firebase session after OAuth redirect or stored session. */
+export async function waitForBootAuthSession(_unused, { attempts = 12, delayMs = 250 } = {}) {
+    if (!authClient) return { session: null, error: null };
 
     clearStaleLedgerOAuthMarkersForSupabaseAuth();
-
-    const params = new URLSearchParams(window.location.search);
-    const oauthError = params.get('error');
-    if (oauthError) {
-        return {
-            session: null,
-            error: { message: params.get('error_description') || oauthError },
-        };
-    }
-
-    const code = params.get('code');
-    if (!code) {
-        const { data } = await supabase.auth.getSession();
-        return { session: data?.session ?? null, error: null };
-    }
-
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error && data?.session) {
-        return { session: data.session, error: null };
-    }
-
-    // Auto-detect may have consumed the code before boot ran.
-    const { data: retry } = await supabase.auth.getSession();
-    if (retry?.session) {
-        return { session: retry.session, error: null };
-    }
-
-    return {
-        session: null,
-        error: error || { message: 'Social sign-in did not complete. Please try again.' },
-    };
-}
-
-import { authClient, ensureAuthInitialized, resetAuthInit } from '@auth/authClient.js';
-
-/** Wait for Supabase session after OAuth redirect or stored session. */
-export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs = 250 } = {}) {
-    const client = authClient || supabase;
-    if (!client) return { session: null, error: null };
-
-    clearStaleLedgerOAuthMarkersForSupabaseAuth();
-
-    const params = new URLSearchParams(window.location.search);
-    const hasOAuthCode = !!params.get('code');
-    const hasHashToken = window.location.hash.includes('access_token=');
 
     const primed = await ensureAuthInitialized();
     if (primed.session) {
-        if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+        cleanAuthRedirectFromUrl();
         return primed;
     }
     if (primed.error) {
-        if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+        cleanAuthRedirectFromUrl();
         return primed;
     }
 
     for (let i = 0; i < attempts; i++) {
-        const { data } = await client.auth.getSession();
+        const { data } = await authClient.auth.getSession();
         if (data?.session) {
-            console.log('[auth] session-ready-after-wait', { email: data.session.user?.email || null, attempt: i });
-            if (hasOAuthCode || hasHashToken) cleanAuthRedirectFromUrl();
+            console.log('[auth] session-ready-after-wait', {
+                email: data.session.user?.email || null,
+                attempt: i,
+            });
+            cleanAuthRedirectFromUrl();
             return { session: data.session, error: null };
         }
         if (i < attempts - 1) {
@@ -136,11 +87,7 @@ export async function waitForBootAuthSession(supabase, { attempts = 12, delayMs 
         }
     }
 
-    console.warn('[auth] boot-session-missing', {
-        hasOAuthCode,
-        hasHashToken,
-        href: window.location.href,
-    });
+    console.warn('[auth] boot-session-missing', { href: window.location.href });
     return { session: null, error: null };
 }
 
@@ -150,31 +97,18 @@ export const NO_SOCIETY_ACCESS_RESIDENT_MESSAGE =
 export const NO_SOCIETY_ACCESS_OFFICE_MESSAGE =
     'You are signed in. Choose your society below — a society administrator will assign your role after approval.';
 
-export async function signInWithSocialProvider(supabase, provider) {
-    const client = authClient || supabase;
-    if (!client) {
-        return { data: null, error: { message: 'Supabase is not configured.' } };
+export async function signInWithSocialProvider(_unused, provider) {
+    if (!authClient) {
+        return { data: null, error: { message: 'Firebase is not configured.' } };
     }
 
     stashOAuthNextFromUrl();
     clearLedgerOAuthPendingMarkers();
     resetAuthInit();
 
-    const options = {
-        redirectTo: getAuthRedirectUrl(),
-    };
-
-    if (provider === 'google') {
-        options.queryParams = {
-            access_type: 'offline',
-            prompt: 'consent',
-        };
-    }
-
-    console.log('[auth] oauth-start', { provider, redirectTo: options.redirectTo });
-    const result = await client.auth.signInWithOAuth({ provider, options });
-    if (!result.error && result.data?.url) {
-        window.location.assign(result.data.url);
-    }
-    return result;
+    console.log('[auth] oauth-start', { provider, redirectTo: getAuthRedirectUrl() });
+    return authClient.auth.signInWithOAuth({
+        provider,
+        options: { useRedirect: false },
+    });
 }

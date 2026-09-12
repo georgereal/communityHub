@@ -1073,6 +1073,17 @@ const isFundingLedgerTxn = (t) => {
   return isBankPettyFunding(t);
 };
 
+/** Linked ledger line eligible for the Bills & Receipts wallet (cash-float) action. */
+const canMarkLinkedTxnAsCashFloat = (t) => {
+  if (!t || t.excluded_from_ledger) return false;
+  if (t.is_cash_float || t.exclude_from_cash_float) return true;
+  if (isBankPettyFunding(t)) return true;
+  return t.type === 'OUT' && String(t.wallet || 'CASH').toUpperCase() === 'BANK';
+};
+
+const isLinkedTxnCashFloatActive = (t) =>
+  !!(t?.is_cash_float && !t?.exclude_from_cash_float) || isBankPettyFunding(t);
+
 const linkedCashTotalForTxn = (txnId) => {
   if (!txnId) return 0;
   const key = String(txnId);
@@ -2678,6 +2689,22 @@ const paintFinanceDocumentsTable = () => {
         ? `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-unlink="${esc(d.id)}" title="Unlink" aria-label="Unlink"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></button>`
         : `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-link="${esc(d.id)}" title="Link to ledger" aria-label="Link"><i class="fa-solid fa-link" aria-hidden="true"></i></button>`)
       : '';
+    const linkedTxn = status === 'linked' && d.transaction_id
+      ? (fnFinances().txns || []).find((t) => t.id === d.transaction_id)
+      : null;
+    let cashFloatBtn = '';
+    if (linkedTxn && canMarkLinkedTxnAsCashFloat(linkedTxn)) {
+      const floatActive = isLinkedTxnCashFloatActive(linkedTxn);
+      const floatTitle = floatActive
+        ? 'Remove from Petty Cash float buckets'
+        : (linkedTxn.exclude_from_cash_float
+          ? 'Add back to Petty Cash float buckets'
+          : 'Mark linked ledger as cash float (Petty Cash funding)');
+      const floatIcon = floatActive
+        ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>'
+        : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>';
+      cashFloatBtn = `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.edit" data-fdoc-cash-float="${esc(d.id)}" data-txn="${esc(linkedTxn.id)}" title="${floatTitle}" aria-label="Cash float">${floatIcon}</button>`;
+    }
     const delBtn = manage && canDeleteFinanceDocs()
       ? `<button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-cap="accounts.delete" data-fdoc-del="${esc(d.id)}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`
       : '';
@@ -2706,6 +2733,7 @@ const paintFinanceDocumentsTable = () => {
       <td class="fdoc-status-cell">${linkLabel}${renderFdocAttachmentIcons(d)}</td>
       <td class="fdoc-actions">
         ${linkBtn}
+        ${cashFloatBtn}
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-view="${esc(d.id)}" title="View details" aria-label="View details"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
         ${editBtn}
         ${delBtn}
@@ -3144,6 +3172,23 @@ export function initFinanceDocumentsPage() {
           window.refreshLedgerLinkedDocsPanel?.();
         })
         .catch((err) => alert(err?.message || 'Unlink failed.'));
+      return;
+    }
+
+    const cashFloatBtn = e.target.closest('[data-fdoc-cash-float]');
+    if (cashFloatBtn && cashFloatBtn.dataset.busy !== '1') {
+      e.preventDefault();
+      e.stopPropagation();
+      const txnId = cashFloatBtn.dataset.txn;
+      if (!txnId) return;
+      const raw = (fnFinances().txns || []).find((txn) => txn.id === txnId);
+      if (!raw || !canMarkLinkedTxnAsCashFloat(raw)) return;
+      const isActive = isLinkedTxnCashFloatActive(raw);
+      void withButtonBusy(cashFloatBtn, '…', async () => {
+        await markLedgerAsCashFloat(txnId, !isActive);
+        renderFinanceDocumentsPage();
+        window.renderCashLedger?.();
+      }).catch((err) => alert(err?.message || 'Could not update cash float mark.'));
       return;
     }
 

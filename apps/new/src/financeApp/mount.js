@@ -140,7 +140,7 @@ export async function mountFinancePage({
     withBankReconModals = false,
 } = {}) {
     const status = document.querySelector('#app-shell-page .finance-mpa-status, #app-shell-root .finance-mpa-status');
-    if (status) status.textContent = 'Signing in…';
+    if (status) status.textContent = 'Loading…';
 
     const ctx = await bootFinanceApp({ page });
     if (!ctx) return null;
