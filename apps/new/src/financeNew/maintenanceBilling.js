@@ -809,7 +809,7 @@ export async function createBulkMaintenanceInvoices({
         console.warn('Billing batch header not saved:', err.message);
     }
 
-    const insertInvoiceWithLines = async ({
+    const buildInvoiceDoc = ({
         unit_id,
         billing_group_id,
         lineRows,
@@ -856,7 +856,7 @@ export async function createBulkMaintenanceInvoices({
             });
         });
 
-        await mongoInsert('maintenance_invoices', {
+        return {
             id: invoice_id,
             apartment_id,
             unit_id: unit_id || null,
@@ -867,20 +867,21 @@ export async function createBulkMaintenanceInvoices({
             notes: notes?.trim() || null,
             batch_id: batchOk ? batch_id : null,
             lines: linePayload,
-        }, { rehydrate: false });
+        };
     };
 
+    const invoiceDocs = [];
     for (const row of toCreateIndividual) {
         const penRow = penaltyByUnit.get(row.unit.id);
         const invoiceTotal = roundMoney(row.total + (penRow?.penaltyTotal || 0));
         totalAmount += invoiceTotal;
-        await insertInvoiceWithLines({
+        invoiceDocs.push(buildInvoiceDoc({
             unit_id: row.unit.id,
             billing_group_id: null,
             lineRows: [row],
             penRows: penaltyByUnit,
             invoiceTotal,
-        });
+        }));
     }
 
     for (const { group, rows } of groupsToCreate) {
@@ -890,13 +891,24 @@ export async function createBulkMaintenanceInvoices({
         }, 0));
         totalAmount += invoiceTotal;
         const primaryUnit = rows[0]?.unit?.id || null;
-        await insertInvoiceWithLines({
+        invoiceDocs.push(buildInvoiceDoc({
             unit_id: primaryUnit,
             billing_group_id: group.id,
             lineRows: rows,
             penRows: penaltyByUnit,
             invoiceTotal,
-        });
+        }));
+    }
+
+    // Chunk to stay under Vercel Hobby 10s / large-payload limits (see nobroker import).
+    const invoiceChunkSize = 100;
+    for (let i = 0; i < invoiceDocs.length; i += invoiceChunkSize) {
+        // eslint-disable-next-line no-await-in-loop
+        await mongoInsert(
+            'maintenance_invoices',
+            invoiceDocs.slice(i, i + invoiceChunkSize),
+            { rehydrate: false },
+        );
     }
 
     if (batchOk && batch_id) {

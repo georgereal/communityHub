@@ -1321,6 +1321,22 @@ async function deleteExpensePlanRecurring(db, apartmentId, body) {
     return { ok: true, id };
 }
 
+/** Chunked unordered bulk upsert — avoids Vercel 10s timeouts on multi-row tableWrite. */
+async function bulkReplaceUpsert(collection, docs) {
+    if (!docs.length) return;
+    const ops = docs.map((doc) => ({
+        replaceOne: {
+            filter: { _id: doc._id },
+            replacement: doc,
+            upsert: true,
+        },
+    }));
+    for (let i = 0; i < ops.length; i += 500) {
+        // eslint-disable-next-line no-await-in-loop
+        await collection.bulkWrite(ops.slice(i, i + 500), { ordered: false });
+    }
+}
+
 /** Generic table writes for Finance-New billing / config helpers (explicit mongoWrite client). */
 async function tableWrite(db, apartmentId, body) {
     const table = body.table;
@@ -1389,10 +1405,9 @@ async function tableWrite(db, apartmentId, body) {
 
     if (table === 'maintenance_invoices') {
         if (op === 'insert' || op === 'upsert') {
-            const out = [];
-            for (const row of rows) {
+            const docs = rows.map((row) => {
                 const id = row.id || uid();
-                const doc = {
+                return {
                     ...row,
                     _id: String(id),
                     id,
@@ -1402,11 +1417,9 @@ async function tableWrite(db, apartmentId, body) {
                     _schema: 'v2',
                     _remodeledAt: new Date(),
                 };
-                // eslint-disable-next-line no-await-in-loop
-                await db.collection('dues_invoices').replaceOne({ _id: String(id) }, doc, { upsert: true });
-                out.push(stripMongo(doc));
-            }
-            return { ok: true, data: out };
+            });
+            await bulkReplaceUpsert(db.collection('dues_invoices'), docs);
+            return { ok: true, data: docs.map(stripMongo) };
         }
         if (op === 'update') {
             await db.collection('dues_invoices').updateOne(
@@ -1480,18 +1493,20 @@ async function tableWrite(db, apartmentId, body) {
 
     if (table === 'maintenance_billing_groups') {
         if (op === 'upsert' || op === 'insert') {
-            const out = [];
-            for (const row of rows) {
+            const docs = rows.map((row) => {
                 const id = row.id || uid();
-                const doc = {
-                    ...row, _id: String(id), id, apartment_id: apartmentId, unitIds: row.unitIds || [],
-                    _schema: 'v2', _remodeledAt: new Date(),
+                return {
+                    ...row,
+                    _id: String(id),
+                    id,
+                    apartment_id: apartmentId,
+                    unitIds: row.unitIds || [],
+                    _schema: 'v2',
+                    _remodeledAt: new Date(),
                 };
-                // eslint-disable-next-line no-await-in-loop
-                await db.collection('billing_groups').replaceOne({ _id: String(id) }, doc, { upsert: true });
-                out.push(stripMongo(doc));
-            }
-            return { ok: true, data: out };
+            });
+            await bulkReplaceUpsert(db.collection('billing_groups'), docs);
+            return { ok: true, data: docs.map(stripMongo) };
         }
         if (op === 'delete') {
             await db.collection('billing_groups').deleteOne({ _id: String(filter.id) });
@@ -1500,12 +1515,21 @@ async function tableWrite(db, apartmentId, body) {
     }
 
     if (table === 'maintenance_billing_group_units') {
-        for (const row of rows) {
-            // eslint-disable-next-line no-await-in-loop
-            await db.collection('billing_groups').updateOne(
-                { _id: String(row.group_id) },
-                { $addToSet: { unitIds: row.unit_id } },
-            );
+        if (op !== 'delete') {
+            const byGroup = new Map();
+            for (const row of rows) {
+                const gid = String(row.group_id || '');
+                if (!gid || row.unit_id == null) continue;
+                if (!byGroup.has(gid)) byGroup.set(gid, []);
+                byGroup.get(gid).push(row.unit_id);
+            }
+            for (const [groupId, unitIds] of byGroup) {
+                // eslint-disable-next-line no-await-in-loop
+                await db.collection('billing_groups').updateOne(
+                    { _id: groupId },
+                    { $addToSet: { unitIds: { $each: unitIds } } },
+                );
+            }
         }
         if (op === 'delete' && filter.group_id) {
             await db.collection('billing_groups').updateOne(
@@ -1518,18 +1542,20 @@ async function tableWrite(db, apartmentId, body) {
 
     if (table === 'maintenance_billing_batches') {
         if (op === 'insert' || op === 'upsert') {
-            const out = [];
-            for (const row of rows) {
+            const docs = rows.map((row) => {
                 const id = row.id || uid();
-                const doc = {
-                    ...row, _id: String(id), id, apartment_id: apartmentId, skips: row.skips || [],
-                    _schema: 'v2', _remodeledAt: new Date(),
+                return {
+                    ...row,
+                    _id: String(id),
+                    id,
+                    apartment_id: apartmentId,
+                    skips: row.skips || [],
+                    _schema: 'v2',
+                    _remodeledAt: new Date(),
                 };
-                // eslint-disable-next-line no-await-in-loop
-                await db.collection('billing_batches').replaceOne({ _id: String(id) }, doc, { upsert: true });
-                out.push(stripMongo(doc));
-            }
-            return { ok: true, data: out };
+            });
+            await bulkReplaceUpsert(db.collection('billing_batches'), docs);
+            return { ok: true, data: docs.map(stripMongo) };
         }
         if (op === 'update') {
             await db.collection('billing_batches').updateOne(
@@ -1541,42 +1567,49 @@ async function tableWrite(db, apartmentId, body) {
     }
 
     if (table === 'maintenance_billing_batch_skips') {
+        const byBatch = new Map();
         for (const row of rows) {
+            const bid = String(row.batch_id || '');
+            if (!bid) continue;
+            if (!byBatch.has(bid)) byBatch.set(bid, []);
+            byBatch.get(bid).push({ ...row, id: row.id || uid() });
+        }
+        for (const [batchId, skips] of byBatch) {
             // eslint-disable-next-line no-await-in-loop
             await db.collection('billing_batches').updateOne(
-                { _id: String(row.batch_id) },
-                { $push: { skips: { ...row, id: row.id || uid() } } },
+                { _id: batchId },
+                { $push: { skips: { $each: skips } } },
             );
         }
         return { ok: true };
     }
 
     if (table === 'maintenance_reminder_log') {
-        const out = [];
-        for (const row of rows) {
+        const docs = rows.map((row) => {
             const id = row.id || uid();
-            const doc = {
-                ...row, _id: String(id), id, apartment_id: apartmentId, created_at: row.created_at || nowIso(),
+            return {
+                ...row,
+                _id: String(id),
+                id,
+                apartment_id: apartmentId,
+                created_at: row.created_at || nowIso(),
                 _schema: 'v2',
             };
-            // eslint-disable-next-line no-await-in-loop
-            await db.collection('maintenance_reminders').insertOne(doc);
-            out.push(stripMongo(doc));
+        });
+        if (docs.length) {
+            await db.collection('maintenance_reminders').insertMany(docs, { ordered: false });
         }
-        return { ok: true, data: out };
+        return { ok: true, data: docs.map(stripMongo) };
     }
 
     if (table === 'nobroker_invoices_raised') {
         if (op === 'insert' || op === 'upsert') {
-            const out = [];
-            for (const row of rows) {
+            const docs = rows.map((row) => {
                 const id = row.id || uid();
-                const doc = { ...row, _id: String(id), id, apartment_id: apartmentId, _schema: 'v2' };
-                // eslint-disable-next-line no-await-in-loop
-                await db.collection('nobroker_invoices').replaceOne({ _id: String(id) }, doc, { upsert: true });
-                out.push(stripMongo(doc));
-            }
-            return { ok: true, data: out };
+                return { ...row, _id: String(id), id, apartment_id: apartmentId, _schema: 'v2' };
+            });
+            await bulkReplaceUpsert(db.collection('nobroker_invoices'), docs);
+            return { ok: true, data: docs.map(stripMongo) };
         }
         if (op === 'delete') {
             const q = { ...apt(apartmentId) };
@@ -1589,15 +1622,14 @@ async function tableWrite(db, apartmentId, body) {
 
     if (table === 'payment_intents') {
         if (op === 'insert') {
-            const out = [];
-            for (const row of rows) {
+            const docs = rows.map((row) => {
                 const id = row.id || uid();
-                const doc = { ...row, _id: String(id), id, apartment_id: apartmentId };
-                // eslint-disable-next-line no-await-in-loop
-                await db.collection('payment_intents').insertOne(doc);
-                out.push(doc);
+                return { ...row, _id: String(id), id, apartment_id: apartmentId };
+            });
+            if (docs.length) {
+                await db.collection('payment_intents').insertMany(docs, { ordered: false });
             }
-            return { ok: true, data: out };
+            return { ok: true, data: docs };
         }
         if (op === 'update') {
             await db.collection('payment_intents').updateOne(

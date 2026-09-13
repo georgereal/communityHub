@@ -712,7 +712,9 @@ export async function applyNoBrokerInvoicesRaisedImport(parsed) {
     source_file: parsed.fileName || null,
   }));
 
-  const chunkSize = 200;
+  // Keep chunks modest: each row carries a `raw` spreadsheet snapshot, and
+  // Vercel Hobby caps finance-rest at 10s (see vercel.json maxDuration).
+  const chunkSize = 100;
   const inserted = [];
   for (let i = 0; i < payload.length; i += chunkSize) {
     const chunk = payload.slice(i, i + chunkSize);
