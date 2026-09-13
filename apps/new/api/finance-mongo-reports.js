@@ -389,6 +389,73 @@ function monthlyTotals(txns, months) {
     });
 }
 
+function normalizeCollectionGapOpening(raw) {
+    if (!raw || typeof raw !== 'object') {
+        return { amount: 0, asOfMonth: null };
+    }
+    const asOfMonth = raw.asOfMonth || raw.as_of_month || null;
+    const month = asOfMonth && /^\d{4}-\d{2}$/.test(String(asOfMonth).slice(0, 7))
+        ? String(asOfMonth).slice(0, 7)
+        : null;
+    const amount = raw.amount == null || raw.amount === ''
+        ? 0
+        : round2(raw.amount);
+    return { amount: Number.isFinite(amount) ? amount : 0, asOfMonth: month };
+}
+
+/**
+ * Running raised − Maintenance Collection gap.
+ * opening.amount = known gap through end of asOfMonth; only later months accumulate.
+ * When asOfMonth is null, accumulate from earliest data (opening amount still applied).
+ */
+function buildCollectionGapSeries({
+    months,
+    raisedByMonth,
+    maintCollectedByMonth,
+    opening,
+}) {
+    const open = normalizeCollectionGapOpening(opening);
+    const asOf = open.asOfMonth;
+    const allKeys = new Set([
+        ...Object.keys(raisedByMonth || {}),
+        ...Object.keys(maintCollectedByMonth || {}),
+        ...months.map((m) => m.key),
+    ]);
+    if (asOf) allKeys.add(asOf);
+    const sortedKeys = [...allKeys].filter(Boolean).sort();
+
+    const cumAfterAsOf = new Map();
+    let running = 0;
+    for (const key of sortedKeys) {
+        if (asOf && key <= asOf) {
+            cumAfterAsOf.set(key, 0);
+            continue;
+        }
+        running = round2(
+            running
+            + (Number(raisedByMonth[key]) || 0)
+            - (Number(maintCollectedByMonth[key]) || 0),
+        );
+        cumAfterAsOf.set(key, running);
+    }
+
+    const collectionGap = months.map((mo) => {
+        if (asOf && mo.key < asOf) return null;
+        if (asOf && mo.key === asOf) return open.amount;
+        const after = cumAfterAsOf.get(mo.key);
+        if (after == null) return open.amount;
+        return round2(open.amount + after);
+    });
+
+    const maintCollected = months.map((mo) => round2(maintCollectedByMonth[mo.key] || 0));
+
+    return {
+        collectionGapOpening: open,
+        maintCollected,
+        collectionGap,
+    };
+}
+
 async function summary(db, apartmentId) {
     const [ledger, vouchers] = await Promise.all([
         db.collection('ledger_entries').aggregate([
@@ -662,6 +729,39 @@ async function analytics(db, apartmentId, body = {}) {
         raisedRows.reduce((s, r) => s + (r.cells[months.indexOf(mo)] || 0), 0),
     ));
 
+    // Full-history raised + Maintenance Collection buckets for running collection gap.
+    const raisedByMonth = {};
+    for (const inv of nobroker || []) {
+        const bm = String(inv.billing_month || '').slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(bm)) continue;
+        const charges = inv.charges && typeof inv.charges === 'object' ? inv.charges : {};
+        let rowTotal = 0;
+        for (const raw of Object.values(charges)) {
+            rowTotal += Math.abs(Number(raw) || 0);
+        }
+        if (rowTotal < 0.001 && inv.total_raised != null) {
+            rowTotal = Math.abs(Number(inv.total_raised) || 0);
+        }
+        if (rowTotal < 0.001) continue;
+        raisedByMonth[bm] = round2((raisedByMonth[bm] || 0) + rowTotal);
+    }
+    const maintCollectedByMonth = {};
+    for (const t of incomeTxns) {
+        const cat = String(t.cat || '');
+        if (cat !== 'Maintenance Collection') continue;
+        const mk = txnMonthKey(t.date);
+        if (!mk) continue;
+        maintCollectedByMonth[mk] = round2(
+            (maintCollectedByMonth[mk] || 0) + Math.abs(Number(t.amount) || 0),
+        );
+    }
+    const gapPack = buildCollectionGapSeries({
+        months,
+        raisedByMonth,
+        maintCollectedByMonth,
+        opening: config?.collectionGapOpening,
+    });
+
     // Book balance / recon snapshot — match classic getBankBalanceReconciliation + Wallet Left + pending.
     const unmatchedLines = bankLines.filter((l) => l.match_status === 'UNMATCHED');
     const unmatchedTxns = entries.filter((t) => {
@@ -738,8 +838,11 @@ async function analytics(db, apartmentId, body = {}) {
             income: incomeMonth,
             expense: expenseMonth,
             net: incomeMonth.map((v, i) => round2(v - expenseMonth[i])),
+            maintCollected: gapPack.maintCollected,
+            collectionGap: gapPack.collectionGap,
             expenseByMonth,
         },
+        collectionGapOpening: gapPack.collectionGapOpening,
         bookBalance: {
             cash: cashWallet,
             bankBalance,

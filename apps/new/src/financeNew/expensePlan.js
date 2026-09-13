@@ -11,6 +11,8 @@ import { postFnMutation } from './mongoMutations.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { getBookBalanceSummary } from './financeAnalytics.js';
 import { refreshCapabilityGates } from '../capUi.js';
+import { can } from '../capabilities.js';
+import { canCrud } from '../rbacMatrix.js';
 import { wireClassifyCombobox, setClassifyInputState } from '../classifyCombobox.js';
 
 const formatMoney = (n) =>
@@ -18,7 +20,20 @@ const formatMoney = (n) =>
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Active plan rows — classic Postgres defaulted status to planned; Mongo saves omitted it. */
+const isActivePlanItem = (i) => !i?.status || i.status === 'planned';
+
+const canEditPlan = () => can('accounts.plan_edit') || can('accounts.edit');
+/** Plan remove is an edit action (not ledger delete). */
+const canDeletePlan = () => canEditPlan() || canCrud('accounts', 'delete');
 
 const esc = (s) => String(s ?? '')
   .replace(/&/g, '&amp;')
@@ -32,9 +47,12 @@ let selectedKey = null;
 let lastTimeline = [];
 let editingItemId = null;
 let editingRecurringId = null;
+/** When converting types on save, delete the source record after creating the target. */
+let convertFromOneOffId = null;
+let convertFromRecurringId = null;
 
 const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
-  const del = `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.delete" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
+  const del = `<button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.plan_edit" ${delAttr}="${esc(delValue)}" title="Delete" aria-label="Delete" style="color:var(--danger);">
       <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
     </button>`;
   return `<td class="eplan-actions" data-cap="accounts.plan_edit">
@@ -45,14 +63,43 @@ const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
   </td>`;
 };
 
-const detailActionsHtml = ({ editAttr, editValue, delAttr, delValue, delLabel }) => {
-  const del = `<button type="button" class="btn btn-outline btn--small btn--danger" data-cap="accounts.delete" ${delAttr}="${esc(delValue)}">
+const detailActionsHtml = ({
+  editAttr,
+  editValue,
+  delAttr,
+  delValue,
+  delLabel,
+  completeAttr,
+  completeValue,
+  deferValue,
+}) => {
+  const complete = completeAttr
+    ? `<button type="button" class="btn btn-outline btn--small" data-cap="accounts.plan_edit" ${completeAttr}="${esc(completeValue)}">
+      <i class="fa-solid fa-check" aria-hidden="true"></i> Mark complete
+    </button>`
+    : '';
+  const defer = deferValue
+    ? `<label class="eplan-defer-inline" data-cap="accounts.plan_edit" style="display:inline-flex;align-items:center;gap:0.35rem;">
+        <span class="muted" style="font-size:0.85rem;">Defer</span>
+        <select class="expense-combobox" data-eplan-defer-months="${esc(deferValue)}" style="width:auto;min-width:5.5rem;">
+          <option value="1">+1 mo</option>
+          <option value="2">+2 mo</option>
+          <option value="3">+3 mo</option>
+        </select>
+        <button type="button" class="btn btn-outline btn--small" data-eplan-defer-item="${esc(deferValue)}" title="Push this expense forward">
+          <i class="fa-solid fa-forward" aria-hidden="true"></i>
+        </button>
+      </label>`
+    : '';
+  const del = `<button type="button" class="btn btn-outline btn--small btn--danger" data-cap="accounts.plan_edit" ${delAttr}="${esc(delValue)}">
       <i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${esc(delLabel || 'Delete')}
     </button>`;
-  return `<div class="eplan-detail__actions" data-cap="accounts.plan_edit">
+  return `<div class="eplan-detail__actions" data-cap="accounts.plan_edit" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">
     <button type="button" class="btn btn-outline btn--small" data-cap="accounts.plan_edit" ${editAttr}="${esc(editValue)}">
       <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
     </button>
+    ${complete}
+    ${defer}
     ${del}
   </div>`;
 };
@@ -234,18 +281,24 @@ export const projectRecurringOccurrences = (templates, fromIso, toIso) => {
 const horizonEndIso = (months) => {
   const d = new Date();
   d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
-/** Planned one-offs + recurring occurrences in the next `months` (for cash-position / reports). */
+/** Planned one-offs + recurring occurrences in the next `months` (for cash-position / reports).
+ * Includes overdue incomplete one-offs (still due). */
 export const getExpensePlanHorizonSummary = (months = 6) => {
   const from = todayISO();
   const to = horizonEndIso(Math.max(1, parseInt(months, 10) || 6));
   const oneOff = getItems()
-    .filter((i) => i.status === 'planned')
+    .filter(isActivePlanItem)
     .filter((i) => {
       const d = String(i.plan_date || '').slice(0, 10);
-      return d >= from && d <= to;
+      if (!d) return false;
+      // Future in horizon, or already past / overdue (still open)
+      return d <= to;
     });
   const projected = projectRecurringOccurrences(getRecurring(), from, to);
   const items = [
@@ -283,10 +336,12 @@ const buildTimeline = () => {
   const from = todayISO();
   const to = horizonEndIso(horizonMonths);
   const oneOff = getItems()
-    .filter((i) => i.status === 'planned')
+    .filter(isActivePlanItem)
     .filter((i) => {
       const d = String(i.plan_date || '').slice(0, 10);
-      return d >= from && d <= to;
+      if (!d) return false;
+      // Include overdue (past) incomplete + upcoming within horizon
+      return d <= to;
     })
     .map((i) => ({
       source: 'oneoff',
@@ -324,7 +379,126 @@ const closeModal = () => {
   if (modal) modal.hidden = true;
   editingItemId = null;
   editingRecurringId = null;
+  convertFromOneOffId = null;
+  convertFromRecurringId = null;
   window.__eplanEditingPeriodAmounts = [];
+};
+
+const dayFromIso = (iso, fallback = 1) => {
+  const d = String(iso || '').slice(8, 10);
+  const n = parseInt(d, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(28, Math.max(1, n));
+};
+
+const readOneOffDraft = () => ({
+  description: document.getElementById('fn-eplan-item-desc')?.value?.trim() || '',
+  title: document.getElementById('fn-eplan-item-desc')?.value?.trim() || '',
+  cat: document.getElementById('fn-eplan-item-cat')?.value?.trim() || 'Other',
+  vendor_name: document.getElementById('fn-eplan-item-vendor')?.value?.trim() || '',
+  amount: parseFloat(document.getElementById('fn-eplan-item-amount')?.value || '') || 0,
+  plan_date: document.getElementById('fn-eplan-item-date')?.value || todayISO(),
+  due_date: document.getElementById('fn-eplan-item-due')?.value
+    || document.getElementById('fn-eplan-item-date')?.value
+    || todayISO(),
+});
+
+const readRecurringDraft = () => {
+  const start = document.getElementById('fn-eplan-rec-start')?.value || todayISO();
+  const day = parseInt(document.getElementById('fn-eplan-rec-day')?.value || '1', 10) || 1;
+  const dueDay = parseInt(document.getElementById('fn-eplan-rec-due-day')?.value || String(day), 10) || day;
+  const amount = parseFloat(document.getElementById('fn-eplan-rec-amount')?.value || '') || 0;
+  const y = Number(start.slice(0, 4));
+  const m = Number(start.slice(5, 7)) - 1;
+  const planDate = start;
+  const dueDate = toIsoLocal(addMonthsClamped(y, m, dueDay));
+  return {
+    title: document.getElementById('fn-eplan-rec-title')?.value?.trim() || '',
+    description: document.getElementById('fn-eplan-rec-title')?.value?.trim() || '',
+    cat: document.getElementById('fn-eplan-rec-cat')?.value?.trim() || 'Other',
+    vendor_name: '',
+    amount,
+    plan_date: planDate,
+    due_date: dueDate,
+    start_date: start,
+    day_of_month: day,
+    due_day_of_month: dueDay,
+    cadence: document.getElementById('fn-eplan-rec-cadence')?.value || 'monthly',
+    amount_mode: 'per_period',
+  };
+};
+
+/** Switch one-off form → recurring form (keeps typed values). */
+const convertOneOffFormToRecurring = () => {
+  const draft = readOneOffDraft();
+  const sourceId = editingItemId;
+  convertFromOneOffId = sourceId;
+  convertFromRecurringId = null;
+  editingItemId = null;
+  editingRecurringId = null;
+
+  const one = document.getElementById('fn-eplan-modal-oneoff');
+  const rec = document.getElementById('fn-eplan-modal-recurring');
+  const title = document.getElementById('fn-eplan-modal-title');
+  const saveRec = document.getElementById('fn-eplan-rec-save');
+  if (one) one.hidden = true;
+  if (rec) rec.hidden = false;
+
+  fillRecurringForm({
+    title: draft.description || draft.title,
+    cat: draft.cat,
+    amount: draft.amount,
+    start_date: draft.plan_date,
+    day_of_month: dayFromIso(draft.plan_date, 1),
+    due_day_of_month: dayFromIso(draft.due_date, dayFromIso(draft.plan_date, 1)),
+    cadence: 'monthly',
+    amount_mode: 'per_period',
+    term_count: null,
+  });
+  if (title) {
+    title.textContent = sourceId
+      ? 'Convert to recurring template'
+      : 'Add recurring template';
+  }
+  if (saveRec) {
+    saveRec.textContent = sourceId ? 'Save as recurring' : 'Save recurring';
+  }
+  setTimeout(() => document.getElementById('fn-eplan-rec-title')?.focus(), 40);
+};
+
+/** Switch recurring form → one-off form (keeps typed values). */
+const convertRecurringFormToOneOff = () => {
+  const draft = readRecurringDraft();
+  const sourceId = editingRecurringId;
+  convertFromRecurringId = sourceId;
+  convertFromOneOffId = null;
+  editingItemId = null;
+  editingRecurringId = null;
+
+  const one = document.getElementById('fn-eplan-modal-oneoff');
+  const rec = document.getElementById('fn-eplan-modal-recurring');
+  const title = document.getElementById('fn-eplan-modal-title');
+  const saveOne = document.getElementById('fn-eplan-item-save');
+  if (rec) rec.hidden = true;
+  if (one) one.hidden = false;
+
+  fillOneOffForm({
+    description: draft.title || draft.description,
+    cat: draft.cat,
+    vendor_name: draft.vendor_name,
+    amount: draft.amount,
+    plan_date: draft.plan_date || draft.start_date,
+    due_date: draft.due_date || draft.plan_date || draft.start_date,
+  });
+  if (title) {
+    title.textContent = sourceId
+      ? 'Convert to one-off expense'
+      : 'Add one-off expense';
+  }
+  if (saveOne) {
+    saveOne.textContent = sourceId ? 'Save as one-off' : 'Save one-off';
+  }
+  setTimeout(() => document.getElementById('fn-eplan-item-desc')?.focus(), 40);
 };
 
 const fillOneOffForm = (item) => {
@@ -529,6 +703,8 @@ const openModal = (kind, record = null) => {
   closeDetail();
   editingItemId = null;
   editingRecurringId = null;
+  convertFromOneOffId = null;
+  convertFromRecurringId = null;
 
   one.hidden = kind !== 'oneoff';
   rec.hidden = kind !== 'recurring';
@@ -606,6 +782,9 @@ const showDetail = (row) => {
         delAttr: 'data-eplan-del-item',
         delValue: row.id,
         delLabel: 'Remove from plan',
+        completeAttr: 'data-eplan-complete-item',
+        completeValue: row.id,
+        deferValue: row.id,
       })}
     `;
     refreshCapabilityGates(body);
@@ -697,6 +876,26 @@ const buildForwardMonthRange = (count) => {
     });
   }
   return months;
+};
+
+/** Forward horizon plus any past months that still have incomplete one-offs. */
+const buildPlanMonthRange = (count, timeline) => {
+  const forward = buildForwardMonthRange(count);
+  const byKey = new Map(forward.map((mo) => [mo.key, mo]));
+  const now = new Date();
+  const curKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  (timeline || []).forEach((item) => {
+    const key = monthKeyFromIso(item.plan_date);
+    if (!key || byKey.has(key) || key >= curKey) return;
+    const [y, m] = key.split('-').map(Number);
+    byKey.set(key, {
+      y,
+      m: m - 1,
+      key,
+      label: monthLabel(y, m - 1),
+    });
+  });
+  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
 };
 
 const monthKeyFromIso = (iso) => {
@@ -795,7 +994,7 @@ const renderMonthPivot = (timeline) => {
   const meta = document.getElementById('fn-eplan-pivot-meta');
   if (!el) return;
 
-  const months = buildForwardMonthRange(horizonMonths);
+  const months = buildPlanMonthRange(horizonMonths, timeline);
   const { groups, colTotals, grandTotal, maxCell } = buildMonthPivot(timeline, months);
   const now = new Date();
   const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -945,7 +1144,15 @@ const renderSummary = (timeline) => {
 const renderTimeline = (timeline) => {
   const el = document.getElementById('fn-eplan-timeline');
   const meta = document.getElementById('fn-eplan-timeline-meta');
-  if (meta) meta.textContent = `${timeline.length} in next ${horizonMonths} months`;
+  if (meta) {
+    const overdue = timeline.filter((r) => {
+      const due = String(r.due_date || r.plan_date || '').slice(0, 10);
+      return due && due < todayISO();
+    }).length;
+    meta.textContent = overdue
+      ? `${timeline.length} item(s) · ${overdue} overdue`
+      : `${timeline.length} in next ${horizonMonths} months`;
+  }
   if (!el) return;
   if (!timeline.length) {
     el.innerHTML = '<p class="fa-panel__hint">Nothing planned in this horizon yet. Use <strong>Add one-off</strong> or <strong>Add recurring</strong>.</p>';
@@ -1100,8 +1307,20 @@ const saveOneOff = async () => {
     cat,
     description,
     vendor_name,
+    status: 'planned',
   });
   if (result.item) applyItemLocally(result.item);
+
+  if (convertFromRecurringId) {
+    const dropId = convertFromRecurringId;
+    await postFnMutation('deleteExpensePlanRecurring', {
+      apartment_id: apt,
+      id: dropId,
+    });
+    removeRecurringLocally(dropId);
+    convertFromRecurringId = null;
+  }
+
   closeModal();
   renderExpensePlanPage();
   if (result.item) {
@@ -1198,6 +1417,17 @@ const saveRecurring = async () => {
     active: existing ? existing.active !== false : true,
   });
   if (result.recurring) applyRecurringLocally(result.recurring);
+
+  if (convertFromOneOffId) {
+    const dropId = convertFromOneOffId;
+    await postFnMutation('deleteExpensePlanItem', {
+      apartment_id: apt,
+      id: dropId,
+    });
+    removeItemLocally(dropId);
+    convertFromOneOffId = null;
+  }
+
   closeModal();
   const panel = document.getElementById('fn-eplan-templates-panel');
   if (panel) panel.open = true;
@@ -1265,6 +1495,35 @@ export const initExpensePlanPage = () => {
 
   document.getElementById('fn-eplan-add-oneoff')?.addEventListener('click', () => openModal('oneoff'));
   document.getElementById('fn-eplan-add-recurring')?.addEventListener('click', () => openModal('recurring'));
+  document.getElementById('fn-eplan-defer-past')?.addEventListener('click', () => {
+    const btn = document.getElementById('fn-eplan-defer-past');
+    if (!canEditPlan()) {
+      alert('You do not have permission to edit the expense plan.');
+      return;
+    }
+    const today = todayISO();
+    const pastCount = getItems().filter((i) => {
+      if (!isActivePlanItem(i)) return false;
+      const plan = String(i.plan_date || '').slice(0, 10);
+      const due = String(i.due_date || i.plan_date || '').slice(0, 10);
+      return plan < today || due < today;
+    }).length;
+    if (!pastCount) {
+      alert('No incomplete past expenses to defer.');
+      return;
+    }
+    if (!confirm(`Defer ${pastCount} incomplete past expense(s) by 1 month?`)) return;
+    void withButtonBusy(btn, 'Deferring…', async () => {
+      const result = await postFnMutation('deferExpensePlanItems', {
+        apartment_id: portalState.access?.activeApartmentId,
+        scope: 'past',
+        months: 1,
+      });
+      (result.items || []).forEach((item) => applyItemLocally(item));
+      closeDetail();
+      renderExpensePlanPage();
+    }).catch((err) => alert(err?.message || 'Could not defer.'));
+  });
   document.getElementById('fn-eplan-modal-close')?.addEventListener('click', closeModal);
   document.getElementById('fn-eplan-modal-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('fn-eplan-detail-close')?.addEventListener('click', closeDetail);
@@ -1280,6 +1539,13 @@ export const initExpensePlanPage = () => {
     const btn = document.getElementById('fn-eplan-rec-save');
     void withButtonBusy(btn, 'Saving…', saveRecurring)
       .catch((err) => alert(err?.message || 'Could not save.'));
+  });
+
+  document.getElementById('fn-eplan-item-to-recurring')?.addEventListener('click', () => {
+    convertOneOffFormToRecurring();
+  });
+  document.getElementById('fn-eplan-rec-to-oneoff')?.addEventListener('click', () => {
+    convertRecurringFormToOneOff();
   });
 
   root.addEventListener('click', (e) => {
@@ -1319,6 +1585,55 @@ export const initExpensePlanPage = () => {
       }).catch((err) => alert(err?.message || 'Could not delete.'));
       return;
     }
+
+    const completeItem = e.target.closest('[data-eplan-complete-item]');
+    if (completeItem) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!canEditPlan()) {
+        alert('You do not have permission to edit the expense plan.');
+        return;
+      }
+      const id = completeItem.getAttribute('data-eplan-complete-item');
+      if (!id || !confirm('Mark this expense complete? It will leave the active plan.')) return;
+      void withButtonBusy(completeItem, '…', async () => {
+        const result = await postFnMutation('completeExpensePlanItem', {
+          apartment_id: portalState.access?.activeApartmentId,
+          id,
+        });
+        if (result.item) applyItemLocally(result.item);
+        else removeItemLocally(id);
+        closeDetail();
+        renderExpensePlanPage();
+      }).catch((err) => alert(err?.message || 'Could not mark complete.'));
+      return;
+    }
+
+    const deferItem = e.target.closest('[data-eplan-defer-item]');
+    if (deferItem) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!canEditPlan()) {
+        alert('You do not have permission to edit the expense plan.');
+        return;
+      }
+      const id = deferItem.getAttribute('data-eplan-defer-item');
+      const monthsEl = document.querySelector(`[data-eplan-defer-months="${CSS.escape(id)}"]`);
+      const months = Math.min(12, Math.max(1, parseInt(monthsEl?.value, 10) || 1));
+      if (!id) return;
+      void withButtonBusy(deferItem, '…', async () => {
+        const result = await postFnMutation('deferExpensePlanItems', {
+          apartment_id: portalState.access?.activeApartmentId,
+          ids: [id],
+          months,
+        });
+        (result.items || []).forEach((item) => applyItemLocally(item));
+        closeDetail();
+        renderExpensePlanPage();
+      }).catch((err) => alert(err?.message || 'Could not defer.'));
+      return;
+    }
+
     const delRec = e.target.closest('[data-eplan-del-recurring]');
     if (delRec) {
       e.preventDefault();

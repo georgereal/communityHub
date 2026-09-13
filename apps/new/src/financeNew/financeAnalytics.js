@@ -20,6 +20,7 @@ import { getFinanceNew } from './state.js';
 import { navigateFinance } from '../financeApp/session.js';
 import { getLedgerBankBalance } from './ledgerBalance.js';
 import { getBankOpeningConfig } from './bankStatementQueries.js';
+import { postFnMutation } from './mongoMutations.js';
 
 /** @type {typeof import('./bankReconciliation.js')|null} */
 let bankReconApi = null;
@@ -220,7 +221,14 @@ const buildMonthRange = (count, endDate = new Date()) => {
     const months = [];
     for (let i = count - 1; i >= 0; i--) {
         const d = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1);
-        months.push({ y: d.getFullYear(), m: d.getMonth(), label: monthLabel(d.getFullYear(), d.getMonth()) });
+        const y = d.getFullYear();
+        const m = d.getMonth();
+        months.push({
+            y,
+            m,
+            label: monthLabel(y, m),
+            key: `${y}-${String(m + 1).padStart(2, '0')}`,
+        });
     }
     return months;
 };
@@ -253,6 +261,110 @@ const sumUnreconciledLedgerNet = () => {
 
 export const isReportableTxn = (txn) => !txn?.exclude_from_reports;
 
+const monthKeyFromDate = (dateVal) => {
+    if (dateVal == null || dateVal === '') return null;
+    const s = String(dateVal).trim();
+    const m = s.match(/^(\d{4})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}`;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+
+const normalizeCollectionGapOpening = (raw) => {
+    if (!raw || typeof raw !== 'object') return { amount: 0, asOfMonth: null };
+    const asRaw = raw.asOfMonth || raw.as_of_month || null;
+    const asOfMonth = asRaw && /^\d{4}-\d{2}$/.test(String(asRaw).slice(0, 7))
+        ? String(asRaw).slice(0, 7)
+        : null;
+    const amount = raw.amount == null || raw.amount === '' ? 0 : round2(raw.amount);
+    return { amount: Number.isFinite(amount) ? amount : 0, asOfMonth };
+};
+
+const getCollectionGapOpeningLocal = () => {
+    const cfg = getFinanceNew()?.config || {};
+    return normalizeCollectionGapOpening(cfg.collectionGapOpening);
+};
+
+/** Running raised − Maintenance Collection; opening seeds through asOfMonth. */
+export const buildCollectionGapSeries = ({
+    months,
+    raisedByMonth,
+    maintCollectedByMonth,
+    opening,
+}) => {
+    const open = normalizeCollectionGapOpening(opening);
+    const asOf = open.asOfMonth;
+    const allKeys = new Set([
+        ...Object.keys(raisedByMonth || {}),
+        ...Object.keys(maintCollectedByMonth || {}),
+        ...months.map((m) => m.key || `${m.y}-${String(m.m + 1).padStart(2, '0')}`),
+    ]);
+    if (asOf) allKeys.add(asOf);
+    const sortedKeys = [...allKeys].filter(Boolean).sort();
+
+    const cumAfterAsOf = new Map();
+    let running = 0;
+    for (const key of sortedKeys) {
+        if (asOf && key <= asOf) {
+            cumAfterAsOf.set(key, 0);
+            continue;
+        }
+        running = round2(
+            running
+            + (Number(raisedByMonth[key]) || 0)
+            - (Number(maintCollectedByMonth[key]) || 0),
+        );
+        cumAfterAsOf.set(key, running);
+    }
+
+    const collectionGap = months.map((mo) => {
+        const key = mo.key || `${mo.y}-${String(mo.m + 1).padStart(2, '0')}`;
+        if (asOf && key < asOf) return null;
+        if (asOf && key === asOf) return open.amount;
+        const after = cumAfterAsOf.get(key);
+        if (after == null) return open.amount;
+        return round2(open.amount + after);
+    });
+
+    const maintCollected = months.map((mo) => {
+        const key = mo.key || `${mo.y}-${String(mo.m + 1).padStart(2, '0')}`;
+        return round2(maintCollectedByMonth[key] || 0);
+    });
+
+    return { collectionGapOpening: open, maintCollected, collectionGap };
+};
+
+const buildLocalRaisedByMonth = (invoices) => {
+    const raisedByMonth = {};
+    (invoices || []).forEach((inv) => {
+        const bm = String(inv.billing_month || '').slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(bm)) return;
+        const charges = inv.charges && typeof inv.charges === 'object' ? inv.charges : {};
+        let rowTotal = 0;
+        Object.values(charges).forEach((raw) => {
+            rowTotal += Math.abs(parseFloat(raw) || 0);
+        });
+        if (rowTotal < 0.001 && inv.total_raised != null) {
+            rowTotal = Math.abs(parseFloat(inv.total_raised) || 0);
+        }
+        if (rowTotal < 0.001) return;
+        raisedByMonth[bm] = round2((raisedByMonth[bm] || 0) + rowTotal);
+    });
+    return raisedByMonth;
+};
+
+const buildLocalMaintCollectedByMonth = () => {
+    const byMonth = {};
+    filterIncome().forEach((t) => {
+        if (String(t.cat || '') !== 'Maintenance Collection') return;
+        const mk = monthKeyFromDate(t.date);
+        if (!mk) return;
+        byMonth[mk] = round2((byMonth[mk] || 0) + Math.abs(parseFloat(t.amount) || 0));
+    });
+    return byMonth;
+};
+
 /** Snapshot of report pivots/stacks using the same filters as the on-screen reports. */
 export const getFinanceReportsExportSnapshot = () => {
   if (analyticsPack) {
@@ -263,6 +375,8 @@ export const getFinanceReportsExportSnapshot = () => {
       income: analyticsPack.income,
       expense: analyticsPack.expense,
       monthly: analyticsPack.monthly,
+      collectionGapOpening: analyticsPack.collectionGapOpening
+        || normalizeCollectionGapOpening(getFinanceNew()?.config?.collectionGapOpening),
     };
   }
   const settings = getSettings();
@@ -289,6 +403,13 @@ export const getFinanceReportsExportSnapshot = () => {
   const expenseMonthTotals = monthlyTotals(expenseTxns, months).map((v) => Math.round(v * 100) / 100);
   const raisedTotals = (raisedMonthTotals || months.map(() => 0)).map((v) => Math.round((v || 0) * 100) / 100);
 
+  const gapPack = buildCollectionGapSeries({
+    months,
+    raisedByMonth: buildLocalRaisedByMonth(invoices),
+    maintCollectedByMonth: buildLocalMaintCollectedByMonth(),
+    opening: getCollectionGapOpeningLocal(),
+  });
+
   return {
     months,
     settings,
@@ -309,7 +430,10 @@ export const getFinanceReportsExportSnapshot = () => {
       income: incomeMonthTotals,
       expense: expenseMonthTotals,
       net: incomeMonthTotals.map((v, i) => Math.round((v - expenseMonthTotals[i]) * 100) / 100),
+      maintCollected: gapPack.maintCollected,
+      collectionGap: gapPack.collectionGap,
     },
+    collectionGapOpening: gapPack.collectionGapOpening,
   };
 };
 
@@ -1061,12 +1185,6 @@ const renderBalanceMetrics = () => {
       </div>`;
 };
 
-const monthKeyFromDate = (iso) => {
-    const s = String(iso || '').slice(0, 10);
-    const m = s.match(/^(\d{4})-(\d{2})/);
-    return m ? `${m[1]}-${m[2]}` : '';
-};
-
 const CASH_POS_SCENARIO_KEY = 'fa-cash-position-scenario';
 
 const defaultCashPosScenario = () => ({
@@ -1504,29 +1622,86 @@ const renderMonthlySummaryCard = () => {
 
     const snap = getFinanceReportsExportSnapshot();
     const { months, monthly } = snap;
+    const opening = normalizeCollectionGapOpening(
+        snap.collectionGapOpening || getCollectionGapOpeningLocal(),
+    );
+    const gaps = Array.isArray(monthly.collectionGap)
+        ? monthly.collectionGap
+        : months.map(() => null);
     const sumRaised = monthly.raised.reduce((a, b) => a + b, 0);
     const sumIncome = monthly.income.reduce((a, b) => a + b, 0);
     const sumExpense = monthly.expense.reduce((a, b) => a + b, 0);
     const sumNet = round2(sumIncome - sumExpense);
-    const netClass = (v) => (v < -0.009 ? 'fa-monthly-summary__neg' : (v > 0.009 ? 'fa-monthly-summary__pos' : ''));
+    const endGap = [...gaps].reverse().find((v) => v != null);
+    const netClass = (v) => {
+        if (v == null || Number.isNaN(v)) return '';
+        return (v < -0.009 ? 'fa-monthly-summary__neg' : (v > 0.009 ? 'fa-monthly-summary__pos' : ''));
+    };
+    const gapTitle = 'Running raised − Maintenance Collection from starting gap. Negative = collected ahead.';
 
     const rows = months.map((mo, i) => {
         const net = monthly.net[i] || 0;
+        const gap = gaps[i];
         return `<tr>
           <td>${mo.label}</td>
           <td class="fa-num">${formatMoney(monthly.raised[i])}</td>
           <td class="fa-num">${formatMoney(monthly.income[i])}</td>
           <td class="fa-num">${formatMoney(monthly.expense[i])}</td>
           <td class="fa-num ${netClass(net)}">${formatMoney(net)}</td>
+          <td class="fa-num ${netClass(gap)}" title="${escAttr(gapTitle)}">${
+            gap == null ? '—' : formatMoney(gap)
+          }</td>
         </tr>`;
     }).join('');
+
+    const asOfValue = opening.asOfMonth || '';
+    const amountValue = opening.asOfMonth != null
+        ? String(opening.amount ?? 0)
+        : '';
+    const asOfLabel = (() => {
+        if (!opening.asOfMonth) return '';
+        const [y, m] = opening.asOfMonth.split('-').map(Number);
+        if (!y || !m) return opening.asOfMonth;
+        return monthLabel(y, m - 1);
+    })();
+    const openingSummary = opening.asOfMonth
+        ? `Started with a balance of <strong>${formatMoney(opening.amount)}</strong> from <strong>${asOfLabel}</strong>`
+        : 'No starting gap set — Coll. gap accumulates from earliest raised / Maintenance Collection in the system.';
 
     el.innerHTML = `
       <summary class="fa-collapsible-panel__summary">
         <span class="fa-collapsible-panel__title">Monthly summary</span>
-        <span class="fa-collapsible-panel__meta">Net ${formatMoney(sumNet)}</span>
+        <span class="fa-collapsible-panel__meta">Net ${formatMoney(sumNet)}${
+          endGap != null ? ` · Coll. gap ${formatMoney(endGap)}` : ''
+        }</span>
       </summary>
       <div class="fa-collapsible-panel__body">
+        <div class="fa-monthly-summary-opening" style="margin-bottom:0.75rem;">
+          <div class="fa-monthly-summary-opening__bar" style="display:flex;align-items:center;gap:0.5rem;min-height:1.75rem;">
+            <p class="muted fa-monthly-summary-opening__summary" style="margin:0;flex:1;font-size:0.85rem;line-height:1.35;">
+              ${openingSummary}
+            </p>
+            <button type="button" class="btn btn-outline btn--small btn--icon" id="fn-fa-gap-settings"
+              title="Starting gap settings" aria-label="Starting gap settings" aria-expanded="false" aria-controls="fn-fa-gap-editor">
+              <i class="fa-solid fa-gear" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div id="fn-fa-gap-editor" hidden style="display:none;flex-wrap:wrap;gap:0.5rem 1rem;align-items:end;margin-top:0.65rem;padding-top:0.65rem;border-top:1px solid var(--border, #e2e8f0);">
+            <label style="display:flex;flex-direction:column;gap:0.2rem;font-size:0.85rem;">
+              <span>As of month</span>
+              <input type="month" id="fn-fa-gap-asof" value="${escAttr(asOfValue)}" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:0.2rem;font-size:0.85rem;">
+              <span>Starting gap amount</span>
+              <input type="number" step="0.01" id="fn-fa-gap-amount" value="${escAttr(amountValue)}" placeholder="Raised − collected to date" />
+            </label>
+            <button type="button" class="btn btn-primary btn--small" id="fn-fa-gap-save">Save</button>
+            <button type="button" class="btn btn-outline btn--small" id="fn-fa-gap-cancel">Cancel</button>
+            <p class="muted" style="margin:0;flex:1 1 12rem;font-size:0.8rem;">
+              Gap through end of that month (negative if paid ahead). Later months add raised − Maintenance Collection.
+            </p>
+          </div>
+        </div>
         <div class="fa-table-wrap">
           <table class="fa-pivot-table fa-monthly-summary-table">
             <thead>
@@ -1536,6 +1711,7 @@ const renderMonthlySummaryCard = () => {
                 <th class="fa-num" title="Ledger income">Income</th>
                 <th class="fa-num" title="Ledger expenses">Expense</th>
                 <th class="fa-num" title="Income − expenses">Net</th>
+                <th class="fa-num" title="${escAttr(gapTitle)}">Coll. gap</th>
               </tr>
             </thead>
             <tbody>
@@ -1546,6 +1722,9 @@ const renderMonthlySummaryCard = () => {
                 <td class="fa-num">${formatMoney(sumIncome)}</td>
                 <td class="fa-num">${formatMoney(sumExpense)}</td>
                 <td class="fa-num ${netClass(sumNet)}">${formatMoney(sumNet)}</td>
+                <td class="fa-num ${netClass(endGap)}" title="End-of-range running gap">${
+                  endGap == null ? '—' : formatMoney(endGap)
+                }</td>
               </tr>
             </tbody>
           </table>
@@ -1553,6 +1732,78 @@ const renderMonthlySummaryCard = () => {
       </div>`;
 
     el.open = wasOpen;
+
+    const editor = document.getElementById('fn-fa-gap-editor');
+    const settingsBtn = document.getElementById('fn-fa-gap-settings');
+    const setEditorOpen = (open) => {
+        if (!editor || !settingsBtn) return;
+        if (open) {
+            editor.removeAttribute('hidden');
+            editor.style.display = 'flex';
+        } else {
+            editor.setAttribute('hidden', '');
+            editor.style.display = 'none';
+        }
+        settingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    settingsBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isOpen = !editor?.hasAttribute('hidden') && editor?.style.display !== 'none';
+        setEditorOpen(!isOpen);
+    });
+    document.getElementById('fn-fa-gap-cancel')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        setEditorOpen(false);
+    });
+
+    document.getElementById('fn-fa-gap-save')?.addEventListener('click', async () => {
+        const btn = document.getElementById('fn-fa-gap-save');
+        const asOfMonth = document.getElementById('fn-fa-gap-asof')?.value?.trim() || null;
+        const rawAmt = document.getElementById('fn-fa-gap-amount')?.value?.trim();
+        if (!asOfMonth) {
+            alert('Pick the as-of month for the starting gap.');
+            return;
+        }
+        if (rawAmt === '' || rawAmt == null || Number.isNaN(Number(rawAmt))) {
+            alert('Enter the starting gap amount (use 0 if fully collected through that month).');
+            return;
+        }
+        const amount = round2(rawAmt);
+        const prevLabel = btn?.textContent;
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Saving…';
+            }
+            const result = await postFnMutation('patchFinanceConfig', {
+                patch: {
+                    collectionGapOpening: { amount, asOfMonth },
+                },
+            });
+            if (result?.config) {
+                getFinanceNew().config = result.config;
+            } else {
+                getFinanceNew().config = {
+                    ...(getFinanceNew().config || {}),
+                    collectionGapOpening: { amount, asOfMonth },
+                };
+            }
+            // Force analytics refresh so Coll. gap uses the new opening.
+            getFinanceNew().reportAnalytics = null;
+            getFinanceNew().reportAnalyticsKey = null;
+            analyticsPack = null;
+            await renderFinanceAnalytics();
+            el.open = true;
+        } catch (err) {
+            alert(err?.message || 'Could not save starting gap.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = prevLabel || 'Save';
+            }
+        }
+    }, { once: true });
 };
 
 const pivotDimensionLabel = (dimension) => {

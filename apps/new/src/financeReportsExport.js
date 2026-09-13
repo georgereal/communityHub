@@ -65,7 +65,10 @@ async function loadAnalyticsApi() {
 export async function exportFinanceReportsExcel() {
   const api = await loadAnalyticsApi();
   const snap = api.getFinanceReportsExportSnapshot();
-  const { months, settings, raised, income, expense, monthly } = snap;
+  const { months, settings, raised, income, expense, monthly, collectionGapOpening } = snap;
+  const gaps = Array.isArray(monthly.collectionGap) ? monthly.collectionGap : months.map(() => null);
+  const endGap = [...gaps].reverse().find((v) => v != null);
+  const opening = collectionGapOpening || {};
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'CommunityHub';
@@ -91,12 +94,23 @@ export async function exportFinanceReportsExcel() {
     ws.addRow(['(Chart could not be rendered — open Financial Reports and try again.)']);
   }
 
+  if (opening.asOfMonth) {
+    ws.addRow([
+      `Starting collection gap: ${opening.amount ?? 0} as of ${opening.asOfMonth} (running raised − Maintenance Collection after that month)`,
+    ]);
+  } else {
+    ws.addRow([
+      'Starting collection gap: not set (running raised − Maintenance Collection from earliest data)',
+    ]);
+  }
+
   styleHeaderRow(ws.addRow([
     'Month',
     'Raised (invoices)',
     'Income (ledger)',
     'Expenses (ledger)',
     'Net (income − expenses)',
+    'Coll. gap (running raised − maint. collected)',
   ]));
   months.forEach((mo, i) => {
     ws.addRow([
@@ -105,6 +119,7 @@ export async function exportFinanceReportsExcel() {
       monthly.income[i],
       monthly.expense[i],
       monthly.net[i],
+      gaps[i] == null ? '—' : gaps[i],
     ]);
   });
   const sumRaised = monthly.raised.reduce((a, b) => a + b, 0);
@@ -116,6 +131,7 @@ export async function exportFinanceReportsExcel() {
     Math.round(sumIncome * 100) / 100,
     Math.round(sumExpense * 100) / 100,
     Math.round((sumIncome - sumExpense) * 100) / 100,
+    endGap == null ? '—' : Math.round(endGap * 100) / 100,
   ]);
   totalRow.font = { bold: true };
 

@@ -56,6 +56,8 @@ const MUTATION_PACKS = {
 
     saveExpensePlanItem: ['boot'],
     deleteExpensePlanItem: ['boot'],
+    completeExpensePlanItem: ['boot'],
+    deferExpensePlanItems: ['boot'],
     saveExpensePlanRecurring: ['boot'],
     deleteExpensePlanRecurring: ['boot'],
 

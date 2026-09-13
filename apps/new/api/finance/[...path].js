@@ -289,6 +289,17 @@ function resolveRoute(method, parts, body, query) {
     // /expense-plan
     if (a === 'expense-plan') {
         if (b === 'items' && m === 'POST' && !c) return { kind: 'mutation', action: 'saveExpensePlanItem', collection: 'finance_config' };
+        if (b === 'items' && c === 'defer' && m === 'POST') {
+            return { kind: 'mutation', action: 'deferExpensePlanItems', collection: 'finance_config' };
+        }
+        if (b === 'items' && c && m === 'POST' && parts[3] === 'complete') {
+            return {
+                kind: 'mutation',
+                action: 'completeExpensePlanItem',
+                collection: 'finance_config',
+                bodyPatch: { id: c },
+            };
+        }
         if (b === 'items' && m === 'DELETE' && c) {
             return {
                 kind: 'mutation',

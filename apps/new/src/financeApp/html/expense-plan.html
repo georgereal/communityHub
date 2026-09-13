@@ -10,6 +10,9 @@
                   <option value="12">12 months</option>
                 </select>
               </label>
+              <button type="button" class="btn btn-outline btn--small" id="fn-eplan-defer-past" data-cap="accounts.plan_edit" title="Move incomplete one-offs from past months forward by 1 month">
+                <i class="fa-solid fa-forward" aria-hidden="true"></i> Defer past +1 mo
+              </button>
               <button type="button" class="btn btn-outline btn--small" id="fn-eplan-add-oneoff" data-cap="accounts.plan_edit">
                 <i class="fa-solid fa-plus" aria-hidden="true"></i> Add one-off
               </button>
@@ -79,8 +82,11 @@
                   <label><span>Planned for</span><input type="date" id="fn-eplan-item-date" class="expense-combobox" /></label>
                   <label><span>Due by</span><input type="date" id="fn-eplan-item-due" class="expense-combobox" title="Complete by this date" /></label>
                 </div>
-                <div class="eplan-modal-actions">
+                <div class="eplan-modal-actions" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">
                   <button type="button" class="btn btn-primary" id="fn-eplan-item-save">Save one-off</button>
+                  <button type="button" class="btn btn-outline" id="fn-eplan-item-to-recurring" data-cap="accounts.plan_edit" title="Switch this to a recurring template">
+                    <i class="fa-solid fa-rotate" aria-hidden="true"></i> Convert to recurring
+                  </button>
                 </div>
               </div>
               <div id="fn-eplan-modal-recurring" class="eplan-modal-form" hidden>
@@ -127,8 +133,11 @@
                   </div>
                   <div id="fn-eplan-rec-periods-list" class="eplan-rec-periods__list"></div>
                 </div>
-                <div class="eplan-modal-actions">
+                <div class="eplan-modal-actions" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">
                   <button type="button" class="btn btn-primary" id="fn-eplan-rec-save">Save recurring</button>
+                  <button type="button" class="btn btn-outline" id="fn-eplan-rec-to-oneoff" data-cap="accounts.plan_edit" title="Switch this to a one-off expense">
+                    <i class="fa-solid fa-rotate" aria-hidden="true"></i> Convert to one-off
+                  </button>
                 </div>
               </div>
             </div>

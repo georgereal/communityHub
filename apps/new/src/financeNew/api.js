@@ -232,6 +232,8 @@ export async function postFinanceMongoMutation(action, payload = {}) {
 
         saveExpensePlanItem: () => financeNewFetch('/api/finance/expense-plan/items', { method: 'POST', body: p }),
         deleteExpensePlanItem: () => financeNewFetch(`/api/finance/expense-plan/items/${p.id}`, { method: 'DELETE', body: p }),
+        completeExpensePlanItem: () => financeNewFetch(`/api/finance/expense-plan/items/${encodeURIComponent(p.id)}/complete`, { method: 'POST', body: p }),
+        deferExpensePlanItems: () => financeNewFetch('/api/finance/expense-plan/items/defer', { method: 'POST', body: p }),
         saveExpensePlanRecurring: () => financeNewFetch('/api/finance/expense-plan/recurring', { method: 'POST', body: p }),
         deleteExpensePlanRecurring: () => financeNewFetch(`/api/finance/expense-plan/recurring/${p.id}`, { method: 'DELETE', body: p }),
 

@@ -1281,9 +1281,18 @@ async function saveExpensePlanItem(db, apartmentId, body) {
     const cfg = await ensureConfig(db, apartmentId);
     const list = [...(cfg.expensePlanItems || [])];
     const id = item.id || uid();
+    const existing = list.find((x) => String(x.id) === String(id));
     const row = {
-        ...item, id, apartment_id: apartmentId, amount: roundMoney(item.amount),
+        ...existing,
+        ...item,
+        id,
+        apartment_id: apartmentId,
+        amount: roundMoney(item.amount),
         plan_date: item.plan_date ? String(item.plan_date).slice(0, 10) : null,
+        due_date: item.due_date
+            ? String(item.due_date).slice(0, 10)
+            : (item.plan_date ? String(item.plan_date).slice(0, 10) : null),
+        status: item.status || existing?.status || 'planned',
     };
     const idx = list.findIndex((x) => String(x.id) === String(id));
     if (idx >= 0) list[idx] = { ...list[idx], ...row };
@@ -1298,6 +1307,78 @@ async function deleteExpensePlanItem(db, apartmentId, body) {
     const list = (cfg.expensePlanItems || []).filter((x) => String(x.id) !== String(id));
     const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
     return { ok: true, id, config };
+}
+
+function addMonthsToIsoServer(iso, months = 1) {
+    const s = String(iso || '').slice(0, 10);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return s;
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const day = Number(m[3]);
+    const last = new Date(Date.UTC(y, mo + months + 1, 0)).getUTCDate();
+    const d = new Date(Date.UTC(y, mo + months, Math.min(day, last)));
+    return d.toISOString().slice(0, 10);
+}
+
+/** Mark one-off plan item complete (keeps history; drops out of active horizon). */
+async function completeExpensePlanItem(db, apartmentId, body) {
+    const id = body.item_id || body.id;
+    if (!id) throw Object.assign(new Error('id required.'), { status: 400 });
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanItems || [])];
+    const idx = list.findIndex((x) => String(x.id) === String(id));
+    if (idx < 0) throw Object.assign(new Error('Plan item not found.'), { status: 404 });
+    list[idx] = {
+        ...list[idx],
+        status: 'done',
+        completed_at: nowIso(),
+    };
+    const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+    return { ok: true, item: list[idx], config };
+}
+
+/**
+ * Push incomplete one-off expenses forward by N months.
+ * body.scope:
+ *   'past' (default) — planned items with plan_date or due_date before today
+ *   'ids' — only body.ids[]
+ * body.months — 1..12 (default 1)
+ */
+async function deferExpensePlanItems(db, apartmentId, body) {
+    const months = Math.min(12, Math.max(1, parseInt(body.months, 10) || 1));
+    const idSet = Array.isArray(body.ids) && body.ids.length
+        ? new Set(body.ids.map(String))
+        : null;
+    const scope = idSet ? 'ids' : (body.scope === 'all' ? 'all' : 'past');
+    const today = new Date();
+    const todayKey = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanItems || [])];
+    let updated = 0;
+    const items = [];
+    for (let i = 0; i < list.length; i++) {
+        const row = list[i];
+        const status = row.status || 'planned';
+        if (status !== 'planned') continue;
+        const id = String(row.id || '');
+        if (idSet && !idSet.has(id)) continue;
+        const planDate = String(row.plan_date || '').slice(0, 10);
+        if (!planDate) continue;
+        const dueDate = String(row.due_date || row.plan_date || '').slice(0, 10);
+        if (scope === 'past') {
+            // Incomplete and already due / planned in a past period
+            if (!(planDate < todayKey || dueDate < todayKey)) continue;
+        }
+        const nextPlan = addMonthsToIsoServer(planDate, months);
+        const nextDue = dueDate ? addMonthsToIsoServer(dueDate, months) : nextPlan;
+        list[i] = { ...row, plan_date: nextPlan, due_date: nextDue, status: 'planned' };
+        items.push(list[i]);
+        updated += 1;
+    }
+    const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+    return { ok: true, updated, months, scope, items, config };
 }
 
 async function saveExpensePlanRecurring(db, apartmentId, body) {
@@ -1648,7 +1729,6 @@ export const BILLS_ACTIONS = new Set([
 ]);
 export const DELETE_ACTIONS = new Set([
     'deleteTransaction', 'deleteTransactions', 'deleteFinanceDocument',
-    'deleteExpensePlanItem', 'deleteExpensePlanRecurring',
 ]);
 export const VIEW_ACTIONS = new Set([
     'listFinanceDocuments', 'financeDocumentsAggregates', 'listBankClassificationRules',
@@ -1744,6 +1824,10 @@ export async function runFinanceMongoMutation(action, { db, apartmentId, user, b
             return saveExpensePlanItem(db, apartmentId, body);
         case 'deleteExpensePlanItem':
             return deleteExpensePlanItem(db, apartmentId, body);
+        case 'completeExpensePlanItem':
+            return completeExpensePlanItem(db, apartmentId, body);
+        case 'deferExpensePlanItems':
+            return deferExpensePlanItems(db, apartmentId, body);
         case 'saveExpensePlanRecurring':
             return saveExpensePlanRecurring(db, apartmentId, body);
         case 'deleteExpensePlanRecurring':
