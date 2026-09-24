@@ -22,47 +22,45 @@ function isBankWallet(t) {
     return String(t.wallet || 'CASH').toUpperCase() === 'BANK';
 }
 
+/** Fields the ledger summary and the home month-flow KPI both need. */
+export const LEDGER_SUMMARY_ENTRY_PROJECTION = {
+    type: 1,
+    wallet: 1,
+    amount: 1,
+    date: 1,
+    cat: 1,
+    id: 1,
+    excluded_from_ledger: 1,
+    running_balance_after: 1,
+    is_cash_float: 1,
+    exclude_from_cash_float: 1,
+    cash_desk_deposit: 1,
+};
+
+export const LEDGER_SUMMARY_VOUCHER_PROJECTION = {
+    id: 1,
+    kind: 1,
+    status: 1,
+    amount: 1,
+    notes: 1,
+    transaction_id: 1,
+    ledgerEntryId: 1,
+};
+
+export function ledgerSummaryVoucherFilter(apartmentId) {
+    return {
+        ...aptFilter(apartmentId),
+        status: { $ne: 'void' },
+    };
+}
+
 /**
  * Same rules as client getLedgerBankBalance / dashboard-summary:
  * opening + BANK movements on/after opening date; prefer config.ledgerBalance.closing when clean.
  * Petty cash KPI = Wallet Left (Bills & receipts float), not CASH-wallet ledger sum.
+ * Caller supplies already-loaded rows so the dashboard can share one ledger scan.
  */
-export async function buildLedgerSummary(db, apartmentId) {
-    const config = await db.collection('finance_config').findOne(aptFilter(apartmentId)) || {};
-    const [entries, vouchers] = await Promise.all([
-        db.collection('ledger_entries')
-            .find(aptFilter(apartmentId))
-            .project({
-                type: 1,
-                wallet: 1,
-                amount: 1,
-                date: 1,
-                cat: 1,
-                id: 1,
-                excluded_from_ledger: 1,
-                running_balance_after: 1,
-                is_cash_float: 1,
-                exclude_from_cash_float: 1,
-                cash_desk_deposit: 1,
-            })
-            .toArray(),
-        db.collection('vouchers')
-            .find({
-                ...aptFilter(apartmentId),
-                status: { $ne: 'void' },
-            })
-            .project({
-                id: 1,
-                kind: 1,
-                status: 1,
-                amount: 1,
-                notes: 1,
-                transaction_id: 1,
-                ledgerEntryId: 1,
-            })
-            .toArray(),
-    ]);
-
+export function summarizeLoadedLedger(entries = [], vouchers = [], config = {}) {
     const active = entries.filter(isActive).map((t) => ({
         ...t,
         id: t.id || (t._id != null ? String(t._id) : ''),
@@ -166,6 +164,21 @@ export async function buildLedgerSummary(db, apartmentId) {
             }
             : null,
     };
+}
+
+export async function buildLedgerSummary(db, apartmentId) {
+    const config = await db.collection('finance_config').findOne(aptFilter(apartmentId)) || {};
+    const [entries, vouchers] = await Promise.all([
+        db.collection('ledger_entries')
+            .find(aptFilter(apartmentId))
+            .project(LEDGER_SUMMARY_ENTRY_PROJECTION)
+            .toArray(),
+        db.collection('vouchers')
+            .find(ledgerSummaryVoucherFilter(apartmentId))
+            .project(LEDGER_SUMMARY_VOUCHER_PROJECTION)
+            .toArray(),
+    ]);
+    return summarizeLoadedLedger(entries, vouchers, config);
 }
 
 export async function executeLedgerRead(action, ctx) {

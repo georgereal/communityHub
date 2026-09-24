@@ -37,7 +37,10 @@ export async function mongoRbacReady() {
     }
 }
 
-export async function ensureRbacIndexes() {
+/** One in-flight ensure per isolate. Cleared on failure so the next call can retry. */
+let rbacIndexesReady = null;
+
+async function createRbacIndexes() {
     const { assignments, rolePerms, policies, overrides, societies, directory } = await collections();
     await Promise.all([
         assignments.createIndex({ user_id: 1, apartment_id: 1, scope: 1 }),
@@ -53,6 +56,16 @@ export async function ensureRbacIndexes() {
             { unique: true, partialFilterExpression: { firebase_uid: { $type: 'string' } } },
         ),
     ]);
+}
+
+export function ensureRbacIndexes() {
+    if (!rbacIndexesReady) {
+        rbacIndexesReady = createRbacIndexes().catch((err) => {
+            rbacIndexesReady = null;
+            throw err;
+        });
+    }
+    return rbacIndexesReady;
 }
 
 export async function loadRolePermissionKeys(roleKey) {

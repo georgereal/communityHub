@@ -226,7 +226,8 @@ export async function listActivityEvents(apartmentId, {
     if (!apartmentId) throw badRequest('apartment_id is required');
     const db = injected || await getMongoDb();
     await ensureActivityIndexes(db);
-    await maybeMigrateActivityFromSupabase(apartmentId, { db });
+    // Backfill is `npm run migrate:logs-mongo`. Paging Supabase here used to
+    // exceed the 10s function cap when an apartment collection was empty.
 
     const lim = Math.min(Math.max(Number(limit) || 300, 1), 1000);
     const entity = String(entityType || '').trim().toUpperCase();

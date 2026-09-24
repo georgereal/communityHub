@@ -74,7 +74,7 @@ Consolidated feed for Admin **Activity** (`/admin/activity`):
 | GET | `/api/activity/events?apartment_id=&entity_type=&action=&limit=` | Merged list + `facets` (live entity_types / actions) + counts |
 | POST | `/api/activity/events` | Append society audit event (`logActivity`) |
 
-Backfill: `npm run migrate:logs-mongo` (prefers `*_temp`). Soft-migrate-on-read fills empty apartment collections from Supabase.
+Backfill: `npm run migrate:logs-mongo` (prefers `*_temp`). GET `/api/activity/events` reads Mongo only.
 
 **Writers (New):** Property API mutations write audits **on the server** in the same request as the mutation (survives client network drops after the API responded). Admin + Finance clients call `logActivity` → `POST /api/activity/events`; failures are queued in a **browser outbox** (`localStorage`) and flushed on `online` / focus / interval / Activity refresh (idempotent client ids).
 
@@ -127,7 +127,7 @@ Wire new domains in:
 2. Add `{domain}Mongo/` + `{domain}-rest.js` following Property/Integrations.
 3. Document routes in this file and regenerate `docs/REPO_MAP.md`.
 4. Do not grow `finance-mongo-mutations.js` with unrelated providers/webhooks.
-5. Ship a **`scripts/migrate-{domain}-to-mongo.mjs`** (upsert, `--dry-run`, optional `--apartment`) and an npm script. Soft-migrate-on-read is a fallback only.
+5. Ship a **`scripts/migrate-{domain}-to-mongo.mjs`** (upsert, `--dry-run`, optional `--apartment`) and an npm script. Do not backfill from Supabase inside a user request.
 
 ### Activity migrate
 
@@ -138,7 +138,7 @@ npm run migrate:logs-mongo -- --dry-run
 npm run migrate:logs-mongo -- --from-live   # skip *_temp
 ```
 
-Copies (prefer `*_temp`): `activity_audit_log`, `vehicle_audit_log`, notifications, email/sms outbox. Soft-migrate-on-read on GET `/api/activity/events` does the same per apartment when a collection is empty.
+Copies (prefer `*_temp`): `activity_audit_log`, `vehicle_audit_log`, notifications, email/sms outbox. GET `/api/activity/events` does not backfill; an empty collection stays empty until this script runs.
 
 ### Integrations migrate
 

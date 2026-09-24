@@ -589,9 +589,68 @@ function parseSheetOnly(body) {
     return v === true || v === '1' || v === 'true';
 }
 
+const REPORT_LEDGER_PROJECTION = {
+    id: 1,
+    type: 1,
+    date: 1,
+    amount: 1,
+    cat: 1,
+    sub_category: 1,
+    vendor_name: 1,
+    wallet: 1,
+    description: 1,
+    bank_reference: 1,
+    bank_payment_type: 1,
+    bankLineRefs: 1,
+    external_sync_key: 1,
+    sync_hash: 1,
+    excluded_from_ledger: 1,
+    exclude_from_reports: 1,
+    exclude_from_cash_float: 1,
+    is_cash_float: 1,
+};
+
+const REPORT_IMPORT_PROJECTION = {
+    id: 1,
+    created_at: 1,
+    file_name: 1,
+    'lines.line_date': 1,
+    'lines.line_order': 1,
+    'lines.source_row_index': 1,
+    'lines.balance': 1,
+    'lines.credit': 1,
+    'lines.debit': 1,
+    'lines.match_status': 1,
+    'lines.transaction_id': 1,
+    'lines.computed_balance': 1,
+};
+
+const REPORT_VOUCHER_PROJECTION = {
+    id: 1,
+    kind: 1,
+    status: 1,
+    notes: 1,
+    transaction_id: 1,
+    doc_date: 1,
+    date: 1,
+    amount: 1,
+    cat: 1,
+    sub_category: 1,
+    vendor_name: 1,
+    exclude_from_reports: 1,
+};
+
+const REPORT_NOBROKER_PROJECTION = {
+    billing_month: 1,
+    charges: 1,
+    total_raised: 1,
+};
+
 /**
  * Full Financial Reports pack — pivots, raised stack, book-balance snapshot.
  * Computed server-side from Mongo; client renders only.
+ * Projections omit raw blobs (spreadsheet snapshots, OCR text) so the read
+ * stays inside the 10s function cap.
  */
 async function analytics(db, apartmentId, body = {}) {
     const months = buildMonthRange(body.months || body.monthCount || 6);
@@ -611,14 +670,14 @@ async function analytics(db, apartmentId, body = {}) {
 
     const [entriesRaw, imports, vouchers, nobroker, config] = await Promise.all([
         // Reports include excluded_from_ledger rows (classic does too) — only omit voided via exclude_from_reports.
-        db.collection('ledger_entries').find(aptMatch(apartmentId)).toArray(),
-        db.collection('bank_imports').find(aptMatch(apartmentId)).toArray(),
+        db.collection('ledger_entries').find(aptMatch(apartmentId)).project(REPORT_LEDGER_PROJECTION).toArray(),
+        db.collection('bank_imports').find(aptMatch(apartmentId)).project(REPORT_IMPORT_PROJECTION).toArray(),
         db.collection('vouchers').find({
             ...aptMatch(apartmentId),
             status: { $ne: 'void' },
             kind: 'OUT',
-        }).toArray(),
-        db.collection('nobroker_invoices').find(aptMatch(apartmentId)).toArray(),
+        }).project(REPORT_VOUCHER_PROJECTION).toArray(),
+        db.collection('nobroker_invoices').find(aptMatch(apartmentId)).project(REPORT_NOBROKER_PROJECTION).toArray(),
         db.collection('finance_config').findOne(aptMatch(apartmentId)),
     ]);
 

@@ -55,9 +55,19 @@ function flattenResidents(units = []) {
     return rows;
 }
 
-export async function ensurePropertyIndexes() {
-    await PropertyUnit.syncIndexes().catch(() => {});
-    await PropertySlot.syncIndexes().catch(() => {});
+/** One successful sync per isolate. A failed attempt is retried on the next request. */
+let propertyIndexesReady = null;
+
+export function ensurePropertyIndexes() {
+    if (!propertyIndexesReady) {
+        propertyIndexesReady = Promise.all([
+            PropertyUnit.syncIndexes(),
+            PropertySlot.syncIndexes(),
+        ]).catch(() => {
+            propertyIndexesReady = null;
+        });
+    }
+    return propertyIndexesReady;
 }
 
 export async function loadPropertyState(apartmentId) {

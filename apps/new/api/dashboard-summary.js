@@ -7,7 +7,12 @@ import { createServiceClient, createUserClient } from '../../../packages/server/
 import { assertUuid } from '../../../packages/server/supabaseRest.js';
 import { getQueryParam } from '../../../packages/server/vercelRequest.js';
 import { getMongoDb } from '../../../packages/server/mongoClient.js';
-import { buildLedgerSummary } from './financeMongo/services/ledgerReads.js';
+import {
+    LEDGER_SUMMARY_ENTRY_PROJECTION,
+    LEDGER_SUMMARY_VOUCHER_PROJECTION,
+    ledgerSummaryVoucherFilter,
+    summarizeLoadedLedger,
+} from './financeMongo/services/ledgerReads.js';
 import { logMongoApi } from '../../../packages/server/mongoLog.js';
 import { isNewUiRequest } from '../../../packages/server/uiMode.js';
 import { mongoRbacReady, userHasMongoSocietyAccess } from './rbacMongo/service.js';
@@ -168,14 +173,14 @@ function computeSync(config) {
 
 export async function buildDashboardSummary(db, apartmentId) {
     const apt = { apartment_id: apartmentId };
-    const [invoices, entries, units, slots, ledgerPack, config] = await Promise.all([
+    const [invoices, entries, units, slots, vouchers, config] = await Promise.all([
         db.collection('dues_invoices')
             .find(apt)
             .project({ amount: 1, amount_paid: 1, unit_id: 1 })
             .toArray(),
         db.collection('ledger_entries')
             .find(apt)
-            .project({ amount: 1, type: 1, date: 1, excluded_from_ledger: 1 })
+            .project(LEDGER_SUMMARY_ENTRY_PROJECTION)
             .toArray(),
         db.collection('property_units')
             .find(apt)
@@ -195,10 +200,14 @@ export async function buildDashboardSummary(db, apartmentId) {
                 occupant: 1,
             })
             .toArray(),
-        buildLedgerSummary(db, apartmentId),
+        db.collection('vouchers')
+            .find(ledgerSummaryVoucherFilter(apartmentId))
+            .project(LEDGER_SUMMARY_VOUCHER_PROJECTION)
+            .toArray(),
         db.collection('finance_config').findOne(apt),
     ]);
 
+    const ledgerPack = summarizeLoadedLedger(entries, vouchers, config || {});
     const flows = computeMonthFlows(entries);
     return {
         parking: computeParking(units, slots),

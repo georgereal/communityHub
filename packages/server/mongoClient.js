@@ -24,14 +24,19 @@ export function getMongoEnv() {
     };
 }
 
-/** Options shared by the native driver and Mongoose. */
+/**
+ * Options shared by the native driver and Mongoose.
+ * Idle lifetime stays long so a warm isolate does not reconnect on every request.
+ * Selection and connect fail in a few seconds so a dead Atlas handshake cannot
+ * consume the whole 10s Vercel budget.
+ */
 export function getMongoClientOptions() {
     return {
         maxPoolSize: 1,
         minPoolSize: 0,
-        maxIdleTimeMS: 45_000,
-        serverSelectionTimeoutMS: 8_000,
-        connectTimeoutMS: 10_000,
+        maxIdleTimeMS: 600_000,
+        serverSelectionTimeoutMS: 4_000,
+        connectTimeoutMS: 5_000,
         retryWrites: true,
     };
 }

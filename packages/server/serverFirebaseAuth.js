@@ -9,10 +9,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import {
-    ensureRbacIndexes,
-    resolveAppUserFromFirebase,
-} from '../../apps/new/api/rbacMongo/service.js';
+import { resolveAppUserFromFirebase } from '../../apps/new/api/rbacMongo/service.js';
 import { isAppSessionToken, verifyAppSessionToken } from './appSessionJwt.js';
 
 const require = createRequire(import.meta.url);
@@ -262,12 +259,6 @@ export async function getUserFromAuthHeader(authHeader, { setClaims = false } = 
             const email = decoded.email || '';
             const emailVerified = !!decoded.email_verified;
             const displayName = decoded.name || decoded.user_metadata?.full_name || '';
-
-            try {
-                await ensureRbacIndexes();
-            } catch {
-                /* indexes are best-effort */
-            }
 
             let linked;
             try {
