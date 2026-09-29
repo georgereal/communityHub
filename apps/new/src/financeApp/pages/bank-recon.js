@@ -1,5 +1,6 @@
 /**
  * Finance MPA — Bank reconciliation
+ * Does not pull finances.js on boot — header Add buttons lazy-load modals.
  */
 import fragmentHtml from '../html/bank-recon.html?raw';
 
@@ -28,16 +29,8 @@ async function main() {
         const { loadAccountsBankRecon } = await import('../../financeNew/load.js');
         await loadAccountsBankRecon();
 
-        const {
-            initExpenseModal,
-            initAccountsSubViewTabs,
-            syncAccountsHeaderActions,
-            processFinances,
-        } = await import('../../financeNew/finances.js');
-        initAccountsSubViewTabs?.();
-        initExpenseModal?.();
-        syncAccountsHeaderActions?.('bank-recon');
-        processFinances?.();
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        initAccountsPageChrome('bank-recon');
 
         const m = await import('../../financeNew/bankReconciliation.js');
         m.initBankReconciliationUi?.();

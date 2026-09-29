@@ -24,7 +24,8 @@ import { isApartmentAdminUser } from '../rbac.js';
 import { can } from '../capabilities.js';
 import { refreshCapabilityGates } from '../capUi.js';
 import { filesToBase64Payload, postFnMutation } from './mongoMutations.js';
-import { getLedgerBankBalance, getActiveLedgerTxns, getLedgerBalanceMeta, recalculateLedgerBalances, ledgerCalculatedBalanceById } from './ledgerBalance.js';
+import { getLedgerBankBalance, getActiveLedgerTxns, getLedgerBalanceMeta, recalculateLedgerBalances, ledgerCalculatedBalanceById, ledgerStoredBalanceById } from './ledgerBalance.js';
+import { getFinanceNew } from './state.js';
 import { applySavedTransactionLocally, removeTransactionLocally } from './ledgerTxnLocal.js';
 import {
     getPassbookClosingBalance,
@@ -943,12 +944,20 @@ export const renderCashLedger = () => {
     if (!list) return;
     populateLedgerCategoryFilter();
     initLedgerBulkBar();
+    wireLedgerInfiniteScroll();
 
     renderLedgerPivotBanner();
     const active = getActiveLedgerTxns([...fnFinances().txns]);
-    // Live ledger walk — same figure as Passbook/(calc) and “Has discrepancy”.
-    const calcById = ledgerCalculatedBalanceById(active);
-    const filtered = applyLedgerTableFilters(active);
+    const s = getFinanceNew();
+    const meta = getLedgerBalanceMeta();
+    // Partial pages cannot live-walk calc — use stored running_balance_after when clean.
+    let calcById;
+    if (s.ledgerLoadedPartial || meta.needsRecalc) {
+        calcById = meta.needsRecalc ? new Map() : ledgerStoredBalanceById(active);
+    } else {
+        calcById = ledgerCalculatedBalanceById(active);
+    }
+    const filtered = applyLedgerTableFilters(active, { serverFiltered: true, calcById });
     const enriched = filtered.map((t) => ({
         ...t,
         _ledgerComputedBalance: calcById.has(t.id) ? calcById.get(t.id) : null,
@@ -957,8 +966,9 @@ export const renderCashLedger = () => {
     updateLedgerSortIndicators();
     syncLedgerBalanceStaleUi();
     syncLedgerClearFiltersUi();
+    syncLedgerScrollSentinel();
 
-    const total = getActiveLedgerTxns().length;
+    const total = Number(s.ledgerTotal) || getActiveLedgerTxns().length;
     const showing = sorted.length;
     const cashBillCount = sorted.filter((t) => t._fromFinanceDocument).length;
     const bankCount = showing - cashBillCount;
@@ -967,7 +977,7 @@ export const renderCashLedger = () => {
     if (countEl) {
         if (cashBillCount > 0) {
             countEl.textContent = `${bankCount} bank · ${cashBillCount} cash bill${cashBillCount === 1 ? '' : 's'}`;
-        } else if (showing === total) {
+        } else if (showing >= total && !s.ledgerHasMore) {
             countEl.textContent = total ? `${total} entries` : '';
         } else {
             countEl.textContent = `${showing} of ${total}`;
@@ -979,6 +989,38 @@ export const renderCashLedger = () => {
     updateLedgerSortIndicators();
     syncLedgerOpeningFields();
 };
+
+let ledgerScrollObserver = null;
+
+const syncLedgerScrollSentinel = () => {
+    const sentinel = document.getElementById('fn-ledger-scroll-sentinel');
+    if (!sentinel) return;
+    const s = getFinanceNew();
+    sentinel.hidden = !s.ledgerHasMore;
+    sentinel.textContent = s.ledgerLoadingMore ? 'Loading…' : 'Scroll for more';
+};
+
+const wireLedgerInfiniteScroll = () => {
+    const sentinel = document.getElementById('fn-ledger-scroll-sentinel');
+    if (!sentinel || ledgerScrollObserver) return;
+    ledgerScrollObserver = new IntersectionObserver((entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        const s = getFinanceNew();
+        if (!s.ledgerHasMore || s.ledgerLoadingMore) return;
+        void import('./load.js')
+            .then(({ loadMoreLedgerPage }) => loadMoreLedgerPage())
+            .then(() => renderCashLedger())
+            .catch((err) => console.warn('[ledger] load more failed:', err?.message || err));
+    }, { root: null, rootMargin: '240px', threshold: 0 });
+    ledgerScrollObserver.observe(sentinel);
+};
+
+/** Refetch page 0 with current search / category / pivot params. */
+export async function refetchLedgerFromFilters() {
+    const { reloadLedgerFiltered } = await import('./load.js');
+    await reloadLedgerFiltered({ force: true });
+    renderCashLedger();
+}
 
 async function uploadReceiptFile(apartmentId, txnId, file, index, subfolder = '') {
     const stem = (file.name.replace(/\.[^.]+$/, '') || 'file')
@@ -2588,7 +2630,9 @@ const initLedgerSearch = () => {
     let debounce = null;
     const onSearchInput = () => {
         clearTimeout(debounce);
-        debounce = setTimeout(() => renderCashLedger(), 120);
+        debounce = setTimeout(() => {
+            void refetchLedgerFromFilters();
+        }, 280);
     };
     input.addEventListener('input', onSearchInput);
     input.addEventListener('search', onSearchInput);
@@ -2601,7 +2645,7 @@ const initLedgerCategoryFilter = () => {
     sel.dataset.wired = '1';
     sel.addEventListener('change', () => {
         setLedgerCategoryFilter(sel.value || null);
-        renderCashLedger();
+        void refetchLedgerFromFilters();
     });
 };
 
@@ -2782,7 +2826,7 @@ const initLedgerClearFilters = () => {
     btn.dataset.wired = '1';
     btn.addEventListener('click', () => {
         clearAllLedgerFilters();
-        renderCashLedger();
+        void refetchLedgerFromFilters();
     });
 };
 

@@ -195,10 +195,44 @@ export function annotateLedgerRunningBalances(txns = null) {
 
 /**
  * Bank balance implied by the active financial ledger (BANK wallet entries).
+ * When the client only has a partial ledger window (pagination / unmatched pack),
+ * prefer server summary or bookBalance — never walk a truncated txn list.
  */
 export function getLedgerBankBalance(txns = null) {
-    const opening = getBankOpeningConfig();
+    const s = getFinanceNew();
     const meta = getLedgerBalanceMeta();
+    const opening = getBankOpeningConfig();
+
+    const useServerPack = txns == null && (
+        s.ledgerLoadedPartial
+        || s.unmatchedBankLoaded
+        || (s.ledgerSummary?.totals && !s.ledgerLoaded)
+    );
+    if (useServerPack) {
+        const summary = s.ledgerSummary;
+        if (summary?.totals) {
+            return {
+                balance: summary.totals.bank ?? null,
+                netMovements: null,
+                asOf: summary.asOf || opening.date || null,
+                txnCount: summary.counts?.bankTxns ?? 0,
+                needsOpening: !!summary.needsOpening,
+                needsRecalc: summary.ledgerBalance?.needsRecalc === true || meta.needsRecalc,
+            };
+        }
+        const bb = s.bookBalancePack?.bookBalance;
+        if (bb) {
+            return {
+                balance: bb.bankBalance != null ? Number(bb.bankBalance) : null,
+                netMovements: null,
+                asOf: bb.asOf || opening.date || null,
+                txnCount: bb.bankTxnCount ?? 0,
+                needsOpening: opening.amount == null,
+                needsRecalc: meta.needsRecalc,
+            };
+        }
+    }
+
     const pool = chronologicalBankTxns(getActiveLedgerTxns(txns));
     const ctx = buildLedgerStatementContext();
     const onOrAfterOpening = opening.date

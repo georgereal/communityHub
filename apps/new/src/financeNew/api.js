@@ -93,14 +93,70 @@ export async function ensureFinanceNewBoot({ force = false } = {}) {
     return getFinanceNew();
 }
 
-export async function loadFinanceNewLedger({ force = false } = {}) {
+export async function loadFinanceNewLedger({
+    force = false,
+    append = false,
+    limit = 50,
+    offset = 0,
+    query: filterQuery = {},
+} = {}) {
     await ensureFinanceNewBoot();
     const s = getFinanceNew();
-    if (!force && s.ledgerLoaded) return s;
-    const json = await financeNewFetch('/api/finance/ledger');
-    applyFinanceNewLedger(json);
-    persistFinancePackCache();
-    return getFinanceNew();
+    const q = { limit, offset, ...filterQuery };
+    // Drop empty filter keys
+    for (const [k, v] of Object.entries(q)) {
+        if (v == null || v === '') delete q[k];
+    }
+    const sameQuery = JSON.stringify(s.ledgerQuery || {}) === JSON.stringify(
+        Object.fromEntries(Object.entries(filterQuery).filter(([, v]) => v != null && v !== '')),
+    );
+    if (!force && !append && s.ledgerLoaded && sameQuery && offset === 0) return s;
+
+    if (append) s.ledgerLoadingMore = true;
+    try {
+        const json = await financeNewFetch('/api/finance/ledger', { query: q });
+        applyFinanceNewLedger(json, { append });
+        s.ledgerQuery = Object.fromEntries(
+            Object.entries(filterQuery).filter(([, v]) => v != null && v !== ''),
+        );
+        // Do not persist large/partial ledger pages in session cache
+        if (!append && !s.ledgerHasMore && s.ledgerEntries.length <= 50) {
+            persistFinancePackCache();
+        }
+        return getFinanceNew();
+    } finally {
+        s.ledgerLoadingMore = false;
+    }
+}
+
+/** Fetch one calendar day of peers (same-day reorder). */
+export async function loadFinanceNewLedgerDay(date) {
+    await ensureFinanceNewBoot();
+    const json = await financeNewFetch('/api/finance/ledger', {
+        query: { date, limit: 200, offset: 0, include_excluded: '1' },
+    });
+    return Array.isArray(json.entries) ? json.entries : [];
+}
+
+export async function loadFinanceNewUnmatchedBank({ force = false, type } = {}) {
+    await ensureFinanceNewBoot();
+    const s = getFinanceNew();
+    if (!force && s.unmatchedBankLoaded) return s.unmatchedBankEntries || [];
+    const json = await financeNewFetch('/api/finance/ledger/unmatched-bank', {
+        query: { type, limit: 500 },
+    });
+    s.unmatchedBankEntries = Array.isArray(json.entries) ? json.entries : [];
+    s.unmatchedBankLoaded = true;
+    return s.unmatchedBankEntries;
+}
+
+export async function exportFinanceNewLedger(filterQuery = {}) {
+    await ensureFinanceNewBoot();
+    const q = { limit: 5000, offset: 0, ...filterQuery };
+    for (const [k, v] of Object.entries(q)) {
+        if (v == null || v === '') delete q[k];
+    }
+    return financeNewFetch('/api/finance/ledger/export', { query: q });
 }
 
 export async function loadFinanceNewLedgerSummary({ force = false } = {}) {
@@ -111,6 +167,29 @@ export async function loadFinanceNewLedgerSummary({ force = false } = {}) {
     applyFinanceNewLedgerSummary(json);
     persistFinancePackCache();
     return s.ledgerSummary;
+}
+
+/**
+ * Slim book-balance KPI pack (no ledger/imports/voucher dumps to the client).
+ * GET /api/finance/reports/bookBalance
+ */
+export async function loadFinanceNewBookBalance({ force = false } = {}) {
+    await ensureFinanceNewBoot();
+    const s = getFinanceNew();
+    if (!force && s.bookBalancePack?.bookBalance) {
+        const { applyBookBalancePack } = await import('./bookBalanceSummary.js');
+        applyBookBalancePack(s.bookBalancePack);
+        return s.bookBalancePack;
+    }
+    const json = await financeNewFetch('/api/finance/reports/bookBalance');
+    s.bookBalancePack = {
+        bookBalance: json.bookBalance || null,
+        recon: json.recon || null,
+    };
+    const { applyBookBalancePack } = await import('./bookBalanceSummary.js');
+    applyBookBalancePack(s.bookBalancePack);
+    persistFinancePackCache();
+    return s.bookBalancePack;
 }
 
 export async function loadFinanceNewVouchers(opts = {}) {

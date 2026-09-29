@@ -647,6 +647,113 @@ const REPORT_NOBROKER_PROJECTION = {
 };
 
 /**
+ * Book-balance + recon snapshot from already-loaded projected rows.
+ * Shared by the slim `bookBalance` report and full `analytics` pack.
+ */
+function buildBookBalancePack(entries, imports, vouchers, config) {
+    const matchedTxnIds = new Set();
+    const bankLines = [];
+    for (const imp of imports || []) {
+        for (const line of imp.lines || []) {
+            bankLines.push({ ...line, import_id: imp.id || imp._id });
+            if (line.match_status === 'MATCHED' && line.transaction_id) {
+                matchedTxnIds.add(String(line.transaction_id));
+            }
+        }
+    }
+
+    const unmatchedLines = bankLines.filter((l) => l.match_status === 'UNMATCHED');
+    const unmatchedTxns = (entries || []).filter((t) => {
+        if (t.excluded_from_ledger) return false;
+        if (reportWallet(t) !== 'BANK') return false;
+        const id = entryId(t);
+        return id && !matchedTxnIds.has(id);
+    });
+
+    const bankAccount = config?.bankAccount || null;
+    const bankSnap = computeBankBalanceSnapshot(bankLines, imports, bankAccount);
+    const ledgerBank = computeLedgerBankSnapshot(entries, bankAccount);
+    const bankBalance = ledgerBank.bankBalance ?? bankSnap.bankBalance;
+    const bankAsOf = ledgerBank.asOf || bankSnap.asOf;
+    const hasBank = bankBalance != null;
+
+    const cashWallet = computeWalletLeft(entries, vouchers, bankAccount);
+
+    const openCommitmentBills = (vouchers || []).filter(isPendingCommitmentDoc);
+    const openCommitmentAmt = round2(openCommitmentBills.reduce((s, d) => s + Math.abs(Number(d.amount) || 0), 0));
+
+    const unclearedCheques = unmatchedTxns.filter(isLedgerChequePayment);
+    const unclearedAmt = round2(unclearedCheques.reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0));
+    const pendingTotal = round2(openCommitmentAmt + unclearedAmt);
+
+    const book = hasBank ? round2(bankBalance + cashWallet - pendingTotal) : cashWallet;
+
+    let unmatchedNet = 0;
+    for (const line of unmatchedLines) {
+        unmatchedNet += (Number(line.credit) || 0) - (Number(line.debit) || 0);
+    }
+    let unreconciledNet = 0;
+    for (const t of unmatchedTxns) {
+        const amt = Math.abs(Number(t.amount) || 0);
+        unreconciledNet += t.type === 'IN' ? amt : -amt;
+    }
+
+    return {
+        matchedTxnIds,
+        bookBalance: {
+            cash: cashWallet,
+            bankBalance,
+            hasBank,
+            asOf: bankAsOf,
+            pending: {
+                openAmt: openCommitmentAmt,
+                openCount: openCommitmentBills.length,
+                unpaidAmt: openCommitmentAmt,
+                unpaidCount: openCommitmentBills.length,
+                unclearedAmt,
+                unclearedCount: unclearedCheques.length,
+                total: pendingTotal,
+                count: openCommitmentBills.length + unclearedCheques.length,
+            },
+            book,
+        },
+        recon: {
+            unmatchedLines: unmatchedLines.length,
+            unmatchedNet: round2(unmatchedNet),
+            unreconciledTxns: unmatchedTxns.length,
+            unreconciledNet: round2(unreconciledNet),
+            matchedCount: matchedTxnIds.size,
+            passbook: bankSnap.passbook,
+            calculated: bankSnap.calculated,
+        },
+    };
+}
+
+/** Slim KPI pack for expense-plan (and other pages that only need book balance). */
+async function bookBalance(db, apartmentId) {
+    const [entriesRaw, imports, vouchers, config] = await Promise.all([
+        db.collection('ledger_entries').find(aptMatch(apartmentId)).project(REPORT_LEDGER_PROJECTION).toArray(),
+        db.collection('bank_imports').find(aptMatch(apartmentId)).project(REPORT_IMPORT_PROJECTION).toArray(),
+        db.collection('vouchers').find({
+            ...aptMatch(apartmentId),
+            status: { $ne: 'void' },
+            kind: 'OUT',
+        }).project(REPORT_VOUCHER_PROJECTION).toArray(),
+        db.collection('finance_config').findOne(aptMatch(apartmentId)),
+    ]);
+
+    const entries = (entriesRaw || []).map((e) => ({
+        ...e,
+        id: e.id || e._id,
+    }));
+    const pack = buildBookBalancePack(entries, imports, vouchers, config);
+    return {
+        bookBalance: pack.bookBalance,
+        recon: pack.recon,
+    };
+}
+
+/**
  * Full Financial Reports pack — pivots, raised stack, book-balance snapshot.
  * Computed server-side from Mongo; client renders only.
  * Projections omit raw blobs (spreadsheet snapshots, OCR text) so the read
@@ -686,16 +793,8 @@ async function analytics(db, apartmentId, body = {}) {
         id: e.id || e._id,
     }));
 
-    const matchedTxnIds = new Set();
-    const bankLines = [];
-    for (const imp of imports || []) {
-        for (const line of imp.lines || []) {
-            bankLines.push({ ...line, import_id: imp.id || imp._id });
-            if (line.match_status === 'MATCHED' && line.transaction_id) {
-                matchedTxnIds.add(String(line.transaction_id));
-            }
-        }
-    }
+    const balancePack = buildBookBalancePack(entries, imports, vouchers, config);
+    const matchedTxnIds = balancePack.matchedTxnIds;
 
     const isExpenseFromBankRecon = (txn) => {
         if (txn?.type !== 'OUT') return false;
@@ -821,44 +920,6 @@ async function analytics(db, apartmentId, body = {}) {
         opening: config?.collectionGapOpening,
     });
 
-    // Book balance / recon snapshot — match classic getBankBalanceReconciliation + Wallet Left + pending.
-    const unmatchedLines = bankLines.filter((l) => l.match_status === 'UNMATCHED');
-    const unmatchedTxns = entries.filter((t) => {
-        if (t.excluded_from_ledger) return false;
-        if (reportWallet(t) !== 'BANK') return false;
-        const id = entryId(t);
-        return id && !matchedTxnIds.has(id);
-    });
-
-    const bankAccount = config?.bankAccount || null;
-    const bankSnap = computeBankBalanceSnapshot(bankLines, imports, bankAccount);
-    const ledgerBank = computeLedgerBankSnapshot(entries, bankAccount);
-    const bankBalance = ledgerBank.bankBalance ?? bankSnap.bankBalance;
-    const bankAsOf = ledgerBank.asOf || bankSnap.asOf;
-    const hasBank = bankBalance != null;
-
-    const cashWallet = computeWalletLeft(entries, vouchers, bankAccount);
-
-    // Classic getPendingChequesSummary: open commitments (unpaid + cheque-ready) + uncleared ledger cheques.
-    const openCommitmentBills = (vouchers || []).filter(isPendingCommitmentDoc);
-    const openCommitmentAmt = round2(openCommitmentBills.reduce((s, d) => s + Math.abs(Number(d.amount) || 0), 0));
-
-    const unclearedCheques = unmatchedTxns.filter(isLedgerChequePayment);
-    const unclearedAmt = round2(unclearedCheques.reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0));
-    const pendingTotal = round2(openCommitmentAmt + unclearedAmt);
-
-    const book = hasBank ? round2(bankBalance + cashWallet - pendingTotal) : cashWallet;
-
-    let unmatchedNet = 0;
-    for (const line of unmatchedLines) {
-        unmatchedNet += (Number(line.credit) || 0) - (Number(line.debit) || 0);
-    }
-    let unreconciledNet = 0;
-    for (const t of unmatchedTxns) {
-        const amt = Math.abs(Number(t.amount) || 0);
-        unreconciledNet += t.type === 'IN' ? amt : -amt;
-    }
-
     const inRangeOut = entries.filter((t) => t.type === 'OUT' && inRange([t]).length);
     const sourceCounts = {
         sheet: inRangeOut.filter((t) => isExpenseFromSheet(t) && isReportable(t)).length,
@@ -902,32 +963,8 @@ async function analytics(db, apartmentId, body = {}) {
             expenseByMonth,
         },
         collectionGapOpening: gapPack.collectionGapOpening,
-        bookBalance: {
-            cash: cashWallet,
-            bankBalance,
-            hasBank,
-            asOf: bankAsOf,
-            pending: {
-                openAmt: openCommitmentAmt,
-                openCount: openCommitmentBills.length,
-                unpaidAmt: openCommitmentAmt,
-                unpaidCount: openCommitmentBills.length,
-                unclearedAmt,
-                unclearedCount: unclearedCheques.length,
-                total: pendingTotal,
-                count: openCommitmentBills.length + unclearedCheques.length,
-            },
-            book,
-        },
-        recon: {
-            unmatchedLines: unmatchedLines.length,
-            unmatchedNet: round2(unmatchedNet),
-            unreconciledTxns: unmatchedTxns.length,
-            unreconciledNet: round2(unreconciledNet),
-            matchedCount: matchedTxnIds.size,
-            passbook: bankSnap.passbook,
-            calculated: bankSnap.calculated,
-        },
+        bookBalance: balancePack.bookBalance,
+        recon: balancePack.recon,
     };
 }
 
@@ -939,6 +976,8 @@ export async function runFinanceMongoReport(report, { db, apartmentId, body = {}
             return byCategory(db, apartmentId, body);
         case 'aging':
             return aging(db, apartmentId);
+        case 'bookBalance':
+            return bookBalance(db, apartmentId);
         case 'analytics':
             return analytics(db, apartmentId, body);
         default:

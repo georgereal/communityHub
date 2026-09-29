@@ -1,16 +1,15 @@
 /**
- * Finance-New — export filtered ledger rows to Excel (Mongo / fn-* DOM).
+ * Finance-New — export filtered ledger rows to Excel via server export (same filters as list).
  */
 import ExcelJS from 'exceljs';
-import { fnFinances } from './classicState.js';
 import { getActiveLedgerTxns } from './ledgerBalance.js';
 import {
-    applyLedgerTableFilters,
-    sortLedgerTxns,
     ledgerHasActiveFilters,
     getLedgerPivotFilter,
     getLedgerCategoryFilter,
 } from './ledgerFilter.js';
+import { buildLedgerServerQuery } from './ledgerServerQuery.js';
+import { exportFinanceNewLedger } from './api.js';
 import { isTransactionReconciled } from './bankStatementQueries.js';
 import {
     getLedgerSyncExportRows,
@@ -18,6 +17,7 @@ import {
     LEDGER_UI_COL,
     txnToLedgerUiCells,
 } from './ledgerDisplayRows.js';
+import { getFinanceNew } from './state.js';
 
 const LEDGER_COLUMNS_KEY = 'ledgerTableColumns_v3';
 
@@ -25,7 +25,6 @@ const loadShowCalculated = () => {
     try {
         const saved = JSON.parse(localStorage.getItem(LEDGER_COLUMNS_KEY) || 'null');
         if (saved && typeof saved === 'object') {
-            // v3: Passbook / calculated is one column
             if ('passbookBalance' in saved) return saved.passbookBalance !== false;
             if ('calculatedBalance' in saved) return saved.calculatedBalance !== false;
         }
@@ -35,18 +34,18 @@ const loadShowCalculated = () => {
     return true;
 };
 
-/** Same filtered + sorted rows as the on-screen Finance-New ledger table. */
+/** Rows currently on screen (for thin local callers). Prefer exportLedgerExcel for files. */
 export function getLedgerDisplayRows() {
-    const txns = fnFinances().txns || [];
+    const txns = getFinanceNew().ledgerEntries || [];
     const reconciledIds = new Set(
-        txns.filter((t) => isTransactionReconciled(t.id)).map((t) => t.id),
+        txns.filter((t) => isTransactionReconciled(t.id || t._id)).map((t) => t.id || t._id),
     );
-    const enriched = getLedgerSyncExportRows(txns, { reconciledIds });
-    return sortLedgerTxns(applyLedgerTableFilters(enriched));
+    const mapped = txns.map((e) => ({ ...e, id: e.id || e._id }));
+    const enriched = getLedgerSyncExportRows(mapped, { reconciledIds });
+    return enriched;
 }
 
-const exportFileSuffix = (rowCount) => {
-    const total = getActiveLedgerTxns().length;
+const exportFileSuffix = (rowCount, total) => {
     const parts = [new Date().toISOString().slice(0, 10)];
     if (rowCount !== total) parts.push(`${rowCount}-of-${total}`);
     if (ledgerHasActiveFilters()) parts.push('filtered');
@@ -54,7 +53,22 @@ const exportFileSuffix = (rowCount) => {
 };
 
 export async function exportLedgerExcel() {
-    const rows = getLedgerDisplayRows();
+    const filterQuery = buildLedgerServerQuery();
+    const json = await exportFinanceNewLedger(filterQuery);
+    const entries = Array.isArray(json.entries) ? json.entries : [];
+    const total = Number(json.total) || entries.length;
+    const reconciledIds = new Set(
+        entries.filter((t) => isTransactionReconciled(t.id || t._id)).map((t) => t.id || t._id),
+    );
+    const mapped = entries.map((e) => ({
+        ...e,
+        id: e.id || e._id,
+        _ledgerComputedBalance: e.running_balance_after != null && e.running_balance_after !== ''
+            ? Number(e.running_balance_after)
+            : null,
+    }));
+    const rows = getLedgerSyncExportRows(mapped, { reconciledIds });
+
     const showCalculated = loadShowCalculated();
     const headers = LEDGER_UI_HEADERS.filter((h) => {
         if (h === 'Sync ID') return false;
@@ -103,7 +117,8 @@ export async function exportLedgerExcel() {
     const meta = wb.addWorksheet('Export info');
     meta.addRow(['Exported at', new Date().toISOString()]);
     meta.addRow(['Rows exported', rows.length]);
-    meta.addRow(['Active ledger total', getActiveLedgerTxns().length]);
+    meta.addRow(['Filtered total', total]);
+    meta.addRow(['Active ledger in memory', getActiveLedgerTxns().length]);
     meta.addRow([
         'Search',
         (document.getElementById('fn-cash-search')?.value || '').trim() || '—',
@@ -118,7 +133,7 @@ export async function exportLedgerExcel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Financial_Ledger_${exportFileSuffix(rows.length)}.xlsx`;
+    a.download = `Financial_Ledger_${exportFileSuffix(rows.length, total)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
 }

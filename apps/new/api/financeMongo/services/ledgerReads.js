@@ -186,5 +186,17 @@ export async function executeLedgerRead(action, ctx) {
         const summary = await buildLedgerSummary(ctx.db, ctx.apartmentId);
         return { summary };
     }
+    if (action === 'loadLedger' || action === 'exportLedger' || action === 'unmatchedBankLedger') {
+        if (action === 'loadLedger') {
+            const { loadLedgerPage } = await import('./ledgerList.js');
+            return loadLedgerPage(ctx.db, ctx.apartmentId, ctx.body || {});
+        }
+        if (action === 'exportLedger') {
+            const { exportLedgerPage } = await import('./ledgerList.js');
+            return exportLedgerPage(ctx.db, ctx.apartmentId, ctx.body || {});
+        }
+        const { loadUnmatchedBankLedger } = await import('./ledgerList.js');
+        return loadUnmatchedBankLedger(ctx.db, ctx.apartmentId, ctx.body || {});
+    }
     return runFinanceMongoRead(action, ctx);
 }

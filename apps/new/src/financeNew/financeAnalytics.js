@@ -17,10 +17,18 @@ import {
 } from './cashFloat.js';
 import { fetchFinanceNewReport } from './api.js';
 import { getFinanceNew } from './state.js';
+import { analyticsQueryKey } from './packCache.js';
 import { navigateFinance } from '../financeApp/session.js';
 import { getLedgerBankBalance } from './ledgerBalance.js';
 import { getBankOpeningConfig } from './bankStatementQueries.js';
 import { postFnMutation } from './mongoMutations.js';
+import {
+    applyBookBalancePack,
+    getBookBalanceSummary as getPackBookBalanceSummary,
+    hasBookBalancePack,
+} from './bookBalanceSummary.js';
+
+export { applyBookBalancePack, hasBookBalancePack };
 
 /** @type {typeof import('./bankReconciliation.js')|null} */
 let bankReconApi = null;
@@ -136,6 +144,17 @@ const isoDay = (v) => {
 
 /** Book balance = ledger running balance + Wallet Left − pending cheques. */
 export const getBookBalanceSummary = () => {
+    // Prefer slim server pack (expense-plan / reports analytics) — no client dumps required.
+    if (hasBookBalancePack() || analyticsPack?.bookBalance) {
+        if (analyticsPack?.bookBalance && !hasBookBalancePack()) {
+            applyBookBalancePack({
+                bookBalance: analyticsPack.bookBalance,
+                recon: analyticsPack.recon || {},
+            });
+        }
+        return getPackBookBalanceSummary();
+    }
+
     const ledgerBank = getLedgerBankBalance();
     const ledgerReady = !!getFinanceNew().ledgerLoaded && (ledgerBank.txnCount || 0) > 0;
     const packBb = analyticsPack?.bookBalance;
@@ -2154,6 +2173,26 @@ export const renderFinanceAnalytics = () => {
     const run = async () => {
         const settings = getSettings();
         const metricsEl = document.getElementById('fn-fa-balance-metrics');
+        const s = getFinanceNew();
+        const reportKey = `analytics:${analyticsQueryKey({
+            months: settings.monthCount,
+            monthCount: settings.monthCount,
+            sheetOnly: settings.sheetOnly,
+            cashExpenseReporting: settings.cashExpenseReporting,
+            pivotDimension: settings.pivotDimension,
+        })}`;
+
+        // Instant paint from session pack cache (survives MPA Back / pivot drill-down).
+        if (!analyticsPack && s.reportAnalytics && s.reportAnalyticsKey === reportKey) {
+            analyticsPack = s.reportAnalytics;
+            if (analyticsPack?.bookBalance) {
+                applyBookBalancePack({
+                    bookBalance: analyticsPack.bookBalance,
+                    recon: analyticsPack.recon || null,
+                });
+            }
+        }
+
         if (metricsEl && !analyticsPack) {
             metricsEl.innerHTML = '<p class="muted">Loading report aggregates…</p>';
         }
@@ -2164,9 +2203,14 @@ export const renderFinanceAnalytics = () => {
                 sheetOnly: settings.sheetOnly,
                 cashExpenseReporting: settings.cashExpenseReporting,
                 pivotDimension: settings.pivotDimension,
-                force: !getFinanceNew().ledgerLoaded,
             });
-            getFinanceNew().reportAnalytics = analyticsPack;
+            s.reportAnalytics = analyticsPack;
+            if (analyticsPack?.bookBalance) {
+                applyBookBalancePack({
+                    bookBalance: analyticsPack.bookBalance,
+                    recon: analyticsPack.recon || null,
+                });
+            }
         } catch (err) {
             analyticsPack = null;
             if (metricsEl) {
@@ -2177,6 +2221,7 @@ export const renderFinanceAnalytics = () => {
         }
 
         // Cash-position worksheet needs voucher commitment aggregates (Mongo).
+        // Prefer session-hydrated aggregates (loadAccountsReports) — skip DB when warm.
         try {
             const docs = await ensureFinanceDocsApi();
             await docs.ensureFinanceDocumentsAggregates();

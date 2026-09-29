@@ -367,6 +367,13 @@ function buildRemodel(flat, remodeledAt) {
 
 async function ensureIndexes(db, dryRun) {
     if (dryRun) return;
+    // Prefer shared specs (pagination-friendly compounds); ignore name conflicts with legacy indexes.
+    try {
+        const { ensureFinanceIndexes } = await import('../apps/new/api/financeMongo/indexes.js');
+        await ensureFinanceIndexes(db);
+    } catch (err) {
+        console.warn('[remodel] shared ensureFinanceIndexes failed, falling back:', err?.message || err);
+    }
     await db.collection('ledger_entries').createIndexes([
         { key: { apartment_id: 1, date: -1 } },
         { key: { apartment_id: 1, type: 1 } },

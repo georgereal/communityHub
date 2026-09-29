@@ -143,7 +143,13 @@ export async function mountFinancePage({
     if (status) status.textContent = 'Loading…';
 
     const ctx = await bootFinanceApp({ page });
-    if (!ctx) return null;
+    if (!ctx) {
+        try {
+            const { hideNavProgress } = await import('../appShell/navProgress.js');
+            hideNavProgress();
+        } catch { /* ignore */ }
+        return null;
+    }
 
     const meta = PAGE_META[page] || { title: 'Finance', subtitle: '', route: 'fn-ledger' };
 

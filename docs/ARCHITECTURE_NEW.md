@@ -118,6 +118,23 @@ Wire new domains in:
 - Admin Integrations → `/api/integrations/connections`
 - Finance bank recon passbook → `/api/integrations/passbook/jobs`
 - Admin Activity → `/api/activity/events` (+ integrations passbook/runs tabs)
+- **Finance page loaders** (`apps/new/src/financeNew/load.js`): each MPA loads only what it needs.
+  - Expense plan = `boot` + `GET /api/finance/reports/bookBalance`
+  - Reports = `boot` + analytics report (via `financeAnalytics`)
+  - Ledger = **paginated** `GET /api/finance/ledger` (limit 50, infinite scroll) + `bank/imports` + `ledger/summary`
+    — search / category / pivot filters are query params; KPIs never from the page window.
+    — Excel export = `GET /api/finance/ledger/export` with the same filters (not client memory).
+    — Same-day reorder fetches that date’s peers (`date=YYYY-MM-DD`) when peers may span pages.
+  - Bank recon = `bank/imports` + `GET /api/finance/ledger/unmatched-bank` + `ledger/summary`
+    — **not** a full ledger dump; matching uses the unmatched-BANK pack.
+  - Bills = vouchers page + aggregates + ledger (link/float candidates; first page is enough for candidates)
+  - Invoices raised = nobroker pages only
+- **Finance page JS graph:** MPA entries use `accountsChrome.js` for header chrome. Do not
+  `import('../../financeNew/finances.js')` on boot except Ledger (table/modals). Docs/bank-recon
+  lazy-load `finances.js` via `ensureFinanceModals()` on Add/Edit. KPI-only pages use
+  `bookBalanceSummary.js`, not `financeAnalytics.js`.
+- **Ledger calc column:** prefer stored `running_balance_after` when `ledgerBalance.needsRecalc` is
+  false; do not live-walk history on a partial page. Dirty → “—” / Recalculate.
 
 ---
 

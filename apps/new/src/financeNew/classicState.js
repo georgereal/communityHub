@@ -151,8 +151,21 @@ export function applyMongoPacksToClassic(packs = {}) {
     s.ledger.accounts = cfg.chartOfAccounts || [];
 
     if (Array.isArray(packs.ledgerEntries)) {
-        f.txns = packs.ledgerEntries.map(mapLedgerEntry);
-        s.ledgerEntries = packs.ledgerEntries;
+        const mapped = packs.ledgerEntries.map(mapLedgerEntry);
+        if (packs.appendLedger) {
+            const seen = new Set((f.txns || []).map((t) => String(t.id)));
+            const merged = [...(f.txns || [])];
+            for (const t of mapped) {
+                if (t.id && seen.has(String(t.id))) continue;
+                if (t.id) seen.add(String(t.id));
+                merged.push(t);
+            }
+            f.txns = merged;
+            // Do not replace s.ledgerEntries on append — caller / applyFinanceNewLedger owns the window.
+        } else {
+            f.txns = mapped;
+            s.ledgerEntries = packs.ledgerEntries;
+        }
         s.ledgerLoaded = true;
     }
     if (Array.isArray(packs.vouchers)) {

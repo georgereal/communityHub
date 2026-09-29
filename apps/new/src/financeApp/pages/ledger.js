@@ -1,6 +1,6 @@
 /**
  * Finance MPA — Ledger (full UI)
- * Shell + Mongo packs + classic financeNew ledger (editable table, attachments, allocations).
+ * Data: ledger + bank (+ billing for allocations). KPIs from ledger/summary — not voucher aggregates.
  */
 import fragmentHtml from '../html/ledger.html?raw';
 
@@ -30,25 +30,47 @@ async function main() {
         // Maintenance collection allocations need billing invoices in classic state.
         await reloadFinancePacks(['billing'], { force: false });
 
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        // finances.js wires Add expense/income; avoid double-binding.
+        initAccountsPageChrome('ledger', { wireActions: false });
+
         const {
             initExpenseModal,
             processFinances,
             renderCashLedger,
-            syncAccountsHeaderActions,
             initAccountsSubViewTabs,
         } = await import('../../financeNew/finances.js');
 
+        let summaryOk = false;
         try {
             const { loadFinanceNewLedgerSummary } = await import('../../financeNew/api.js');
             const { applyLedgerSummaryKpis } = await import('../../financeNew/ledgerSummaryUi.js');
             const summary = await loadFinanceNewLedgerSummary();
-            applyLedgerSummaryKpis(summary);
-        } catch { /* processFinances still fills KPIs */ }
+            summaryOk = applyLedgerSummaryKpis(summary);
+        } catch { /* processFinances fills KPIs */ }
 
+        // Ledger table / bulk bar wiring (MPA chrome already applied above).
         initAccountsSubViewTabs?.();
         initExpenseModal?.();
-        syncAccountsHeaderActions?.('ledger');
-        processFinances();
+        // Prefer server summary for Wallet Left — processFinances needs voucher aggregates we no longer load.
+        if (!summaryOk) processFinances();
+
+        // Reports pivot drill-down: restore filter stashed before MPA hard-nav, then server-fetch.
+        const {
+            consumeLedgerPivotFilter,
+            applyLedgerPivotFilter,
+        } = await import('../../financeNew/ledgerFilter.js');
+        const pendingPivot = consumeLedgerPivotFilter();
+        if (pendingPivot) {
+            // Cash-detail pivots merge cash bills into the ledger view.
+            if (pendingPivot.cashExpenseReporting === 'cash_detail') {
+                await reloadFinancePacks(['vouchers'], { force: false });
+            }
+            applyLedgerPivotFilter(pendingPivot);
+            const { reloadLedgerFiltered } = await import('../../financeNew/load.js');
+            await reloadLedgerFiltered({ force: true });
+        }
+
         renderCashLedger();
 
         document.querySelector('.finance-mpa-status')?.remove();

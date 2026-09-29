@@ -76,19 +76,19 @@ export function compareLedgerTxnStatementOrder(a, b, ctx) {
 export function buildSameDayLedgerOrderMeta(ctx = null) {
     const statementCtx = ctx || buildLedgerStatementContext();
     const byDate = new Map();
-    for (const txn of getActiveBankLedgerTxns()) {
-        const line = statementCtx.byTxnId.get(txn.id);
-        if (!line) continue;
+    // Count peers from statement lines (always fully loaded), not the paginated ledger window.
+    for (const line of annotateStatementLineBalances()) {
+        if (!line.transaction_id) continue;
         const key = lineDateKey(line);
         if (!key) continue;
         if (!byDate.has(key)) byDate.set(key, []);
-        byDate.get(key).push({ txn, line });
+        byDate.get(key).push(line);
     }
     const meta = new Map();
     for (const [date, list] of byDate) {
-        list.sort((a, b) => compareLineOrder(a.line, b.line, statementCtx.importById));
-        list.forEach((row, index) => {
-            meta.set(row.txn.id, { index, count: list.length, date });
+        list.sort((a, b) => compareLineOrder(a, b, statementCtx.importById));
+        list.forEach((line, index) => {
+            meta.set(line.transaction_id, { index, count: list.length, date });
         });
     }
     return meta;
@@ -107,6 +107,14 @@ export async function moveLedgerTxnInDay(txnId, direction, { steps = 1, recalcul
 
     const date = lineDateKey(focusLine);
     if (!date) throw new Error('Statement line is missing a date.');
+
+    // Ensure same-day peers are in memory even when the ledger list is paginated.
+    try {
+        const { ensureLedgerDayPeers } = await import('./load.js');
+        await ensureLedgerDayPeers(date);
+    } catch (err) {
+        console.warn('[ledger] day peers fetch failed:', err?.message || err);
+    }
 
     const activeTxnIds = new Set(getActiveBankLedgerTxns().map((row) => row.id));
     const allDayLines = (fnFinances().bankStatementLines || [])

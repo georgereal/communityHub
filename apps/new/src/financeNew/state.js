@@ -15,7 +15,15 @@ export function emptyFinanceNewState() {
         admin: null,
         ledgerEntries: [],
         ledgerLoaded: false,
+        ledgerLoadedPartial: false,
+        ledgerTotal: 0,
+        ledgerOffset: 0,
+        ledgerLimit: 50,
+        ledgerHasMore: false,
+        ledgerQuery: {},
+        ledgerLoadingMore: false,
         ledgerSummary: null,
+        bookBalancePack: null,
         vouchers: [],
         vouchersTotal: 0,
         vouchersOffset: 0,
@@ -31,6 +39,8 @@ export function emptyFinanceNewState() {
         nobrokerInvoices: [],
         nobrokerTotal: 0,
         nobrokerLoaded: false,
+        unmatchedBankEntries: [],
+        unmatchedBankLoaded: false,
         reportAnalytics: null,
         reportAnalyticsKey: null,
         lastError: null,
@@ -59,10 +69,38 @@ export function applyFinanceNewBoot(payload = {}) {
     return s;
 }
 
-export function applyFinanceNewLedger(payload = {}) {
+export function applyFinanceNewLedger(payload = {}, { append = false } = {}) {
     const s = getFinanceNew();
-    s.ledgerEntries = Array.isArray(payload.entries) ? payload.entries : [];
+    const next = Array.isArray(payload.entries) ? payload.entries : [];
+    if (append) {
+        const seen = new Set((s.ledgerEntries || []).map((e) => String(e.id || e._id)));
+        const merged = [...(s.ledgerEntries || [])];
+        for (const e of next) {
+            const id = String(e.id || e._id || '');
+            if (id && seen.has(id)) continue;
+            if (id) seen.add(id);
+            merged.push(e);
+        }
+        s.ledgerEntries = merged;
+    } else {
+        s.ledgerEntries = next;
+    }
+    s.ledgerTotal = Number(payload.total) || s.ledgerEntries.length;
+    s.ledgerOffset = Number(payload.offset) || 0;
+    s.ledgerLimit = Number(payload.limit) || 50;
+    s.ledgerHasMore = payload.hasMore === true
+        || (s.ledgerOffset + next.length < s.ledgerTotal);
+    s.ledgerLoadedPartial = s.ledgerHasMore || s.ledgerEntries.length < s.ledgerTotal;
     s.ledgerLoaded = true;
+    if (payload.ledgerBalance) {
+        s.config = {
+            ...(s.config || {}),
+            ledgerBalance: {
+                ...(s.config?.ledgerBalance || {}),
+                ...payload.ledgerBalance,
+            },
+        };
+    }
     return s;
 }
 

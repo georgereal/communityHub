@@ -6,6 +6,11 @@ import { requireAnyApartmentPermission } from '../../../packages/server/serverAu
 import { readJsonBody } from '../../../packages/server/vercelRequest.js';
 import { getMongoDb } from '../../../packages/server/mongoClient.js';
 import { logMongoApi } from '../../../packages/server/mongoLog.js';
+import {
+    exportLedgerPage,
+    loadLedgerPage,
+    loadUnmatchedBankLedger,
+} from './financeMongo/services/ledgerList.js';
 
 const VIEW_PERMS = ['accounts.view', 'accounts.edit', 'accounts.bills_entry'];
 
@@ -53,13 +58,7 @@ async function boot(db, apartmentId) {
 }
 
 async function loadLedger(db, apartmentId, body = {}) {
-    const limit = Math.min(Math.max(Number(body.limit) || 5000, 1), 10000);
-    const entries = await db.collection('ledger_entries')
-        .find(aptFilter(apartmentId))
-        .sort({ date: -1, created_at: -1 })
-        .limit(limit)
-        .toArray();
-    return { entries, total: entries.length };
+    return loadLedgerPage(db, apartmentId, body);
 }
 
 function roundMoney(n) {
@@ -334,6 +333,10 @@ export async function runFinanceMongoRead(action, { db, apartmentId, body = {} }
             return boot(db, apartmentId);
         case 'loadLedger':
             return loadLedger(db, apartmentId, body);
+        case 'exportLedger':
+            return exportLedgerPage(db, apartmentId, body);
+        case 'unmatchedBankLedger':
+            return loadUnmatchedBankLedger(db, apartmentId, body);
         case 'listVouchers':
             return listVouchers(db, apartmentId, body);
         case 'voucherAggregates':

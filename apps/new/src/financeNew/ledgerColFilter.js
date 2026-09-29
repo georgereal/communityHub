@@ -268,7 +268,19 @@ const openMenu = (btn) => {
     };
 
     const apply = () => {
-        setLedgerColumnFilter(filterKey, collectFilterValue(menu, kind));
+        const value = collectFilterValue(menu, kind);
+        if (kind === 'passbook' && value?.discrepancy) {
+            import('./ledgerBalance.js').then(({ getLedgerBalanceMeta }) => {
+                if (getLedgerBalanceMeta().needsRecalc) {
+                    alert('Recalculate stored balances before filtering by Passbook discrepancy.');
+                    return;
+                }
+                setLedgerColumnFilter(filterKey, value);
+                refresh();
+            });
+            return;
+        }
+        setLedgerColumnFilter(filterKey, value);
         refresh();
     };
 

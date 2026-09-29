@@ -8,7 +8,8 @@ import { fnFinances, fnLedger, ensureFnClassicShape } from './classicState.js';
  * the filtered ledger so drill-down matches the pivot (bank + Bills & receipts).
  */
 import { normalizeCategoryKey, categoryDisplayLabel } from '../expenseCategories.js';
-import { getActiveLedgerTxns, ledgerTxnDayKey, ledgerCalculatedBalanceById, PASSBOOK_CALC_EPS } from './ledgerBalance.js';
+import { getActiveLedgerTxns, ledgerTxnDayKey, ledgerCalculatedBalanceById, ledgerStoredBalanceById, getLedgerBalanceMeta, PASSBOOK_CALC_EPS } from './ledgerBalance.js';
+import { getFinanceNew } from './state.js';
 import { isTransactionReconciled } from './bankStatementQueries.js';
 import {
     buildLedgerStatementContext,
@@ -88,6 +89,65 @@ let ledgerSort = { field: 'date', dir: 'desc' };
 /** @type {Record<string, string|object>} Excel-style per-column filters (text string or structured) */
 let ledgerColumnFilters = {};
 let activityTimer = null;
+
+/** Survives MPA hard-nav from Reports → Ledger (in-memory filter would be lost). */
+const LEDGER_PIVOT_STORAGE_KEY = 'ch_fn_ledger_pivot_filter';
+const DOCS_REPORT_STORAGE_KEY = 'ch_fn_docs_report_filter';
+
+const serializePivotFilter = (filter) => {
+    if (!filter) return null;
+    const out = { ...filter };
+    if (out.rangeStart instanceof Date) out.rangeStart = out.rangeStart.toISOString();
+    if (out.rangeEnd instanceof Date) out.rangeEnd = out.rangeEnd.toISOString();
+    return out;
+};
+
+const revivePivotFilter = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const out = { ...raw };
+    if (out.rangeStart) out.rangeStart = new Date(out.rangeStart);
+    if (out.rangeEnd) out.rangeEnd = new Date(out.rangeEnd);
+    if (Number.isNaN(out.rangeStart?.getTime?.())) delete out.rangeStart;
+    if (Number.isNaN(out.rangeEnd?.getTime?.())) delete out.rangeEnd;
+    return out;
+};
+
+export const persistLedgerPivotFilter = (filter) => {
+    try {
+        if (!filter) sessionStorage.removeItem(LEDGER_PIVOT_STORAGE_KEY);
+        else sessionStorage.setItem(LEDGER_PIVOT_STORAGE_KEY, JSON.stringify(serializePivotFilter(filter)));
+    } catch { /* ignore */ }
+};
+
+/** Read + clear pending Reports→Ledger drill-down (call once on ledger boot). */
+export const consumeLedgerPivotFilter = () => {
+    try {
+        const raw = sessionStorage.getItem(LEDGER_PIVOT_STORAGE_KEY);
+        if (!raw) return null;
+        sessionStorage.removeItem(LEDGER_PIVOT_STORAGE_KEY);
+        return revivePivotFilter(JSON.parse(raw));
+    } catch {
+        return null;
+    }
+};
+
+export const persistDocsReportFilter = (filter) => {
+    try {
+        if (!filter) sessionStorage.removeItem(DOCS_REPORT_STORAGE_KEY);
+        else sessionStorage.setItem(DOCS_REPORT_STORAGE_KEY, JSON.stringify(serializePivotFilter(filter)));
+    } catch { /* ignore */ }
+};
+
+export const consumeDocsReportFilter = () => {
+    try {
+        const raw = sessionStorage.getItem(DOCS_REPORT_STORAGE_KEY);
+        if (!raw) return null;
+        sessionStorage.removeItem(DOCS_REPORT_STORAGE_KEY);
+        return revivePivotFilter(JSON.parse(raw));
+    } catch {
+        return null;
+    }
+};
 
 const PASSBOOK_MISMATCH_EPS = PASSBOOK_CALC_EPS;
 
@@ -175,6 +235,7 @@ export const clearAllLedgerFilters = () => {
     ledgerPivotFilter = null;
     ledgerCategoryFilter = null;
     ledgerColumnFilters = {};
+    persistLedgerPivotFilter(null);
     const searchEl = document.getElementById('fn-cash-search');
     if (searchEl) searchEl.value = '';
     const catSel = document.getElementById('fn-ledger-cat-filter');
@@ -349,17 +410,28 @@ export const pivotMatchingCashBills = () => {
     );
 };
 
-export const applyLedgerTableFilters = (txns) => {
-    const q = (document.getElementById('fn-cash-search')?.value || '').trim();
+export const applyLedgerTableFilters = (txns, opts = {}) => {
+    const { serverFiltered = false, calcById: calcOverride = null } = opts;
+    const q = serverFiltered ? '' : (document.getElementById('fn-cash-search')?.value || '').trim();
     const passbookFilterOn = isLedgerColumnFilterActive(ledgerColumnFilters.passbook);
     const statementCtx = passbookFilterOn ? buildLedgerStatementContext() : null;
-    // Same full-ledger calc map the Passbook / calc cell uses — required for discrepancy.
-    const calcById = passbookFilterOn ? ledgerCalculatedBalanceById(txns) : null;
+    const meta = getLedgerBalanceMeta();
+    // Discrepancy needs trusted balances — prefer stored when clean; live walk only on full ledger.
+    let calcById = calcOverride;
+    if (passbookFilterOn && !calcById) {
+        if (meta.needsRecalc) {
+            calcById = new Map();
+        } else if (getFinanceNew().ledgerLoadedPartial) {
+            calcById = ledgerStoredBalanceById(txns);
+        } else {
+            calcById = ledgerCalculatedBalanceById(txns);
+        }
+    }
     const ledgerRows = getActiveLedgerTxns(txns).filter((t) =>
-        txnMatchesLedgerPivotFilter(t)
-        && txnMatchesLedgerSearch(t, q)
+        (serverFiltered || txnMatchesLedgerPivotFilter(t))
+        && (serverFiltered || txnMatchesLedgerSearch(t, q))
         && txnMatchesColumnFilters(t, statementCtx, calcById)
-        && (!ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
+        && (serverFiltered || !ledgerCategoryFilter || normalizeCategoryKey(t.cat || '') === ledgerCategoryFilter),
     );
     const bills = pivotMatchingCashBills();
     if (!bills.length) return ledgerRows;
@@ -463,6 +535,7 @@ export const sortLedgerTxns = (txns) => {
 
 export const clearLedgerPivotFilter = () => {
     ledgerPivotFilter = null;
+    persistLedgerPivotFilter(null);
     renderLedgerPivotBanner();
 };
 
@@ -481,13 +554,15 @@ export const navigateToLedgerFromPivot = (filter) => {
         cashExpenseReporting: filter?.cashExpenseReporting || getCashExpenseReportingMode(),
     };
     applyLedgerPivotFilter(stamped);
+    // MPA hard-nav wipes module state — stash for ledger.html boot.
+    persistLedgerPivotFilter(stamped);
     navigateFinance('finance-ledger');
-    window.renderCashLedger?.();
 };
 
 /** Jump to Bills & receipts with the same report drill-down (cash expenses). */
 export const navigateToFinanceDocsFromPivot = async (filter = ledgerPivotFilter) => {
     if (!filter) return;
+    persistDocsReportFilter(filter);
     const { applyFinanceDocsReportFilter } = await import('./financeDocuments.js');
     applyFinanceDocsReportFilter(filter);
     navigateFinance('finance-docs');
@@ -669,13 +744,23 @@ export const renderLedgerPivotBanner = () => {
     el.innerHTML = `
       <span class="ledger-pivot-banner__label"><i class="fa-solid fa-filter" aria-hidden="true"></i> ${describeLedgerPivotFilter(ledgerPivotFilter)}</span>
       <span class="ledger-pivot-banner__actions">
-        ${showBillsJump ? '<button type="button" class="btn btn-outline btn--small" id="ledger-pivot-open-bills">Open matching bills</button>' : ''}
-        <button type="button" class="btn btn-outline btn--small" id="ledger-pivot-clear">Clear report filter</button>
+        <button type="button" class="btn btn-outline btn--small" id="fn-ledger-pivot-back" title="Return to Financial reports">
+          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to reports
+        </button>
+        ${showBillsJump ? '<button type="button" class="btn btn-outline btn--small" id="fn-ledger-pivot-open-bills">Open matching bills</button>' : ''}
+        <button type="button" class="btn btn-outline btn--small" id="fn-ledger-pivot-clear">Clear report filter</button>
       </span>`;
+
+    el.querySelector('#fn-ledger-pivot-back')?.addEventListener('click', () => {
+        navigateFinance('finance-reports');
+    }, { once: true });
 
     el.querySelector('#fn-ledger-pivot-clear')?.addEventListener('click', () => {
         clearLedgerPivotFilter();
-        window.renderCashLedger?.();
+        void import('./finances.js').then((m) => {
+            if (typeof m.refetchLedgerFromFilters === 'function') return m.refetchLedgerFromFilters();
+            m.renderCashLedger?.();
+        });
     }, { once: true });
 
     el.querySelector('#fn-ledger-pivot-open-bills')?.addEventListener('click', () => {

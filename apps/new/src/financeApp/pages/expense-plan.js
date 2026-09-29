@@ -23,12 +23,8 @@ async function main() {
         const { loadAccountsExpensePlan } = await import('../../financeNew/load.js');
         await loadAccountsExpensePlan();
 
-        const {
-            initAccountsSubViewTabs,
-            syncAccountsHeaderActions,
-        } = await import('../../financeNew/finances.js');
-        initAccountsSubViewTabs?.();
-        syncAccountsHeaderActions?.('expense-plan');
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        initAccountsPageChrome('expense-plan');
 
         const { initExpensePlanPage, renderExpensePlanPage } = await import('../../financeNew/expensePlan.js');
         initExpensePlanPage();

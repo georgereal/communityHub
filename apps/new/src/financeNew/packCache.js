@@ -40,9 +40,11 @@ function snapshotFromState(s) {
         booted: !!s.booted,
         config: s.config,
         counts: s.counts || {},
-        ledgerEntries: s.ledgerLoaded ? s.ledgerEntries : null,
-        ledgerLoaded: !!s.ledgerLoaded,
+        // Do not session-cache large ledger windows — only metadata / first-page skip.
+        ledgerEntries: null,
+        ledgerLoaded: false,
         ledgerSummary: s.ledgerSummary,
+        bookBalancePack: s.bookBalancePack,
         vouchers: s.vouchersLoaded ? s.vouchers : null,
         vouchersTotal: s.vouchersTotal,
         vouchersOffset: s.vouchersOffset,
@@ -74,6 +76,12 @@ function applySnapshot(snap) {
         s.ledgerLoaded = true;
     }
     s.ledgerSummary = snap.ledgerSummary || null;
+    s.bookBalancePack = snap.bookBalancePack || null;
+    if (snap.bookBalancePack?.bookBalance) {
+        import('./bookBalanceSummary.js').then(({ applyBookBalancePack }) => {
+            applyBookBalancePack(snap.bookBalancePack);
+        }).catch(() => { /* ignore */ });
+    }
     if (snap.vouchersLoaded && Array.isArray(snap.vouchers)) {
         s.vouchers = snap.vouchers;
         s.vouchersTotal = Number(snap.vouchersTotal) || 0;
@@ -133,6 +141,10 @@ export function invalidateCachedReports() {
     const s = getFinanceNew();
     s.reportAnalytics = null;
     s.reportAnalyticsKey = null;
+    s.bookBalancePack = null;
+    import('./bookBalanceSummary.js').then(({ clearBookBalancePack }) => {
+        clearBookBalancePack();
+    }).catch(() => { /* ignore */ });
 }
 
 let persistTimer = 0;

@@ -8,6 +8,7 @@ import {
     financeNewFetch,
     loadFinanceNewBankImports,
     loadFinanceNewBilling,
+    loadFinanceNewBookBalance,
     loadFinanceNewLedger,
     loadFinanceNewVoucherAggregates,
     loadFinanceNewVouchers,
@@ -26,9 +27,17 @@ export async function ensureBootMapped({ force = false } = {}) {
     return s;
 }
 
-async function loadLedgerMapped({ force = false } = {}) {
-    await loadFinanceNewLedger({ force });
-    applyMongoPacksToClassic({ ledgerEntries: getFinanceNew().ledgerEntries });
+async function loadLedgerMapped({ force = false, append = false, offset = 0, limit = 50, query = {} } = {}) {
+    const { buildLedgerServerQuery } = await import('./ledgerServerQuery.js');
+    // Append must keep the query that produced the current window (ignore mid-scroll DOM edits).
+    const filterQuery = append
+        ? { ...(getFinanceNew().ledgerQuery || {}), ...query }
+        : { ...buildLedgerServerQuery(), ...query };
+    await loadFinanceNewLedger({ force, append, offset, limit, query: filterQuery });
+    applyMongoPacksToClassic({
+        ledgerEntries: getFinanceNew().ledgerEntries,
+        appendLedger: append,
+    });
 }
 
 async function loadBankMapped({ force = false } = {}) {
@@ -83,7 +92,7 @@ async function loadVouchersPageMapped(opts = {}) {
 
 /**
  * Reload one or more packs after a mutation.
- * @param {Array<'boot'|'ledger'|'bank'|'billing'|'nobroker'|'vouchers'|'voucherAggregates'>} packs
+ * @param {Array<'boot'|'ledger'|'bank'|'billing'|'nobroker'|'vouchers'|'voucherAggregates'|'bookBalance'>} packs
  */
 export async function reloadFinancePacks(packs = [], { force = true } = {}) {
     const set = new Set(packs);
@@ -99,6 +108,7 @@ export async function reloadFinancePacks(packs = [], { force = true } = {}) {
     if (set.has('nobroker')) jobs.push(loadNobrokerMapped({ force }));
     if (set.has('vouchers')) jobs.push(loadVouchersPageMapped({ limit: 50, offset: 0, force }));
     if (set.has('voucherAggregates')) jobs.push(loadFinanceNewVoucherAggregates({ force }));
+    if (set.has('bookBalance')) jobs.push(loadFinanceNewBookBalance({ force }));
     if (jobs.length) await Promise.all(jobs);
     return getFinanceNew();
 }
@@ -110,19 +120,36 @@ export async function loadAccountsReports({ force = false } = {}) {
     return getFinanceNew();
 }
 
-/** Cash ledger — ledger + bank + voucher aggregates (Wallet Left / Petty cash KPI). */
+/** Cash ledger — first page + bank imports. More pages via infinite scroll. */
 export async function loadAccountsLedger({ force = false } = {}) {
     ensureFnClassicShape();
     await ensureBootMapped({ force });
     await Promise.all([
-        loadLedgerMapped({ force }),
+        loadLedgerMapped({ force, offset: 0, limit: 50 }),
         loadBankMapped({ force }),
-        loadFinanceNewVoucherAggregates({ force }),
     ]);
-    try {
-        const { hydrateFinanceDocsAggregatesFromApi } = await import('./financeDocuments.js');
-        hydrateFinanceDocsAggregatesFromApi(getFinanceNew().voucherAggregates || {}, aptId());
-    } catch { /* Wallet Left falls back inside processFinances */ }
+    return getFinanceNew();
+}
+
+/** Append next ledger page (infinite scroll). */
+export async function loadMoreLedgerPage() {
+    const s = getFinanceNew();
+    if (!s.ledgerHasMore || s.ledgerLoadingMore) return s;
+    const nextOffset = (Number(s.ledgerOffset) || 0) + (Number(s.ledgerLimit) || 50);
+    await loadLedgerMapped({
+        force: true,
+        append: true,
+        offset: nextOffset,
+        limit: s.ledgerLimit || 50,
+        query: s.ledgerQuery || {},
+    });
+    return getFinanceNew();
+}
+
+/** Reset ledger list with current UI filters (search / pivot / cat). */
+export async function reloadLedgerFiltered({ force = true } = {}) {
+    ensureFnClassicShape();
+    await loadLedgerMapped({ force, offset: 0, limit: 50 });
     return getFinanceNew();
 }
 
@@ -138,19 +165,11 @@ export async function loadAccountsFinanceDocs({ force = false } = {}) {
     return getFinanceNew();
 }
 
-/** Expense plan — config + ledger/bank/vouchers for book-balance KPIs. */
+/** Expense plan — boot (plan items) + slim book-balance KPIs only. */
 export async function loadAccountsExpensePlan({ force = false } = {}) {
     ensureFnClassicShape();
     await ensureBootMapped({ force });
-    await Promise.all([
-        loadLedgerMapped({ force }),
-        loadBankMapped({ force }),
-        loadFinanceNewVoucherAggregates({ force }),
-    ]);
-    try {
-        const { hydrateFinanceDocsAggregatesFromApi } = await import('./financeDocuments.js');
-        hydrateFinanceDocsAggregatesFromApi(getFinanceNew().voucherAggregates || {}, aptId());
-    } catch { /* summary still renders from plan items */ }
+    await loadFinanceNewBookBalance({ force });
     return getFinanceNew();
 }
 
@@ -162,15 +181,36 @@ export async function loadAccountsInvoicesRaised({ force = false } = {}) {
     return getFinanceNew();
 }
 
-/** Bank reconciliation — bank imports/lines + ledger for matching. */
+/** Bank reconciliation — imports + unmatched BANK pack + summary KPIs (no full ledger dump). */
 export async function loadAccountsBankRecon({ force = false } = {}) {
     ensureFnClassicShape();
     await ensureBootMapped({ force });
+    const { loadFinanceNewUnmatchedBank, loadFinanceNewLedgerSummary } = await import('./api.js');
     await Promise.all([
         loadBankMapped({ force }),
-        loadLedgerMapped({ force }),
+        loadFinanceNewUnmatchedBank({ force }),
+        loadFinanceNewLedgerSummary({ force }),
     ]);
     return getFinanceNew();
+}
+
+/** Merge same-calendar-day ledger peers into classic txns (reorder across page boundaries). */
+export async function ensureLedgerDayPeers(date) {
+    const day = String(date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+    const { loadFinanceNewLedgerDay } = await import('./api.js');
+    const entries = await loadFinanceNewLedgerDay(day);
+    if (!entries.length) return entries;
+    applyMongoPacksToClassic({ ledgerEntries: entries, appendLedger: true });
+    const s = getFinanceNew();
+    const seen = new Set((s.ledgerEntries || []).map((e) => String(e.id || e._id)));
+    for (const e of entries) {
+        const id = String(e.id || e._id || '');
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        s.ledgerEntries = [...(s.ledgerEntries || []), e];
+    }
+    return entries;
 }
 
 /** Maintenance invoices shell — billing packs (+ ledger for collections). */

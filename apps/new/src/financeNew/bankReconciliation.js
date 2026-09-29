@@ -48,6 +48,7 @@ import {
     getUnmatchedBankLines,
 } from './bankStatementQueries.js';
 import { getLedgerBankBalance } from './ledgerBalance.js';
+import { getFinanceNew } from './state.js';
 
 export {
     getMatchedTransactionIds,
@@ -490,6 +491,12 @@ const patchLocalLineOrder = (updates = []) => {
 };
 
 export const getUnmatchedLedgerTxns = (typeFilter = null) => {
+    const s = getFinanceNew();
+    if (s.unmatchedBankLoaded) {
+        return (s.unmatchedBankEntries || [])
+            .map((t) => ({ ...t, id: t.id || t._id }))
+            .filter((t) => !typeFilter || t.type === typeFilter);
+    }
     const matched = getMatchedTransactionIds();
     return (fnFinances().txns || []).filter((t) =>
         (t.wallet || '').toUpperCase() === 'BANK'
@@ -497,6 +504,22 @@ export const getUnmatchedLedgerTxns = (typeFilter = null) => {
         && (!typeFilter || t.type === typeFilter),
     );
 };
+
+/** Update unmatched-BANK cache after match/unmatch (avoid empty pool until full refetch). */
+export function invalidateUnmatchedBankCache({ removeTxnIds = [], force = false } = {}) {
+    const s = getFinanceNew();
+    if (force) {
+        s.unmatchedBankLoaded = false;
+        s.unmatchedBankEntries = [];
+        return;
+    }
+    if (removeTxnIds.length && s.unmatchedBankLoaded) {
+        const drop = new Set(removeTxnIds.map(String));
+        s.unmatchedBankEntries = (s.unmatchedBankEntries || []).filter(
+            (t) => !drop.has(String(t.id || t._id)),
+        );
+    }
+}
 
 let nobrokerDumpLines = [];
 let nobrokerFileName = '';
@@ -1103,6 +1126,11 @@ export async function createLedgerFromBankLine(lineId, { nobrokerRow = null, ski
         nobroker_row: nobrokerRow || findNoBrokerForLine(line) || null,
         skip_match: !!skipMatch,
     });
+    invalidateUnmatchedBankCache({ force: true });
+    try {
+        const { loadFinanceNewUnmatchedBank } = await import('./api.js');
+        await loadFinanceNewUnmatchedBank({ force: true });
+    } catch { /* ignore */ }
     return result.txnId;
 }
 
@@ -1422,6 +1450,7 @@ const renderSortHeader = (label, key, extraClass = '') => {
 
 export async function matchBankLine(lineId, transactionId) {
     await postFnMutation('matchBankLine', { line_id: lineId, transaction_id: transactionId });
+    invalidateUnmatchedBankCache({ removeTxnIds: [transactionId] });
     void logActivity({
         entityType: 'BANK_MATCH',
         entityId: lineId,
@@ -1433,6 +1462,11 @@ export async function matchBankLine(lineId, transactionId) {
 
 export async function unmatchBankLine(lineId) {
     await postFnMutation('unmatchBankLine', { line_id: lineId });
+    invalidateUnmatchedBankCache({ force: true });
+    try {
+        const { loadFinanceNewUnmatchedBank } = await import('./api.js');
+        await loadFinanceNewUnmatchedBank({ force: true });
+    } catch { /* next recon load will refetch */ }
     void logActivity({
         entityType: 'BANK_MATCH',
         entityId: lineId,
@@ -1445,6 +1479,11 @@ export async function unmatchBankLines(lineIds = []) {
     const ids = [...new Set((lineIds || []).filter(Boolean))];
     if (!ids.length) return;
     await postFnMutation('unmatchBankLines', { line_ids: ids });
+    invalidateUnmatchedBankCache({ force: true });
+    try {
+        const { loadFinanceNewUnmatchedBank } = await import('./api.js');
+        await loadFinanceNewUnmatchedBank({ force: true });
+    } catch { /* ignore */ }
     void logActivity({
         entityType: 'BANK_MATCH',
         entityId: ids[0],

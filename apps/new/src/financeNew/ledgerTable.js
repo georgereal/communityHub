@@ -24,8 +24,10 @@ import {
     patchAffectsLedgerBalance,
     getLedgerBalanceMeta,
     ledgerCalculatedBalanceById,
+    ledgerStoredBalanceById,
     PASSBOOK_CALC_EPS,
 } from './ledgerBalance.js';
+import { getFinanceNew } from './state.js';
 import {
     wireClassifyCombobox,
     setClassifyInputState,
@@ -870,9 +872,13 @@ const saveLedgerClassifyRow = async (row) => {
     }
 };
 
-/** Running balances for the Passbook / calculated cell — same map as discrepancy filter. */
-function ledgerRunningBalancesForDisplay() {
-    return ledgerCalculatedBalanceById();
+/** Running balances for Passbook / calc — stored when partial or dirty; live walk only on full clean ledger. */
+function ledgerRunningBalancesForDisplay(txns = null) {
+    const s = getFinanceNew();
+    const meta = getLedgerBalanceMeta();
+    if (meta.needsRecalc) return new Map();
+    if (s.ledgerLoadedPartial) return ledgerStoredBalanceById(txns);
+    return ledgerCalculatedBalanceById(txns);
 }
 
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {
@@ -883,14 +889,19 @@ export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachme
     const filtersActive = ledgerHasActiveFilters();
     const balanceMeta = getLedgerBalanceMeta();
     const balancesTrusted = !filtersActive && !balanceMeta.needsRecalc;
-    // Always the full-ledger calculated figure (same as “Has discrepancy” filter).
-    const runningBalances = ledgerRunningBalancesForDisplay();
+    const runningBalances = ledgerRunningBalancesForDisplay(txns);
+    // Prefer per-row values already set by renderCashLedger when present.
+    for (const t of txns || []) {
+        if (t._ledgerComputedBalance != null && Number.isFinite(Number(t._ledgerComputedBalance))) {
+            runningBalances.set(t.id, Number(t._ledgerComputedBalance));
+        }
+    }
     const showCalculated = true;
     const opening = getBankOpeningConfig();
     const statementCtx = buildLedgerStatementContext();
     const orderMeta = buildSameDayLedgerOrderMeta(statementCtx);
     const passbookHeaderHint = balanceMeta.needsRecalc
-        ? ' title="Passbook (bank) vs calculated (ledger walk). Calculated may be stale — Recalculate to persist."'
+        ? ' title="Passbook (bank) vs calculated. Recalculate to refresh stored balances (partial pages cannot live-walk)."'
         : ' title="Passbook = bank statement balance; (calc) = ledger running balance from opening + movements"';
     const rowOpts = {
         formatTxnDetail,

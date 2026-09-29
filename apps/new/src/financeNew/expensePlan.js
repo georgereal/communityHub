@@ -9,7 +9,7 @@ import { categoryDisplayLabel } from '../expenseCategories.js';
 import { buildCategoryOptions } from '../classifyOptions.js';
 import { postFnMutation } from './mongoMutations.js';
 import { withButtonBusy } from '../buttonBusy.js';
-import { getBookBalanceSummary } from './financeAnalytics.js';
+import { getBookBalanceSummary } from './bookBalanceSummary.js';
 import { refreshCapabilityGates } from '../capUi.js';
 import { can } from '../capabilities.js';
 import { canCrud } from '../rbacMatrix.js';
@@ -1261,19 +1261,6 @@ export const renderExpensePlanPage = () => {
   renderTimeline(lastTimeline);
   renderRecurringList();
   refreshCapabilityGates(document.getElementById('fn-subview-expense-plan') || document);
-
-  // Book balance needs unpaid / cheque-ready bills + bank recon helpers.
-  void (async () => {
-    try {
-      const { ensureBookBalanceClients } = await import('./financeAnalytics.js');
-      const { ensureFinanceDocumentsAggregates } = await import('./financeDocuments.js');
-      await ensureBookBalanceClients();
-      await ensureFinanceDocumentsAggregates();
-    } catch (err) {
-      console.warn('[expensePlan] aggregates:', err?.message || err);
-    }
-    renderSummary(lastTimeline);
-  })();
 
   if (selectedKey) {
     const row = lastTimeline.find((r) => r.key === selectedKey);

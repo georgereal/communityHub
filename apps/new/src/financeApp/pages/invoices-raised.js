@@ -23,12 +23,8 @@ async function main() {
         const { loadAccountsInvoicesRaised } = await import('../../financeNew/load.js');
         await loadAccountsInvoicesRaised();
 
-        const {
-            initAccountsSubViewTabs,
-            syncAccountsHeaderActions,
-        } = await import('../../financeNew/finances.js');
-        initAccountsSubViewTabs?.();
-        syncAccountsHeaderActions?.('invoices-raised');
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        initAccountsPageChrome('invoices-raised');
 
         const { initInvoicesRaisedPage, renderInvoicesRaisedPage } = await import('../../financeNew/invoicesRaisedPage.js');
         initInvoicesRaisedPage();

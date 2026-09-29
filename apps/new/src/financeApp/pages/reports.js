@@ -28,6 +28,9 @@ async function main() {
         const ctx = await mountFinancePage({ page: 'reports', fragmentHtml });
         if (!ctx) return;
 
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        initAccountsPageChrome('reports');
+
         setStatus('Loading report data…');
         const { loadAccountsReports } = await import('../../financeNew/loadReports.js');
         await loadAccountsReports();

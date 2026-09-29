@@ -145,6 +145,33 @@ export function installNavProgressBoot() {
     window.addEventListener('ch-mpa-inapp-nav', () => {
         beginSoftNavigation();
     });
+
+    // Hard nav paints an overlay, then the page may enter bfcache with it still in the DOM.
+    // Browser Back restores that frozen overlay — clear it so finance (and other) MPAs don't stick.
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) {
+            hideNavProgress();
+            return;
+        }
+        // Non-bfcache back/forward can still leave a pending overlay if the prior target never mounted.
+        try {
+            if (sessionStorage.getItem(PENDING_KEY) !== '1') {
+                document.getElementById(OVERLAY_ID)?.remove();
+                document.documentElement.classList.remove('ch-nav-busy');
+            }
+        } catch {
+            document.getElementById(OVERLAY_ID)?.remove();
+            document.documentElement.classList.remove('ch-nav-busy');
+        }
+    });
+
+    // Strip overlay before freeze so a restored history entry is not permanently covered.
+    // Keep PENDING_KEY so the destination document can re-show progress until mount.
+    window.addEventListener('pagehide', () => {
+        document.getElementById(OVERLAY_ID)?.remove();
+        document.documentElement.classList.remove('ch-nav-busy');
+        document.getElementById('ch-boot-splash')?.remove();
+    });
 }
 
 installNavProgressBoot();

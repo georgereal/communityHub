@@ -391,6 +391,10 @@ export function hydrateFinanceDocsAggregatesFromApi(json = {}, apartmentId = nul
   return aggregatesCache;
 }
 
+export function getFinanceDocumentsAggregatesCache() {
+  return aggregatesCache;
+}
+
 /** Infinite-scroll list controller + per-filter page cache. */
 const listPageCache = new Map();
 let searchDebounceTimer = null;
@@ -581,6 +585,21 @@ export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
       floatVersion: FLOAT_TOTALS_VERSION,
       fetchedAt: Date.now(),
     };
+    try {
+      const s = getFinanceNew();
+      s.voucherAggregates = {
+        ...(s.voucherAggregates || {}),
+        summary: result.summary,
+        cashDocumentIds: result.cashDocumentIds || [],
+        openDocumentIds: result.openDocumentIds || [],
+        fundingBillTotals: result.fundingBillTotals || {},
+        fundingTransactionIds: result.fundingTransactionIds
+          || Object.keys(result.fundingBillTotals || {}),
+        documents: result.documents || s.voucherAggregates?.documents || [],
+      };
+      const { persistFinancePackCache } = await import('./packCache.js');
+      persistFinancePackCache();
+    } catch { /* pack cache is best-effort */ }
     return aggregatesCache;
   })();
 
@@ -857,6 +876,9 @@ export const applyFinanceDocsReportFilter = (filter) => {
 
 export const clearFinanceDocsReportFilter = () => {
   docsReportFilter = null;
+  void import('./ledgerFilter.js').then(({ persistDocsReportFilter }) => {
+    persistDocsReportFilter(null);
+  }).catch(() => { /* ignore */ });
   renderFdocReportBanner();
   renderFinanceDocumentsPage();
 };
@@ -923,7 +945,15 @@ const renderFdocReportBanner = () => {
   el.hidden = false;
   el.innerHTML = `
     <span class="ledger-pivot-banner__label"><i class="fa-solid fa-filter" aria-hidden="true"></i> ${esc(describeDocsReportFilter(docsReportFilter))}</span>
-    <button type="button" class="btn btn-outline btn--small" id="fdoc-report-clear">Clear report filter</button>`;
+    <span class="ledger-pivot-banner__actions">
+      <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-report-back" title="Return to Financial reports">
+        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to reports
+      </button>
+      <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-report-clear">Clear report filter</button>
+    </span>`;
+  el.querySelector('#fn-fdoc-report-back')?.addEventListener('click', () => {
+    navigateFinance('finance-reports');
+  }, { once: true });
   el.querySelector('#fn-fdoc-report-clear')?.addEventListener('click', () => {
     clearFinanceDocsReportFilter();
   }, { once: true });
@@ -3208,13 +3238,21 @@ export function initFinanceDocumentsPage() {
     const viewId = e.target.closest('[data-fdoc-view]')?.dataset?.fdocView;
     if (viewId) {
       const doc = (fnFinances().financeDocuments || []).find((d) => d.id === viewId);
-      if (doc) window.openFinanceDocumentView?.(doc);
+      if (doc) {
+        void import('./accountsChrome.js').then(({ openFinanceDocumentModal }) => (
+          openFinanceDocumentModal(doc, { readOnly: true })
+        ));
+      }
       return;
     }
     const editId = e.target.closest('[data-fdoc-edit]')?.dataset?.fdocEdit;
     if (editId) {
       const doc = (fnFinances().financeDocuments || []).find((d) => d.id === editId);
-      if (doc) window.openFinanceDocumentEdit?.(doc);
+      if (doc) {
+        void import('./accountsChrome.js').then(({ openFinanceDocumentModal }) => (
+          openFinanceDocumentModal(doc)
+        ));
+      }
       return;
     }
     const delId = e.target.closest('[data-fdoc-del]')?.dataset?.fdocDel;
@@ -3238,7 +3276,11 @@ export function initFinanceDocumentsPage() {
     if (row && e.target.closest('.fdoc-cell-open, .fdoc-status-cell')) {
       if (e.target.closest('[data-fdoc-preview], .fdoc-attach-icons')) return;
       const doc = (fnFinances().financeDocuments || []).find((d) => d.id === row.dataset.docId);
-      if (doc) window.openFinanceDocumentView?.(doc);
+      if (doc) {
+        void import('./accountsChrome.js').then(({ openFinanceDocumentModal }) => (
+          openFinanceDocumentModal(doc, { readOnly: true })
+        ));
+      }
     }
   });
 
@@ -3469,11 +3511,10 @@ export async function createFinanceDocumentFromLedgerTxn(txnId, { openEditor = t
 
   if (openEditor) {
     // Prefer the shared bill/receipt modal so attachments can be uploaded immediately.
-    if (typeof window.openFinanceDocumentEdit === 'function') {
-      window.openFinanceDocumentEdit(doc, { readOnly: false });
-    } else {
-      await focusFinanceDocument(doc.id);
-    }
+    const { openFinanceDocumentModal } = await import('./accountsChrome.js');
+    await openFinanceDocumentModal(doc);
+  } else {
+    await focusFinanceDocument(doc.id);
   }
 
   return doc;

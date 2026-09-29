@@ -105,9 +105,69 @@ function resolveRoute(method, parts, body, query) {
 
     // /ledger
     if (a === 'ledger') {
-        if (m === 'GET' && !b) return { kind: 'read', action: 'loadLedger', collection: 'ledger_entries' };
+        if (m === 'GET' && !b) {
+            return {
+                kind: 'read',
+                action: 'loadLedger',
+                collection: 'ledger_entries',
+                bodyPatch: {
+                    limit: q.limit,
+                    offset: q.offset,
+                    q: q.q,
+                    cat: q.cat,
+                    type: q.type,
+                    wallet: q.wallet,
+                    date_from: q.date_from,
+                    date_to: q.date_to,
+                    date: q.date,
+                    pivot_type: q.pivot_type,
+                    pivot_dimension: q.pivot_dimension,
+                    pivot_key: q.pivot_key,
+                    pivot_wallet: q.pivot_wallet,
+                    pivot_year: q.pivot_year,
+                    pivot_month: q.pivot_month,
+                    source_scope: q.source_scope,
+                    transaction_id: q.transaction_id,
+                    include_excluded: q.include_excluded,
+                },
+            };
+        }
         if (m === 'GET' && b === 'summary') {
             return { kind: 'read', action: 'ledgerSummary', collection: 'ledger_entries' };
+        }
+        if (m === 'GET' && b === 'unmatched-bank') {
+            return {
+                kind: 'read',
+                action: 'unmatchedBankLedger',
+                collection: 'ledger_entries',
+                bodyPatch: { limit: q.limit, type: q.type },
+            };
+        }
+        if (m === 'GET' && b === 'export') {
+            return {
+                kind: 'read',
+                action: 'exportLedger',
+                collection: 'ledger_entries',
+                bodyPatch: {
+                    limit: q.limit,
+                    offset: q.offset,
+                    q: q.q,
+                    cat: q.cat,
+                    type: q.type,
+                    wallet: q.wallet,
+                    date_from: q.date_from,
+                    date_to: q.date_to,
+                    pivot_type: q.pivot_type,
+                    pivot_dimension: q.pivot_dimension,
+                    pivot_key: q.pivot_key,
+                    pivot_wallet: q.pivot_wallet,
+                    pivot_year: q.pivot_year,
+                    pivot_month: q.pivot_month,
+                    source_scope: q.source_scope,
+                    transaction_id: q.transaction_id,
+                    include_excluded: q.include_excluded,
+                },
+            };
         }
         if (m === 'POST' && !b) return { kind: 'mutation', action: 'saveTransaction', collection: 'ledger_entries' };
         if (m === 'POST' && b === 'recalculate') return { kind: 'mutation', action: 'recalculateLedgerBalances', collection: 'ledger_entries' };
@@ -368,6 +428,20 @@ export default async function handler(req, res) {
             q: getQueryParam(req, 'q'),
             pay: getQueryParam(req, 'pay'),
             type: getQueryParam(req, 'type'),
+            cat: getQueryParam(req, 'cat'),
+            wallet: getQueryParam(req, 'wallet'),
+            date: getQueryParam(req, 'date'),
+            date_from: getQueryParam(req, 'date_from'),
+            date_to: getQueryParam(req, 'date_to'),
+            pivot_type: getQueryParam(req, 'pivot_type'),
+            pivot_dimension: getQueryParam(req, 'pivot_dimension'),
+            pivot_key: getQueryParam(req, 'pivot_key'),
+            pivot_wallet: getQueryParam(req, 'pivot_wallet'),
+            pivot_year: getQueryParam(req, 'pivot_year'),
+            pivot_month: getQueryParam(req, 'pivot_month'),
+            source_scope: getQueryParam(req, 'source_scope'),
+            transaction_id: getQueryParam(req, 'transaction_id'),
+            include_excluded: getQueryParam(req, 'include_excluded'),
             months: getQueryParam(req, 'months'),
             monthCount: getQueryParam(req, 'monthCount'),
             sheetOnly: getQueryParam(req, 'sheetOnly'),

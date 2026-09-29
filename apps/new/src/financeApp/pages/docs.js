@@ -1,5 +1,6 @@
 /**
  * Finance MPA — Bills & receipts
+ * Chrome is slim; finances.js (cash modal openers) loads on first Add/Edit.
  */
 import fragmentHtml from '../html/docs.html?raw';
 
@@ -23,21 +24,25 @@ async function main() {
         const { loadAccountsFinanceDocs } = await import('../../financeNew/load.js');
         await loadAccountsFinanceDocs();
 
-        const {
-            initExpenseModal,
-            initAccountsSubViewTabs,
-            syncAccountsHeaderActions,
-        } = await import('../../financeNew/finances.js');
-        initAccountsSubViewTabs?.();
-        initExpenseModal?.();
-        syncAccountsHeaderActions?.('finance-docs');
+        const { initAccountsPageChrome } = await import('../../financeNew/accountsChrome.js');
+        initAccountsPageChrome('finance-docs');
 
-        const { initFinanceDocumentsPage, renderFinanceDocumentsPage } = await import('../../financeNew/financeDocuments.js');
+        const { initFinanceDocumentsPage, renderFinanceDocumentsPage, applyFinanceDocsReportFilter } = await import('../../financeNew/financeDocuments.js');
         initFinanceDocumentsPage();
+
+        // Reports → Bills drill-down (stashed before MPA hard-nav).
+        try {
+            const { consumeDocsReportFilter } = await import('../../financeNew/ledgerFilter.js');
+            const pendingDocs = consumeDocsReportFilter();
+            if (pendingDocs) applyFinanceDocsReportFilter(pendingDocs);
+        } catch { /* ignore */ }
+
         renderFinanceDocumentsPage();
 
         const { initQuickCapture } = await import('../../financeNew/quickCapture.js');
         initQuickCapture();
+
+        document.querySelector('.finance-mpa-status')?.remove();
     } catch (err) {
         console.error('[finance/docs]', err);
         const host = document.getElementById('app-shell-page') || document.getElementById('app-shell-root');
