@@ -6,6 +6,7 @@ import { bindFinanceNewWindow } from './windowBridge.js';
  * Phase 2.2 — Bank statement import and reconciliation
  */
 import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { portalState } from '../store.js';
 import { logActivity } from '../activityAudit.js';
 import { matchFlatFromText, parseNoBrokerCollectionLines } from '../bulkCollectionImport.js';
@@ -180,11 +181,37 @@ const parseEditableDate = (value) => {
     return null;
 };
 
+/** Strip optional time suffix from bank exports like "21-09-2026 10:21:45" or "21-09-2026 / 10:21". */
+const stripDateTimeSuffix = (value) => {
+    const s = String(value || '').trim();
+    if (!s) return '';
+    const withSlash = s.match(/^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s*\/\s*\d{1,2}:\d{2}/);
+    if (withSlash) return withSlash[1];
+    const withSpace = s.match(/^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+\d{1,2}:\d{2}/);
+    if (withSpace) return withSpace[1];
+    const isoWithTime = s.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{1,2}:\d{2}/);
+    if (isoWithTime) return isoWithTime[1];
+    return s;
+};
+
 const parseDate = (val) => {
     if (!val) return null;
-    if (val instanceof Date) return val.toISOString().slice(0, 10);
-    const s = String(val).trim();
+    if (val instanceof Date) {
+        if (Number.isNaN(val.getTime())) return null;
+        return val.toISOString().slice(0, 10);
+    }
+    if (typeof val === 'number' && Number.isFinite(val)) {
+        // Excel serial date (SheetJS / ExcelJS)
+        const parsed = XLSX.SSF?.parse_date_code?.(val);
+        if (parsed?.y && parsed?.m && parsed?.d) {
+            return normalizeDateParts(parsed.y, parsed.m - 1, parsed.d);
+        }
+    }
+    const s = stripDateTimeSuffix(val);
+    if (!s) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const editable = parseEditableDate(s);
+    if (editable) return editable;
     const d = new Date(s);
     if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
     const parts = s.split(/[\/\-]/);
@@ -194,6 +221,22 @@ const parseDate = (val) => {
         if (a > 1000) return `${a}-${String(b).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
     }
     return null;
+};
+
+/** Import presets for bank statement spreadsheets. */
+export const BANK_STATEMENT_TEMPLATES = {
+    standard: {
+        id: 'standard',
+        label: 'CommunityHub template',
+        defaultHeaderRow: 1,
+        hint: 'CommunityHub columns: Date, Description, Debit, Credit, Balance.',
+    },
+    andhra: {
+        id: 'andhra',
+        label: 'Andhra Bank template',
+        defaultHeaderRow: 14,
+        hint: 'Andhra Bank mapping: Date → Date (dd-mm-yyyy / time), Remarks → Description, Withdrawals → Debit, Deposits → Credit, Balance → Balance. Header row is usually 14.',
+    },
 };
 
 const parseAmount = (val) => {
@@ -246,25 +289,52 @@ const passbookRowBalance = (line) => {
     return Number.isFinite(value) ? value : null;
 };
 
-const detectStatementColumns = (headers) => {
+const detectStatementColumns = (headers, template = 'standard') => {
     const normalized = headers.map((h) => String(h || '').trim().toLowerCase());
-    const col = (names) => {
+    const exact = (names) => {
+        const idx = normalized.findIndex((h) => names.includes(h));
+        return idx >= 0 ? idx : -1;
+    };
+    const includes = (names) => {
         const idx = normalized.findIndex((h) => names.some((n) => h.includes(n)));
         return idx >= 0 ? idx : -1;
     };
+    const col = (exactNames, fuzzyNames) => {
+        const exactIdx = exact(exactNames);
+        if (exactIdx >= 0) return exactIdx;
+        return includes(fuzzyNames);
+    };
+
+    // Andhra Bank (Union Bank OpTransactionHistory): Date, Tran Id, Remarks, UTR, Instr. Id, Withdrawals, Deposits, Balance
+    if (template === 'andhra') {
+        const dateCol = col(['date'], ['date']);
+        const descCol = col(['remarks', 'remark'], ['remarks', 'remark', 'description', 'narration', 'particular']);
+        const debitCol = col(['withdrawals', 'withdrawal'], ['withdraw', 'debit']);
+        const creditCol = col(['deposits', 'deposit'], ['deposit', 'credit']);
+        const balanceCol = col(['balance'], ['balance']);
+        return { dateCol, descCol, debitCol, creditCol, balanceCol };
+    }
+
     return {
-        dateCol: col(['date']),
-        descCol: col(['description', 'narration', 'particular']),
-        debitCol: col(['debit', 'withdraw']),
-        creditCol: col(['credit', 'deposit']),
-        balanceCol: col(['balance']),
+        dateCol: col(['date'], ['date']),
+        descCol: col(['description', 'remarks', 'remark'], ['description', 'narration', 'particular', 'remarks', 'remark']),
+        debitCol: col(['debit', 'withdrawals', 'withdrawal'], ['debit', 'withdraw']),
+        creditCol: col(['credit', 'deposits', 'deposit'], ['credit', 'deposit']),
+        balanceCol: col(['balance'], ['balance']),
     };
 };
 
-const buildStatementLinesFromRows = (headers, rows) => {
-    const { dateCol, descCol, debitCol, creditCol, balanceCol } = detectStatementColumns(headers);
+const buildStatementLinesFromRows = (headers, rows, { template = 'standard' } = {}) => {
+    const { dateCol, descCol, debitCol, creditCol, balanceCol } = detectStatementColumns(headers, template);
     if (dateCol < 0) {
-        throw new Error('Could not find Date column. Use template headers: Date, Description, Debit, Credit, Balance.');
+        throw new Error(
+            template === 'andhra'
+                ? 'Could not find Date column for Andhra Bank template. Check the header row number (usually 14).'
+                : 'Could not find Date column. Use template headers: Date, Description, Debit, Credit, Balance.',
+        );
+    }
+    if (template === 'andhra' && descCol < 0) {
+        throw new Error('Could not find Remarks column for Andhra Bank template. Check the header row number.');
     }
 
     const lines = [];
@@ -281,8 +351,57 @@ const buildStatementLinesFromRows = (headers, rows) => {
         });
     });
 
-    if (!lines.length) throw new Error('No data rows found.');
+    if (!lines.length) {
+        throw new Error(
+            template === 'andhra'
+                ? 'No Andhra Bank data rows found. Confirm the header row (usually 14) and that dates use dd-mm-yyyy.'
+                : 'No data rows found.',
+        );
+    }
     return lines;
+};
+
+const normalizeSheetRows = (rows) => (rows || []).map((row) => {
+    if (Array.isArray(row)) return row;
+    return [];
+});
+
+const readWorkbookRowsWithXlsx = async (file) => {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) throw new Error('No worksheet found in file.');
+    const sheet = wb.Sheets[sheetName];
+    return normalizeSheetRows(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }));
+};
+
+const readWorkbookRowsWithExcelJs = async (file) => {
+    const wb = new ExcelJS.Workbook();
+    const buf = await file.arrayBuffer();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new Error('No worksheet found in file.');
+    const rows = [];
+    const maxCol = Math.max(ws.columnCount || 0, 1);
+    ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+        const cells = new Array(maxCol).fill('');
+        row.eachCell({ includeEmpty: true }, (cell, col) => {
+            const value = cell.value;
+            if (value && typeof value === 'object' && !(value instanceof Date) && value.text != null) {
+                cells[col - 1] = value.text;
+            } else if (value && typeof value === 'object' && value.result != null) {
+                cells[col - 1] = value.result;
+            } else {
+                cells[col - 1] = value ?? '';
+            }
+        });
+        rows[rowNumber - 1] = cells;
+    });
+    // Fill gaps so headerRow indexing stays 1-based against spreadsheet rows
+    for (let i = 0; i < rows.length; i += 1) {
+        if (!rows[i]) rows[i] = new Array(maxCol).fill('');
+    }
+    return rows;
 };
 
 const parseCsvRows = (text) => {
@@ -329,38 +448,70 @@ const parseCsvRows = (text) => {
     return rows;
 };
 
-export async function parseBankStatementFile(file) {
-    const name = String(file?.name || '').toLowerCase();
-    if (name.endsWith('.csv')) {
-        const text = await file.text();
-        const rows = parseCsvRows(text);
-        if (rows.length < 2) throw new Error('CSV file is empty or missing data rows.');
-        const [headers, ...dataRows] = rows;
-        return buildStatementLinesFromRows(headers, dataRows);
+export function getBankStatementImportOptions() {
+    const templateEl = document.getElementById('fn-bank-recon-import-template');
+    const headerEl = document.getElementById('fn-bank-recon-import-header-row');
+    const template = templateEl?.value === 'andhra' ? 'andhra' : 'standard';
+    const preset = BANK_STATEMENT_TEMPLATES[template] || BANK_STATEMENT_TEMPLATES.standard;
+    const rawHeader = parseInt(headerEl?.value, 10);
+    const headerRow = Number.isInteger(rawHeader) && rawHeader >= 1
+        ? rawHeader
+        : preset.defaultHeaderRow;
+    return { template, headerRow };
+}
+
+export function syncBankStatementImportOptionsUi() {
+    const templateEl = document.getElementById('fn-bank-recon-import-template');
+    const hintEl = document.getElementById('fn-bank-recon-import-template-hint');
+    const templateBtn = document.getElementById('fn-bank-recon-template-btn');
+    if (!templateEl) return;
+
+    const template = templateEl.value === 'andhra' ? 'andhra' : 'standard';
+    const preset = BANK_STATEMENT_TEMPLATES[template];
+    if (hintEl) hintEl.textContent = preset.hint;
+    if (templateBtn) {
+        templateBtn.hidden = template === 'andhra';
+        templateBtn.disabled = template === 'andhra';
     }
-    if (name.endsWith('.xls')) {
-        throw new Error('Legacy .xls files are not supported yet. Save the file as .xlsx or .csv and import again.');
+}
+
+export async function parseBankStatementFile(file, options = {}) {
+    const template = options.template === 'andhra' ? 'andhra' : 'standard';
+    const preset = BANK_STATEMENT_TEMPLATES[template];
+    const headerRow = Number.isInteger(options.headerRow) && options.headerRow >= 1
+        ? options.headerRow
+        : preset.defaultHeaderRow;
+
+    const name = String(file?.name || '').toLowerCase();
+    let allRows;
+    if (name.endsWith('.csv')) {
+        allRows = normalizeSheetRows(parseCsvRows(await file.text()));
+    } else if (name.endsWith('.xls') && !name.endsWith('.xlsx')) {
+        allRows = await readWorkbookRowsWithXlsx(file);
+    } else if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
+        // Prefer ExcelJS for modern workbooks; fall back to SheetJS if needed.
+        try {
+            allRows = await readWorkbookRowsWithExcelJs(file);
+        } catch {
+            allRows = await readWorkbookRowsWithXlsx(file);
+        }
+    } else {
+        // Unknown extension — try SheetJS (covers legacy .xls mislabeled uploads)
+        try {
+            allRows = await readWorkbookRowsWithXlsx(file);
+        } catch {
+            throw new Error('Unsupported file type. Upload .xlsx, .xls, or .csv.');
+        }
     }
 
-    const wb = new ExcelJS.Workbook();
-    const buf = await file.arrayBuffer();
-    await wb.xlsx.load(buf);
-    const ws = wb.worksheets[0];
-    if (!ws) throw new Error('No worksheet found in file.');
-    const headers = [];
-    ws.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
-        headers[col - 1] = String(cell.value || '').trim();
-    });
-    const dataRows = [];
-    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const cells = [];
-        row.eachCell({ includeEmpty: true }, (cell, col) => {
-            cells[col - 1] = cell.value;
-        });
-        dataRows.push(cells);
-    });
-    return buildStatementLinesFromRows(headers, dataRows);
+    if (!allRows.length) throw new Error('Spreadsheet is empty.');
+    if (headerRow > allRows.length) {
+        throw new Error(`Header row ${headerRow} is past the end of the file (${allRows.length} row(s)).`);
+    }
+
+    const headers = allRows[headerRow - 1] || [];
+    const dataRows = allRows.slice(headerRow);
+    return buildStatementLinesFromRows(headers, dataRows, { template });
 }
 
 export async function importBankStatement(file, lines, { fileLabel, skipDedupe = false, pull = true } = {}) {
@@ -3788,14 +3939,16 @@ export const initBankReconciliationUi = () => {
     };
 
     const processBankStatementFile = async (file) => {
-        const lines = await parseBankStatementFile(file);
+        const options = getBankStatementImportOptions();
+        const lines = await parseBankStatementFile(file, options);
         const { unique, skipped } = dedupeBankImportLines(lines);
         const dupNote = skipped ? `\n\n${skipped} duplicate(s) will be skipped.` : '';
         if (!unique.length) {
             alert(`All ${lines.length} line(s) are duplicates (same date, description, and amount). Nothing to import.`);
             return;
         }
-        if (!confirm(`Import ${unique.length} new line(s) from ${file.name}?${dupNote}`)) return;
+        const templateLabel = BANK_STATEMENT_TEMPLATES[options.template]?.label || 'statement';
+        if (!confirm(`Import ${unique.length} new line(s) from ${file.name} (${templateLabel}, header row ${options.headerRow})?${dupNote}`)) return;
         const result = await importBankStatement(file, lines);
         alert(importResultMessage(result));
         renderBankReconciliation();
@@ -3853,6 +4006,13 @@ export const initBankReconciliationUi = () => {
         setActiveBankReconTab('import');
         document.getElementById('fn-bank-recon-file')?.click();
     });
+    document.getElementById('fn-bank-recon-import-template')?.addEventListener('change', () => {
+        const template = document.getElementById('fn-bank-recon-import-template')?.value === 'andhra' ? 'andhra' : 'standard';
+        const headerEl = document.getElementById('fn-bank-recon-import-header-row');
+        if (headerEl) headerEl.value = String(BANK_STATEMENT_TEMPLATES[template].defaultHeaderRow);
+        syncBankStatementImportOptionsUi();
+    });
+    syncBankStatementImportOptionsUi();
     wireDropzone(document.getElementById('fn-bank-recon-import-dropzone'), {
         onActivate: () => document.getElementById('fn-bank-recon-file')?.click(),
         onFiles: async (files) => {

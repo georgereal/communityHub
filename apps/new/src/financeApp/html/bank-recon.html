@@ -5,7 +5,7 @@
                 <i class="fa-solid fa-file-arrow-up bank-recon-source-tab__icon" aria-hidden="true"></i>
                 <span class="bank-recon-source-tab__text">
                   <strong><span class="bank-recon-tab-label bank-recon-tab-label--long">Import statement</span><span class="bank-recon-tab-label bank-recon-tab-label--short">Import</span></strong>
-                  <span class="bank-recon-source-tab__hint">Excel / CSV · manual rows</span>
+                  <span class="bank-recon-source-tab__hint">Excel / CSV · Andhra Bank</span>
                 </span>
               </button>
               <button type="button" class="bank-recon-source-tab" id="fn-bank-recon-tab-passbook" role="tab" data-bank-recon-tab="passbook" aria-selected="false" aria-controls="fn-bank-recon-passbook-panel">
@@ -30,17 +30,33 @@
             <div class="bank-recon-source-panels">
               <div id="fn-bank-recon-import-panel" class="bank-recon-source-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-import" hidden>
                 <div class="bank-recon-source-panel__intro">
-                  <p>Upload a bank export with columns <strong>Date</strong>, <strong>Description</strong>, <strong>Debit</strong>, <strong>Credit</strong>, and optionally <strong>Balance</strong>. Duplicates (same date, description, amount) are skipped automatically.</p>
-                  <ul class="bank-recon-source-panel__steps">
-                    <li>Download the template and paste your statement rows.</li>
-                    <li>Drag a file onto the zone below or browse for <code>.xlsx</code> / <code>.csv</code>.</li>
+                  <p>Upload a bank export, then classify and match statement lines below. Duplicates (same date, description, amount) are skipped automatically.</p>
+                  <ul class="bank-recon-source-panel__steps" id="fn-bank-recon-import-steps">
+                    <li>Choose the statement template and set the header row if the export has a preamble.</li>
+                    <li>Drag a file onto the zone below or browse for <code>.xlsx</code> / <code>.xls</code> / <code>.csv</code>.</li>
                     <li>Use <strong>Add rows manually</strong> when OCR misses lines or for one-off entries.</li>
                   </ul>
+                </div>
+                <div class="bank-recon-import-options" id="fn-bank-recon-import-options">
+                  <label class="bank-recon-import-options__field">
+                    <span class="bank-recon-import-options__label">Statement template</span>
+                    <select id="fn-bank-recon-import-template" class="bank-recon-import-options__select">
+                      <option value="standard">CommunityHub template</option>
+                      <option value="andhra">Andhra Bank template</option>
+                    </select>
+                  </label>
+                  <label class="bank-recon-import-options__field">
+                    <span class="bank-recon-import-options__label">Header row</span>
+                    <input type="number" id="fn-bank-recon-import-header-row" class="bank-recon-import-options__input" min="1" step="1" value="1" inputmode="numeric" title="1-based row number that contains column headers" />
+                  </label>
+                  <p class="bank-recon-import-options__hint" id="fn-bank-recon-import-template-hint">
+                    CommunityHub columns: Date, Description, Debit, Credit, Balance.
+                  </p>
                 </div>
                 <div class="bank-recon-dropzone" id="fn-bank-recon-import-dropzone" tabindex="0" role="button" aria-label="Drop Excel or CSV file to import">
                   <i class="fa-solid fa-cloud-arrow-up bank-recon-dropzone__icon" aria-hidden="true"></i>
                   <p class="bank-recon-dropzone__title">Drop Excel or CSV here</p>
-                  <p class="bank-recon-dropzone__sub">or use Browse below · one file per import</p>
+                  <p class="bank-recon-dropzone__sub">.xlsx · .xls · CSV · one file per import</p>
                 </div>
                 <div class="bank-recon-source-panel__actions">
                   <button type="button" class="btn btn-outline btn--small" id="fn-bank-recon-template-btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download template</button>
@@ -106,7 +122,7 @@
               <div id="fn-bank-recon-opening-panel" class="bank-recon-source-panel__body bank-recon-opening-panel__body" role="tabpanel" aria-labelledby="bank-recon-tab-opening" hidden></div>
             </div>
           </div>
-          <input type="file" id="fn-bank-recon-file" accept=".xlsx,.csv" hidden />
+          <input type="file" id="fn-bank-recon-file" accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
           <input type="file" id="fn-bank-recon-passbook-files" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf" multiple hidden />
 
           <section id="fn-bank-recon-stats" class="bank-recon-stats"></section>

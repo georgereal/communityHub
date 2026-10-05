@@ -7174,7 +7174,7 @@ header {
   }
 
   .cash-modal--bill #expense-form-view .expense-form__section--vendor-invoice {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   #cash-modal.cash-modal--bill .bill-payment {
@@ -7250,6 +7250,29 @@ header {
       "category subcat"
       "vendor-invoice vendor-invoice"
       "desc desc";
+  }
+
+  .cash-modal--bill #expense-form-view .expense-form__section--amount .expense-amount,
+  .cash-modal--bill #expense-form-view .expense-form__section--date .expense-date {
+    min-height: 2.45rem;
+    font-size: 0.95rem;
+  }
+
+  .cash-modal--bill #expense-form-view .expense-form__section--cats .expense-combobox,
+  .cash-modal--bill #expense-form-view .expense-form__section--subcat .expense-combobox,
+  .cash-modal--bill #expense-form-view .expense-form__section--vendor .expense-combobox,
+  .cash-modal--bill #expense-form-view .expense-form__section--invoice .expense-combobox {
+    min-height: 2.45rem;
+    width: 100%;
+  }
+
+  .cash-modal--bill #expense-form-view .expense-form__section--desc .expense-textarea {
+    min-height: 2.75rem;
+  }
+
+  .cash-modal--bill #expense-form-view .expense-form__section--vendor-invoice {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem 0.85rem;
   }
 }
 
@@ -12866,6 +12889,7 @@ header {
 
 .bank-recon-source-panels .bank-recon-source-panel__intro,
 .bank-recon-source-panels .bank-recon-source-panel__steps,
+.bank-recon-source-panels .bank-recon-import-options,
 .bank-recon-source-panels .bank-recon-passbook-hint,
 .bank-recon-source-panels .bank-recon-passbook-status,
 .bank-recon-source-panels .bank-recon-passbook-jobs-inline,
@@ -12876,6 +12900,56 @@ header {
 .bank-recon-source-panels .bank-recon-balance-panel__mismatch-count,
 .bank-recon-source-panels .bank-recon-balance-panel__fields {
   grid-column: 1 / -1;
+}
+
+.bank-recon-import-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem 0.85rem;
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.bank-recon-import-options__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 10rem;
+}
+
+.bank-recon-import-options__label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.bank-recon-import-options__select,
+.bank-recon-import-options__input {
+  min-height: 2rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.78rem;
+  color: var(--text-main);
+}
+
+.bank-recon-import-options__input {
+  width: 5.5rem;
+}
+
+.bank-recon-import-options__hint {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 
 .bank-recon-source-panels .bank-recon-balance-panel__fields {
@@ -18730,6 +18804,15 @@ textarea.bank-recon-cell-input {
   max-height: min(86vh, 820px);
 }
 
+.fdoc-link-modal__panel--eplan {
+  width: min(1080px, 96vw);
+  max-height: min(90vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
 .ledger-linked-bills-list {
   display: flex;
   flex-direction: column;
@@ -19465,6 +19548,60 @@ textarea.bank-recon-cell-input {
   color: #0369a1;
 }
 
+.eplan-badge--open {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.eplan-badge--overdue {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.eplan-badge--done {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.ledger-kpi--filter {
+  appearance: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: inherit;
+}
+
+.ledger-kpi--filter:hover {
+  border-color: #cbd5e1;
+}
+
+.ledger-kpi--filter.ledger-kpi--active {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.25);
+}
+
+.eplan-row--done td {
+  opacity: 0.72;
+}
+
+.eplan-rec-period-row__pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  justify-content: flex-end;
+}
+
+.eplan-rec-period-row__pct input {
+  width: 4.5rem;
+  text-align: right;
+}
+
+.eplan-rec-period-row:has(.eplan-rec-period-row__pct) {
+  grid-template-columns: 2rem 1fr minmax(5rem, 6.5rem) minmax(5.5rem, 7rem);
+}
+
 .fdoc-staff-mode #fdoc-funding-details,
 .fdoc-staff-mode #fdoc-float-kpis,
 .fdoc-staff-mode #fdoc-bulk-link,
@@ -19639,16 +19776,113 @@ textarea.bank-recon-cell-input {
   content: '▾';
 }
 
+.eplan-modal-head {
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.eplan-modal-form--workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* display:flex above must not defeat the hidden attribute */
+.eplan-modal-form--workspace[hidden] {
+  display: none !important;
+}
+
+.eplan-modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.eplan-modal-top {
+  padding: 1rem 1.25rem 0.85rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.eplan-modal-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.85rem;
+  padding: 0.85rem 1.25rem 1rem;
+  background: #f8fafc;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+}
+
+.eplan-modal-bottom--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.eplan-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.75rem 0.85rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.eplan-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.55rem;
+}
+
+.eplan-card__head h4 {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #0f172a;
+}
+
+.eplan-card__head p {
+  margin: 0.12rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-dim, #64748b);
+  line-height: 1.3;
+}
+
+.eplan-card--schedule {
+  min-height: 10rem;
+}
+
+.eplan-card--docs {
+  min-height: 10rem;
+}
+
 .eplan-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem 0.75rem;
+  gap: 0.55rem 0.7rem;
+}
+
+.eplan-form-grid--compact {
+  gap: 0.5rem 0.65rem;
 }
 
 .eplan-form-grid label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.22rem;
   font-size: 0.68rem;
   font-weight: 700;
   color: var(--text-dim, #64748b);
@@ -19658,37 +19892,157 @@ textarea.bank-recon-cell-input {
   grid-column: 1 / -1;
 }
 
+.eplan-form-span-2 {
+  grid-column: span 1;
+}
+
+.eplan-attach {
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.eplan-attach--inline {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 4.5rem;
+}
+
+.eplan-attach__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+
+.eplan-attach__label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.eplan-attach__add {
+  cursor: pointer;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.eplan-attach .fdoc-attach-list,
+.eplan-attach__list {
+  margin: 0;
+  flex: 1;
+  min-height: 2.25rem;
+}
+
+.eplan-attach__hint {
+  margin: 0.4rem 0 0 !important;
+}
+
+.eplan-what-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.eplan-detail-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.eplan-detail-atts .fdoc-chip__open,
+.eplan-detail-att {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
 .eplan-modal-actions {
   margin-top: 1rem;
   display: flex;
   justify-content: flex-end;
 }
 
-.eplan-rec-split-hint {
-  margin: 0.55rem 0 0;
+.eplan-modal-actions--bar {
+  margin: 0;
+  flex-shrink: 0;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+  background: #fff;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
-.eplan-rec-periods {
-  margin-top: 0.75rem;
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 10px;
-  padding: 0.55rem 0.65rem;
-  background: #f8fafc;
-  max-height: 220px;
+.eplan-modal-actions--bar .btn-primary {
+  margin-left: auto;
+}
+
+.eplan-complete-summary {
+  margin: 0 0 0.45rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+.eplan-complete-list {
+  max-height: min(46vh, 360px);
   overflow: auto;
 }
 
-.eplan-rec-periods__head {
+.eplan-rec-split-hint {
+  margin: 0.5rem 0 0;
+}
+
+.eplan-rec-periods {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  max-height: none;
+  overflow: visible;
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.45rem;
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  flex-direction: column;
+}
+
+.eplan-rec-periods--panel .eplan-rec-periods__list {
+  flex: 1;
+  overflow: auto;
+  max-height: min(34vh, 280px);
+  padding-right: 0.1rem;
+}
+
+.eplan-rec-periods-empty {
+  margin: 0;
+  padding: 0.9rem 0.95rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 0.8rem;
   color: var(--text-dim, #64748b);
+  line-height: 1.4;
+}
+
+.eplan-rec-periods-empty[hidden] {
+  display: none !important;
 }
 
 .eplan-rec-periods__list {
@@ -19703,6 +20057,9 @@ textarea.bank-recon-cell-input {
   gap: 0.45rem;
   align-items: center;
   font-size: 0.82rem;
+  padding: 0.3rem 0.35rem;
+  border-radius: 6px;
+  background: #f8fafc;
 }
 
 .eplan-rec-period-row__idx {
@@ -19715,9 +20072,47 @@ textarea.bank-recon-cell-input {
   width: 100%;
 }
 
+@media (min-width: 901px) {
+  .fdoc-link-modal__panel--eplan {
+    width: min(1040px, 96vw);
+  }
+
+  .eplan-form-grid--compact {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .eplan-form-span-2 {
+    grid-column: span 2;
+  }
+
+  .eplan-modal-bottom {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  }
+
+  .eplan-modal-bottom--single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .eplan-card--schedule,
+  .eplan-card--docs {
+    min-height: 12rem;
+  }
+}
+
 @media (max-width: 900px) {
-  .eplan-form-grid {
+  .eplan-form-grid,
+  .eplan-form-grid--compact {
     grid-template-columns: 1fr;
+  }
+
+  .eplan-form-span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .fdoc-link-modal__panel--eplan {
+    width: min(100vw, 100%);
+    max-height: 100vh;
+    border-radius: 0;
   }
 
   .eplan-dl__meta {
@@ -19955,5 +20350,6 @@ textarea.bank-recon-cell-input {
 
 .eplan-due--late { color: #b91c1c; font-weight: 700; }
 .eplan-row--overdue td { background: #fff7ed; }
+.eplan-row--done.eplan-row--overdue td { background: transparent; }
 .eplan-form-grid .bank-recon-classify-combobox { position: relative; }
 .eplan-form-grid .bank-recon-classify-combobox input { width: 100%; }

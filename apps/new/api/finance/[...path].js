@@ -360,6 +360,22 @@ function resolveRoute(method, parts, body, query) {
                 bodyPatch: { id: c },
             };
         }
+        if (b === 'items' && c && m === 'POST' && parts[3] === 'reopen') {
+            return {
+                kind: 'mutation',
+                action: 'reopenExpensePlanItem',
+                collection: 'finance_config',
+                bodyPatch: { id: c },
+            };
+        }
+        if (b === 'items' && c && m === 'POST' && parts[3] === 'link') {
+            return {
+                kind: 'mutation',
+                action: 'linkExpensePlanItem',
+                collection: 'finance_config',
+                bodyPatch: { id: c },
+            };
+        }
         if (b === 'items' && m === 'DELETE' && c) {
             return {
                 kind: 'mutation',
@@ -369,6 +385,14 @@ function resolveRoute(method, parts, body, query) {
             };
         }
         if (b === 'recurring' && m === 'POST' && !c) return { kind: 'mutation', action: 'saveExpensePlanRecurring', collection: 'finance_config' };
+        if (b === 'recurring' && c && m === 'POST' && parts[3] === 'occurrence') {
+            return {
+                kind: 'mutation',
+                action: 'setExpensePlanOccurrenceStatus',
+                collection: 'finance_config',
+                bodyPatch: { id: c, recurring_id: c },
+            };
+        }
         if (b === 'recurring' && m === 'DELETE' && c) {
             return {
                 kind: 'mutation',

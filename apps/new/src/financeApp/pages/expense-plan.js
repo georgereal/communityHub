@@ -16,7 +16,7 @@ async function main() {
     try {
         setStatus('Loading…');
         const { mountFinancePage } = await import('../mount.js');
-        const ctx = await mountFinancePage({ page: 'expense-plan', fragmentHtml });
+        const ctx = await mountFinancePage({ page: 'expense-plan', fragmentHtml, withModals: true });
         if (!ctx) return;
 
         setStatus('Loading expense plan…');

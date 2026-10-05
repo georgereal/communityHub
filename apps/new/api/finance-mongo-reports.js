@@ -181,11 +181,12 @@ function compareBankLines(a, b, importById) {
     return (a.source_row_index ?? 0) - (b.source_row_index ?? 0);
 }
 
-function passbookRowBalance(line, importById) {
-    const PASSBOOK_PREFIX = 'evolyx-passbook:';
-    const imp = importById.get(String(line?.import_id));
-    const fileName = String(imp?.file_name || '');
-    if (!fileName.startsWith(PASSBOOK_PREFIX)) return null;
+/**
+ * Closing balance printed on a statement row.
+ * Accepts any import source (Excel/CSV upload or Evolyx passbook OCR) — we do not
+ * split banks yet, so every Balance column counts as the same passbook series.
+ */
+function passbookRowBalance(line) {
     if (line?.balance == null || line.balance === '') return null;
     const value = parseFloat(line.balance);
     return Number.isFinite(value) ? value : null;
@@ -224,11 +225,11 @@ function computeLedgerBankSnapshot(entries, bankAccount) {
 }
 
 /**
- * Classic: prefer last chronological passbook balance on/after opening;
+ * Prefer last chronological statement Balance on/after opening (Excel or OCR);
  * else opening + credits − debits (calculated from MATCHED lines only).
  *
- * Passbook balance: sourced from the bank-uploaded statement balance column —
- * uses all lines because it reflects what the bank actually shows.
+ * Passbook balance: last Balance column from any bank-statement import source —
+ * OCR scans and spreadsheet uploads share one society bank account today.
  *
  * Calculated balance: only MATCHED+POSTED lines are counted because unmatched
  * lines have not been posted to the ledger yet and should not affect the
@@ -248,10 +249,10 @@ function computeBankBalanceSnapshot(bankLines, imports, bankAccount) {
         .sort((a, b) => compareBankLines(a, b, importById))
         .filter((l) => !openingDate || String(l.line_date || '') >= openingDate);
 
-    // Passbook balance: from bank-uploaded file balance column — all lines (reflects actual bank).
+    // Passbook closing: newest statement Balance from any import (Excel / CSV / OCR).
     let passbook = null;
     for (let i = allChronological.length - 1; i >= 0; i -= 1) {
-        const bal = passbookRowBalance(allChronological[i], importById);
+        const bal = passbookRowBalance(allChronological[i]);
         if (bal != null) {
             passbook = { balance: round2(bal), asOf: allChronological[i].line_date };
             break;

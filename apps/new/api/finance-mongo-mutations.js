@@ -16,6 +16,7 @@ import {
     r2PutObject,
     r2DeleteObjects,
     buildFinanceDocObjectKey,
+    buildExpensePlanObjectKey,
     extForRecordMime,
     attachmentObjectKey,
     isAllowedFinanceDocObjectKey,
@@ -95,6 +96,108 @@ async function uploadFinanceDocFilesToR2(apartmentId, files = [], { kind } = {})
         });
     }
     return uploaded;
+}
+
+function normalizeExpensePlanAttachments(kept = []) {
+    return (kept || [])
+        .map((entry) => {
+            if (entry && typeof entry === 'object' && entry.key) {
+                const key = String(entry.key).trim();
+                if (!isAllowedFinanceDocObjectKey(key)) return null;
+                return {
+                    key,
+                    contentType: String(entry.contentType || 'application/octet-stream'),
+                    originalName: String(entry.originalName || '').slice(0, 512),
+                    bytes: Number(entry.bytes) || 0,
+                    uploadedAt: entry.uploadedAt || nowIso(),
+                    purpose: 'proposal',
+                };
+            }
+            const key = attachmentObjectKey(entry);
+            if (!key || !isAllowedFinanceDocObjectKey(key)) return null;
+            return {
+                key,
+                contentType: 'application/octet-stream',
+                originalName: key.split('/').pop() || key,
+                bytes: 0,
+                uploadedAt: nowIso(),
+                purpose: 'proposal',
+            };
+        })
+        .filter(Boolean);
+}
+
+async function uploadExpensePlanFilesToR2(apartmentId, files = []) {
+    if (!files.length) return [];
+    if (!isR2Configured()) {
+        throw Object.assign(
+            new Error('Object storage is not configured (set R2 credentials and bucket).'),
+            { status: 503 },
+        );
+    }
+    const uploaded = [];
+    for (const file of files) {
+        const mime = String(file.mimeType || 'application/octet-stream').toLowerCase();
+        const ext = extForRecordMime(mime);
+        if (!ext) {
+            throw Object.assign(
+                new Error('Only images (JPEG, PNG, WebP, GIF) or PDF files are supported for proposal/invoice attachments.'),
+                { status: 400 },
+            );
+        }
+        const body = Buffer.from(String(file.base64 || ''), 'base64');
+        const key = buildExpensePlanObjectKey({
+            orgName: apartmentId,
+            mimeOrExt: mime,
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await r2PutObject({ key, body, contentType: mime });
+        uploaded.push({
+            key,
+            contentType: mime,
+            originalName: String(file.name || '').slice(0, 512),
+            bytes: body.length,
+            uploadedAt: nowIso(),
+            purpose: 'proposal',
+        });
+    }
+    return uploaded;
+}
+
+async function mergeExpensePlanAttachments(apartmentId, existingAttachments, body) {
+    const previous = Array.isArray(existingAttachments) ? existingAttachments : [];
+    const hasKeep = Object.prototype.hasOwnProperty.call(body, 'keepAttachments')
+        || Object.prototype.hasOwnProperty.call(body, 'keepAttachmentPaths');
+    const kept = normalizeExpensePlanAttachments(
+        hasKeep
+            ? (body.keepAttachments || body.keepAttachmentPaths || [])
+            : (body.attachment_urls || previous),
+    );
+    let uploaded = [];
+    if (body.newAttachmentFiles?.length) {
+        uploaded = await uploadExpensePlanFilesToR2(apartmentId, body.newAttachmentFiles);
+    }
+    const keepKeys = new Set(kept.map((a) => a.key));
+    const removeFromBody = (body.removeAttachments || [])
+        .map((a) => (a && typeof a === 'object' ? a.key : attachmentObjectKey(a)))
+        .filter((k) => k && isAllowedFinanceDocObjectKey(k));
+    const removedByOmit = previous
+        .map((a) => attachmentObjectKey(a))
+        .filter((k) => k && isAllowedFinanceDocObjectKey(k) && !keepKeys.has(k));
+    const removeKeys = [...new Set([...removeFromBody, ...removedByOmit])];
+    if (removeKeys.length && isR2Configured()) {
+        try { await r2DeleteObjects(removeKeys); } catch { /* keep save even if R2 delete fails */ }
+    }
+    return [...kept, ...uploaded];
+}
+
+async function deleteExpensePlanAttachmentKeys(attachments = []) {
+    const keys = (attachments || [])
+        .map((a) => attachmentObjectKey(a))
+        .filter((k) => k && isAllowedFinanceDocObjectKey(k));
+    if (keys.length && isR2Configured()) {
+        try { await r2DeleteObjects(keys); } catch { /* best-effort */ }
+    }
 }
 
 async function ensureConfig(db, apartmentId) {
@@ -1282,6 +1385,11 @@ async function saveExpensePlanItem(db, apartmentId, body) {
     const list = [...(cfg.expensePlanItems || [])];
     const id = item.id || uid();
     const existing = list.find((x) => String(x.id) === String(id));
+    const attachment_urls = await mergeExpensePlanAttachments(
+        apartmentId,
+        existing?.attachment_urls,
+        body,
+    );
     const row = {
         ...existing,
         ...item,
@@ -1293,7 +1401,12 @@ async function saveExpensePlanItem(db, apartmentId, body) {
             ? String(item.due_date).slice(0, 10)
             : (item.plan_date ? String(item.plan_date).slice(0, 10) : null),
         status: item.status || existing?.status || 'planned',
+        attachment_urls,
     };
+    delete row.keepAttachments;
+    delete row.keepAttachmentPaths;
+    delete row.newAttachmentFiles;
+    delete row.removeAttachments;
     const idx = list.findIndex((x) => String(x.id) === String(id));
     if (idx >= 0) list[idx] = { ...list[idx], ...row };
     else list.push(row);
@@ -1304,6 +1417,10 @@ async function saveExpensePlanItem(db, apartmentId, body) {
 async function deleteExpensePlanItem(db, apartmentId, body) {
     const id = body.item_id || body.id;
     const cfg = await ensureConfig(db, apartmentId);
+    const existing = (cfg.expensePlanItems || []).find((x) => String(x.id) === String(id));
+    if (existing) {
+        if (!body.preserveAttachments) await deleteExpensePlanAttachmentKeys(existing.attachment_urls);
+    }
     const list = (cfg.expensePlanItems || []).filter((x) => String(x.id) !== String(id));
     const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
     return { ok: true, id, config };
@@ -1321,21 +1438,181 @@ function addMonthsToIsoServer(iso, months = 1) {
     return d.toISOString().slice(0, 10);
 }
 
-/** Mark one-off plan item complete (keeps history; drops out of active horizon). */
+/** Soft reverse-link on a ledger row ↔ expense plan. */
+async function setLedgerExpensePlanRef(db, apartmentId, transactionId, ref) {
+    if (!transactionId) return null;
+    const q = { _id: String(transactionId), ...apt(apartmentId) };
+    const existing = await db.collection('ledger_entries').findOne(q);
+    if (!existing) return null;
+    if (!ref) {
+        await db.collection('ledger_entries').updateOne(q, {
+            $unset: {
+                expense_plan_ref: '',
+                expense_plan_item_id: '',
+                expense_plan_kind: '',
+                expense_plan_date: '',
+            },
+            $set: { updated_at: nowIso() },
+        });
+        return stripMongo({ ...existing, expense_plan_ref: undefined });
+    }
+    const patch = {
+        expense_plan_ref: ref,
+        expense_plan_item_id: ref.item_id,
+        expense_plan_kind: ref.kind,
+        expense_plan_date: ref.plan_date || null,
+        updated_at: nowIso(),
+    };
+    await db.collection('ledger_entries').updateOne(q, { $set: patch });
+    return stripMongo({ ...existing, ...patch });
+}
+
+/** Mark one-off plan item complete (keeps history; optional ledger link). */
 async function completeExpensePlanItem(db, apartmentId, body) {
+    const id = body.item_id || body.id;
+    if (!id) throw Object.assign(new Error('id required.'), { status: 400 });
+    const transactionId = body.transaction_id ? String(body.transaction_id) : null;
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanItems || [])];
+    const idx = list.findIndex((x) => String(x.id) === String(id));
+    if (idx < 0) throw Object.assign(new Error('Plan item not found.'), { status: 404 });
+    const prev = list[idx];
+    const prevTxn = prev.transaction_id ? String(prev.transaction_id) : null;
+    if (prevTxn && prevTxn !== transactionId) {
+        await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+    }
+    list[idx] = {
+        ...prev,
+        status: 'done',
+        completed_at: nowIso(),
+        transaction_id: transactionId,
+    };
+    let transaction = null;
+    if (transactionId) {
+        transaction = await setLedgerExpensePlanRef(db, apartmentId, transactionId, {
+            kind: 'oneoff',
+            item_id: String(id),
+        });
+        if (!transaction) {
+            throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+        }
+    }
+    const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+    return { ok: true, item: list[idx], transaction, config };
+}
+
+/** Re-open a completed one-off plan item. */
+async function reopenExpensePlanItem(db, apartmentId, body) {
     const id = body.item_id || body.id;
     if (!id) throw Object.assign(new Error('id required.'), { status: 400 });
     const cfg = await ensureConfig(db, apartmentId);
     const list = [...(cfg.expensePlanItems || [])];
     const idx = list.findIndex((x) => String(x.id) === String(id));
     if (idx < 0) throw Object.assign(new Error('Plan item not found.'), { status: 404 });
-    list[idx] = {
-        ...list[idx],
-        status: 'done',
-        completed_at: nowIso(),
-    };
+    const prev = list[idx];
+    if (prev.transaction_id) {
+        await setLedgerExpensePlanRef(db, apartmentId, prev.transaction_id, null);
+    }
+    const next = { ...prev, status: 'planned' };
+    delete next.completed_at;
+    delete next.transaction_id;
+    list[idx] = next;
     const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
     return { ok: true, item: list[idx], config };
+}
+
+/**
+ * Attach / change ledger link on an already-done one-off (or clear with transaction_id: null).
+ */
+async function linkExpensePlanItem(db, apartmentId, body) {
+    const id = body.item_id || body.id;
+    if (!id) throw Object.assign(new Error('id required.'), { status: 400 });
+    const hasTxn = Object.prototype.hasOwnProperty.call(body, 'transaction_id');
+    if (!hasTxn) throw Object.assign(new Error('transaction_id required (use null to unlink).'), { status: 400 });
+    const transactionId = body.transaction_id ? String(body.transaction_id) : null;
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanItems || [])];
+    const idx = list.findIndex((x) => String(x.id) === String(id));
+    if (idx < 0) throw Object.assign(new Error('Plan item not found.'), { status: 404 });
+    const prev = list[idx];
+    if ((prev.status || 'planned') !== 'done') {
+        throw Object.assign(new Error('Mark the plan item complete before linking a ledger row.'), { status: 400 });
+    }
+    const prevTxn = prev.transaction_id ? String(prev.transaction_id) : null;
+    if (prevTxn && prevTxn !== transactionId) {
+        await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+    }
+    let transaction = null;
+    if (transactionId) {
+        transaction = await setLedgerExpensePlanRef(db, apartmentId, transactionId, {
+            kind: 'oneoff',
+            item_id: String(id),
+        });
+        if (!transaction) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+    }
+    list[idx] = { ...prev, transaction_id: transactionId };
+    const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+    return { ok: true, item: list[idx], transaction, config };
+}
+
+/**
+ * Mark a single recurring occurrence done / planned.
+ * Stores dates on the template as completed_dates[] and optional occurrence_links{date: txnId}.
+ * body: { recurring_id|id, plan_date, status: 'done'|'planned', transaction_id? }
+ */
+async function setExpensePlanOccurrenceStatus(db, apartmentId, body) {
+    const id = body.recurring_id || body.id;
+    const planDate = String(body.plan_date || '').slice(0, 10);
+    const status = body.status === 'done' ? 'done' : 'planned';
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(planDate)) {
+        throw Object.assign(new Error('recurring_id and plan_date (YYYY-MM-DD) required.'), { status: 400 });
+    }
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanRecurring || [])];
+    const idx = list.findIndex((x) => String(x.id) === String(id));
+    if (idx < 0) throw Object.assign(new Error('Recurring template not found.'), { status: 404 });
+    const prev = list[idx];
+    const set = new Set(
+        (Array.isArray(prev.completed_dates) ? prev.completed_dates : [])
+            .map((d) => String(d).slice(0, 10))
+            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
+    );
+    const links = { ...(prev.occurrence_links && typeof prev.occurrence_links === 'object' ? prev.occurrence_links : {}) };
+    const prevTxn = links[planDate] ? String(links[planDate]) : null;
+    let transaction = null;
+
+    if (status === 'done') {
+        set.add(planDate);
+        const hasTxn = Object.prototype.hasOwnProperty.call(body, 'transaction_id');
+        if (hasTxn) {
+            const transactionId = body.transaction_id ? String(body.transaction_id) : null;
+            if (prevTxn && prevTxn !== transactionId) {
+                await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+            }
+            if (transactionId) {
+                transaction = await setLedgerExpensePlanRef(db, apartmentId, transactionId, {
+                    kind: 'recurring',
+                    item_id: String(id),
+                    plan_date: planDate,
+                });
+                if (!transaction) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+                links[planDate] = transactionId;
+            } else {
+                delete links[planDate];
+            }
+        }
+    } else {
+        set.delete(planDate);
+        if (prevTxn) {
+            await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+        }
+        delete links[planDate];
+    }
+
+    const completed_dates = [...set].sort();
+    list[idx] = { ...prev, completed_dates, occurrence_links: links };
+    const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+    return { ok: true, recurring: list[idx], plan_date: planDate, status, transaction, config };
 }
 
 /**
@@ -1386,7 +1663,36 @@ async function saveExpensePlanRecurring(db, apartmentId, body) {
     const cfg = await ensureConfig(db, apartmentId);
     const list = [...(cfg.expensePlanRecurring || [])];
     const id = item.id || uid();
-    const row = { ...item, id, apartment_id: apartmentId, amount: roundMoney(item.amount) };
+    const existing = list.find((x) => String(x.id) === String(id));
+    const attachment_urls = await mergeExpensePlanAttachments(
+        apartmentId,
+        existing?.attachment_urls,
+        body,
+    );
+    const period_amounts = Array.isArray(item.period_amounts)
+        ? item.period_amounts.map((v) => roundMoney(v))
+        : (item.period_amounts === null ? null : existing?.period_amounts);
+    const period_percents = Array.isArray(item.period_percents)
+        ? item.period_percents.map((v) => Math.round((Number(v) || 0) * 100) / 100)
+        : (item.period_percents === null ? null : existing?.period_percents);
+    const row = {
+        ...existing,
+        ...item,
+        id,
+        apartment_id: apartmentId,
+        amount: roundMoney(item.amount),
+        total_amount: item.total_amount != null ? roundMoney(item.total_amount) : (item.total_amount === null ? null : existing?.total_amount),
+        period_amounts,
+        period_percents,
+        completed_dates: Array.isArray(item.completed_dates)
+            ? item.completed_dates.map((d) => String(d).slice(0, 10)).filter(Boolean)
+            : (existing?.completed_dates || []),
+        attachment_urls,
+    };
+    delete row.keepAttachments;
+    delete row.keepAttachmentPaths;
+    delete row.newAttachmentFiles;
+    delete row.removeAttachments;
     const idx = list.findIndex((x) => String(x.id) === String(id));
     if (idx >= 0) list[idx] = { ...list[idx], ...row };
     else list.push(row);
@@ -1397,6 +1703,10 @@ async function saveExpensePlanRecurring(db, apartmentId, body) {
 async function deleteExpensePlanRecurring(db, apartmentId, body) {
     const id = body.recurring_id || body.id;
     const cfg = await ensureConfig(db, apartmentId);
+    const existing = (cfg.expensePlanRecurring || []).find((x) => String(x.id) === String(id));
+    if (existing) {
+        if (!body.preserveAttachments) await deleteExpensePlanAttachmentKeys(existing.attachment_urls);
+    }
     const list = (cfg.expensePlanRecurring || []).filter((x) => String(x.id) !== String(id));
     await saveConfig(db, apartmentId, { expensePlanRecurring: list });
     return { ok: true, id };
@@ -1826,6 +2136,12 @@ export async function runFinanceMongoMutation(action, { db, apartmentId, user, b
             return deleteExpensePlanItem(db, apartmentId, body);
         case 'completeExpensePlanItem':
             return completeExpensePlanItem(db, apartmentId, body);
+        case 'reopenExpensePlanItem':
+            return reopenExpensePlanItem(db, apartmentId, body);
+        case 'linkExpensePlanItem':
+            return linkExpensePlanItem(db, apartmentId, body);
+        case 'setExpensePlanOccurrenceStatus':
+            return setExpensePlanOccurrenceStatus(db, apartmentId, body);
         case 'deferExpensePlanItems':
             return deferExpensePlanItems(db, apartmentId, body);
         case 'saveExpensePlanRecurring':

@@ -126,6 +126,8 @@ async function injectModals({ ledgerOnly = false, bankRecon = false } = {}) {
         const { default: bankReconModalsHtml } = await import('./html/_bank-recon-modals.html?raw');
         parts.push(bankReconModalsHtml);
     }
+    const { default: receiptViewerHtml } = await import('./html/_receipt-viewer-modal.html?raw');
+    parts.push(receiptViewerHtml);
     host.innerHTML = parts.join('\n');
 }
 

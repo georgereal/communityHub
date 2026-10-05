@@ -842,6 +842,25 @@
     width: 100%;
   }
 
+  .bank-recon-import-options {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .bank-recon-import-options__field {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .bank-recon-import-options__input {
+    width: 100%;
+  }
+
+  .bank-recon-import-options__hint {
+    flex-basis: auto;
+  }
+
   .bank-recon-source-panel__actions .btn {
     width: 100%;
     max-width: 100%;

@@ -12,6 +12,7 @@
  * Object keys:
  *   {parentFolder}/{orgName}/income/{uuid}.{ext}
  *   {parentFolder}/{orgName}/expenses/{uuid}.{ext}
+ *   {parentFolder}/{orgName}/expense-plan/{uuid}.{ext}
  */
 import {
   DeleteObjectCommand,
@@ -90,34 +91,49 @@ export function slugifyOrgName(name) {
   return s || 'org';
 }
 
+const R2_DOC_FOLDERS = new Set(['income', 'expenses', 'expense-plan']);
+
 export function kindToFolder(kind) {
+  if (kind === 'expense-plan' || kind === 'plan') return 'expense-plan';
   return kind === 'IN' ? 'income' : 'expenses';
 }
 
-/**
- * Keys: communityHub/{orgName}/income|expenses/{uuid}.{ext}
- * Bucket stays R2_BUCKET_NAME (e.g. communityhub).
- */
-export function buildFinanceDocObjectKey({ orgName, kind, mimeOrExt }) {
-  const parent = r2ParentFolder();
-  const org = slugifyOrgName(orgName);
-  const folder = kindToFolder(kind);
+function extForObjectKey(mimeOrExt) {
   let ext = extForRecordMime(mimeOrExt);
   if (!ext) {
     ext = String(mimeOrExt || 'bin').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 8) || 'bin';
   }
+  return ext;
+}
+
+/**
+ * Keys: communityHub/{orgName}/income|expenses|expense-plan/{uuid}.{ext}
+ * Bucket stays R2_BUCKET_NAME (e.g. communityhub).
+ */
+export function buildFinanceDocObjectKey({ orgName, kind, mimeOrExt, folder: folderOverride } = {}) {
+  const parent = r2ParentFolder();
+  const org = slugifyOrgName(orgName);
+  const folder = folderOverride && R2_DOC_FOLDERS.has(folderOverride)
+    ? folderOverride
+    : kindToFolder(kind);
+  const ext = extForObjectKey(mimeOrExt);
   return `${parent}/${org}/${folder}/${randomUUID()}.${ext}`;
+}
+
+/** Proposal / invoice attachments for expense-plan one-offs and recurring templates. */
+export function buildExpensePlanObjectKey({ orgName, mimeOrExt } = {}) {
+  return buildFinanceDocObjectKey({ orgName, kind: 'expense-plan', mimeOrExt });
 }
 
 export function isAllowedFinanceDocObjectKey(key) {
   if (typeof key !== 'string' || key.length > 512 || key.length < 20) return false;
   if (key.includes('..') || key.startsWith('/') || key.includes('\\')) return false;
   const parts = key.split('/');
-  // communityHub/{org}/income|expenses/{uuid}.{ext}
+  // communityHub/{org}/income|expenses|expense-plan/{uuid}.{ext}
   if (parts.length === 4) {
     const [, org, folder, file] = parts;
     if (!parts[0] || !org || org.length > 80) return false;
-    if (folder !== 'income' && folder !== 'expenses') return false;
+    if (!R2_DOC_FOLDERS.has(folder)) return false;
     return /^[a-f0-9-]{36}\.[a-z0-9]{2,8}$/i.test(file || '');
   }
   return false;

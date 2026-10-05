@@ -1461,7 +1461,7 @@ export const saveCashData = async () => {
 
     if (isNaN(amt) || amt <= 0) return alert('Enter a valid amount.');
     if (saveTarget === 'bill') {
-        if (!desc?.trim()) return alert('Enter the particulars.');
+        if (!cat) return alert('Pick a category.');
     } else if (!isIncome && !vendor_name) {
         return alert('Enter the vendor name.');
     }
@@ -1821,9 +1821,9 @@ const resetBillAttachmentUI = (attachments = []) => {
 
 const applyCashModalChrome = ({ isIncome, isBill }) => {
     const modal = document.getElementById('cash-modal');
-    const walletSection = document.querySelector('#fn-expense-form-view .expense-form__section--wallet');
+    const walletSection = document.querySelector('#expense-form-view .expense-form__section--wallet');
     const bankSection = document.getElementById('expense-bank-section');
-    const incomeWallet = document.querySelector('#fn-income-form-view .expense-form__section--wallet');
+    const incomeWallet = document.querySelector('#income-form-view .expense-form__section--wallet');
     const incomeBank = document.getElementById('income-bank-section');
     const excludeWrap = document.querySelector('.expense-form__exclude-reports');
     const receiptHint = document.getElementById('cash-receipt-hint');
@@ -1837,8 +1837,8 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     const payDesc = document.getElementById('bill-payment-desc');
     const docsTitle = billDocs?.querySelector('.bill-docs__title');
     const docsDesc = billDocs?.querySelector('.bill-docs__desc');
-    const expenseVendorLabel = document.querySelector('#fn-expense-form-view .expense-form__section--vendor .expense-label');
-    const cashDescLabel = document.querySelector('#fn-expense-form-view label[for="cash-desc"]');
+    const expenseVendorLabel = document.querySelector('#expense-form-view .expense-form__section--vendor .expense-label');
+    const cashDescLabel = document.querySelector('#expense-form-view label[for="cash-desc"]');
     const cashDesc = document.getElementById('cash-desc');
     const expenseVendorInput = document.getElementById('expense-vendor-input');
 
@@ -1847,17 +1847,18 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
 
     if (isBill && !isIncome) {
         if (expenseVendorLabel) {
-            expenseVendorLabel.innerHTML = 'Vendor <span class="expense-optional">(optional — type new or pick)</span>';
+            expenseVendorLabel.innerHTML = 'Vendor <span class="expense-optional">(optional)</span>';
         }
         if (expenseVendorInput) {
             expenseVendorInput.placeholder = 'Pick from list or type a new vendor';
         }
         if (cashDescLabel) {
-            cashDescLabel.innerHTML = 'Particulars';
+            cashDescLabel.innerHTML = 'Notes <span class="expense-optional">(optional)</span>';
         }
         if (cashDesc) {
             cashDesc.placeholder = 'What this bill is for';
-            cashDesc.required = true;
+            cashDesc.required = false;
+            cashDesc.removeAttribute('required');
         }
     } else if (!isIncome) {
         if (expenseVendorLabel) expenseVendorLabel.textContent = 'Vendor';
@@ -1870,6 +1871,7 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
         if (cashDesc) {
             cashDesc.placeholder = 'Work done, payment terms, or other details';
             cashDesc.required = false;
+            cashDesc.removeAttribute('required');
         }
     }
 
@@ -1943,7 +1945,7 @@ const applyCashModalChrome = ({ isIncome, isBill }) => {
     const incomeVendorWrap = document.getElementById('income-extra-vendor-wrap');
     const incomeVendorLabel = document.getElementById('income-vendor-label');
     const incomeVendorInput = document.getElementById('income-vendor-input');
-    const incomeDescLabel = document.querySelector('#fn-income-form-view label[for="income-desc"]');
+    const incomeDescLabel = document.querySelector('#income-form-view label[for="income-desc"]');
     const incomeDesc = document.getElementById('income-desc');
     if (isBill && isIncome) {
         if (incomeExtra) incomeExtra.hidden = false;
