@@ -1,0 +1,19 @@
+# CommunityHub — Caddy reverse proxy + automatic HTTPS (Let's Encrypt).
+# setup-remote.sh replaces __DOMAIN__ with the real hostname.
+# Certs renew automatically while caddy.service is running (ports 80 + 443 open).
+
+__DOMAIN__ {
+	encode gzip zstd
+
+	reverse_proxy 127.0.0.1:3000
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/communityhub.log
+	}
+}

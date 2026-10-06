@@ -25,3 +25,8 @@ dist-ssr
 .vercel
 firebase-service-account.json
 *-firebase-adminsdk*.json
+
+# Hetzner deploy secrets (templates are committed)
+scripts/deploy/hetzner.deploy.env
+scripts/deploy/oracle.deploy.env
+.env.production

@@ -465,6 +465,7 @@ ${mdTable(['File', 'Purpose'], d.topConfig.map((f) => [f, 'Repo config / entry p
   UI actions use \`src/capabilities.js\`. Fallback remains \`rbac.js\` / \`rbacMatrix.js\` until Mongo is populated.
 - **Views:** lazy-activated per route (\`views/controllers.js\`), each \`views/inits/*.js\` wires view-specific init.
 - **Deployment:** Vercel (\`vercel.json\`) — SPA rewrite to \`index.html\`, \`api/*\` serverless, cron sync, immutable assets.
+  Production VPS: Hetzner long-running Node (\`server/index.js\` + Caddy + systemd + Let’s Encrypt) — see \`docs/deploy/HETZNER.md\`, \`npm run deploy:hetzner\`.
 
 ---
 

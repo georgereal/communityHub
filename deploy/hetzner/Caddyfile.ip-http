@@ -1,0 +1,18 @@
+# Temporary: serve over HTTP by public IP (no TLS).
+# Used before DNS A record points at this VM.
+# Browse: http://SERVER_IP/
+
+:80 {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:3000
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/communityhub.log
+	}
+}

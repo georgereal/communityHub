@@ -6,13 +6,18 @@ import { getUserFromAuthHeader } from '../server/serverFirebaseAuth.js';
 const SESSION_COOKIE = 'communityhub_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
-function cookieAttrs() {
+function cookieAttrs({ clearing = false } = {}) {
+    // Secure cookies are not stored/sent on plain HTTP. For IP-first VPS smoke tests
+    // set SESSION_COOKIE_SECURE=0 in /etc/communityhub.env (turn back on for HTTPS).
+    const secureFlag = process.env.SESSION_COOKIE_SECURE;
+    const useSecure = secureFlag === '1' || secureFlag === 'true'
+        || (secureFlag !== '0' && secureFlag !== 'false' && process.env.NODE_ENV === 'production');
     return [
-        `Max-Age=${SESSION_TTL_SECONDS}`,
+        clearing ? 'Max-Age=0' : `Max-Age=${SESSION_TTL_SECONDS}`,
         'Path=/',
         'HttpOnly',
         'SameSite=Lax',
-        process.env.NODE_ENV === 'production' ? 'Secure' : '',
+        useSecure ? 'Secure' : '',
     ].filter(Boolean).join('; ');
 }
 
@@ -42,7 +47,7 @@ export function setSessionCookie(res, accessToken) {
 }
 
 export function clearSessionCookie(res) {
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; ${cookieAttrs({ clearing: true })}`);
 }
 
 export function authHeaderFromRequest(req) {

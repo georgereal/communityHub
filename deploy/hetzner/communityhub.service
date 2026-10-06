@@ -1,0 +1,32 @@
+[Unit]
+Description=CommunityHub Node server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=communityhub
+Group=communityhub
+WorkingDirectory=/opt/communityhub
+EnvironmentFile=/etc/communityhub.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+# Soft cap for a 4 GB Hetzner CX-class box
+MemoryMax=700M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/communityhub
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
