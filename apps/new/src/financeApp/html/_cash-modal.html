@@ -9,6 +9,16 @@
           onclick="document.getElementById('cash-modal').classList.remove('active')">&times;</button>
       </div>
 
+      <div id="cash-modal-linked-info" class="cash-modal-linked-info" hidden>
+        <div class="cash-modal-linked-info__inner">
+          <i class="fa-solid fa-link cash-modal-linked-info__icon" aria-hidden="true"></i>
+          <div class="cash-modal-linked-info__content">
+            <h4 class="cash-modal-linked-info__title">Linked ledger line</h4>
+            <p class="cash-modal-linked-info__detail" id="cash-modal-linked-detail"></p>
+          </div>
+        </div>
+      </div>
+
       <div id="bill-documents-section" class="bill-docs" hidden>
         <div class="bill-docs__intro">
           <h3 class="bill-docs__title">Attachments</h3>

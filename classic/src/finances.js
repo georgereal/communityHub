@@ -2,7 +2,7 @@
  * Sentry Finance Engine (Audit Relational)
  */
 import { portalState, persist, supabase, pullState } from './store.js';
-import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection, setLedgerViewRefresh } from './ledgerTable.js';
+import { renderEditableLedgerRows, initLedgerBulkBar, renderExcludedLedgerSection, setLedgerViewRefresh, syncLedgerBulkBar } from './ledgerTable.js';
 import { renderFinanceAnalytics } from './financeAnalytics.js';
 import { renderLedgerPivotBanner, sortLedgerTxns, sortLedgerTxnsChronological, toggleLedgerSort, updateLedgerSortIndicators, applyLedgerTableFilters, setLedgerCategoryFilter } from './ledgerFilter.js';
 import {
@@ -2401,7 +2401,6 @@ export const initAccountsSubViewTabs = () => {
             if (!document.getElementById('view-accounts') && !document.getElementById('view-invoices')) return;
             void (async () => {
                 try {
-                    const { syncLedgerBulkBar } = await import('./ledgerTable.js');
                     syncLedgerBulkBar();
                 } catch { /* ignore */ }
                 window.renderCashLedger?.();

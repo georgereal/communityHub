@@ -25,6 +25,7 @@ export async function financeNewFetch(path, {
     method = 'GET',
     body,
     query = {},
+    timeout = 0,
 } = {}) {
     const apartment_id = query.apartment_id || body?.apartment_id || portalState.access?.activeApartmentId;
     if (!apartment_id) throw new Error('No active apartment selected.');
@@ -45,6 +46,7 @@ export async function financeNewFetch(path, {
     if (body != null && method !== 'GET' && method !== 'HEAD') {
         init.body = JSON.stringify({ apartment_id, ...body });
     }
+    if (timeout > 0) init.signal = AbortSignal.timeout(timeout);
 
     const res = await fetch(`${u.pathname}${u.search}`, init);
     const { ok, json, error } = await readApiJson(res);
@@ -316,6 +318,10 @@ export async function postFinanceMongoMutation(action, payload = {}) {
         linkExpensePlanItem: () => financeNewFetch(`/api/finance/expense-plan/items/${encodeURIComponent(p.id)}/link`, { method: 'POST', body: p }),
         setExpensePlanOccurrenceStatus: () => financeNewFetch(
             `/api/finance/expense-plan/recurring/${encodeURIComponent(p.recurring_id || p.id)}/occurrence`,
+            { method: 'POST', body: p },
+        ),
+        linkExpensePlanOccurrenceDoc: () => financeNewFetch(
+            `/api/finance/expense-plan/recurring/${encodeURIComponent(p.recurring_id || p.id)}/occurrence-doc`,
             { method: 'POST', body: p },
         ),
         deferExpensePlanItems: () => financeNewFetch('/api/finance/expense-plan/items/defer', { method: 'POST', body: p }),

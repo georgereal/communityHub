@@ -34,6 +34,12 @@
           <section class="fa-panel eplan-main" style="margin-top:0.75rem;">
             <div class="eplan-section-head">
               <h4 class="fdoc-funding-section-title" style="margin:0;">Detail list</h4>
+              <div class="eplan-detail-tabs" id="fn-eplan-filter-tabs" role="tablist">
+                <button type="button" class="eplan-detail-tab" data-eplan-status-filter="open" role="tab">Open</button>
+                <button type="button" class="eplan-detail-tab" data-eplan-status-filter="overdue" role="tab">Overdue</button>
+                <button type="button" class="eplan-detail-tab" data-eplan-status-filter="done" role="tab">Done</button>
+                <button type="button" class="eplan-detail-tab" data-eplan-status-filter="all" role="tab">All</button>
+              </div>
               <span id="fn-eplan-timeline-meta" class="eplan-section-meta"></span>
             </div>
             <div id="fn-eplan-timeline" class="fa-table-wrap"></div>

@@ -7,10 +7,8 @@ const txnWallet = (t) => String(t?.wallet || 'CASH').toUpperCase();
 
 /** Bank OUT that funds the petty cash float. */
 export const isBankPettyFunding = (t) =>
-    t?.type === 'OUT'
-    && txnWallet(t) === 'BANK'
-    && normalizeCategoryKey(t.cat) === 'Petty Cash'
-    && !t.exclude_from_cash_float;
+    (t?.type === 'OUT' || t?.kind === 'OUT')
+    && normalizeCategoryKey(t.cat) === 'Petty Cash';
 
 /** Cash-desk spend that draws down the float (real expense categories). */
 export const isCashDeskSpend = (t) =>

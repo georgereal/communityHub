@@ -13,6 +13,7 @@ This file is read by coding agents (Claude Code, Cline, GitHub Copilot, Cursor, 
 
 ```
 docs/REPO_MAP.md
+docs/PATTERNS.md
 ```
 
 For **New** app REST / Mongo domains (Finance, Property, Integrations segregation), also read:
@@ -23,6 +24,8 @@ docs/ARCHITECTURE_NEW.md
 
 The repository map is the **single source of truth** for this project's directory structure, feature modules,
 API endpoints, views/routes, SQL migrations, architectural patterns, and development commands.
+`docs/PATTERNS.md` complements it by documenting *behavioral* conventions (data-flow patterns, override-save
+logic, normalization rules) that are not visible from structure alone.
 
 Reading it first:
 - Gives you instant context without re-exploring the whole codebase.
@@ -30,12 +33,34 @@ Reading it first:
 - Surfaces existing patterns (state in `store.js`, routing in `navigation.js`, lazy views in `views/controllers.js`).
 - Keeps your work consistent with current conventions.
 
+> **Occupancy / unit logic:** Read `docs/PATTERNS.md` §1 before touching occupancy_status
+> or unit edit/save flows — it contains the auto-derive + override-save convention.
+
 ### Workflow
 
 1. Read `docs/REPO_MAP.md` first.
-2. Use its structure to locate the relevant files.
-3. Only then explore specific files with `read_file` / `search`.
-4. If the repo map is stale or missing sections relevant to your task, update it as part of your changes.
+2. Read `docs/PATTERNS.md` for behavioral patterns relevant to your task.
+3. Use the map to locate the relevant files.
+4. Only then explore specific files with `read_file` / `search`.
+5. If the repo map is stale or missing sections relevant to your task, update it as part of your changes.
+
+---
+
+## Behavioral Patterns — `docs/PATTERNS.md`
+
+This is a **manually maintained** design handbook (not auto-generated). It documents
+behavioral conventions that the repo map can't capture from structure alone:
+override-save logic, normalization rules, async data lifecycles, etc.
+
+**You MUST update `docs/PATTERNS.md` whenever you introduce or change a non-obvious
+behavioral pattern** (e.g. a new "auto-derive on null" field, a new cross-app sync
+strategy). Add a section describing the pattern, the files affected, and the expected
+behavior. This keeps the collective mental model current for future agents.
+
+### Commit Checklist (Behavioral Changes)
+
+- [ ] `docs/PATTERNS.md` updated if new behavioral pattern introduced or changed.
+- [ ] `docs/REPO_MAP.md` updated if new structural elements introduced.
 
 ---
 
@@ -74,6 +99,7 @@ node scripts/utilities/generate-repo-map.js
 - **Git pre-push hook** (`.git/hooks/pre-push`, installed via `npm run setup:hooks`): detects structural
   changes (`src/`, `api/`, `scripts/`, `package.json`, `vite.config.js`, `vercel.json`), auto-regenerates the
   repo map, and warns if it is stale. It does **not** block the push.
+  It also prints a reminder to update `docs/PATTERNS.md` when behavioral patterns are changed.
 - **CI (`.github/workflows/repo-map-check.yml`)**: runs on PRs touching structural files, regenerates the map,
   and comments on the PR if it is out of date.
 

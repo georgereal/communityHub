@@ -18325,6 +18325,121 @@ textarea.bank-recon-cell-input {
   gap: 0.35rem 0.5rem;
 }
 
+/* Chips row under the status badge — linked txn + attachments. */
+.fdoc-status-cell__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  flex-basis: 100%;
+}
+
+/* Compact read-only ledger view modal — dl rows on desktop, stacked cards on mobile. */
+.ledger-view-modal {
+  max-width: 34rem;
+}
+.ledger-view-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+}
+.ledger-view-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.ledger-view-item dt {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  margin: 0;
+}
+.ledger-view-item dd {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #0f172a;
+  text-align: right;
+  word-break: break-word;
+}
+.ledger-view-item--amount {
+  grid-column: 1 / -1;
+}
+.ledger-view-item--amount dd {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #b91c1c;
+}
+.ledger-view-amount--in {
+  color: #15803d !important;
+}
+.ledger-view-item:nth-child(n+2):nth-child(-n+3) dd {
+  font-weight: 600;
+}
+@media (max-width: 560px) {
+  .ledger-view-grid {
+    grid-template-columns: 1fr;
+  }
+  .ledger-view-item {
+    padding: 0.5rem 0.35rem;
+  }
+}
+
+/* Clickable chip that opens the linked ledger entry. */
+.fdoc-linked-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 0.73rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.fdoc-linked-chip:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+/* Attachment chip — previews files on click. */
+.fdoc-att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.73rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.fdoc-att-chip:hover {
+  background: #eef4ff;
+  border-color: #93b4f0;
+  color: var(--primary, #1d4ed8);
+}
+.fdoc-att-chip__view {
+  font-size: 0.62rem;
+  opacity: 0.55;
+}
+.fdoc-att-chip:hover .fdoc-att-chip__view {
+  opacity: 1;
+}
+
 .fdoc-scroll-sentinel {
   margin: 0.75rem 0 0;
   text-align: center;
@@ -19584,6 +19699,10 @@ textarea.bank-recon-cell-input {
 
 .eplan-row--done td {
   opacity: 0.72;
+  background: #f0fdf4;
+}
+.eplan-row--done .cash-float-amt {
+  color: #047857;
 }
 
 .eplan-rec-period-row__pct {
@@ -20327,6 +20446,25 @@ textarea.bank-recon-cell-input {
   color: #cbd5e1;
 }
 
+/* Done/paid cells in the expense-plan pivot — green, no heat. */
+.eplan-pivot-cell--done {
+  background: #ecfdf5;
+  color: #047857;
+}
+.eplan-pivot-cell--done .eplan-pivot-bar {
+  background: rgba(5, 150, 105, 0.5);
+}
+.eplan-pivot-done-sub {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #047857;
+  margin-top: 1px;
+}
+.eplan-pivot-foot .eplan-pivot-done-sub {
+  color: #6ee7b7;
+}
+
 .eplan-pivot-foot td {
   background: #0f172a !important;
   color: #f8fafc;
@@ -20346,6 +20484,34 @@ textarea.bank-recon-cell-input {
 
 .eplan-pivot-foot .eplan-pivot-col--current {
   background: #1e293b !important;
+}
+
+/* Detail-list status tabs (Open/Overdue/Done/All). */
+.eplan-detail-tabs {
+  display: inline-flex;
+  gap: 2px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 2px;
+}
+.eplan-detail-tab {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.eplan-detail-tab:hover { color: #0f172a; }
+.eplan-detail-tab--active {
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+.eplan-detail-tab[data-eplan-status-filter="done"].eplan-detail-tab--active {
+  color: #047857;
 }
 
 .eplan-due--late { color: #b91c1c; font-weight: 700; }

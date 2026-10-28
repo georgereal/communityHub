@@ -87,6 +87,17 @@ async function listVouchers(db, apartmentId, body = {}) {
     } else if (body.pay === 'cheque') {
         filter.notes = { $regex: 'Payment:\\s*Cheque|CHQ|CHEQUE', $options: 'i' };
     }
+    if (body.unlinked === true || body.unlinked === '1' || body.unlinked === 'true') {
+        filter.status = { $nin: ['linked', 'void'] };
+        filter.$and = filter.$and || [];
+        filter.$and.push({
+            $or: [
+                { transaction_id: { $exists: false } },
+                { transaction_id: null },
+                { transaction_id: '' },
+            ],
+        });
+    }
     if (body.q) {
         const q = String(body.q).trim();
         if (q) {
@@ -94,7 +105,20 @@ async function listVouchers(db, apartmentId, body = {}) {
                 { vendor_name: { $regex: q, $options: 'i' } },
                 { description: { $regex: q, $options: 'i' } },
                 { cat: { $regex: q, $options: 'i' } },
+                { notes: { $regex: q, $options: 'i' } },
             ];
+            // Numeric queries also match amount substring ("81" → 81500).
+            const amtQ = q.replace(/[^\d.]/g, '');
+            if (amtQ) {
+                textOr.push({
+                    $expr: {
+                        $regexMatch: {
+                            input: { $toString: '$amount' },
+                            regex: amtQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                        },
+                    },
+                });
+            }
             if (filter.$or) filter.$and = [{ $or: filter.$or }, { $or: textOr }];
             else filter.$or = textOr;
         }
@@ -177,6 +201,8 @@ async function voucherAggregates(db, apartmentId) {
                 cat: 1,
                 wallet: 1,
                 type: 1,
+                amount: 1,
+                date: 1,
                 is_cash_float: 1,
                 exclude_from_cash_float: 1,
             },
@@ -203,6 +229,28 @@ async function voucherAggregates(db, apartmentId) {
             .filter(Boolean)
             .map(String),
     )];
+
+    // Full funding entry details (amount, date) — returned so the frontend
+    // can compute cash-float totals even when entries fall outside the
+    // 50-item ledger page loaded into fnFinances().txns.
+    const fundingEntries = (fundingTxns || [])
+        .filter((t) => {
+            if (t.exclude_from_cash_float) return false;
+            if (t.is_cash_float) return true;
+            return String(t.wallet || '').toUpperCase() === 'BANK'
+                && String(t.cat || '').trim().toLowerCase() === 'petty cash';
+        })
+        .map((t) => ({
+            id: String(t.id || ''),
+            type: t.type,
+            cat: t.cat,
+            wallet: t.wallet,
+            amount: parseFloat(t.amount) || 0,
+            date: t.date ? String(t.date).slice(0, 10) : null,
+            is_cash_float: !!t.is_cash_float,
+            exclude_from_cash_float: !!t.exclude_from_cash_float,
+        }))
+        .filter((e) => e.id);
 
     let fundingLinked = [];
     if (fundingIds.length) {
@@ -289,6 +337,7 @@ async function voucherAggregates(db, apartmentId) {
         openDocumentIds,
         fundingTransactionIds: fundingIds,
         fundingBillTotals,
+        fundingEntries,
     };
 }
 

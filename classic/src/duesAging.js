@@ -2,7 +2,7 @@
  * Dues aging report and payment reminders
  */
 import ExcelJS from 'exceljs';
-import { portalState, supabase } from './store.js';
+import { portalState, supabase, pullState } from './store.js';
 import {
     clearResidentsCache,
     getBillToForInvoice,
@@ -148,7 +148,6 @@ export const sendReminderForInvoice = async (invoiceId, { force = false } = {}) 
         summary: `Reminder sent for invoice ${inv?.period_label || invoiceId}`,
         newData: { sent_to: billTo.email, channel },
     });
-    const { pullState } = await import('./store.js');
     await pullState();
     return result;
 };

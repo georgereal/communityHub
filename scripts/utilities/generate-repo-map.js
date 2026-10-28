@@ -427,6 +427,8 @@ ${d.docsTree}
 
 \`PHASED_REQUIREMENTS.md\` is the product spec (phases/sprints) — hand it to an agent to implement features in order.
 \`ARCHITECTURE_NEW.md\` is the New-app REST domain guide (Finance / Property / Integrations segregation).
+\`PATTERNS.md\` documents behavioral conventions (override-save logic, normalization rules, data-flow patterns)
+that are not visible from the auto-generated structure alone — read it before modifying occupancy/unit flows.
 
 ### public/
 \`\`\`

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Box,
@@ -180,6 +180,7 @@ export default function UnitDetailDialog({
     const [vehicleDraft, setVehicleDraft] = useState(null);
     const [tick, setTick] = useState(0);
     const [nbSplitOpen, setNbSplitOpen] = useState(false);
+    const autoOccRef = useRef(null); /** effective derived status when unit had no explicit occupancy_status */
 
     const live = useMemo(() => {
         if (!unit?.id) return unit;
@@ -202,9 +203,11 @@ export default function UnitDetailDialog({
             area_sqft: live?.area_sqft ?? '',
             car_limit: live?.car_limit ?? 0,
             bike_limit: live?.bike_limit ?? 0,
-            occupancy_status: live?.occupancy_status || '',
+            occupancy_status: live?.occupancy_status || live?.occupancy || '',
             notes: live?.notes || '',
         });
+        // Track the auto-derived value so we can keep it as null on save unless changed
+        autoOccRef.current = live?.occupancy_status ? null : (live?.occupancy || null);
     }, [open, live, mode]);
 
     useEffect(() => {
@@ -245,7 +248,7 @@ export default function UnitDetailDialog({
                 area_sqft: form.area_sqft === '' ? null : Number(form.area_sqft),
                 car_limit: Number(form.car_limit) || 0,
                 bike_limit: Number(form.bike_limit) || 0,
-                occupancy_status: form.occupancy_status || null,
+                occupancy_status: (autoOccRef.current && form.occupancy_status === autoOccRef.current) ? null : (form.occupancy_status || null),
                 notes: form.notes || null,
             });
             refresh();
@@ -450,14 +453,14 @@ export default function UnitDetailDialog({
                         <TextField size="small" label="Car slots" type="number" value={form.car_limit} disabled={!editing} onChange={(e) => setField('car_limit', e.target.value)} sx={fieldSx} />
                         <TextField size="small" label="Bike slots" type="number" value={form.bike_limit} disabled={!editing} onChange={(e) => setField('bike_limit', e.target.value)} sx={fieldSx} />
                         <FormControl size="small" fullWidth sx={{ gridColumn: '1 / -1', ...fieldSx }}>
-                            <InputLabel>Occupancy override</InputLabel>
+                            <InputLabel>Occupancy status</InputLabel>
                             <Select
-                                label="Occupancy override"
+                                label="Occupancy status"
                                 value={form.occupancy_status || ''}
                                 disabled={!editing}
                                 onChange={(e) => setField('occupancy_status', e.target.value)}
                             >
-                                <MenuItem value="">Derived from residents</MenuItem>
+                                <MenuItem value="">Auto from residents</MenuItem>
                                 {OCCUPANCY_STATUS_VALUES.map((k) => (
                                     <MenuItem key={k} value={k}>{occupancyLabel(k)}</MenuItem>
                                 ))}

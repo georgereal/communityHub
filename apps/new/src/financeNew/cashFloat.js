@@ -17,6 +17,7 @@ import {
     isCashDeskTopUp,
     setCashExpenseReportingMode,
 } from './cashFloatPredicates.js';
+import { getFinanceNew } from './state.js';
 
 export {
     getCashExpenseReportingMode,
@@ -36,16 +37,26 @@ const txnWallet = (t) => (t?.wallet === 'BANK' ? 'BANK' : 'CASH');
 const amountOf = (t) => Math.abs(parseFloat(t?.amount) || 0);
 
 export const computeCashFloatStore = (txns = fnFinances()?.txns || []) => {
-  const funding = txns.filter(isBankPettyFunding);
-  const spends = txns.filter(isCashDeskSpend);
-  const topUps = txns.filter(isCashDeskTopUp);
+  // The frontend ledger page only holds 50 paginated entries. Petty Cash
+  // funding entries that fall outside the first page are invisible to
+  // isBankPettyFunding, causing the "funded" KPI to under-report. The
+  // voucher aggregates API queries ALL funding ledger entries (no pagination),
+  // so we supplement the local txns page with those entries to close the gap.
+  const apiFundingEntries = getFinanceNew()?.voucherAggregates?.fundingEntries || [];
+  const existingIds = new Set((txns || []).map((t) => String(t?.id || t?._id || '')));
+  const supplement = apiFundingEntries.filter((t) => !existingIds.has(String(t?.id || '')));
+  const allTxns = supplement.length ? [...txns, ...supplement] : txns;
+
+  const funding = allTxns.filter(isBankPettyFunding);
+  const spends = allTxns.filter(isCashDeskSpend);
+  const topUps = allTxns.filter(isCashDeskTopUp);
 
   const funded = round2(funding.reduce((s, t) => s + amountOf(t), 0));
   const spent = round2(spends.reduce((s, t) => s + amountOf(t), 0));
   const topUpTotal = round2(topUps.reduce((s, t) => s + amountOf(t), 0));
   const remaining = round2(funded - spent);
 
-  const walletCash = round2(txns.reduce((s, t) => {
+  const walletCash = round2(allTxns.reduce((s, t) => {
     if (txnWallet(t) !== 'CASH') return s;
     const a = amountOf(t);
     return t.type === 'IN' ? s + a : s - a;

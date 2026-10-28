@@ -1907,35 +1907,32 @@ async function listFinanceDocumentsMutation(service, apartmentId, body) {
 async function financeDocumentsAggregatesMutation(service, apartmentId) {
     const base = () => service.from('finance_documents').eq('apartment_id', apartmentId).neq('status', 'void');
 
-    // Funding bucket ids (bank Petty Cash / explicit cash-float marks).
+    // Funding bucket ids (bank Petty Cash / explicit cash-float marks) + full entries.
     let fundingIds = [];
+    let fundingEntries = [];
     {
         let fundingQ = await service
             .from('transactions')
-            .select('id, cat, wallet, type, is_cash_float, exclude_from_cash_float')
+            .select('id, cat, wallet, type, amount, date, is_cash_float, exclude_from_cash_float')
             .eq('apartment_id', apartmentId)
             .eq('type', 'OUT');
         if (fundingQ.error && /is_cash_float|exclude_from_cash_float/i.test(fundingQ.error.message)) {
             fundingQ = await service
                 .from('transactions')
-                .select('id, cat, wallet, type')
+                .select('id, cat, wallet, type, amount, date')
                 .eq('apartment_id', apartmentId)
                 .eq('type', 'OUT');
         }
         if (fundingQ.error) {
             throw Object.assign(new Error(fundingQ.error.message), { status: 500 });
         }
-        fundingIds = [...new Set(
-            (fundingQ.data || [])
-                .filter((t) => {
-                    if (t.exclude_from_cash_float) return false;
-                    if (t.is_cash_float) return true;
-                    return String(t.wallet || '').toUpperCase() === 'BANK'
-                        && String(t.cat || '').trim().toLowerCase() === 'petty cash';
-                })
-                .map((r) => r.id)
-                .filter(Boolean),
-        )];
+        fundingEntries = (fundingQ.data || []).filter((t) => {
+            if (t.exclude_from_cash_float) return false;
+            if (t.is_cash_float) return true;
+            return String(t.wallet || '').toUpperCase() === 'BANK'
+                && String(t.cat || '').trim().toLowerCase() === 'petty cash';
+        });
+        fundingIds = [...new Set(fundingEntries.map((r) => r.id).filter(Boolean))];
     }
 
     // Use .ilike() (not raw .or with spaces) — PostgREST `.or('notes.ilike.%Payment: Cash%')`
@@ -2047,6 +2044,7 @@ async function financeDocumentsAggregatesMutation(service, apartmentId) {
         cashDocumentIds: (cashRes.data || []).map((d) => d.id).filter(Boolean),
         openDocumentIds: (openRes.data || []).map((d) => d.id).filter(Boolean),
         fundingTransactionIds: fundingIds,
+        fundingEntries,
         fundingBillTotals,
     };
 }

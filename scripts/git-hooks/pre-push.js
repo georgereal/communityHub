@@ -208,6 +208,10 @@ async function main() {
     } catch {
       /* ignore */
     }
+
+    // Reminder: behavioral patterns may need documenting
+    console.log('📚 Behavioral check: if you introduced or changed a non-obvious pattern');
+    console.log('   (e.g. auto-derive logic, override-save, normalization), update docs/PATTERNS.md');
   } else {
     console.log('✅ No structural changes — skipping repo map check');
   }

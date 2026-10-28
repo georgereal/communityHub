@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Alert,
     Button,
@@ -31,6 +31,7 @@ export default function UnitFormDialog({ open, onClose, unit, onSaved }) {
     const [form, setForm] = useState(empty);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const autoOccRef = useRef(null); /** effective derived status when unit had no explicit occupancy_status */
 
     useEffect(() => {
         if (!open) return;
@@ -46,6 +47,8 @@ export default function UnitFormDialog({ open, onClose, unit, onSaved }) {
                 occupancy_status: unit.occupancy_status || unit.occupancy || '',
                 notes: unit.notes || '',
             });
+            // Track the auto-derived value so we can keep it as null on save unless changed
+            autoOccRef.current = unit.occupancy_status ? null : (unit.occupancy || null);
         } else {
             setForm(empty);
         }
@@ -63,7 +66,7 @@ export default function UnitFormDialog({ open, onClose, unit, onSaved }) {
                 area_sqft: form.area_sqft === '' ? null : Number(form.area_sqft),
                 car_limit: Number(form.car_limit) || 0,
                 bike_limit: Number(form.bike_limit) || 0,
-                occupancy_status: form.occupancy_status || null,
+                occupancy_status: (autoOccRef.current && form.occupancy_status === autoOccRef.current) ? null : (form.occupancy_status || null),
                 notes: form.notes || null,
             };
             if (unit?.id) await saveUnitFields(unit.id, patch);
@@ -100,13 +103,13 @@ export default function UnitFormDialog({ open, onClose, unit, onSaved }) {
                         <TextField label="Bike slots" type="number" fullWidth value={form.bike_limit} onChange={(e) => setField('bike_limit', e.target.value)} />
                     </Stack>
                     <FormControl fullWidth>
-                        <InputLabel>Occupancy</InputLabel>
+                        <InputLabel>Occupancy status</InputLabel>
                         <Select
-                            label="Occupancy"
+                            label="Occupancy status"
                             value={form.occupancy_status || ''}
                             onChange={(e) => setField('occupancy_status', e.target.value)}
                         >
-                            <MenuItem value="">Derived from residents</MenuItem>
+                            <MenuItem value="">Auto from residents</MenuItem>
                             {OCCUPANCY_STATUS_VALUES.map((k) => (
                                 <MenuItem key={k} value={k}>{occupancyLabel(k)}</MenuItem>
                             ))}

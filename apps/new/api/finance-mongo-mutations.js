@@ -523,6 +523,27 @@ async function saveTransaction(db, apartmentId, body) {
     if (!existing) doc.created_at = nowIso();
     await db.collection('ledger_entries').replaceOne({ _id: String(id) }, doc, { upsert: true });
 
+    // Ledger edit is the source of truth — propagate a changed amount down to
+    // linked bills and through them to expense plans (one-way only).
+    let config = null;
+    const prevAmt = existing ? roundMoney(Math.abs(parseFloat(existing.amount) || 0)) : null;
+    if (prevAmt != null && prevAmt !== amount && Array.isArray(doc.voucherIds) && doc.voucherIds.length) {
+        for (const vid of doc.voucherIds) {
+            // eslint-disable-next-line no-await-in-loop
+            const vdoc = await db.collection('vouchers').findOne({ _id: String(vid), ...apt(apartmentId) });
+            if (!vdoc) continue;
+            const next = { ...vdoc, amount, updated_at: nowIso() };
+            // eslint-disable-next-line no-await-in-loop
+            await db.collection('vouchers').replaceOne({ _id: String(vid) }, next);
+            const planRef = await findExpensePlanRef(db, apartmentId, next);
+            if (planRef) {
+                // eslint-disable-next-line no-await-in-loop
+                const res = await applyExpensePlanActual(db, apartmentId, planRef, { amount });
+                if (res?.config) config = res.config;
+            }
+        }
+    }
+
     // Sync allocations onto dues invoices
     if (txn.cat === 'Maintenance Collection' && Array.isArray(body.allocations)) {
         for (const a of body.allocations) {
@@ -579,6 +600,7 @@ async function saveTransaction(db, apartmentId, body) {
         transaction: stripMongo(doc),
         entry: stripMongo(doc),
         ledgerBalance,
+        config,
     };
 }
 
@@ -698,6 +720,9 @@ async function saveFinanceDocument(db, apartmentId, userId, body) {
         attachment_urls: [...kept, ...uploaded],
         source: raw.source === 'excel' ? 'excel' : (raw.source || 'manual'),
         vendor_name: raw.vendor_name ? titleCaseVendorName(raw.vendor_name) : (raw.vendor_name ?? existing?.vendor_name ?? null),
+        expense_plan_item_id: raw.expense_plan_item_id || existing?.expense_plan_item_id || null,
+        expense_plan_recurring_id: raw.expense_plan_recurring_id || existing?.expense_plan_recurring_id || null,
+        expense_plan_date: raw.expense_plan_date || existing?.expense_plan_date || null,
         updated_at: nowIso(),
         _schema: 'v2',
         _remodeledAt: new Date(),
@@ -714,7 +739,14 @@ async function saveFinanceDocument(db, apartmentId, userId, body) {
         await db.collection('ledger_entries').updateOne({ _id: String(transactionId) }, { $addToSet: { voucherIds: id } });
     }
     if (doc.vendor_name) await touchVendor(db, apartmentId, doc.vendor_name);
-    return { ok: true, document: stripMongo(doc) };
+    // Bill edit → update the expense plan's amount (plan never writes to ledger).
+    const planRef = await findExpensePlanRef(db, apartmentId, doc);
+    let config = null;
+    if (planRef) {
+        const res = await applyExpensePlanActual(db, apartmentId, planRef, { amount: doc.amount });
+        config = res?.config || null;
+    }
+    return { ok: true, document: stripMongo(doc), config };
 }
 
 async function deleteFinanceDocument(db, apartmentId, body) {
@@ -725,8 +757,37 @@ async function deleteFinanceDocument(db, apartmentId, body) {
     if (txnId) {
         await db.collection('ledger_entries').updateOne({ _id: String(txnId) }, { $pull: { voucherIds: id } });
     }
+    // If this bill originated from a plan, clear the plan's doc ref (status untouched).
+    const planRef = await findExpensePlanRef(db, apartmentId, existing);
+    let config = null;
+    if (planRef) {
+        const cfg = await ensureConfig(db, apartmentId);
+        if (planRef.kind === 'oneoff') {
+            const list = [...(cfg.expensePlanItems || [])];
+            const idx = list.findIndex((x) => String(x.id) === String(planRef.item_id)
+                && String(x.finance_document_id || '') === String(id));
+            if (idx >= 0) {
+                const next = { ...list[idx] };
+                delete next.finance_document_id;
+                list[idx] = next;
+                config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+            }
+        } else if (planRef.kind === 'recurring') {
+            const list = [...(cfg.expensePlanRecurring || [])];
+            const idx = list.findIndex((x) => String(x.id) === String(planRef.item_id));
+            if (idx >= 0) {
+                const prev = list[idx];
+                const financeDocLinks = { ...(prev.occurrence_finance_docs || {}) };
+                if (String(financeDocLinks[planRef.plan_date] || '') === String(id)) {
+                    delete financeDocLinks[planRef.plan_date];
+                    list[idx] = { ...prev, occurrence_finance_docs: financeDocLinks };
+                    config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+                }
+            }
+        }
+    }
     await db.collection('vouchers').deleteOne({ _id: String(id) });
-    return { ok: true };
+    return { ok: true, config };
 }
 
 async function linkFinanceDocuments(db, apartmentId, body) {
@@ -736,7 +797,9 @@ async function linkFinanceDocuments(db, apartmentId, body) {
     const txn = await db.collection('ledger_entries').findOne({ _id: String(txnId), ...apt(apartmentId) });
     if (!txn) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
     const inferredNotes = paymentNotesFromLedgerTxn(txn);
+    const txnAmt = roundMoney(Math.abs(parseFloat(txn.amount) || 0));
     const documents = [];
+    let config = null;
     for (const id of ids) {
         // eslint-disable-next-line no-await-in-loop
         const existing = await db.collection('vouchers').findOne({ _id: String(id), ...apt(apartmentId) });
@@ -748,6 +811,8 @@ async function linkFinanceDocuments(db, apartmentId, body) {
             status: 'linked',
             updated_at: nowIso(),
         };
+        // Ledger is the actuals source of truth — mirror its amount on the bill.
+        if (txnAmt > 0 && roundMoney(existing.amount) !== txnAmt) next.amount = txnAmt;
         if (inferredNotes && notesNeedPaymentMode(existing.notes)) {
             next.notes = inferredNotes;
         } else if (inferredNotes && existing.notes && !/Paid on:/i.test(String(existing.notes))) {
@@ -756,6 +821,16 @@ async function linkFinanceDocuments(db, apartmentId, body) {
         }
         // eslint-disable-next-line no-await-in-loop
         await db.collection('vouchers').replaceOne({ _id: String(id) }, next);
+        // Plan origin → mark plan done + propagate the actual amount.
+        const planRef = await findExpensePlanRef(db, apartmentId, next);
+        if (planRef) {
+            // eslint-disable-next-line no-await-in-loop
+            const res = await applyExpensePlanActual(db, apartmentId, planRef, {
+                transactionId: txnId,
+                amount: next.amount,
+            });
+            if (res?.config) config = res.config;
+        }
         documents.push(stripMongo(next));
     }
     await db.collection('ledger_entries').updateOne(
@@ -770,13 +845,14 @@ async function linkFinanceDocuments(db, apartmentId, body) {
     }
     const transaction = await db.collection('ledger_entries').findOne({ _id: String(txnId) });
     return {
-        ok: true, documents, count: documents.length, transaction: stripMongo(transaction), cash_desk_deposit: body.cash_desk_deposit,
+        ok: true, documents, count: documents.length, transaction: stripMongo(transaction), cash_desk_deposit: body.cash_desk_deposit, config,
     };
 }
 
 async function unlinkFinanceDocuments(db, apartmentId, body) {
     const ids = body.document_ids || [];
     const documents = [];
+    let config = null;
     for (const id of ids) {
         // eslint-disable-next-line no-await-in-loop
         const existing = await db.collection('vouchers').findOne({ _id: String(id), ...apt(apartmentId) });
@@ -790,10 +866,17 @@ async function unlinkFinanceDocuments(db, apartmentId, body) {
         if (txnId) {
             // eslint-disable-next-line no-await-in-loop
             await db.collection('ledger_entries').updateOne({ _id: String(txnId) }, { $pull: { voucherIds: id } });
+            // Bill detached from ledger → reopen the plan if it was completed via this txn.
+            const planRef = await findExpensePlanRef(db, apartmentId, existing);
+            if (planRef) {
+                // eslint-disable-next-line no-await-in-loop
+                const res = await reopenExpensePlanActual(db, apartmentId, planRef, txnId);
+                if (res?.config) config = res.config;
+            }
         }
         documents.push(stripMongo(existing));
     }
-    return { ok: true, documents, count: documents.length };
+    return { ok: true, documents, count: documents.length, config };
 }
 
 async function importFinanceDocuments(db, apartmentId, userId, body) {
@@ -1229,16 +1312,16 @@ async function saveBankClassificationRule(db, apartmentId, body) {
     const idx = list.findIndex((r) => String(r.id) === String(id));
     if (idx >= 0) list[idx] = { ...list[idx], ...rule };
     else list.push(rule);
-    await saveConfig(db, apartmentId, { classificationRules: list });
-    return { ok: true, rule };
+    const config = await saveConfig(db, apartmentId, { classificationRules: list });
+    return { ok: true, rule, config };
 }
 
 async function deleteBankClassificationRule(db, apartmentId, body) {
     const id = body.id || body.rule_id;
     const cfg = await ensureConfig(db, apartmentId);
     const list = (cfg.classificationRules || []).filter((r) => String(r.id) !== String(id));
-    await saveConfig(db, apartmentId, { classificationRules: list });
-    return { ok: true };
+    const config = await saveConfig(db, apartmentId, { classificationRules: list });
+    return { ok: true, config };
 }
 
 async function listBankClassificationRules(db, apartmentId) {
@@ -1402,6 +1485,7 @@ async function saveExpensePlanItem(db, apartmentId, body) {
             : (item.plan_date ? String(item.plan_date).slice(0, 10) : null),
         status: item.status || existing?.status || 'planned',
         attachment_urls,
+        finance_document_id: item.finance_document_id || existing?.finance_document_id || null,
     };
     delete row.keepAttachments;
     delete row.keepAttachmentPaths;
@@ -1467,6 +1551,224 @@ async function setLedgerExpensePlanRef(db, apartmentId, transactionId, ref) {
     return stripMongo({ ...existing, ...patch });
 }
 
+/**
+ * Derive an expense-plan ref from a finance document's origin fields.
+ * Returns { kind:'oneoff', item_id } | { kind:'recurring', item_id, plan_date } | null.
+ */
+function expensePlanRefFromDoc(doc) {
+    if (!doc) return null;
+    if (doc.expense_plan_item_id) {
+        return { kind: 'oneoff', item_id: String(doc.expense_plan_item_id) };
+    }
+    if (doc.expense_plan_recurring_id && doc.expense_plan_date) {
+        return {
+            kind: 'recurring',
+            item_id: String(doc.expense_plan_recurring_id),
+            plan_date: String(doc.expense_plan_date).slice(0, 10),
+        };
+    }
+    return null;
+}
+
+/**
+ * Resolve a doc's plan ref — doc fields first, then fall back to scanning the
+ * finance config for a plan→doc link (covers docs linked on the plan side only,
+ * e.g. bills attached to an occurrence after creation).
+ */
+async function findExpensePlanRef(db, apartmentId, doc) {
+    const direct = expensePlanRefFromDoc(doc);
+    if (direct || !doc?.id) return direct;
+    const cfg = await ensureConfig(db, apartmentId);
+    const docId = String(doc.id);
+    const oneoff = (cfg.expensePlanItems || []).find(
+        (x) => String(x.finance_document_id || '') === docId,
+    );
+    if (oneoff) return { kind: 'oneoff', item_id: String(oneoff.id) };
+    for (const tmpl of (cfg.expensePlanRecurring || [])) {
+        const links = tmpl.occurrence_finance_docs || {};
+        for (const [date, fid] of Object.entries(links)) {
+            if (String(fid) === docId) {
+                return { kind: 'recurring', item_id: String(tmpl.id), plan_date: date };
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * One-way back-propagation (ledger/bill → plan): apply actuals to the
+ * expense-plan record referenced by a bill.
+ *
+ * opts.transactionId — mark the plan item/occurrence done with this ledger link.
+ * opts.amount — sync the plan's amount (occurrence_amounts override for recurring;
+ *               item.amount for one-off). Never writes to the ledger itself.
+ */
+async function applyExpensePlanActual(db, apartmentId, ref, { transactionId, amount } = {}) {
+    if (!ref) return null;
+    const cfg = await ensureConfig(db, apartmentId);
+    const amt = Number.isFinite(Number(amount)) && Number(amount) > 0 ? roundMoney(amount) : null;
+
+    if (ref.kind === 'oneoff') {
+        const list = [...(cfg.expensePlanItems || [])];
+        const idx = list.findIndex((x) => String(x.id) === String(ref.item_id));
+        if (idx < 0) return null;
+        const prev = list[idx];
+        const next = { ...prev };
+        let changed = false;
+        if (transactionId) {
+            const prevTxn = prev.transaction_id ? String(prev.transaction_id) : null;
+            if (prevTxn && prevTxn !== transactionId) {
+                await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+            }
+            next.status = 'done';
+            next.completed_at = prev.completed_at || nowIso();
+            next.transaction_id = transactionId;
+            changed = true;
+        }
+        if (amt != null && roundMoney(prev.amount) !== amt) {
+            next.amount = amt;
+            changed = true;
+        }
+        if (!changed) return null;
+        list[idx] = next;
+        const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+        if (transactionId) {
+            await setLedgerExpensePlanRef(db, apartmentId, transactionId, {
+                kind: 'oneoff',
+                item_id: String(ref.item_id),
+            });
+        }
+        return { item: next, config };
+    }
+
+    if (ref.kind === 'recurring') {
+        const planDate = String(ref.plan_date || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(planDate)) return null;
+        const list = [...(cfg.expensePlanRecurring || [])];
+        const idx = list.findIndex((x) => String(x.id) === String(ref.item_id));
+        if (idx < 0) return null;
+        const prev = list[idx];
+        const completed = new Set(
+            (Array.isArray(prev.completed_dates) ? prev.completed_dates : [])
+                .map((d) => String(d).slice(0, 10)),
+        );
+        const links = { ...(prev.occurrence_links || {}) };
+        const amounts = { ...(prev.occurrence_amounts || {}) };
+        if (transactionId) {
+            completed.add(planDate);
+            const prevTxn = links[planDate] ? String(links[planDate]) : null;
+            if (prevTxn && prevTxn !== transactionId) {
+                await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
+            }
+            links[planDate] = transactionId;
+        }
+        if (amt != null && roundMoney(amounts[planDate] ?? prev.amount) !== amt) {
+            amounts[planDate] = amt;
+        }
+        list[idx] = {
+            ...prev,
+            completed_dates: [...completed].sort(),
+            occurrence_links: links,
+            occurrence_amounts: amounts,
+        };
+        const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+        if (transactionId) {
+            await setLedgerExpensePlanRef(db, apartmentId, transactionId, {
+                kind: 'recurring',
+                item_id: String(ref.item_id),
+                plan_date: planDate,
+            });
+        }
+        return { recurring: list[idx], config };
+    }
+    return null;
+}
+
+/**
+ * Reopen a plan item/occurrence after its bill was unlinked from the ledger.
+ * Only fires when the plan's stored txn link matches the unlinked txn.
+ */
+async function reopenExpensePlanActual(db, apartmentId, ref, transactionId) {
+    if (!ref || !transactionId) return null;
+    const cfg = await ensureConfig(db, apartmentId);
+
+    if (ref.kind === 'oneoff') {
+        const list = [...(cfg.expensePlanItems || [])];
+        const idx = list.findIndex((x) => String(x.id) === String(ref.item_id));
+        if (idx < 0) return null;
+        const prev = list[idx];
+        if (String(prev.transaction_id || '') !== String(transactionId)) return null;
+        const next = { ...prev, status: 'planned' };
+        delete next.completed_at;
+        delete next.transaction_id;
+        list[idx] = next;
+        const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
+        await setLedgerExpensePlanRef(db, apartmentId, transactionId, null);
+        return { item: next, config };
+    }
+
+    if (ref.kind === 'recurring') {
+        const planDate = String(ref.plan_date || '').slice(0, 10);
+        const list = [...(cfg.expensePlanRecurring || [])];
+        const idx = list.findIndex((x) => String(x.id) === String(ref.item_id));
+        if (idx < 0) return null;
+        const prev = list[idx];
+        const links = { ...(prev.occurrence_links || {}) };
+        if (String(links[planDate] || '') !== String(transactionId)) return null;
+        delete links[planDate];
+        const amounts = { ...(prev.occurrence_amounts || {}) };
+        delete amounts[planDate];
+        const completed = new Set(
+            (Array.isArray(prev.completed_dates) ? prev.completed_dates : [])
+                .map((d) => String(d).slice(0, 10)),
+        );
+        completed.delete(planDate);
+        list[idx] = {
+            ...prev,
+            completed_dates: [...completed].sort(),
+            occurrence_links: links,
+            occurrence_amounts: amounts,
+        };
+        const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+        await setLedgerExpensePlanRef(db, apartmentId, transactionId, null);
+        return { recurring: list[idx], config };
+    }
+    return null;
+}
+
+/**
+ * Sync a voucher's amount + link fields when its ledger row's actuals change.
+ * txn is the authoritative source — bill mirrors it.
+ */
+async function syncDocToLedgerActual(db, apartmentId, doc, txn) {
+    if (!doc || !txn) return doc;
+    const txnAmt = roundMoney(Math.abs(parseFloat(txn.amount) || 0));
+    const next = { ...doc };
+    let changed = false;
+    if (String(next.transaction_id || '') !== String(txn.id)) {
+        next.transaction_id = String(txn.id);
+        next.ledgerEntryId = String(txn.id);
+        changed = true;
+    }
+    if (next.status !== 'linked') {
+        next.status = 'linked';
+        changed = true;
+    }
+    if (txnAmt > 0 && roundMoney(next.amount) !== txnAmt) {
+        next.amount = txnAmt;
+        changed = true;
+    }
+    if (changed) {
+        next.updated_at = nowIso();
+        await db.collection('vouchers').replaceOne({ _id: String(next.id) }, next);
+        await db.collection('ledger_entries').updateOne(
+            { _id: String(txn.id) },
+            { $addToSet: { voucherIds: String(next.id) } },
+        );
+    }
+    return next;
+}
+
 /** Mark one-off plan item complete (keeps history; optional ledger link). */
 async function completeExpensePlanItem(db, apartmentId, body) {
     const id = body.item_id || body.id;
@@ -1495,6 +1797,16 @@ async function completeExpensePlanItem(db, apartmentId, body) {
         });
         if (!transaction) {
             throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+        }
+        // If a bill was created from this plan item, link + sync it to the txn.
+        if (list[idx].finance_document_id) {
+            const doc = await db.collection('vouchers').findOne({
+                _id: String(list[idx].finance_document_id),
+                ...apt(apartmentId),
+            });
+            if (doc) {
+                await syncDocToLedgerActual(db, apartmentId, doc, { id: transactionId, amount: transaction.amount });
+            }
         }
     }
     const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
@@ -1549,6 +1861,16 @@ async function linkExpensePlanItem(db, apartmentId, body) {
             item_id: String(id),
         });
         if (!transaction) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
+        // If a bill was created from this plan item, link + sync it to the txn.
+        if (prev.finance_document_id) {
+            const doc = await db.collection('vouchers').findOne({
+                _id: String(prev.finance_document_id),
+                ...apt(apartmentId),
+            });
+            if (doc) {
+                await syncDocToLedgerActual(db, apartmentId, doc, { id: transactionId, amount: transaction.amount });
+            }
+        }
     }
     list[idx] = { ...prev, transaction_id: transactionId };
     const config = await saveConfig(db, apartmentId, { expensePlanItems: list });
@@ -1578,8 +1900,20 @@ async function setExpensePlanOccurrenceStatus(db, apartmentId, body) {
             .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
     );
     const links = { ...(prev.occurrence_links && typeof prev.occurrence_links === 'object' ? prev.occurrence_links : {}) };
+    const financeDocLinks = { ...(prev.occurrence_finance_docs && typeof prev.occurrence_finance_docs === 'object' ? prev.occurrence_finance_docs : {}) };
     const prevTxn = links[planDate] ? String(links[planDate]) : null;
     let transaction = null;
+
+    // Handle finance_document_id for BOTH statuses (independent of status change)
+    const hasFinanceDoc = Object.prototype.hasOwnProperty.call(body, 'finance_document_id');
+    if (hasFinanceDoc) {
+        const financeDocId = body.finance_document_id ? String(body.finance_document_id) : null;
+        if (financeDocId) {
+            financeDocLinks[planDate] = financeDocId;
+        } else {
+            delete financeDocLinks[planDate];
+        }
+    }
 
     if (status === 'done') {
         set.add(planDate);
@@ -1597,6 +1931,16 @@ async function setExpensePlanOccurrenceStatus(db, apartmentId, body) {
                 });
                 if (!transaction) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
                 links[planDate] = transactionId;
+                // If a bill exists for this occurrence, link + sync it to the txn.
+                if (financeDocLinks[planDate]) {
+                    const doc = await db.collection('vouchers').findOne({
+                        _id: String(financeDocLinks[planDate]),
+                        ...apt(apartmentId),
+                    });
+                    if (doc) {
+                        await syncDocToLedgerActual(db, apartmentId, doc, { id: transactionId, amount: transaction.amount });
+                    }
+                }
             } else {
                 delete links[planDate];
             }
@@ -1607,12 +1951,48 @@ async function setExpensePlanOccurrenceStatus(db, apartmentId, body) {
             await setLedgerExpensePlanRef(db, apartmentId, prevTxn, null);
         }
         delete links[planDate];
+        // Only delete finance doc link if no explicit finance_document_id was provided
+        if (!hasFinanceDoc) {
+            delete financeDocLinks[planDate];
+        }
     }
 
     const completed_dates = [...set].sort();
-    list[idx] = { ...prev, completed_dates, occurrence_links: links };
+    list[idx] = { ...prev, completed_dates, occurrence_links: links, occurrence_finance_docs: financeDocLinks };
     const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
     return { ok: true, recurring: list[idx], plan_date: planDate, status, transaction, config };
+}
+
+/**
+ * Link / unlink a finance document (bill) to a single recurring occurrence.
+ * Only touches occurrence_finance_docs — does not change status or ledger links.
+ * body: { recurring_id|id, plan_date, finance_document_id (null to unlink) }
+ */
+async function linkExpensePlanOccurrenceDoc(db, apartmentId, body) {
+    const id = body.recurring_id || body.id;
+    const planDate = String(body.plan_date || '').slice(0, 10);
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(planDate)) {
+        throw Object.assign(new Error('recurring_id and plan_date (YYYY-MM-DD) required.'), { status: 400 });
+    }
+    const cfg = await ensureConfig(db, apartmentId);
+    const list = [...(cfg.expensePlanRecurring || [])];
+    const idx = list.findIndex((x) => String(x.id) === String(id));
+    if (idx < 0) throw Object.assign(new Error('Recurring template not found.'), { status: 404 });
+    const prev = list[idx];
+    const financeDocLinks = {
+        ...(prev.occurrence_finance_docs && typeof prev.occurrence_finance_docs === 'object'
+            ? prev.occurrence_finance_docs
+            : {}),
+    };
+    const financeDocId = body.finance_document_id ? String(body.finance_document_id) : null;
+    if (financeDocId) {
+        financeDocLinks[planDate] = financeDocId;
+    } else {
+        delete financeDocLinks[planDate];
+    }
+    list[idx] = { ...prev, occurrence_finance_docs: financeDocLinks };
+    const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+    return { ok: true, recurring: list[idx], config };
 }
 
 /**
@@ -1708,8 +2088,8 @@ async function deleteExpensePlanRecurring(db, apartmentId, body) {
         if (!body.preserveAttachments) await deleteExpensePlanAttachmentKeys(existing.attachment_urls);
     }
     const list = (cfg.expensePlanRecurring || []).filter((x) => String(x.id) !== String(id));
-    await saveConfig(db, apartmentId, { expensePlanRecurring: list });
-    return { ok: true, id };
+    const config = await saveConfig(db, apartmentId, { expensePlanRecurring: list });
+    return { ok: true, id, config };
 }
 
 /** Chunked unordered bulk upsert — avoids Vercel 10s timeouts on multi-row tableWrite. */
@@ -2142,6 +2522,8 @@ export async function runFinanceMongoMutation(action, { db, apartmentId, user, b
             return linkExpensePlanItem(db, apartmentId, body);
         case 'setExpensePlanOccurrenceStatus':
             return setExpensePlanOccurrenceStatus(db, apartmentId, body);
+        case 'linkExpensePlanOccurrenceDoc':
+            return linkExpensePlanOccurrenceDoc(db, apartmentId, body);
         case 'deferExpensePlanItems':
             return deferExpensePlanItems(db, apartmentId, body);
         case 'saveExpensePlanRecurring':

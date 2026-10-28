@@ -1,3 +1,4 @@
+import { financeNewFetch } from './api.js';
 import { navigateFinance } from '../financeApp/session.js';
 /** Finance-New clone of classic module (financeDocuments.js) — Mongo-backed, isolated DOM (fn-*). */
 import { fnFinances, fnLedger, ensureFnClassicShape } from './classicState.js';
@@ -383,6 +384,7 @@ export function hydrateFinanceDocsAggregatesFromApi(json = {}, apartmentId = nul
     openDocumentIds: json.openDocumentIds || [],
     fundingBillTotals: json.fundingBillTotals || {},
     fundingTransactionIds: json.fundingTransactionIds || Object.keys(json.fundingBillTotals || {}),
+    fundingEntries: json.fundingEntries || [],
     floatReady: true,
     commitmentsReady: true,
     floatVersion: FLOAT_TOTALS_VERSION,
@@ -580,6 +582,7 @@ export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
       openDocumentIds: result.openDocumentIds || [],
       fundingBillTotals: result.fundingBillTotals || {},
       fundingTransactionIds: result.fundingTransactionIds || Object.keys(result.fundingBillTotals || {}),
+      fundingEntries: result.fundingEntries || [],
       floatReady: true,
       commitmentsReady: true,
       floatVersion: FLOAT_TOTALS_VERSION,
@@ -595,6 +598,7 @@ export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
         fundingBillTotals: result.fundingBillTotals || {},
         fundingTransactionIds: result.fundingTransactionIds
           || Object.keys(result.fundingBillTotals || {}),
+        fundingEntries: result.fundingEntries || [],
         documents: result.documents || s.voucherAggregates?.documents || [],
       };
       const { persistFinancePackCache } = await import('./packCache.js');
@@ -973,6 +977,10 @@ const linkPicker = {
   txnId: null,
 };
 
+/** Debounce delay for the API-backed link search (attach-to-txn mode). */
+const LINK_SEARCH_DEBOUNCE_MS = 3000;
+let linkSearchTimer = null;
+
 const fillCatOptions = (kind) => {
   const sel = document.getElementById('fn-fdoc-cat');
   if (!sel) return;
@@ -1297,16 +1305,25 @@ const ledgerCandidatesForCashLink = () => {
 };
 
 /** Bank deposits that take cash off the desk (link cash receipts and/or wallet float here). */
-const ledgerCandidatesForCashDeposit = (docs, query) => {
+const ledgerCandidatesForCashDeposit = async (docs, query) => {
   const q = String(query || '').trim().toLowerCase();
   const primary = docs[0];
   const docAmt = docs.length === 1 ? (parseFloat(primary?.amount) || 0) : 0;
   const selectedTotal = round2(docs.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0));
-  const txns = (fnFinances().txns || []).filter((t) => {
-    if (t.excluded_from_ledger) return false;
-    if (t.type !== 'IN') return false;
-    return (t.wallet || 'CASH') === 'BANK';
+
+  // Server-side search over the full ledger — not just the loaded page.
+  const json = await financeNewFetch('/api/finance/ledger', {
+    query: {
+      q,
+      type: 'IN',
+      wallet: 'BANK',
+      no_vouchers: '1',
+      limit: 80,
+      offset: 0,
+    },
   });
+  const txns = (Array.isArray(json.rows) ? json.rows : (Array.isArray(json.entries) ? json.entries : []))
+    .filter((t) => !t.excluded_from_ledger);
 
   const scored = txns.map((t) => {
     const hay = [
@@ -1371,7 +1388,7 @@ const linkedLedgerTxnIds = () => {
   return ids;
 };
 
-const ledgerCandidatesForChequeSearch = (docs, query) => {
+const ledgerCandidatesForChequeSearch = async (docs, query) => {
   const q = String(query || '').trim().toLowerCase();
   const primary = docs[0];
   const chequeHint = paymentInfo(primary).mode === 'cheque'
@@ -1380,36 +1397,48 @@ const ledgerCandidatesForChequeSearch = (docs, query) => {
   const docAmt = docs.length === 1 ? (parseFloat(primary?.amount) || 0) : 0;
   const wantType = primary?.kind === 'IN' ? 'IN' : 'OUT';
   const taken = linkedLedgerTxnIds();
-  const txns = (fnFinances().txns || []).filter((t) =>
-    !t.excluded_from_ledger && t.type === wantType && !taken.has(String(t.id)),
-  );
   const needle = q || chequeHint;
   if (!needle && !docAmt) return [];
 
-  const scored = txns.map((t) => {
-    const hay = [
-      t.bank_reference,
-      t.description,
-      t.vendor_name,
-      t.vendor_invoice,
-      t.cat,
-      categoryDisplayLabel(t.cat),
-    ].join(' ').toLowerCase();
-    let score = 0;
-    if (needle) {
-      if (hay.includes(needle)) score += 40;
-      const ref = String(t.bank_reference || '').toLowerCase();
-      if (ref && (ref === needle || ref.includes(needle) || needle.includes(ref))) score += 50;
-      needle.split(/\s+/).filter((tok) => tok.length >= 4).forEach((tok) => {
-        if (hay.includes(tok)) score += 8;
-      });
-    }
-    const txnAmt = Math.abs(parseFloat(t.amount) || 0);
-    if (docAmt > 0 && Math.abs(txnAmt - docAmt) < 0.02) score += 35;
-    else if (docAmt > 0 && txnAmt > 0 && Math.abs(txnAmt - docAmt) / docAmt < 0.02) score += 20;
-    if (score > 0 && (t.wallet || 'CASH') === 'BANK') score += 5;
-    return { t, score };
-  }).filter((x) => x.score > 0);
+  // Server-side search over the full ledger — not just the loaded page.
+  const json = await financeNewFetch('/api/finance/ledger', {
+    query: {
+      q: needle || '',
+      type: wantType,
+      no_vouchers: '1',
+      limit: 80,
+      offset: 0,
+    },
+  });
+  const rows = Array.isArray(json.rows) ? json.rows : (Array.isArray(json.entries) ? json.entries : []);
+
+  const scored = rows
+    .filter((t) => !t.excluded_from_ledger && !taken.has(String(t.id)))
+    .map((t) => {
+      const hay = [
+        t.bank_reference,
+        t.description,
+        t.vendor_name,
+        t.vendor_invoice,
+        t.cat,
+        categoryDisplayLabel(t.cat),
+      ].join(' ').toLowerCase();
+      let score = 0;
+      if (needle) {
+        if (hay.includes(needle)) score += 40;
+        const ref = String(t.bank_reference || '').toLowerCase();
+        if (ref && (ref === needle || ref.includes(needle) || needle.includes(ref))) score += 50;
+        needle.split(/\s+/).filter((tok) => tok.length >= 4).forEach((tok) => {
+          if (hay.includes(tok)) score += 8;
+        });
+      }
+      const txnAmt = Math.abs(parseFloat(t.amount) || 0);
+      if (docAmt > 0 && Math.abs(txnAmt - docAmt) < 0.02) score += 35;
+      else if (docAmt > 0 && txnAmt > 0 && Math.abs(txnAmt - docAmt) / docAmt < 0.02) score += 20;
+      if (score > 0 && (t.wallet || 'CASH') === 'BANK') score += 5;
+      return { t, score };
+    })
+    .filter((x) => x.score > 0 || !needle);
 
   return scored
     .sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || '')) || b.score - a.score)
@@ -1492,41 +1521,42 @@ const syncDepositWalletToggle = () => {
   cb.checked = !!linkPicker.includeWalletFloat;
 };
 
-/** Unlinked bills/receipts eligible to attach to a known ledger row. */
-const unlinkedDocsForLedgerAttach = (txnId, query = '') => {
-  const txn = (fnFinances().txns || []).find((t) => t.id === txnId);
-  const preferKind = txn?.type === 'IN' ? 'IN' : 'OUT';
+/** Unlinked bills/receipts eligible to attach to a known ledger row. Server-side search. */
+const unlinkedDocsForLedgerAttach = async (txnId, query = '') => {
+  let preferKind = 'IN'; // default kind when no txnId
+  let txn = null;
+  if (txnId) {
+    txn = (fnFinances().txns || []).find((t) => t.id === txnId);
+    if (txn) {
+      preferKind = txn?.type === 'IN' ? 'IN' : 'OUT';
+    }
+  }
   const q = String(query || '').trim().toLowerCase();
-  const txnAmt = Math.abs(parseFloat(txn?.amount) || 0);
+  const txnAmt = txn ? Math.abs(parseFloat(txn.amount) || 0) : 0;
 
-  return (fnFinances().financeDocuments || [])
-    .filter((d) => {
-      if (!d || d.status === 'void') return false;
-      if (bookStatus(d) === 'linked' || d.transaction_id) return false;
-      return true;
-    })
+  const json = await financeNewFetch('/api/finance/vouchers', {
+    query: {
+      limit: 60,
+      offset: 0,
+      unlinked: '1',
+      ...(q ? { q } : {}),
+      kind: preferKind,
+      status: 'all',
+    },
+  });
+  const rows = Array.isArray(json.rows) ? json.rows : (Array.isArray(json.entries) ? json.entries : []);
+
+  // Rank results locally (ranking, not searching — the server already filtered).
+  return rows
     .map((d) => {
       const amt = Math.abs(parseFloat(d.amount) || 0);
-      const kindScore = d.kind === preferKind ? 2 : 0;
-      const amtScore = txnAmt > 0 && Math.abs(amt - txnAmt) < 0.02 ? 3 : 0;
-      const hay = [
-        d.vendor_name,
-        d.description,
-        d.notes,
-        categoryDisplayLabel(d.cat),
-        d.doc_date,
-        String(d.amount || ''),
-      ].join(' ').toLowerCase();
-      const searchHit = !q || hay.includes(q);
-      return { d, score: kindScore + amtScore, searchHit };
+      let score = d.kind === preferKind ? 2 : 0;
+      if (txnAmt > 0 && Math.abs(amt - txnAmt) < 0.02) score += 3;
+      return { d, score };
     })
-    .filter((x) => x.searchHit)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return String(b.d.doc_date || '').localeCompare(String(a.d.doc_date || ''));
-    })
-    .map((x) => x.d)
-    .slice(0, 60);
+    .sort((a, b) => (b.score - a.score)
+      || String(b.d.doc_date || '').localeCompare(String(a.d.doc_date || '')))
+    .map((x) => x.d);
 };
 
 const renderAttachDocCandidateRows = (docs) => {
@@ -1550,6 +1580,7 @@ const refreshAfterLedgerDocLink = () => {
   renderFinanceDocumentsPage();
   window.renderCashLedger?.();
   window.refreshLedgerLinkedDocsPanel?.();
+  window.refreshExpensePlanDetail?.();
 };
 
 const linkDocToKnownTxn = async (docId) => {
@@ -1610,14 +1641,17 @@ export const openAttachDocsToLedgerModal = (txnId) => {
     .catch((err) => console.warn('[fdoc] attach modal aggregates:', err?.message || err));
 };
 
-const refreshLinkModalList = () => {
+let linkListSeq = 0;
+const refreshLinkModalList = async () => {
   const list = document.getElementById('fn-fdoc-link-list');
   if (!list) return;
+  const seq = ++linkListSeq;
 
+  // attach-to-txn searches the docs API (debounced by the input handler).
   if (linkPicker.mode === 'attach-to-txn') {
-    list.innerHTML = renderAttachDocCandidateRows(
-      unlinkedDocsForLedgerAttach(linkPicker.txnId, linkPicker.search),
-    );
+    const results = await unlinkedDocsForLedgerAttach(linkPicker.txnId, linkPicker.search);
+    if (seq !== linkListSeq) return;
+    list.innerHTML = renderAttachDocCandidateRows(results);
     return;
   }
 
@@ -1636,14 +1670,18 @@ const refreshLinkModalList = () => {
     return;
   }
   if (linkPicker.mode === 'cash-deposit') {
+    const candidates = await ledgerCandidatesForCashDeposit(docs, linkPicker.search);
+    if (seq !== linkListSeq) return;
     list.innerHTML = renderLinkCandidateRows(
-      ledgerCandidatesForCashDeposit(docs, linkPicker.search),
+      candidates,
       { depositMode: true, docs, selectedTotal: round2(docs.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0)) },
     );
     return;
   }
+  const candidates = await ledgerCandidatesForChequeSearch(docs, linkPicker.search);
+  if (seq !== linkListSeq) return;
   list.innerHTML = renderLinkCandidateRows(
-    ledgerCandidatesForChequeSearch(docs, linkPicker.search),
+    candidates,
     { cashMode: false },
   );
 };
@@ -1651,6 +1689,10 @@ const refreshLinkModalList = () => {
 const closeLinkModal = () => {
   const modal = document.getElementById('fn-fdoc-link-modal');
   if (modal) modal.hidden = true;
+  if (linkSearchTimer) {
+    clearTimeout(linkSearchTimer);
+    linkSearchTimer = null;
+  }
   linkPicker.docIds = [];
   linkPicker.search = '';
   linkPicker.mode = 'cash';
@@ -1840,6 +1882,7 @@ const linkSelectedDocsToTxn = async (txnId) => {
     renderFinanceDocumentsPage();
     window.renderCashLedger?.();
     window.refreshLedgerLinkedDocsPanel?.();
+    window.refreshExpensePlanDetail?.();
     return;
   }
 
@@ -1855,6 +1898,7 @@ const linkSelectedDocsToTxn = async (txnId) => {
   renderFinanceDocumentsPage();
   window.renderCashLedger?.();
   window.refreshLedgerLinkedDocsPanel?.();
+  window.refreshExpensePlanDetail?.();
 };
 
 const isBlankExcelCell = (val) => {
@@ -2665,13 +2709,77 @@ const txnLabel = (txnId) => {
   return `${d} · ${formatMoney(t.amount)} · ${categoryDisplayLabel(t.cat)}`;
 };
 
+/** Linked txn ids already requested from the server (avoid re-fetch loops). */
+const linkedTxnRequested = new Set();
+
+/** Batch-load linked txns not on the current ledger page, then re-paint the table. */
+const fetchMissingLinkedTxns = async (docs) => {
+  const have = new Set((fnFinances().txns || []).map((t) => String(t.id)));
+  const missing = [...new Set(
+    docs
+      .filter((d) => d?.transaction_id && bookStatus(d) === 'linked')
+      .map((d) => String(d.transaction_id))
+      .filter((id) => !have.has(id) && !linkedTxnRequested.has(id)),
+  )];
+  if (!missing.length) return;
+  missing.forEach((id) => linkedTxnRequested.add(id));
+  try {
+    const res = await financeNewFetch('/api/finance/ledger', {
+      query: { transaction_ids: missing.join(','), limit: missing.length },
+      timeout: 15000,
+    });
+    const rows = res?.rows || res?.entries || [];
+    const existing = fnFinances().txns || [];
+    const existingIds = new Set(existing.map((t) => String(t.id)));
+    const fresh = rows.filter((t) => {
+      if (!t.id && t._id) t.id = String(t._id);
+      return t.id && !existingIds.has(String(t.id));
+    });
+    if (fresh.length) {
+      fnFinances().txns = [...existing, ...fresh];
+      paintFinanceDocumentsTable();
+    }
+  } catch { /* chip falls back to "Ledger entry" label */ }
+};
+
+/** Resolve the linked ledger txn (cache first, then server) and open its modal. */
+const openLinkedLedgerTxn = async (txnId) => {
+  if (!txnId) return;
+  const key = String(txnId);
+  let txn = (fnFinances().txns || []).find((t) => t.id === key);
+  if (!txn) {
+    try {
+      const res = await financeNewFetch('/api/finance/ledger', {
+        query: { transaction_id: key, limit: 1 },
+        timeout: 15000,
+      });
+      const rows = res?.rows || res?.entries || [];
+      txn = rows.find((t) => String(t.id) === key) || rows[0] || null;
+      if (txn) {
+        if (!txn.id && txn._id) txn.id = String(txn._id);
+        if (!(fnFinances().txns || []).find((t) => String(t.id) === String(txn.id))) {
+          (fnFinances().txns = fnFinances().txns || []).push(txn);
+        }
+      }
+    } catch { /* fall through to alert */ }
+  }
+  if (!txn?.id) {
+    alert('Linked ledger entry not found.');
+    return;
+  }
+  const { ensureFinanceModals } = await import('./accountsChrome.js');
+  await ensureFinanceModals();
+  if (typeof window.viewLedgerTxn === 'function') window.viewLedgerTxn(txn);
+};
+
 const renderFdocAttachmentIcons = (doc) => {
   const atts = Array.isArray(doc.attachment_urls) ? doc.attachment_urls : [];
   if (!atts.length) return '';
   const n = atts.length;
-  return `<button type="button" class="fdoc-attach-icon fdoc-attach-icon--count" data-fdoc-preview="${esc(doc.id)}" data-preview-idx="0" title="${n} file(s) — click to preview" aria-label="Preview ${n} file(s)">
+  return `<button type="button" class="fdoc-att-chip" data-fdoc-preview="${esc(doc.id)}" data-preview-idx="0" title="${n} file${n === 1 ? '' : 's'} attached — click to preview" aria-label="Preview ${n} attached file${n === 1 ? '' : 's'}">
     <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
-    <span class="fdoc-attach-count">${n}</span>
+    <span>${n} file${n === 1 ? '' : 's'}</span>
+    <i class="fa-solid fa-eye fdoc-att-chip__view" aria-hidden="true"></i>
   </button>`;
 };
 
@@ -2722,6 +2830,15 @@ const paintFinanceDocumentsTable = () => {
     const linkedTxn = status === 'linked' && d.transaction_id
       ? (fnFinances().txns || []).find((t) => t.id === d.transaction_id)
       : null;
+    let linkedTxnChip = '';
+    if (status === 'linked' && d.transaction_id) {
+      const chipLabel = linkedTxn
+        ? `${linkedTxn.date ? new Date(linkedTxn.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''} · ₹${Math.abs(parseFloat(linkedTxn.amount || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+        : 'Ledger entry';
+      linkedTxnChip = `<button type="button" class="fdoc-linked-chip" data-fdoc-open-txn="${esc(d.transaction_id)}" title="${esc(txnLabel(d.transaction_id))} — open ledger entry" aria-label="Open linked ledger entry">
+        <i class="fa-solid fa-link" aria-hidden="true"></i> ${esc(chipLabel)}
+      </button>`;
+    }
     let cashFloatBtn = '';
     if (linkedTxn && canMarkLinkedTxnAsCashFloat(linkedTxn)) {
       const floatActive = isLinkedTxnCashFloatActive(linkedTxn);
@@ -2760,7 +2877,10 @@ const paintFinanceDocumentsTable = () => {
       <td class="fdoc-cell-open">${esc(formatVendorParticulars(d.vendor_name, d.description))}</td>
       <td class="fdoc-cell-open"><span class="${payClass}">${esc(pay.label)}</span></td>
       <td class="cash-float-amt fdoc-cell-open">${formatMoney(d.amount)}</td>
-      <td class="fdoc-status-cell">${linkLabel}${renderFdocAttachmentIcons(d)}</td>
+      <td class="fdoc-status-cell">
+        ${linkLabel}
+        <span class="fdoc-status-cell__meta">${linkedTxnChip}${renderFdocAttachmentIcons(d)}</span>
+      </td>
       <td class="fdoc-actions">
         ${linkBtn}
         ${cashFloatBtn}
@@ -2772,6 +2892,7 @@ const paintFinanceDocumentsTable = () => {
   }).join('');
   syncBulkActionButtons();
   refreshCapabilityGates(document.getElementById('fn-subview-finance-docs') || body);
+  void fetchMissingLinkedTxns(docs);
 };
 
 export function renderFinanceDocumentsPage() {
@@ -3017,7 +3138,20 @@ const ensureLinkModalWired = () => {
   document.getElementById('fn-fdoc-link-backdrop')?.addEventListener('click', closeLinkModal);
   document.getElementById('fn-fdoc-link-search')?.addEventListener('input', (e) => {
     linkPicker.search = e.target.value || '';
-    refreshLinkModalList();
+    if (linkSearchTimer) clearTimeout(linkSearchTimer);
+    const hasQuery = Boolean(String(linkPicker.search).trim());
+    // cash mode has no search box and stays client-side; cleared queries
+    // refresh instantly; all other modes are API-backed and debounced.
+    if (!hasQuery || linkPicker.mode === 'cash') {
+      refreshLinkModalList();
+      return;
+    }
+    const list = document.getElementById('fn-fdoc-link-list');
+    if (list) list.innerHTML = '<p class="fa-panel__hint" style="margin:0.5rem 0;">Searching…</p>';
+    linkSearchTimer = setTimeout(() => {
+      linkSearchTimer = null;
+      refreshLinkModalList();
+    }, LINK_SEARCH_DEBOUNCE_MS);
   });
   document.getElementById('fn-fdoc-link-wallet-float')?.addEventListener('change', (e) => {
     linkPicker.includeWalletFloat = !!e.target.checked;
@@ -3200,6 +3334,7 @@ export function initFinanceDocumentsPage() {
           renderFinanceDocumentsPage();
           window.renderCashLedger?.();
           window.refreshLedgerLinkedDocsPanel?.();
+          window.refreshExpensePlanDetail?.();
         })
         .catch((err) => alert(err?.message || 'Unlink failed.'));
       return;
@@ -3222,6 +3357,14 @@ export function initFinanceDocumentsPage() {
       return;
     }
 
+    const openTxnBtn = e.target.closest('[data-fdoc-open-txn]');
+    if (openTxnBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      void openLinkedLedgerTxn(openTxnBtn.dataset.fdocOpenTxn);
+      return;
+    }
+
     const previewBtn = e.target.closest('[data-fdoc-preview]');
     if (previewBtn) {
       e.preventDefault();
@@ -3231,7 +3374,11 @@ export function initFinanceDocumentsPage() {
       const doc = (fnFinances().financeDocuments || []).find((d) => d.id === docId);
       const atts = Array.isArray(doc?.attachment_urls) ? doc.attachment_urls : [];
       if (!atts.length) return;
-      void window.viewAttachmentGallery?.(atts, startIdx);
+      void (async () => {
+        const { ensureFinanceModals } = await import('./accountsChrome.js');
+        await ensureFinanceModals();
+        await window.viewAttachmentGallery?.(atts, startIdx);
+      })();
       return;
     }
 

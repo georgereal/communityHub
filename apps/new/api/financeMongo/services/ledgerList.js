@@ -60,6 +60,11 @@ export function buildLedgerListFilter(apartmentId, body = {}) {
 
     const txnId = body.transaction_id || body.transactionId;
     if (txnId) filter.id = String(txnId);
+    const txnIds = body.transaction_ids;
+    if (!txnId && txnIds) {
+        const ids = String(txnIds).split(',').map((s) => s.trim()).filter(Boolean);
+        if (ids.length) filter.id = { $in: ids };
+    }
 
     let dateFrom = body.date_from || body.dateFrom || null;
     let dateTo = body.date_to || body.dateTo || null;
@@ -190,8 +195,34 @@ export function buildLedgerListFilter(apartmentId, body = {}) {
             { cat: re },
             { wallet: re },
         ];
+        // Numeric queries also match amount substring ("81" → 81500).
+        const amtQ = q.replace(/[^\d.]/g, '');
+        if (amtQ) {
+            textOr.push({
+                $expr: {
+                    $regexMatch: {
+                        input: { $toString: '$amount' },
+                        regex: escapeRe(amtQ),
+                    },
+                },
+            });
+        }
         filter.$and = filter.$and || [];
         filter.$and.push({ $or: textOr });
+    }
+
+    const noVouchers = body.no_vouchers === true
+        || body.no_vouchers === '1'
+        || body.no_vouchers === 'true'
+        || body.noVouchers === true;
+    if (noVouchers) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({
+            $or: [
+                { voucherIds: { $exists: false } },
+                { voucherIds: { $size: 0 } },
+            ],
+        });
     }
 
     return filter;

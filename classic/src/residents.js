@@ -142,7 +142,9 @@ export function classifyUnitOccupancy(residents, unitRecord = null) {
     const residingOwners = owners.filter((r) => r.is_residing !== false);
     const explicit = unitRecord?.occupancy_status;
 
-    if (explicit && ['UNDER_RENOVATION', 'LOCKED', 'DEVELOPER_HOLD'].includes(explicit)) {
+    // Honor any explicitly-set occupancy_status (manual override).
+    // null/empty means "auto from residents" — fall through to derivation below.
+    if (explicit && ['NON_ALLOTABLE', 'VACANT', 'OWNER_OCCUPIED', 'TENANT_OCCUPIED', 'UNDER_RENOVATION', 'LOCKED', 'DEVELOPER_HOLD'].includes(explicit)) {
         return explicit;
     }
     if (!owners.length && !tenants.length) return 'NON_ALLOTABLE';

@@ -31,6 +31,7 @@ import {
     beginApartmentSwitch,
 } from './accessLocks.js';
 import { readApiJson } from './apiJson.js';
+import { loadModuleAccess } from './moduleAccess.js';
 import { isNewUi } from '@new/uiMode.js';
 
 export {
@@ -326,7 +327,6 @@ function schedulePostBootAccessLoads(apartmentId, userId) {
     deferAfterFirstPaint(() => {
         void (async () => {
             try {
-                const { loadModuleAccess } = await import('./moduleAccess.js');
                 await loadModuleAccess(apartmentId, userId || null);
                 document.dispatchEvent(new CustomEvent('module-access-loaded'));
             } catch (err) {

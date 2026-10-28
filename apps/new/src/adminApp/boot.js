@@ -3,6 +3,7 @@ import { goToLogin } from '../authRedirect.js';
 import { MPA_ROUTE_PATHS } from '../appShell/routes.js';
 import { ensureMpaCookieSession } from '../appShell/mpaAuth.js';
 import { hydrateWorkspaceSession } from '../appShell/workspaceBoot.js';
+import { refreshFinanceCategoryCatalog } from './api.js';
 
 export async function bootAdminApp({ route = 'an-society' } = {}) {
     const ok = await ensureMpaCookieSession();
@@ -16,7 +17,6 @@ export async function bootAdminApp({ route = 'an-society' } = {}) {
     const { ctx } = await hydrateWorkspaceSession();
 
     try {
-        const { refreshFinanceCategoryCatalog } = await import('./api.js');
         await refreshFinanceCategoryCatalog();
     } catch (err) {
         console.warn('[adminApp] domain load:', err);

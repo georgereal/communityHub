@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import { portalState } from './store.js';
 import { normalizeCategoryKey, EXPENSE_CATS, categoryDisplayLabel } from './expenseCategories.js';
 import { postFinanceMutation } from './financeApi.js';
+import { getFinanceDocumentsAggregatesCache } from './financeDocuments.js';
 import { applySavedTransactionLocally } from './ledgerTxnLocal.js';
 import { withButtonBusy } from './buttonBusy.js';
 
@@ -17,10 +18,8 @@ const txnWallet = (t) => (t?.wallet === 'BANK' ? 'BANK' : 'CASH');
 
 /** Bank withdrawal classified as Petty Cash — funds the float store. */
 export const isBankPettyFunding = (t) =>
-  t?.type === 'OUT'
-  && txnWallet(t) === 'BANK'
-  && normalizeCategoryKey(t.cat) === 'Petty Cash'
-  && !t.exclude_from_cash_float;
+  (t?.type === 'OUT' || t?.kind === 'OUT')
+  && normalizeCategoryKey(t.cat) === 'Petty Cash';
 
 /** Cash-desk spend that draws down the float (real expense categories). */
 export const isCashDeskSpend = (t) =>
@@ -58,16 +57,26 @@ export const setCashExpenseReportingMode = (mode) => {
 const amountOf = (t) => Math.abs(parseFloat(t?.amount) || 0);
 
 export const computeCashFloatStore = (txns = portalState.finances?.txns || []) => {
-  const funding = txns.filter(isBankPettyFunding);
-  const spends = txns.filter(isCashDeskSpend);
-  const topUps = txns.filter(isCashDeskTopUp);
+  // The frontend ledger page only holds 50 paginated entries. Petty Cash
+  // funding entries that fall outside the first page are invisible to
+  // isBankPettyFunding, causing the "funded" KPI to under-report. The
+  // voucher aggregates API queries ALL funding ledger entries (no pagination),
+  // so we supplement the local txns page with those entries to close the gap.
+  const apiFundingEntries = getFinanceDocumentsAggregatesCache()?.fundingEntries || [];
+  const existingIds = new Set((txns || []).map((t) => String(t?.id || t?._id || '')));
+  const supplement = apiFundingEntries.filter((t) => !existingIds.has(String(t?.id || '')));
+  const allTxns = supplement.length ? [...txns, ...supplement] : txns;
+
+  const funding = allTxns.filter(isBankPettyFunding);
+  const spends = allTxns.filter(isCashDeskSpend);
+  const topUps = allTxns.filter(isCashDeskTopUp);
 
   const funded = round2(funding.reduce((s, t) => s + amountOf(t), 0));
   const spent = round2(spends.reduce((s, t) => s + amountOf(t), 0));
   const topUpTotal = round2(topUps.reduce((s, t) => s + amountOf(t), 0));
   const remaining = round2(funded - spent);
 
-  const walletCash = round2(txns.reduce((s, t) => {
+  const walletCash = round2(allTxns.reduce((s, t) => {
     if (txnWallet(t) !== 'CASH') return s;
     const a = amountOf(t);
     return t.type === 'IN' ? s + a : s - a;

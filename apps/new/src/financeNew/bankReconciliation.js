@@ -684,8 +684,8 @@ let bankReconVisibleColumns = {
 };
 /** Per-table filters on bank reconciliation. */
 let bankReconFilters = {
-    work: { q: '', type: 'all', mismatchOnly: false },
-    processed: { q: '', status: 'all', type: 'all', mismatchOnly: false },
+    work: { q: '', type: 'all', mismatchOnly: false, match_status: 'all' },
+    processed: { q: '', status: 'all', type: 'all', mismatchOnly: false, match_status: 'all' },
     ledger: { q: '', type: 'all' },
 };
 let bankReconMismatchNav = { work: -1, processed: -1 };
@@ -964,6 +964,7 @@ const filterWorkLines = (lines) => {
     const f = bankReconFilters.work;
     return lines.filter((line) => {
         if (f.mismatchOnly && !line.passbookMismatch) return false;
+        if (f.match_status !== 'all' && line.match_status !== f.match_status) return false;
         if (f.type === 'IN' || f.type === 'OUT') {
             if (bankLineType(line) !== f.type) return false;
         }
@@ -978,6 +979,7 @@ const filterProcessedLines = (lines) => {
         if (f.status === 'MATCHED' || f.status === 'IGNORED') {
             if (line.match_status !== f.status) return false;
         }
+        if (f.match_status !== 'all' && line.match_status !== f.match_status) return false;
         if (f.type === 'IN' || f.type === 'OUT') {
             if (bankLineType(line) !== f.type) return false;
         }
@@ -1008,6 +1010,12 @@ const renderFilterBar = (scope, { mismatchCount = 0, showStatus = false, showTyp
             <option value="IGNORED"${f.status === 'IGNORED' ? ' selected' : ''}>Ignored</option>
           </select>`
         : '';
+    const matchStatusOpts = `<select class="bank-recon-filter-match-status expense-combobox" data-filter-scope="${scope}" aria-label="Match status filter">
+        <option value="all"${f.match_status === "all" ? " selected" : ""}>All</option>
+        <option value="MATCHED"${f.match_status === "MATCHED" ? " selected" : ""}>Matched</option>
+        <option value="UNMATCHED"${f.match_status === "UNMATCHED" ? " selected" : ""}>Unmatched</option>
+        <option value="IGNORED"${f.match_status === "IGNORED" ? " selected" : ""}>Ignored</option>
+      </select>`;
     const typeOpts = showType
         ? `<select class="bank-recon-filter-type expense-combobox" data-filter-scope="${scope}" aria-label="Type filter">
             <option value="all"${f.type === 'all' ? ' selected' : ''}>All types</option>
@@ -1034,6 +1042,7 @@ const renderFilterBar = (scope, { mismatchCount = 0, showStatus = false, showTyp
       <div class="bank-recon-filter-bar" data-filter-scope="${scope}">
         <input type="search" class="bank-recon-filter-q expense-combobox" data-filter-scope="${scope}" placeholder="Search…" value="${esc(f.q || '')}" aria-label="Search rows" />
         ${typeOpts}
+        ${matchStatusOpts}
         ${statusOpts}
         ${mismatchControls}
       </div>`;
@@ -2670,6 +2679,8 @@ const wireLedgerTable = (txnsEl) => {
         const editBtn = e.target.closest('.bank-recon-ledger-edit');
         if (editBtn) {
             navigateFinance('finance-ledger');
+            const { ensureFinanceModals } = await import('./accountsChrome.js');
+            await ensureFinanceModals();
             window.editTxn?.(editBtn.dataset.txn);
             return;
         }

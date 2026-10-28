@@ -128,7 +128,9 @@ function resolveRoute(method, parts, body, query) {
                     pivot_month: q.pivot_month,
                     source_scope: q.source_scope,
                     transaction_id: q.transaction_id,
+                    transaction_ids: q.transaction_ids,
                     include_excluded: q.include_excluded,
+                    no_vouchers: q.no_vouchers,
                 },
             };
         }
@@ -393,6 +395,14 @@ function resolveRoute(method, parts, body, query) {
                 bodyPatch: { id: c, recurring_id: c },
             };
         }
+        if (b === 'recurring' && c && m === 'POST' && parts[3] === 'occurrence-doc') {
+            return {
+                kind: 'mutation',
+                action: 'linkExpensePlanOccurrenceDoc',
+                collection: 'finance_config',
+                bodyPatch: { id: c, recurring_id: c },
+            };
+        }
         if (b === 'recurring' && m === 'DELETE' && c) {
             return {
                 kind: 'mutation',
@@ -465,6 +475,7 @@ export default async function handler(req, res) {
             pivot_month: getQueryParam(req, 'pivot_month'),
             source_scope: getQueryParam(req, 'source_scope'),
             transaction_id: getQueryParam(req, 'transaction_id'),
+            transaction_ids: getQueryParam(req, 'transaction_ids'),
             include_excluded: getQueryParam(req, 'include_excluded'),
             months: getQueryParam(req, 'months'),
             monthCount: getQueryParam(req, 'monthCount'),

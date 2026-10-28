@@ -449,12 +449,20 @@ export const projectRecurringOccurrences = (templates, fromIso, toIso) => {
       if (t.end_date && iso > String(t.end_date).slice(0, 10)) return;
       const cursor = new Date(`${iso}T12:00:00`);
       if (cursor < from || cursor > to) return;
-      const amount = periodAmounts && periodAmounts[occIndex] != null
-        ? round2(periodAmounts[occIndex])
-        : defaultAmt;
+      const occAmounts = t.occurrence_amounts && typeof t.occurrence_amounts === 'object'
+        ? t.occurrence_amounts
+        : {};
+      const amount = occAmounts[iso] != null
+        ? round2(occAmounts[iso])
+        : (periodAmounts && periodAmounts[occIndex] != null
+          ? round2(periodAmounts[occIndex])
+          : defaultAmt);
       const status = completedSet.has(iso) ? 'done' : 'planned';
       const links = t.occurrence_links && typeof t.occurrence_links === 'object'
         ? t.occurrence_links
+        : {};
+      const financeDocLinks = t.occurrence_finance_docs && typeof t.occurrence_finance_docs === 'object'
+        ? t.occurrence_finance_docs
         : {};
       out.push({
         source: 'recurring',
@@ -477,6 +485,7 @@ export const projectRecurringOccurrences = (templates, fromIso, toIso) => {
         occ_index: occIndex,
         status,
         transaction_id: links[iso] || null,
+        finance_document_id: financeDocLinks[iso] || null,
       });
     });
   });
@@ -565,6 +574,7 @@ const buildTimelineRaw = () => {
       status: isDonePlanItem(i) ? 'done' : 'planned',
       completed_at: i.completed_at || null,
       transaction_id: i.transaction_id || null,
+      finance_document_id: i.finance_document_id || null,
     }));
 
   const projected = projectRecurringOccurrences(getRecurring(), from, to);
@@ -1131,10 +1141,82 @@ const linkedLedgerBlock = (transactionId) => {
   if (!transactionId) {
     return `<div class="eplan-dl__block"><dt>Ledger</dt><dd class="muted">Not linked</dd></div>`;
   }
-  if (!txn) {
-    return `<div class="eplan-dl__block"><dt>Ledger</dt><dd>Linked · id ${esc(String(transactionId).slice(0, 8))}…</dd></div>`;
+  const label = txn ? ledgerTxnLabel(txn) : `Linked · id ${esc(String(transactionId).slice(0, 8))}…`;
+  return `<div class="eplan-dl__block"><dt>Ledger</dt><dd>
+    <button type="button" class="fdoc-chip__open" data-eplan-open-ledger="${esc(transactionId)}" title="View ledger entry">${esc(label)}</button>
+  </dd></div>`;
+};
+
+const linkedFinanceDocBlock = (financeDocId) => {
+  if (!financeDocId) {
+    return '';
   }
-  return `<div class="eplan-dl__block"><dt>Ledger</dt><dd>${esc(ledgerTxnLabel(txn))}</dd></div>`;
+  const docs = fnFinances().financeDocuments || [];
+  const doc = docs.find((d) => d.id === financeDocId);
+  const label = doc
+    ? `${doc.vendor_name || doc.description || '—'} · ${formatMoney(doc.amount)} · ${String(doc.doc_date || '').slice(0, 10)}`
+    : `Bill created · id ${String(financeDocId).slice(0, 8)}…`;
+  return `<div class="eplan-dl__block"><dt>Bill</dt><dd>
+    <button type="button" class="fdoc-chip__open" data-eplan-open-bill="${esc(financeDocId)}" title="View bill">${esc(label)}</button>
+  </dd></div>`;
+};
+
+/** Fetch a single ledger txn by id (cache → server), then cache it. */
+const fetchLedgerTxnById = async (txnId) => {
+  if (!txnId) return null;
+  const cached = findLedgerTxn(txnId);
+  if (cached) return cached;
+  const json = await financeNewFetch('/api/finance/ledger', {
+    query: { transaction_id: txnId, limit: 1, offset: 0 },
+    timeout: 15000,
+  });
+  const rows = json.rows || json.entries || [];
+  const txn = rows.find((t) => String(t.id) === String(txnId)) || rows[0] || null;
+  if (txn) {
+    rememberLedgerTxns([txn]);
+    if (!(fnFinances().txns || []).find((t) => String(t.id) === String(txn.id))) {
+      (fnFinances().txns = fnFinances().txns || []).push(txn);
+    }
+  }
+  return txn;
+};
+
+let billFetchPromise = null;
+const fetchBillById = async (financeDocId) => {
+  if (!financeDocId) return null;
+  const docs = fnFinances().financeDocuments || [];
+  const cached = docs.find((d) => d.id === financeDocId);
+  if (cached) return cached;
+
+  // Fetch on-demand from server
+  if (billFetchPromise) {
+    const cachedResult = await billFetchPromise;
+    const fromPromise = cachedResult.find((d) => d.id === financeDocId);
+    if (fromPromise) return fromPromise;
+  }
+
+  const apt = portalState.access?.activeApartmentId;
+  billFetchPromise = postFnMutation('listFinanceDocuments', {
+    apartment_id: apt,
+    document_ids: [financeDocId],
+  });
+  const result = await billFetchPromise;
+  billFetchPromise = null;
+
+  const fetched = result.documents || [];
+  if (fetched.length > 0) {
+    if (!fnFinances().financeDocuments) fnFinances().financeDocuments = [];
+    fetched.forEach((d) => {
+      const idx = fnFinances().financeDocuments.findIndex((x) => x.id === d.id);
+      if (idx >= 0) {
+        fnFinances().financeDocuments[idx] = d;
+      } else {
+        fnFinances().financeDocuments.push(d);
+      }
+    });
+    return fetched.find((d) => d.id === financeDocId) || null;
+  }
+  return null;
 };
 
 const scoreLedgerCandidate = (txn, plan) => {
@@ -1163,38 +1245,49 @@ const searchLedgerOutForPlan = async (plan, query = '') => {
     && Number.isFinite(asNum)
     && /[\d.]/.test(raw)
     && !/[a-zA-Z]/.test(raw);
-  const window = planDateWindow(plan);
+  // Use a wider date window (12 months total, +/-6 months from plan date)
+  // so users can find payments made earlier/later in the year.
+  const planDate = plan?.plan_date || plan?.due_date;
+  const window = planDate
+    ? {
+        date_from: new Date(planDate).setMonth(new Date(planDate).getMonth() - 6)
+          .toISOString().slice(0, 10),
+        date_to: new Date(planDate).setMonth(new Date(planDate).getMonth() + 6)
+          .toISOString().slice(0, 10),
+      }
+    : {};
 
   const fetchOut = async (extra) => {
     const json = await financeNewFetch('/api/finance/ledger', {
       query: {
         type: 'OUT',
-        limit: 80,
+        limit: 200, // increased from 80 to capture more results
         offset: 0,
         ...extra,
       },
+      timeout: 15000,
     });
     return Array.isArray(json.entries) ? json.entries : [];
   };
 
   let entries;
   if (isAmountish || !raw) {
-    // Amount isn't in text index — pull a date window (optionally by category), filter locally.
-    entries = await fetchOut({
-      ...window,
-      ...(plan?.cat ? { cat: plan.cat } : {}),
-    });
+    // Pull a wide date window without category filtering — lets users find payments
+    // made outside the narrow category/date constraints.
+    entries = await fetchOut({ ...window });
     if (isAmountish) {
       const target = Math.abs(asNum);
       let matched = entries.filter((t) => Math.abs(Math.abs(parseFloat(t.amount) || 0) - target) < 1);
-      if (!matched.length && plan?.cat) {
+      if (!matched.length) {
+        // Retry without amount filtering if no matches — the wide date window should surface results.
         entries = await fetchOut({ ...window });
-        matched = entries.filter((t) => Math.abs(Math.abs(parseFloat(t.amount) || 0) - target) < 1);
+      } else {
+        entries = matched;
       }
-      entries = matched;
     }
   } else {
-    entries = await fetchOut({ q: raw });
+    // Text search — query by vendor/description, still within the wide date window.
+    entries = await fetchOut({ q: raw, ...window });
   }
 
   rememberLedgerTxns(entries);
@@ -1315,6 +1408,96 @@ const openCompleteLinkModal = ({ mode = 'complete', kind, id, planDate = null, p
   setTimeout(() => searchEl?.focus(), 40);
 };
 
+/**
+ * Create a finance document (bill/receipt) from a planned expense item.
+ * If the item is already linked to a ledger transaction, defer to
+ * createFinanceDocumentFromLedgerTxn for a proper link.
+ */
+const createBillFromPlanItem = async (item) => {
+  const txnId = item.transaction_id;
+
+  if (txnId) {
+    const { createFinanceDocumentFromLedgerTxn } = await import('./financeDocuments.js');
+    return await createFinanceDocumentFromLedgerTxn(txnId, { openEditor: true });
+  }
+
+  const amount = Math.abs(parseFloat(item.amount) || 0);
+  if (!(amount > 0)) throw new Error('Plan item has no amount.');
+
+  const result = await postFnMutation('saveFinanceDocument', {
+    document: {
+      kind: 'OUT',
+      doc_date: String(item.plan_date || item.due_date || '').slice(0, 10) || todayISO(),
+      amount,
+      cat: item.cat || 'Other',
+      sub_category: item.sub_category || null,
+      vendor_name: item.vendor_name || null,
+      description: item.description || item.title || null,
+      notes: item.notes || null,
+      transaction_id: null,
+      source: 'expense_plan',
+      expense_plan_item_id: item.id || null,
+      expense_plan_recurring_id: item.recurring_id || null,
+      expense_plan_date: item.recurring_id ? (item.plan_date || null) : null,
+    },
+    keepAttachments: Array.isArray(item.attachment_urls) ? item.attachment_urls : [],
+    removeAttachments: [],
+    newAttachmentFiles: [],
+  });
+
+  const doc = result.document;
+  if (!doc?.id) throw new Error('Could not create bill.');
+
+  // Save the finance document ID back to the expense plan item
+  if (item.id) {
+    const apt = portalState.access?.activeApartmentId;
+    const updateResult = await postFnMutation('saveExpensePlanItem', {
+      apartment_id: apt,
+      item: {
+        id: item.id,
+        finance_document_id: doc.id,
+      },
+    });
+    if (updateResult.item) {
+      if (item.source === 'oneoff') {
+        applyItemLocally(updateResult.item);
+      } else if (item.recurring_id) {
+        applyRecurringLocally(updateResult.item);
+      }
+    }
+  } else if (item.recurring_id && item.plan_date) {
+    // For recurring occurrences, link the bill without touching status or ledger links
+    const apt = portalState.access?.activeApartmentId;
+    const updateResult = await postFnMutation('linkExpensePlanOccurrenceDoc', {
+      apartment_id: apt,
+      recurring_id: item.recurring_id,
+      plan_date: item.plan_date,
+      finance_document_id: doc.id,
+    });
+    if (updateResult.recurring) {
+      applyRecurringLocally(updateResult.recurring);
+    }
+  }
+
+  const { refreshFinanceDocumentsAfterSave } = await import('./financeDocuments.js');
+  const { openFinanceDocumentModal } = await import('./accountsChrome.js');
+  refreshFinanceDocumentsAfterSave(doc);
+  window.refreshLedgerLinkedDocsPanel?.();
+  window.renderCashLedger?.();
+
+  // Refresh the expense plan detail modal to show the new bill link
+  if (selectedKey) {
+    const updatedTimeline = buildTimeline();
+    const updatedRow = updatedTimeline.find((r) => r.key === selectedKey);
+    if (updatedRow) {
+      await showDetail(updatedRow);
+    }
+  }
+
+  if (openFinanceDocumentModal) await openFinanceDocumentModal(doc);
+  return doc;
+};
+
 const submitCompleteLink = async (transactionId) => {
   if (!completeLinkCtx) return;
   const apt = portalState.access?.activeApartmentId;
@@ -1348,10 +1531,10 @@ const submitCompleteLink = async (transactionId) => {
   }
   closeCompleteLinkModal();
   closeDetail();
-  renderExpensePlanPage();
+  await renderExpensePlanPage();
 };
 
-const showDetail = (row) => {
+const showDetail = async (row) => {
   const body = document.getElementById('fn-eplan-detail-body');
   if (!body || !row) return;
   selectedKey = row.key;
@@ -1364,6 +1547,13 @@ const showDetail = (row) => {
     const done = rowStatusOf(row) === 'done';
     const stored = getItems().find((x) => x.id === row.id) || row;
     const txnId = stored.transaction_id || row.transaction_id || null;
+    const financeDocId = stored.finance_document_id || row.finance_document_id || null;
+
+    // Fetch bill on-demand if not in cache
+    if (financeDocId) {
+      await fetchBillById(financeDocId);
+    }
+
     openDetailModal(row.title || row.description || 'Planned expense');
     body.innerHTML = `
       <p class="eplan-detail__title">${esc(row.title || row.description || 'Planned expense')}</p>
@@ -1373,6 +1563,7 @@ const showDetail = (row) => {
         <div class="eplan-dl__block"><dt>Vendor</dt><dd>${esc(row.vendor_name || '—')}</dd></div>
         <div class="eplan-dl__block"><dt>Amount</dt><dd>${formatMoney(row.amount)}</dd></div>
         ${linkedLedgerBlock(txnId)}
+        ${linkedFinanceDocBlock(financeDocId)}
         ${attachDetailBlock(attachmentsOf(stored))}
         <div class="eplan-dl__meta">
           <div><dt>Type</dt><dd>One-off</dd></div>
@@ -1395,6 +1586,16 @@ const showDetail = (row) => {
             deferValue: row.id,
           }),
       })}
+      ${!done
+        ? `<div class="eplan-detail__actions" data-cap="accounts.plan_edit" style="margin-top:0.5rem;">
+            <button type="button" class="btn btn-outline btn--small" data-eplan-create-bill-item="${esc(row.id)}">
+              <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Create bill
+            </button>
+            <button type="button" class="btn btn-outline btn--small" data-eplan-link-item="${esc(row.id)}">
+              <i class="fa-solid fa-link" aria-hidden="true"></i> ${txnId ? 'Change ledger link' : 'Link to payment'}
+            </button>
+          </div>`
+        : ''}
       ${done
         ? `<div class="eplan-detail__actions" data-cap="accounts.plan_edit" style="margin-top:0.5rem;">
             <button type="button" class="btn btn-outline btn--small" data-eplan-link-item="${esc(row.id)}">
@@ -1413,6 +1614,15 @@ const showDetail = (row) => {
   const txnId = row.transaction_id
     || (tmpl?.occurrence_links && tmpl.occurrence_links[row.plan_date])
     || null;
+  const financeDocId = row.finance_document_id
+    || (tmpl?.occurrence_finance_docs && tmpl.occurrence_finance_docs[row.plan_date])
+    || null;
+
+  // Fetch bill on-demand if not in cache
+  if (financeDocId) {
+    await fetchBillById(financeDocId);
+  }
+
   openDetailModal(row.title || 'Recurring');
   body.innerHTML = `
     <p class="eplan-detail__title">${esc(row.title || 'Recurring')}</p>
@@ -1421,6 +1631,7 @@ const showDetail = (row) => {
       <div class="eplan-dl__block"><dt>Category</dt><dd>${esc(categoryDisplayLabel(row.cat) || row.cat || '—')}</dd></div>
       <div class="eplan-dl__block"><dt>Amount</dt><dd>${formatMoney(row.amount)}</dd></div>
       ${linkedLedgerBlock(txnId)}
+      ${linkedFinanceDocBlock(financeDocId)}
       ${attachDetailBlock(attachmentsOf(tmpl))}
       <div class="eplan-dl__meta">
         <div><dt>Type</dt><dd>Recurring</dd></div>
@@ -1451,6 +1662,16 @@ const showDetail = (row) => {
             completeLabel: 'Mark period complete',
           }),
       })
+      : ''}
+    ${!done && row.recurring_id
+      ? `<div class="eplan-detail__actions" data-cap="accounts.plan_edit" style="margin-top:0.5rem;">
+          <button type="button" class="btn btn-outline btn--small" data-eplan-create-bill-occ="${esc(`${row.recurring_id}|${row.plan_date}`)}">
+            <i class="fa-solid fa-file-invoice" aria-hidden="true"></i> Create bill
+          </button>
+          <button type="button" class="btn btn-outline btn--small" data-eplan-link-occ="${esc(`${row.recurring_id}|${row.plan_date}`)}">
+            <i class="fa-solid fa-link" aria-hidden="true"></i> ${txnId ? 'Change ledger link' : 'Link to payment'}
+          </button>
+        </div>`
       : ''}
     ${done && row.recurring_id
       ? `<div class="eplan-detail__actions" data-cap="accounts.plan_edit" style="margin-top:0.5rem;">
@@ -1586,13 +1807,18 @@ const buildMonthPivot = (timeline, months) => {
         id: item.id || null,
         sampleKey: item.key,
         cells: months.map(() => 0),
+        doneCells: months.map(() => 0),
         total: 0,
+        doneTotal: 0,
       });
     }
     const row = rowsMap.get(key);
     const amt = round2(parseFloat(item.amount) || 0);
+    const isDone = rowStatusOf(item) === 'done';
     row.cells[mi] = round2(row.cells[mi] + amt);
+    if (isDone) row.doneCells[mi] = round2(row.doneCells[mi] + amt);
     row.total = round2(row.total + amt);
+    if (isDone) row.doneTotal = round2(row.doneTotal + amt);
   });
 
   const rows = [...rowsMap.values()].sort((a, b) =>
@@ -1612,7 +1838,9 @@ const buildMonthPivot = (timeline, months) => {
         label: r.catLabel,
         rows: [],
         cells: months.map(() => 0),
+        doneCells: months.map(() => 0),
         total: 0,
+        doneTotal: 0,
       };
       byCat.set(ck, g);
       groups.push(g);
@@ -1621,16 +1849,22 @@ const buildMonthPivot = (timeline, months) => {
     g.rows.push(r);
     r.cells.forEach((v, i) => {
       g.cells[i] = round2(g.cells[i] + v);
+      g.doneCells[i] = round2(g.doneCells[i] + (r.doneCells[i] || 0));
     });
     g.total = round2(g.total + r.total);
+    g.doneTotal = round2(g.doneTotal + (r.doneTotal || 0));
   });
 
   const colTotals = months.map((_, i) =>
     round2(groups.reduce((s, g) => s + (g.cells[i] || 0), 0)),
   );
+  const doneColTotals = months.map((_, i) =>
+    round2(groups.reduce((s, g) => s + (g.doneCells[i] || 0), 0)),
+  );
   const grandTotal = round2(colTotals.reduce((s, v) => s + v, 0));
+  const doneGrandTotal = round2(doneColTotals.reduce((s, v) => s + v, 0));
   const maxCell = Math.max(0, ...rows.flatMap((r) => r.cells), ...colTotals);
-  return { groups, rows, colTotals, grandTotal, maxCell };
+  return { groups, rows, colTotals, doneColTotals, grandTotal, doneGrandTotal, maxCell };
 };
 
 /** Collapsed category keys in the month pivot (session UI state). */
@@ -1650,13 +1884,14 @@ const renderMonthPivot = (timeline) => {
   if (!el) return;
 
   const months = buildPlanMonthRange(horizonMonths, timeline);
-  const { groups, colTotals, grandTotal, maxCell } = buildMonthPivot(timeline, months);
+  const { groups, colTotals, doneColTotals, grandTotal, doneGrandTotal, maxCell } = buildMonthPivot(timeline, months);
   const now = new Date();
   const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const openGrandTotal = round2(grandTotal - doneGrandTotal);
 
   if (meta) {
     meta.textContent = groups.length
-      ? `${groups.length} categor${groups.length === 1 ? 'y' : 'ies'} · ${formatMoney(grandTotal)}`
+      ? `${groups.length} categor${groups.length === 1 ? 'y' : 'ies'} · ${formatMoney(openGrandTotal)} pending${doneGrandTotal > 0 ? ` · ${formatMoney(doneGrandTotal)} paid` : ''}`
       : 'No planned amounts in this horizon';
   }
 
@@ -1673,15 +1908,20 @@ const renderMonthPivot = (timeline) => {
     </th>`;
   };
 
-  const amountTd = (v, { strong = false, isCurrent = false, isTotal = false } = {}) => {
+  const amountTd = (v, { strong = false, isCurrent = false, isTotal = false, doneAmt = 0 } = {}) => {
     if (v <= 0.001) {
       return `<td class="fa-num eplan-pivot-cell${isCurrent ? ' eplan-pivot-col--current' : ''}${isTotal ? ' fa-col-total' : ''}"><span class="eplan-pivot-empty">—</span></td>`;
     }
-    const heat = heatClass(v, maxCell);
+    const allDone = doneAmt > 0.001 && Math.abs(doneAmt - v) < 0.02;
+    const heat = allDone ? '' : heatClass(v, maxCell);
     const content = strong ? `<strong>${formatMoney(v)}</strong>` : formatMoney(v);
     const barPct = maxCell > 0 ? Math.max(8, Math.round((v / maxCell) * 100)) : 0;
-    return `<td class="fa-num eplan-pivot-cell${heat}${isCurrent ? ' eplan-pivot-col--current' : ''}${isTotal ? ' fa-col-total' : ''}">
-      <span class="eplan-pivot-val">${content}</span>
+    // Partial-done cell: split the value open/done.
+    const split = !allDone && doneAmt > 0.001
+      ? `<span class="eplan-pivot-done-sub">${formatMoney(doneAmt)} paid</span>`
+      : '';
+    return `<td class="fa-num eplan-pivot-cell${heat}${allDone ? ' eplan-pivot-cell--done' : ''}${isCurrent ? ' eplan-pivot-col--current' : ''}${isTotal ? ' fa-col-total' : ''}">
+      <span class="eplan-pivot-val">${content}</span>${split}
       <span class="eplan-pivot-bar" style="width:${barPct}%" aria-hidden="true"></span>
     </td>`;
   };
@@ -1696,8 +1936,8 @@ const renderMonthPivot = (timeline) => {
         <strong>${esc(g.label)}</strong>
         <span class="eplan-pivot-group__count">${g.rows.length}</span>
       </td>
-      ${g.cells.map((v, i) => amountTd(v, { strong: true, isCurrent: months[i].key === currentKey })).join('')}
-      ${amountTd(g.total, { strong: true, isTotal: true })}
+      ${g.cells.map((v, i) => amountTd(v, { strong: true, isCurrent: months[i].key === currentKey, doneAmt: g.doneCells[i] })).join('')}
+      ${amountTd(g.total, { strong: true, isTotal: true, doneAmt: g.doneTotal })}
     </tr>`;
 
     if (collapsed) return groupRow;
@@ -1711,8 +1951,8 @@ const renderMonthPivot = (timeline) => {
           <div class="eplan-what">${esc(r.label)}</div>
           <div class="eplan-what-meta">${badge}</div>
         </td>
-        ${r.cells.map((v, i) => amountTd(v, { isCurrent: months[i].key === currentKey })).join('')}
-        ${amountTd(r.total, { strong: true, isTotal: true })}
+        ${r.cells.map((v, i) => amountTd(v, { isCurrent: months[i].key === currentKey, doneAmt: r.doneCells[i] })).join('')}
+        ${amountTd(r.total, { strong: true, isTotal: true, doneAmt: r.doneTotal })}
       </tr>`;
     }).join('');
 
@@ -1736,8 +1976,8 @@ const renderMonthPivot = (timeline) => {
         <tfoot>
           <tr class="eplan-pivot-foot">
             <td class="eplan-pivot-sticky"><strong>Monthly total</strong></td>
-            ${colTotals.map((v, i) => amountTd(v, { strong: true, isCurrent: months[i].key === currentKey })).join('')}
-            ${amountTd(grandTotal, { strong: true, isTotal: true })}
+            ${colTotals.map((v, i) => amountTd(v, { strong: true, isCurrent: months[i].key === currentKey, doneAmt: doneColTotals[i] })).join('')}
+            ${amountTd(grandTotal, { strong: true, isTotal: true, doneAmt: doneGrandTotal })}
           </tr>
         </tfoot>
       </table>
@@ -1795,6 +2035,7 @@ const renderSummary = (timeline) => {
     ${filterCard('open', 'fa-circle-dot', 'Open', openTotal, `${horizonMonths} mo horizon`, openRows.length)}
     ${filterCard('overdue', 'fa-clock', 'Overdue', round2(overdueRows.reduce((s, r) => s + (r.amount || 0), 0)), 'past due unpaid', overdueRows.length)}
     ${filterCard('done', 'fa-check', 'Done', round2(doneRows.reduce((s, r) => s + (r.amount || 0), 0)), 'completed', doneRows.length)}
+    ${filterCard('all', 'fa-list', 'All', round2(all.reduce((s, r) => s + (r.amount || 0), 0)), 'everything', all.length)}
     <div class="ledger-kpi">
       <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
       <div class="ledger-kpi__body">
@@ -1926,7 +2167,7 @@ const renderRecurringList = () => {
   refreshCapabilityGates(el);
 };
 
-export const renderExpensePlanPage = () => {
+export const renderExpensePlanPage = async () => {
   const horizonEl = document.getElementById('fn-eplan-horizon');
   if (horizonEl && !horizonEl.dataset.touched) {
     horizonEl.value = String(horizonMonths);
@@ -1934,8 +2175,11 @@ export const renderExpensePlanPage = () => {
 
   lastTimeline = buildTimeline();
   renderSummary(lastTimeline);
-  renderMonthPivot(lastTimeline);
+  renderMonthPivot(buildTimelineAll());
   renderTimeline(lastTimeline);
+  document.querySelectorAll('#fn-eplan-filter-tabs [data-eplan-status-filter]').forEach((btn) => {
+    btn.classList.toggle('eplan-detail-tab--active', btn.getAttribute('data-eplan-status-filter') === statusFilter);
+  });
   renderRecurringList();
   refreshCapabilityGates(document.getElementById('fn-subview-expense-plan') || document);
 
@@ -1990,7 +2234,7 @@ const saveOneOff = async () => {
   }
 
   closeModal();
-  renderExpensePlanPage();
+  await renderExpensePlanPage();
   if (result.item) {
     const key = `one:${result.item.id}`;
     const row = lastTimeline.find((r) => r.key === key)
@@ -2006,7 +2250,7 @@ const saveOneOff = async () => {
         description: result.item.description,
         title: result.item.description || result.item.vendor_name || 'Planned',
       };
-    showDetail(row);
+    await showDetail(row);
   }
 };
 
@@ -2129,7 +2373,7 @@ const saveRecurring = async () => {
   closeModal();
   const panel = document.getElementById('fn-eplan-templates-panel');
   if (panel) panel.open = true;
-  renderExpensePlanPage();
+  await renderExpensePlanPage();
   if (result.recurring) showTemplateDetail(result.recurring);
 };
 
@@ -2140,6 +2384,14 @@ export const initExpensePlanPage = () => {
     return;
   }
   wired = true;
+
+  // Let bill↔ledger mutations refresh the open detail modal/timeline
+  // (e.g. after linkFinanceDocuments auto-completes a plan item).
+  bindFinanceNewWindow('refreshExpensePlanDetail', () => {
+    if (document.getElementById('fn-eplan-detail-modal')?.hidden === false || selectedKey) {
+      renderExpensePlanPage();
+    }
+  });
 
   wireClassifyCombobox(document.getElementById('fn-eplan-item-cat-wrap'), {
     getOptions: catOptionsList,
@@ -2195,12 +2447,7 @@ export const initExpensePlanPage = () => {
     renderExpensePlanPage();
   });
 
-  document.getElementById('fn-eplan-summary')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-eplan-status-filter]');
-    if (!btn) return;
-    statusFilter = btn.getAttribute('data-eplan-status-filter') || 'open';
-    renderExpensePlanPage();
-  });
+  // Status-filter chip clicks are handled in the root delegated listener below.
 
   document.getElementById('fn-eplan-add-oneoff')?.addEventListener('click', () => openModal('oneoff'));
   document.getElementById('fn-eplan-add-recurring')?.addEventListener('click', () => openModal('recurring'));
@@ -2308,6 +2555,13 @@ export const initExpensePlanPage = () => {
   };
 
   root.addEventListener('click', (e) => {
+    const statusBtn = e.target.closest('[data-eplan-status-filter]');
+    if (statusBtn) {
+      e.preventDefault();
+      statusFilter = statusBtn.getAttribute('data-eplan-status-filter') || 'open';
+      renderExpensePlanPage();
+      return;
+    }
     const keepOpen = e.target.closest('[data-eplan-keep-open]');
     if (keepOpen) {
       e.preventDefault();
@@ -2568,8 +2822,20 @@ export const initExpensePlanPage = () => {
     if (pivotRow && !e.target.closest('button')) {
       const pivotKey = pivotRow.dataset.eplanPivotKey || '';
       if (pivotKey.startsWith('rec:')) {
-        const id = pivotKey.slice(4);
-        const t = getRecurring().find((x) => x.id === id);
+        const templateId = pivotKey.slice(4);
+        // Open the first upcoming occurrence detail (not template detail),
+        // so users can create bill / mark complete / link to payment per occurrence.
+        const occurrence = lastTimeline.find((r) =>
+          r.source === 'recurring' &&
+          r.recurring_id === templateId &&
+          rowStatusOf(r) !== 'done'
+        );
+        if (occurrence) {
+          showDetail(occurrence);
+          return;
+        }
+        // Fall back to template detail if all occurrences are done
+        const t = getRecurring().find((x) => x.id === templateId);
         if (t) {
           showTemplateDetail(t);
           return;
@@ -2586,6 +2852,83 @@ export const initExpensePlanPage = () => {
       if (hit) showDetail(hit);
       return;
     }
+    const openLedgerBtn = e.target.closest('[data-eplan-open-ledger]');
+    if (openLedgerBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const txnId = openLedgerBtn.getAttribute('data-eplan-open-ledger');
+      void (async () => {
+        try {
+          const txn = await fetchLedgerTxnById(txnId);
+          if (!txn) { alert('Could not find the linked ledger entry.'); return; }
+          const { ensureFinanceModals } = await import('./accountsChrome.js');
+          await ensureFinanceModals();
+          window.viewLedgerTxn?.(txn);
+        } catch (err) {
+          alert(err?.message || 'Could not load the ledger entry.');
+        }
+      })();
+      return;
+    }
+
+    const openBillBtn = e.target.closest('[data-eplan-open-bill]');
+    if (openBillBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const docId = openBillBtn.getAttribute('data-eplan-open-bill');
+      void (async () => {
+        try {
+          const doc = await fetchBillById(docId);
+          if (!doc) {
+            alert('Could not find the linked bill.');
+            return;
+          }
+          const { openFinanceDocumentModal } = await import('./accountsChrome.js');
+          await openFinanceDocumentModal(doc, { readOnly: true });
+        } catch (err) {
+          alert(err?.message || 'Could not load the bill.');
+        }
+      })();
+      return;
+    }
+
+    const createBillItemBtn = e.target.closest('[data-eplan-create-bill-item]');
+    if (createBillItemBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!canEditPlan()) {
+        alert('You do not have permission to edit the expense plan.');
+        return;
+      }
+      const id = createBillItemBtn.getAttribute('data-eplan-create-bill-item');
+      const plan = getItems().find((x) => x.id === id)
+        || lastTimeline.find((r) => r.id === id);
+      if (!id || !plan) return;
+      void withButtonBusy(createBillItemBtn, '...', async () => {
+        await createBillFromPlanItem(plan);
+      }).catch((err) => alert(err?.message || 'Could not create bill.'));
+      return;
+    }
+
+    const createBillOccBtn = e.target.closest('[data-eplan-create-bill-occ]');
+    if (createBillOccBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!canEditPlan()) {
+        alert('You do not have permission to edit the expense plan.');
+        return;
+      }
+      const raw = createBillOccBtn.getAttribute('data-eplan-create-bill-occ') || '';
+      const [recurringId, planDate] = raw.split('|');
+      const plan = lastTimeline.find((r) => r.recurring_id === recurringId && r.plan_date === planDate)
+        || { recurring_id: recurringId, plan_date: planDate, amount: 0, title: 'Recurring period' };
+      if (!recurringId || !planDate) return;
+      void withButtonBusy(createBillOccBtn, '...', async () => {
+        await createBillFromPlanItem(plan);
+      }).catch((err) => alert(err?.message || 'Could not create bill.'));
+      return;
+    }
+
     const tmplRow = e.target.closest('tr[data-eplan-recurring]');
     if (tmplRow && !e.target.closest('button')) {
       const t = getRecurring().find((x) => x.id === tmplRow.dataset.eplanRecurring);

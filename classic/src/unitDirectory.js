@@ -803,6 +803,8 @@ const wireUnitDirectoryExpanded = (root, residents) => {
 let editingUnitId = null;
 let unitDetailRefreshGen = 0;
 let editingUnitResidents = [];
+let editingUnitOccDerived = null; // derived status pre-shown in dropdown when auto
+let editingUnitOccWasAuto = false; // true when occupancy_status was empty on open
 let activeUnitDetailTab = 'overview';
 
 const formatMoney = (n) => `₹${parseFloat(n || 0).toLocaleString('en-IN')}`;
@@ -1315,18 +1317,24 @@ export const openUnitDetailModal = async (unitId, tab = 'overview') => {
     const unitResidents = editingUnitResidents.filter((r) => normUnit(r.unit_number) === normUnit(u.number));
     const derivedOcc = deriveUnitOccupancy(u, unitResidents);
 
+    // When the unit is in "auto" mode (no explicit override), pre-populate
+    // the dropdown with the effective derived status so the user sees the
+    // current state immediately. Track this so saveUnitEdit() can keep it
+    // as null if the user leaves it unchanged.
+    editingUnitOccWasAuto = !u.occupancy_status;
+    editingUnitOccDerived = editingUnitOccWasAuto ? derivedOcc : null;
+
     document.getElementById('unit-detail-title').textContent = u.number;
     document.getElementById('unit-detail-subtitle').textContent = [
         unitSubtitle(u),
         occupancyLabel(derivedOcc),
-        u.occupancy_status && u.occupancy_status !== derivedOcc ? `(manual: ${occupancyLabel(u.occupancy_status)})` : '',
     ].filter(Boolean).join(' · ');
     document.getElementById('unit-edit-block').value = u.block || deriveBlockFromFlat(u.number) || '';
     document.getElementById('unit-edit-bhk').value = u.bhk || '';
     document.getElementById('unit-edit-area').value = u.area_sqft ?? '';
     document.getElementById('unit-edit-car').value = u.car_limit ?? 0;
     document.getElementById('unit-edit-bike').value = u.bike_limit ?? 0;
-    document.getElementById('unit-edit-occupancy').value = u.occupancy_status || '';
+    document.getElementById('unit-edit-occupancy').value = u.occupancy_status || derivedOcc || '';
     document.getElementById('unit-edit-notes').value = u.notes || '';
 
     renderUnitDetailKpis(u);
@@ -1352,13 +1360,20 @@ async function saveUnitEdit() {
 
     const areaRaw = document.getElementById('unit-edit-area')?.value;
     const occ = document.getElementById('unit-edit-occupancy')?.value || null;
+    // If the unit was in "auto" mode and the user left the pre-populated
+    // derived value unchanged, keep it as null (auto). If they changed it,
+    // save the new explicit value.
+    let saveOcc = occ;
+    if (editingUnitOccWasAuto && occ === editingUnitOccDerived) {
+        saveOcc = null;
+    }
     const patch = {
         block: document.getElementById('unit-edit-block')?.value.trim() || null,
         bhk: document.getElementById('unit-edit-bhk')?.value.trim() || null,
         area_sqft: areaRaw === '' ? null : parseFloat(areaRaw),
         car_limit: parseInt(document.getElementById('unit-edit-car')?.value, 10) || 0,
         bike_limit: parseInt(document.getElementById('unit-edit-bike')?.value, 10) || 0,
-        occupancy_status: occ || null,
+        occupancy_status: saveOcc,
         notes: document.getElementById('unit-edit-notes')?.value.trim() || null,
     };
 

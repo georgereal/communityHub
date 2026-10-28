@@ -21,7 +21,7 @@ const MUTATION_PACKS = {
     bulkUpdateTransactions: ['ledger'],
     setLedgerExclusion: ['ledger'],
     returnLedgerTxnToStatement: ['ledger', 'bank'],
-    recalculateLedgerBalances: ['ledger', 'boot'],
+    recalculateLedgerBalances: ['ledger'],
 
     saveFinanceDocument: ['vouchers', 'voucherAggregates'],
     saveVoucher: ['vouchers', 'voucherAggregates'],
@@ -33,10 +33,9 @@ const MUTATION_PACKS = {
     syncFinanceDocumentCategories: ['vouchers', 'voucherAggregates'],
 
     setCashFloatFlag: ['ledger', 'voucherAggregates'],
-    saveCashFloatOpening: ['boot'],
 
     importBankStatement: ['bank'],
-    saveBankOpeningBalance: ['boot', 'bank'],
+    saveBankOpeningBalance: ['bank'],
     clearBankStatementData: ['bank'],
     reorderBankStatementLines: ['bank'],
     recalculateBankStatementBalances: ['bank'],
@@ -51,20 +50,12 @@ const MUTATION_PACKS = {
     createLedgerFromBankLineAuto: ['bank', 'ledger', 'boot'],
     createTxnsFromBankLines: ['bank', 'ledger', 'boot'],
 
-    saveBankClassificationRule: ['boot'],
-    deleteBankClassificationRule: ['boot'],
-
-    saveExpensePlanItem: ['boot'],
-    deleteExpensePlanItem: ['boot'],
-    completeExpensePlanItem: ['boot', 'ledger'],
-    reopenExpensePlanItem: ['boot', 'ledger'],
-    linkExpensePlanItem: ['boot', 'ledger'],
-    setExpensePlanOccurrenceStatus: ['boot', 'ledger'],
-    deferExpensePlanItems: ['boot'],
-    saveExpensePlanRecurring: ['boot'],
-    deleteExpensePlanRecurring: ['boot'],
-
-    patchFinanceConfig: ['boot'],
+    // Expense-plan / config mutations return `config` in the response —
+    // postFnMutation applies it via applyMongoPacksToClassic, no boot refetch.
+    completeExpensePlanItem: ['ledger'],
+    reopenExpensePlanItem: ['ledger'],
+    linkExpensePlanItem: ['ledger'],
+    setExpensePlanOccurrenceStatus: ['ledger'],
     // tableWrite: caller (mongoWrite) reloads the specific table pack
 };
 

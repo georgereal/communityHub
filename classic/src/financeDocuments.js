@@ -519,6 +519,8 @@ async function ensureCommitmentDocsForBalance() {
   return all;
 }
 
+export const getFinanceDocumentsAggregatesCache = () => aggregatesCache;
+
 export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
   const apartmentId = portalState.access?.activeApartmentId;
   if (!apartmentId) return null;
@@ -576,6 +578,7 @@ export async function ensureFinanceDocumentsAggregates({ force = false } = {}) {
       openDocumentIds: result.openDocumentIds || [],
       fundingBillTotals,
       fundingTransactionIds: result.fundingTransactionIds || Object.keys(fundingBillTotals),
+      fundingEntries: result.fundingEntries || [],
       floatReady: true,
       commitmentsReady: true,
       floatVersion: FLOAT_TOTALS_VERSION,

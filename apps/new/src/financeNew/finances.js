@@ -1068,6 +1068,7 @@ async function resolveReceiptUrl(pathOrUrl) {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({ action: 'createSignedUrl', path: storagePath, expiresIn: 300 }),
+            signal: AbortSignal.timeout(15000),
         });
         if (res.ok) {
             const json = await res.json().catch(() => ({}));
@@ -1139,10 +1140,16 @@ bindFinanceNewWindow('viewAttachmentGallery', async (entries, startIndex = 0) =>
         currentName: '',
         isPdf: false,
     };
+    // Show the modal immediately — the signed-URL fetch can be slow and
+    // must not block the dialog from appearing at all.
+    const modal = document.getElementById('receipt-modal');
+    const caption = document.getElementById('receipt-viewer-caption');
+    if (caption) caption.textContent = 'Loading preview…';
+    modal?.classList.add('active');
     try {
         await showReceiptAtIndex(idx);
-        document.getElementById('receipt-modal')?.classList.add('active');
     } catch (err) {
+        if (caption) caption.textContent = '';
         alert(err?.message || 'Could not load attachment preview.');
     }
 });
@@ -2142,6 +2149,29 @@ bindFinanceNewWindow('openFinanceDocumentEdit', (doc, { readOnly = false } = {})
 
     resetBillAttachmentUI(Array.isArray(doc.attachment_urls) ? doc.attachment_urls : []);
     applyCashModalChrome({ isIncome, isBill: true });
+
+    // Show linked ledger line info when the doc is linked to a txn
+    const linkedInfo = document.getElementById('cash-modal-linked-info');
+    const linkedDetail = document.getElementById('cash-modal-linked-detail');
+    if (linkedInfo && linkedDetail) {
+        if (doc.transaction_id) {
+            const t = (fnFinances().txns || []).find((x) => x.id === doc.transaction_id);
+            if (t) {
+                const d = t.date
+                    ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
+                    : '';
+                const amt = `₹${Math.abs(parseFloat(t.amount || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+                const cat = categoryDisplayLabel(t.cat || '');
+                linkedDetail.textContent = `${d} · ${amt} · ${cat}`;
+                linkedInfo.hidden = false;
+            } else {
+                linkedInfo.hidden = true;
+            }
+        } else {
+            linkedInfo.hidden = true;
+        }
+    }
+
     setBillModalReadOnly(!!readOnly);
     modal.classList.add('active');
     if (!readOnly) {
@@ -2259,6 +2289,41 @@ const openLedgerLineModal = (mode = 'expense', txn = null) => {
     if (billBtn) billBtn.hidden = !editing;
     modal.classList.add('active');
     setTimeout(() => document.getElementById('ledger-line-amt')?.focus(), 50);
+};
+
+/** Compact read-only view of a ledger row (linked from bills/plan) — Edit opens the full form. */
+const openLedgerTxnView = (txn) => {
+    const modal = document.getElementById('ledger-view-modal');
+    if (!modal || !txn) return;
+    const isIncome = txn.type === 'IN';
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v || '—'; };
+
+    document.getElementById('ledger-view-title').textContent = isIncome ? 'Ledger income' : 'Ledger expense';
+    set('ledger-view-amount', `₹${Math.abs(parseFloat(txn.amount) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+    document.getElementById('ledger-view-amount')?.classList.toggle('ledger-view-amount--in', isIncome);
+    set('ledger-view-date', txn.date ? new Date(txn.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+    set('ledger-view-type', isIncome ? 'IN — money in' : 'OUT — expense');
+    set('ledger-view-wallet', String(txn.wallet || 'BANK').toUpperCase() === 'CASH' ? 'Petty Cash' : 'Bank');
+    set('ledger-view-cat', categoryDisplayLabel(txn.cat || '') || txn.cat || '—');
+    set('ledger-view-desc', txn.description || txn.vendor_name || '—');
+
+    const refWrap = document.getElementById('ledger-view-bankref-item');
+    if (refWrap) refWrap.hidden = !txn.bank_reference;
+    if (txn.bank_reference) set('ledger-view-bankref', txn.bank_reference);
+
+    const voucherIds = Array.isArray(txn.voucherIds) ? txn.voucherIds : [];
+    const docsWrap = document.getElementById('ledger-view-docs-item');
+    if (docsWrap) docsWrap.hidden = !voucherIds.length;
+    if (voucherIds.length) set('ledger-view-docs', `${voucherIds.length} bill${voucherIds.length === 1 ? '' : 's'}/receipt${voucherIds.length === 1 ? '' : 's'}`);
+
+    const editBtn = document.getElementById('ledger-view-edit-btn');
+    if (editBtn) {
+        editBtn.onclick = () => {
+            modal.classList.remove('active');
+            openLedgerLineModal(isIncome ? 'income' : 'expense', txn);
+        };
+    }
+    modal.classList.add('active');
 };
 
 /** Open Add bill / Add receipt form; on save it links to the ledger line being edited. */
@@ -2517,6 +2582,14 @@ bindFinanceNewWindow('editTxn', (id) => {
     if (!t) return;
     // Ledger edit uses the lean passbook modal — not the bill/receipt form.
     openLedgerLineModal(t.type === 'IN' ? 'income' : 'expense', t);
+});
+
+bindFinanceNewWindow('viewLedgerTxn', (txnOrId) => {
+    const t = typeof txnOrId === 'object' && txnOrId
+        ? txnOrId
+        : fnFinances().txns.find((x) => x.id == txnOrId);
+    if (!t) return;
+    openLedgerTxnView(t);
 });
 
 const FN_ACCOUNTS_SUBVIEW_ROUTES = {

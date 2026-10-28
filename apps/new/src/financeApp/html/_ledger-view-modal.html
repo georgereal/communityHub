@@ -1,0 +1,56 @@
+<div class="modal-backdrop" id="ledger-view-modal">
+  <div class="modal-content ledger-view-modal">
+    <div class="ledger-line-modal__header">
+      <div>
+        <h2 id="ledger-view-title">Ledger entry</h2>
+        <p id="ledger-view-sub">Linked transaction</p>
+      </div>
+      <button type="button" class="btn btn-outline ledger-line-modal__close" aria-label="Close"
+        onclick="document.getElementById('ledger-view-modal').classList.remove('active')">&times;</button>
+    </div>
+
+    <dl class="ledger-view-grid" id="ledger-view-grid">
+      <div class="ledger-view-item ledger-view-item--amount">
+        <dt>Amount</dt>
+        <dd id="ledger-view-amount">—</dd>
+      </div>
+      <div class="ledger-view-item">
+        <dt>Date</dt>
+        <dd id="ledger-view-date">—</dd>
+      </div>
+      <div class="ledger-view-item">
+        <dt>Type</dt>
+        <dd id="ledger-view-type">—</dd>
+      </div>
+      <div class="ledger-view-item">
+        <dt>Wallet</dt>
+        <dd id="ledger-view-wallet">—</dd>
+      </div>
+      <div class="ledger-view-item">
+        <dt>Category</dt>
+        <dd id="ledger-view-cat">—</dd>
+      </div>
+      <div class="ledger-view-item">
+        <dt>Narration</dt>
+        <dd id="ledger-view-desc">—</dd>
+      </div>
+      <div class="ledger-view-item" id="ledger-view-bankref-item" hidden>
+        <dt>Bank reference</dt>
+        <dd id="ledger-view-bankref">—</dd>
+      </div>
+      <div class="ledger-view-item" id="ledger-view-docs-item" hidden>
+        <dt>Linked bills</dt>
+        <dd id="ledger-view-docs">—</dd>
+      </div>
+    </dl>
+
+    <div class="ledger-line-modal__footer">
+      <span></span>
+      <div class="ledger-line-modal__footer-actions">
+        <button class="btn btn-outline" type="button"
+          onclick="document.getElementById('ledger-view-modal').classList.remove('active')">Close</button>
+        <button class="btn btn-primary" type="button" id="ledger-view-edit-btn">Edit</button>
+      </div>
+    </div>
+  </div>
+</div>
