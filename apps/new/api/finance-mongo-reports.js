@@ -97,7 +97,9 @@ function reportWallet(txn) {
 }
 
 function isReportable(txn) {
-    return !txn?.exclude_from_reports;
+    // Bank Reject rows are paired IN/OUT entries that cancel each other — always omit from
+    // report/pivot totals, even when exclude_from_reports wasn't stamped at write time.
+    return !txn?.exclude_from_reports && txn?.cat !== 'Bank Reject';
 }
 
 function isBankPettyFunding(t) {
@@ -522,7 +524,7 @@ async function summary(db, apartmentId) {
 
 async function byCategory(db, apartmentId, body = {}) {
     const type = body.type === 'IN' || body.type === 'OUT' ? body.type : null;
-    const match = { ...aptMatch(apartmentId), excluded_from_ledger: { $ne: true }, exclude_from_reports: { $ne: true } };
+    const match = { ...aptMatch(apartmentId), excluded_from_ledger: { $ne: true }, exclude_from_reports: { $ne: true }, cat: { $ne: 'Bank Reject' } };
     if (type) match.type = type;
     const rows = await db.collection('ledger_entries').aggregate([
         { $match: match },

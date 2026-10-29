@@ -1,4 +1,6 @@
+import { getMongoDb } from './mongoClient.js';
 import { requireApartmentPermission } from './serverAuth.js';
+import { COL_OAUTH_APPS, COL_SETTINGS, COL_USER_OAUTH } from '../../apps/new/api/integrationsMongo/spreadsheetStore.js';
 
 /**
  * Exchange Microsoft authorization code for tokens (server-side only — uses client secret).
@@ -15,16 +17,12 @@ export default async function handler(req, res) {
     }
 
     try {
-    const { user, service: serviceClient } = await requireApartmentPermission(req, apartment_id, 'accounts.edit');
+    const { user } = await requireApartmentPermission(req, apartment_id, 'accounts.edit');
+    const db = await getMongoDb();
 
-    const { data: app, error: appError } = await serviceClient
-        .from('ledger_sync_oauth_apps')
-        .select('*')
-        .eq('apartment_id', apartment_id)
-        .eq('provider', 'MICROSOFT')
-        .maybeSingle();
+    const app = await db.collection(COL_OAUTH_APPS).findOne({ apartment_id, provider: 'MICROSOFT' });
 
-    if (appError || !app?.client_id || !app?.client_secret) {
+    if (!app?.client_id || !app?.client_secret) {
         return res.status(400).json({ error: 'Microsoft OAuth app or client secret is not configured. Save Client ID and Secret in Admin first.' });
     }
 
@@ -78,28 +76,32 @@ export default async function handler(req, res) {
         ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString()
         : null;
 
-    const { error: connError } = await serviceClient.from('user_oauth_connections').upsert({
-        user_id: user.id,
-        apartment_id,
-        provider: 'MICROSOFT',
-        account_email: accountEmail,
-        access_token: tokenJson.access_token,
-        refresh_token: tokenJson.refresh_token,
-        token_expires_at: expiresAt,
-        scopes: 'Files.ReadWrite User.Read offline_access',
-        provider_account_id: accountEmail,
-        account_meta: { background_capable: true, web_oauth: true },
-        updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,apartment_id,provider' });
+    await db.collection(COL_USER_OAUTH).updateOne(
+        { user_id: user.id, apartment_id, provider: 'MICROSOFT' },
+        {
+            $set: {
+                user_id: user.id,
+                apartment_id,
+                provider: 'MICROSOFT',
+                account_email: accountEmail,
+                access_token: tokenJson.access_token,
+                refresh_token: tokenJson.refresh_token,
+                token_expires_at: expiresAt,
+                scopes: 'Files.ReadWrite User.Read offline_access',
+                provider_account_id: accountEmail,
+                account_meta: { background_capable: true, web_oauth: true },
+                updated_at: new Date().toISOString(),
+            },
+            $setOnInsert: { created_at: new Date().toISOString() },
+        },
+        { upsert: true },
+    );
 
-    if (connError) {
-        return res.status(500).json({ error: connError.message });
-    }
-
-    await serviceClient.from('ledger_sync_settings').update({
-        last_synced_by: user.id,
-        updated_at: new Date().toISOString(),
-    }).eq('apartment_id', apartment_id);
+    await db.collection(COL_SETTINGS).updateOne(
+        { apartment_id },
+        { $set: { last_synced_by: user.id, updated_at: new Date().toISOString() } },
+        { upsert: true },
+    );
 
     return res.status(200).json({
         ok: true,

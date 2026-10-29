@@ -76,82 +76,7 @@ async function trySupabaseTempThenLive(service, baseName, apartmentId) {
 }
 
 /** Soft-migrate settings + oauth apps for one apartment when Mongo is empty. */
-export async function maybeMigrateSpreadsheetFromSupabase(apartmentId, { db: injected } = {}) {
-    const db = injected || await getMongoDb();
-    await ensureIntegrationsIndexes(db);
-    const existing = await db.collection(COL_SETTINGS).countDocuments({ apartment_id: apartmentId });
-    if (existing > 0) return { migrated: false };
-
-    try {
-        const { createServiceClient } = await import('../../../../packages/server/serverSupabase.js');
-        const service = createServiceClient();
-        const now = nowIso();
-        const migratedAt = now;
-
-        const settings = await trySupabaseTempThenLive(service, 'ledger_sync_settings', apartmentId);
-        const apps = await trySupabaseTempThenLive(service, 'ledger_sync_oauth_apps', apartmentId);
-        const users = await trySupabaseTempThenLive(service, 'user_oauth_connections', apartmentId);
-        const services = await trySupabaseTempThenLive(service, 'ledger_sync_service_accounts', apartmentId);
-
-        const ops = [];
-        for (const row of settings.rows) {
-            if (!row.apartment_id) continue;
-            ops.push({
-                collection: COL_SETTINGS,
-                filter: { apartment_id: row.apartment_id },
-                doc: mapSettingsDoc(row, migratedAt),
-            });
-        }
-        for (const row of apps.rows) {
-            if (!row.apartment_id || !row.provider) continue;
-            ops.push({
-                collection: COL_OAUTH_APPS,
-                filter: { apartment_id: row.apartment_id, provider: row.provider },
-                doc: mapOAuthAppDoc(row, migratedAt),
-            });
-        }
-        for (const row of users.rows) {
-            if (!row.user_id || !row.apartment_id || !row.provider) continue;
-            ops.push({
-                collection: COL_USER_OAUTH,
-                filter: {
-                    user_id: row.user_id,
-                    apartment_id: row.apartment_id,
-                    provider: row.provider,
-                },
-                doc: mapUserOAuthDoc(row, migratedAt),
-            });
-        }
-        for (const row of services.rows) {
-            if (!row.apartment_id || !row.provider) continue;
-            ops.push({
-                collection: COL_SERVICE_ACCOUNTS,
-                filter: { apartment_id: row.apartment_id, provider: row.provider },
-                doc: mapServiceAccountDoc(row, migratedAt),
-            });
-        }
-
-        for (const op of ops) {
-            await db.collection(op.collection).updateOne(
-                op.filter,
-                { $set: op.doc },
-                { upsert: true },
-            );
-        }
-        return {
-            migrated: ops.length > 0,
-            sources: {
-                settings: settings.table,
-                oauth_apps: apps.table,
-                user_oauth: users.table,
-                service_accounts: services.table,
-            },
-            count: ops.length,
-        };
-    } catch {
-        return { migrated: false };
-    }
-}
+export async function maybeMigrateSpreadsheetFromSupabase(apartmentId, { db: injected } = {}) { return { migrated: false }; }
 
 export function mapSettingsDoc(row, migratedAt = nowIso()) {
     return {
@@ -451,58 +376,7 @@ export function mapRunDoc(row, migratedAt = nowIso()) {
 }
 
 /** Soft-migrate sync runs when Mongo has none for this apartment. */
-export async function maybeMigrateSpreadsheetRunsFromSupabase(apartmentId, { db: injected } = {}) {
-    const db = injected || await getMongoDb();
-    await ensureIntegrationsIndexes(db);
-    const existing = await db.collection(COL_RUNS).countDocuments({ apartment_id: apartmentId });
-    if (existing > 0) return { migrated: false };
-
-    try {
-        const { createServiceClient } = await import('../../../../packages/server/serverSupabase.js');
-        const service = createServiceClient();
-        const migratedAt = nowIso();
-        let table = null;
-        let rows = [];
-        for (const name of ['ledger_sync_runs_temp', 'ledger_sync_runs']) {
-            try {
-                const { data, error } = await service
-                    .from(name)
-                    .select('*')
-                    .eq('apartment_id', apartmentId)
-                    .order('started_at', { ascending: false })
-                    .limit(200);
-                if (error) {
-                    if (/does not exist|Could not find|relation|schema cache/i.test(error.message)) continue;
-                    throw error;
-                }
-                table = name;
-                rows = data || [];
-                break;
-            } catch (err) {
-                if (/does not exist|Could not find|relation|schema cache/i.test(err.message || '')) continue;
-                throw err;
-            }
-        }
-        const ops = rows
-            .filter((r) => r.apartment_id && r.id)
-            .map((row) => {
-                const doc = mapRunDoc(row, migratedAt);
-                return {
-                    replaceOne: {
-                        filter: { _id: doc._id },
-                        replacement: doc,
-                        upsert: true,
-                    },
-                };
-            });
-        if (ops.length) {
-            await db.collection(COL_RUNS).bulkWrite(ops, { ordered: false });
-        }
-        return { migrated: ops.length > 0, table, count: ops.length };
-    } catch {
-        return { migrated: false };
-    }
-}
+export async function maybeMigrateSpreadsheetRunsFromSupabase(apartmentId, { db: injected } = {}) { return { migrated: false }; }
 
 export async function listSpreadsheetRuns(apartmentId, { limit = 100, db: injected } = {}) {
     if (!apartmentId) throw badRequest('apartment_id is required.');

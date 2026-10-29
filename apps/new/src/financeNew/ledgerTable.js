@@ -710,7 +710,7 @@ const renderLedgerRow = (raw, {
         <div class="bank-recon-row-actions">
           ${receiptBtn}
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-cap="accounts.edit" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn" data-cap="accounts.edit" data-txn="${t.id}" title="Remove from ledger (move to excluded)" aria-label="Remove from ledger"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn ${t.exclude_from_reports ? 'ledger-exclude-btn--on' : ''}" data-cap="accounts.edit" data-txn="${t.id}" title="${t.exclude_from_reports ? 'Include back in reports' : 'Omit from reports (stays in ledger + bank balance)'}" aria-label="Toggle report exclusion">${t.exclude_from_reports ? '<i class="fa-solid fa-eye-slash" aria-hidden="true"></i>' : '<i class="fa-solid fa-eye" aria-hidden="true"></i>'}</button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-bill-btn" data-cap="accounts.bills_enter" data-txn="${t.id}" title="Bill / receipt — create, link, or edit" aria-label="Bill or receipt"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.edit" onclick="window.editTxn('${t.id}')" title="Edit ledger line" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon btn--danger" data-cap="accounts.delete" onclick="window.delTxn('${t.id}')" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
@@ -1444,14 +1444,19 @@ export const wireLedgerTableEvents = () => {
         if (excludeBtn && excludeBtn.dataset.busy !== '1') {
             const txnId = excludeBtn.dataset.txn;
             if (!txnId) return;
-            if (!confirm('Remove this entry from the ledger? It will move to Excluded entries and no longer affect bank balance.')) return;
+            const t = resolveLedgerRowSource(txnId);
+            if (!t) return;
+            const next = !t.exclude_from_reports;
             try {
                 await withButtonBusy(excludeBtn, '…', async () => {
-                    await setLedgerExclusion(txnId, true);
+                    await postFnMutation('bulkUpdateTransactions', {
+                        updates: [{ id: txnId, fields: { exclude_from_reports: next } }],
+                    });
+                    applyLocalTxnPatches([{ id: txnId, fields: { exclude_from_reports: next } }]);
                     refreshAfterLedgerSave();
                 });
             } catch (err) {
-                alert(err?.message || 'Could not exclude row.');
+                alert(err?.message || 'Could not update report exclusion.');
             }
             return;
         }

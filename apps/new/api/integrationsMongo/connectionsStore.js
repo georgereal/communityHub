@@ -25,45 +25,7 @@ function publicRow(doc) {
     };
 }
 
-async function maybeMigrateFromSupabase(db, apartmentId) {
-    const existing = await db.collection('external_connections').countDocuments({ apartment_id: apartmentId });
-    if (existing > 0) return;
-
-    try {
-        const { createServiceClient } = await import('../../../../packages/server/serverSupabase.js');
-        const service = createServiceClient();
-        const { data, error } = await service
-            .from('apartment_external_connections')
-            .select('id, apartment_id, provider, connection_key, display_name, base_url, client_id, workflow_id, enabled, api_key, config, configured_by, created_at, updated_at')
-            .eq('apartment_id', apartmentId);
-        if (error || !data?.length) return;
-
-        const now = nowIso();
-        const docs = data.map((row) => ({
-            id: row.id || crypto.randomUUID(),
-            apartment_id: row.apartment_id,
-            provider: row.provider,
-            connection_key: row.connection_key,
-            display_name: row.display_name || null,
-            base_url: row.base_url,
-            client_id: row.client_id || null,
-            workflow_id: row.workflow_id || null,
-            api_key: row.api_key || null,
-            enabled: row.enabled !== false,
-            config: row.config && typeof row.config === 'object' ? row.config : {},
-            configured_by: row.configured_by || null,
-            created_at: row.created_at || now,
-            updated_at: row.updated_at || now,
-            _migratedFrom: 'supabase',
-            _schema: 'integrations_v1',
-        }));
-        if (docs.length) {
-            await db.collection('external_connections').insertMany(docs, { ordered: false }).catch(() => {});
-        }
-    } catch {
-        // Supabase optional during Mongo-first rollout
-    }
-}
+export async function maybeMigrateFromSupabase(db, apartmentId) { return { migrated: false }; }
 
 export async function listExternalConnections(apartmentId, { db: injected } = {}) {
     const db = injected || await getMongoDb();

@@ -1076,14 +1076,9 @@ async function resolveReceiptUrl(pathOrUrl) {
             if (url) return url;
         }
     } catch {
-        /* fall through to Supabase storage */
+        /* fall through */
     }
-
-    const { authClient } = await import('@auth/authClient.js');
-    if (!authClient) return null;
-    const { data, error } = await authClient.storage.from(RECEIPT_BUCKET).createSignedUrl(storagePath, 3600);
-    if (error) throw error;
-    return data.signedUrl;
+    return null;
 }
 
 /** Normalize attachment entries (string path, {key, originalName}, File) for the viewer. */

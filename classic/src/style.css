@@ -20519,3 +20519,6 @@ textarea.bank-recon-cell-input {
 .eplan-row--done.eplan-row--overdue td { background: transparent; }
 .eplan-form-grid .bank-recon-classify-combobox { position: relative; }
 .eplan-form-grid .bank-recon-classify-combobox input { width: 100%; }
+
+/* Report-exclusion toggle — active state */
+.ledger-exclude-btn--on { color: #b91c1c; }

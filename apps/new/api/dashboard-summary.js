@@ -3,8 +3,7 @@
  * New UI: society membership from Mongo. Classic: user_apartments. Auth JWT is Supabase.
  */
 import { requireSession } from '../../../packages/server/serverAuth.js';
-import { createServiceClient, createUserClient } from '../../../packages/server/serverSupabase.js';
-import { assertUuid } from '../../../packages/server/supabaseRest.js';
+import { assertUuid } from '../../../packages/server/ids.js';
 import { getQueryParam } from '../../../packages/server/vercelRequest.js';
 import { getMongoDb } from '../../../packages/server/mongoClient.js';
 import {
@@ -28,15 +27,6 @@ function logSummary(userId, apartmentId, ms, error) {
         ms,
         error: error || null,
     });
-}
-
-async function getService(req) {
-    const { authHeader } = await requireSession(req);
-    try {
-        return createServiceClient();
-    } catch {
-        return createUserClient(authHeader);
-    }
 }
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -244,19 +234,11 @@ export default async function handler(req, res) {
         const { user } = await requireSession(req);
         userId = user.id;
 
-        if (isNewUiRequest(req) && await mongoRbacReady()) {
+        if (await mongoRbacReady()) {
             const ok = await userHasMongoSocietyAccess(user.id, apartmentId);
             if (!ok) throw Object.assign(new Error('No access to this society.'), { status: 403 });
         } else {
-            const service = await getService(req);
-            const { data: mapping, error: mapErr } = await service
-                .from('user_apartments')
-                .select('apartment_id')
-                .eq('user_id', user.id)
-                .eq('apartment_id', apartmentId)
-                .maybeSingle();
-            if (mapErr) throw Object.assign(new Error(mapErr.message), { status: 500 });
-            if (!mapping) throw Object.assign(new Error('No access to this society.'), { status: 403 });
+            throw Object.assign(new Error('Access control unavailable.'), { status: 503 });
         }
 
         const db = await getMongoDb();

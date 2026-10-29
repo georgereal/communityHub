@@ -30,7 +30,6 @@ export function getAppSessionSecret() {
     const secret = (
         process.env.AUTH_SESSION_SECRET
         || process.env.JWT_SECRET
-        || process.env.SUPABASE_JWT_SECRET
         || ''
     ).trim();
     if (!secret) {
