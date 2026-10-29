@@ -779,15 +779,17 @@ const renderFdocListChrome = () => {
   const total = summary?.total ?? listState.total ?? loaded;
 
   if (meta) {
+    const chip = (label, cls = '') => `<span class="fdoc-meta-chip${cls ? ` ${cls}` : ''}">${esc(label)}</span>`;
     if (staffOnly) {
-      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded} · add & upload only`;
+      meta.innerHTML = chip(`${total} bills`) + chip(`showing ${loaded}`) + chip('add & upload only');
     } else if (summary) {
-      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`
-        + ` · unpaid ${formatMoney(summary.unpaidOutAmt)}`
-        + ` · cheque ready / paid ${formatMoney(summary.paidOutAmt)}`
-        + ` · linked ${formatMoney(summary.linkedOutAmt)}`;
+      meta.innerHTML = chip(`${total} bills`)
+        + chip(`showing ${loaded}`)
+        + chip(`unpaid ${formatMoney(summary.unpaidOutAmt)}`, 'fdoc-meta-chip--warn')
+        + chip(`cheque/paid ${formatMoney(summary.paidOutAmt)}`, 'fdoc-meta-chip--orange')
+        + chip(`linked ${formatMoney(summary.linkedOutAmt)}`, 'fdoc-meta-chip--ok');
     } else {
-      meta.textContent = `${total} bill(s)/receipt(s) · showing ${loaded}`;
+      meta.innerHTML = chip(`${total} bills`) + chip(`showing ${loaded}`);
     }
   }
 
@@ -2774,13 +2776,17 @@ const openLinkedLedgerTxn = async (txnId) => {
 
 const renderFdocAttachmentIcons = (doc) => {
   const atts = Array.isArray(doc.attachment_urls) ? doc.attachment_urls : [];
-  if (!atts.length) return '';
+  const addChip = `<button type="button" class="fdoc-att-chip fdoc-att-chip--add" data-cap="accounts.docs_manage" data-fdoc-attach="${esc(doc.id)}" title="Attach file or photo" aria-label="Attach file or photo">
+    <i class="fa-solid fa-plus" aria-hidden="true"></i>
+    <span>${atts.length ? '' : 'Add file'}</span>
+  </button>`;
+  if (!atts.length) return addChip;
   const n = atts.length;
   return `<button type="button" class="fdoc-att-chip" data-fdoc-preview="${esc(doc.id)}" data-preview-idx="0" title="${n} file${n === 1 ? '' : 's'} attached — click to preview" aria-label="Preview ${n} attached file${n === 1 ? '' : 's'}">
     <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
     <span>${n} file${n === 1 ? '' : 's'}</span>
     <i class="fa-solid fa-eye fdoc-att-chip__view" aria-hidden="true"></i>
-  </button>`;
+  </button>${addChip}`;
 };
 
 const paintFinanceDocumentsTable = () => {
@@ -2885,6 +2891,7 @@ const paintFinanceDocumentsTable = () => {
         ${linkBtn}
         ${cashFloatBtn}
         <button type="button" class="btn btn-outline btn--small btn--icon" data-fdoc-view="${esc(d.id)}" title="View details" aria-label="View details"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+        <button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.docs_manage" data-fdoc-attach="${esc(d.id)}" title="Attach file or photo" aria-label="Attach file or photo"><i class="fa-solid fa-paperclip" aria-hidden="true"></i></button>
         ${editBtn}
         ${delBtn}
       </td>
@@ -3273,6 +3280,150 @@ export function initFinanceDocumentsPage() {
     void downloadFinanceDocumentsTemplate();
   });
 
+  const attachInput = document.getElementById('fn-fdoc-attach-input');
+  const attachCamera = document.getElementById('fn-fdoc-attach-camera');
+  const uploadDocFiles = async (docId, files) => {
+    if (!files.length || !docId) return;
+    const doc = (fnFinances().financeDocuments || []).find((d) => d.id === docId);
+    if (!doc) return;
+    try {
+      const result = await postFnMutation('saveFinanceDocument', {
+        document: {
+          id: doc.id,
+          kind: doc.kind === 'IN' ? 'IN' : 'OUT',
+          doc_date: String(doc.doc_date || '').slice(0, 10),
+          amount: round2(Number(doc.amount) || 0),
+          cat: doc.cat,
+          vendor_name: doc.vendor_name,
+          description: doc.description,
+          sub_category: doc.sub_category,
+          transaction_id: doc.transaction_id || null,
+          source: doc.source || 'manual',
+        },
+        keepAttachments: Array.isArray(doc.attachment_urls) ? doc.attachment_urls : [],
+        removeAttachments: [],
+        newAttachmentFiles: await filesToBase64Payload(files),
+      });
+      applyDocLocally(result.document);
+      renderFinanceDocumentsPage();
+    } catch (err) {
+      alert(err?.message || 'Attach failed.');
+    }
+  };
+  const onAttachFiles = (input) => {
+    const files = [...(input.files || [])];
+    const docId = input.dataset.docId;
+    input.value = '';
+    delete input.dataset.docId;
+    void uploadDocFiles(docId, files);
+  };
+  attachInput?.addEventListener('change', () => onAttachFiles(attachInput));
+  attachCamera?.addEventListener('change', () => onAttachFiles(attachCamera));
+
+  // In-browser camera capture (desktops); mobile uses the native capture input.
+  const cameraModal = document.getElementById('fn-fdoc-camera-modal');
+  const cameraVideo = document.getElementById('fn-fdoc-camera-video');
+  let cameraStream = null;
+  const stopCamera = () => {
+    cameraStream?.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+    if (cameraModal) cameraModal.hidden = true;
+  };
+  const openCameraCapture = async (docId) => {
+    if (!cameraModal || !cameraVideo || !navigator.mediaDevices?.getUserMedia) {
+      // No webcam API (old browser or non-HTTPS origin) — say why, then
+      // fall back to the file input so the user isn't stuck.
+      if (window.isSecureContext === false) {
+        alert('In-browser camera needs HTTPS (or localhost). Opening the file picker instead.');
+      }
+      if (attachCamera) {
+        attachCamera.dataset.docId = docId;
+        attachCamera.click();
+      }
+      return;
+    }
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+    } catch {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (err) {
+        alert(err?.message || 'Camera unavailable — use Choose files instead.');
+        return;
+      }
+    }
+    cameraModal.dataset.docId = docId;
+    cameraVideo.srcObject = cameraStream;
+    cameraModal.hidden = false;
+  };
+  cameraModal?.addEventListener('click', (e) => {
+    if (e.target.closest('[data-camera-close]')) stopCamera();
+  });
+  document.getElementById('fn-fdoc-camera-shoot')?.addEventListener('click', () => {
+    if (!cameraStream || !cameraVideo?.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = cameraVideo.videoWidth;
+    canvas.height = cameraVideo.videoHeight;
+    canvas.getContext('2d').drawImage(cameraVideo, 0, 0);
+    const docId = cameraModal.dataset.docId;
+    canvas.toBlob((blob) => {
+      stopCamera();
+      if (!blob) return;
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      void uploadDocFiles(docId, [file]);
+    }, 'image/jpeg', 0.9);
+  });
+
+  // Attach source menu — one button per bill opens "Take photo" / "Choose files".
+  const attachMenu = document.getElementById('fn-fdoc-attach-menu');
+  const closeAttachMenu = () => {
+    if (attachMenu) attachMenu.hidden = true;
+    document.removeEventListener('click', closeAttachMenu, true);
+    document.removeEventListener('keydown', onAttachMenuKey);
+  };
+  const onAttachMenuKey = (e) => {
+    if (e.key === 'Escape') closeAttachMenu();
+  };
+  const openAttachMenu = (docId, anchorEl) => {
+    if (!attachMenu || !anchorEl) return;
+    attachMenu.dataset.docId = docId;
+    attachMenu.hidden = false;
+    const r = anchorEl.getBoundingClientRect();
+    const menuW = attachMenu.offsetWidth || 160;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - menuW - 8));
+    attachMenu.style.left = `${left}px`;
+    attachMenu.style.top = `${r.bottom + 4}px`;
+    setTimeout(() => {
+      document.addEventListener('click', closeAttachMenu, true);
+      document.addEventListener('keydown', onAttachMenuKey);
+    }, 0);
+  };
+  attachMenu?.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-attach-mode]');
+    if (!item) return;
+    e.stopPropagation();
+    const docId = attachMenu.dataset.docId;
+    if (item.dataset.attachMode === 'camera') {
+      // Touch devices get the native camera via the capture input;
+      // desktops get the in-browser getUserMedia modal.
+      const isTouch = window.matchMedia?.('(pointer: coarse)').matches
+        || 'ontouchstart' in window;
+      if (isTouch && attachCamera) {
+        attachCamera.dataset.docId = docId;
+        attachCamera.click();
+      } else {
+        void openCameraCapture(docId);
+      }
+    } else if (attachInput) {
+      attachInput.dataset.docId = docId;
+      attachInput.click();
+    }
+    closeAttachMenu();
+  });
+
   const uploadBtn = document.getElementById('fn-fdoc-upload-btn');
   const fileInput = document.getElementById('fn-fdoc-file');
   uploadBtn?.addEventListener('click', () => fileInput?.click());
@@ -3304,6 +3455,11 @@ export function initFinanceDocumentsPage() {
   });
 
   document.getElementById('fn-fdoc-table-body')?.addEventListener('click', (e) => {
+    const attachBtn = e.target.closest('[data-fdoc-attach]');
+    if (attachBtn) {
+      openAttachMenu(attachBtn.dataset.fdocAttach, attachBtn);
+      return;
+    }
     const catEditId = e.target.closest('[data-fdoc-cat-edit]')?.dataset?.fdocCatEdit;
     if (catEditId) {
       openFdocCatEditor(catEditId);

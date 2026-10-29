@@ -92,9 +92,15 @@
       <span class="fa-cash-mode__knob" aria-hidden="true"></span>
     </button>
     <span class="fn-cash-toggle-v2__side" data-side="cash_detail">Cash bills by category</span>
-    <p class="fa-cash-mode__hint">
-      Off = bank Petty Cash as one lump. On = bank ledger plus cash bills broken out by category.
-    </p>
+    <span class="fa-info-anchor">
+      <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fa-cash-mode-tip" title="About cash expense reporting">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <span class="sr-only">About cash expense reporting</span>
+      </button>
+      <span class="fa-info-tip" id="fn-fa-cash-mode-tip" hidden role="tooltip">
+        Off = bank Petty Cash as one lump. On = bank ledger plus cash bills broken out by category.
+      </span>
+    </span>
     <button type="button" class="fn-action-btn fn-cash-toggle-v2__excel" id="fn-fa-download-xlsx" title="Download monthly stacks and pivots as Excel">
       <i class="fa-solid fa-download" aria-hidden="true"></i>
       <span>Excel</span>
@@ -105,10 +111,21 @@
     <div class="metric-card fa-chart-card fa-chart-card--full">
       <div class="fa-chart-card__head">
         <div>
-          <h3 class="fa-panel__title">Monthly stacks: raised, income &amp; expenses</h3>
-          <p class="fa-panel__hint">Three stacked bars per month — <strong>raised</strong> (NoBroker invoices), <strong>income</strong> (cash in), and <strong>expenses</strong> (<strong>Pivot by</strong> applies to the expense bar).</p>
+          <h3 class="fa-panel__title">Monthly stacks: raised, income &amp; expenses
+            <span class="fa-info-anchor">
+              <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fa-stacks-tip" title="About this chart">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                <span class="sr-only">About this chart</span>
+              </button>
+              <span class="fa-info-tip" id="fn-fa-stacks-tip" hidden role="tooltip">Three stacked bars per month — <strong>raised</strong> (NoBroker invoices), <strong>income</strong> (cash in), and <strong>expenses</strong> (<strong>Pivot by</strong> applies to the expense bar).</span>
+            </span>
+          </h3>
         </div>
         <div class="fa-projection-anchor">
+          <button type="button" class="fa-projection-icon-btn" data-fa-legend-toggle aria-expanded="false" title="Show legend">
+            <i class="fa-solid fa-list" aria-hidden="true"></i>
+            <span class="sr-only">Toggle legend</span>
+          </button>
           <button type="button" class="fa-projection-icon-btn" id="fn-fa-projection-toggle" aria-expanded="false" aria-controls="fn-fa-projection-popover" title="Trend projection">
             <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
             <span class="sr-only">Trend projection</span>
@@ -126,8 +143,15 @@
   <section class="fa-panel fa-pivot-panel">
     <div class="fa-panel__head fa-panel__head--row">
       <div>
-        <h3 class="fa-panel__title">Invoices raised pivot</h3>
-        <p class="fa-panel__hint">NoBroker current-period charge heads by month (from Start Period Date). Upload on the <strong>Invoices Raised</strong> tab.</p>
+        <h3 class="fa-panel__title">Invoices raised pivot
+          <span class="fa-info-anchor">
+            <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fa-raised-tip" title="About this pivot">
+              <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+              <span class="sr-only">About this pivot</span>
+            </button>
+            <span class="fa-info-tip" id="fn-fa-raised-tip" hidden role="tooltip">NoBroker current-period charge heads by month (from Start Period Date). Upload on the <strong>Invoices Raised</strong> tab.</span>
+          </span>
+        </h3>
       </div>
       <div id="fn-fa-raised-pivot-meta" class="fa-pivot-meta"></div>
     </div>
@@ -137,8 +161,15 @@
   <section class="fa-panel fa-pivot-panel">
     <div class="fa-panel__head fa-panel__head--row">
       <div>
-        <h3 class="fa-panel__title">Income pivot</h3>
-        <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. Rows excluded from reports are omitted.</p>
+        <h3 class="fa-panel__title">Income pivot
+          <span class="fa-info-anchor">
+            <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fa-income-tip" title="About this pivot">
+              <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+              <span class="sr-only">About this pivot</span>
+            </button>
+            <span class="fa-info-tip" id="fn-fa-income-tip" hidden role="tooltip">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. Rows excluded from reports are omitted.</span>
+          </span>
+        </h3>
       </div>
       <div id="fn-fa-income-pivot-meta" class="fa-pivot-meta"></div>
     </div>
@@ -148,8 +179,15 @@
   <section class="fa-panel fa-pivot-panel">
     <div class="fa-panel__head fa-panel__head--row">
       <div>
-        <h3 class="fa-panel__title">Expense pivot</h3>
-        <p class="fa-panel__hint">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. For cash detail, set category/subcategory on each bill under Bills &amp; receipts.</p>
+        <h3 class="fa-panel__title">Expense pivot
+          <span class="fa-info-anchor">
+            <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fa-expense-tip" title="About this pivot">
+              <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+              <span class="sr-only">About this pivot</span>
+            </button>
+            <span class="fa-info-tip" id="fn-fa-expense-tip" hidden role="tooltip">Click any amount — month, row total, column total, or grand total — to open matching ledger entries. For cash detail, set category/subcategory on each bill under Bills &amp; receipts.</span>
+          </span>
+        </h3>
       </div>
       <div id="fn-fa-expense-pivot-meta" class="fa-pivot-meta"></div>
     </div>

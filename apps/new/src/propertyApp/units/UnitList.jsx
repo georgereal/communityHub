@@ -340,25 +340,60 @@ export default function UnitList() {
                     </Paper>
                 ) : (
                 <Stack spacing={1.25}>
-                    {rows.map((u) => (
+                    {rows.map((u) => {
+                        const isTenant = u.occupancy === 'TENANT_OCCUPIED';
+                        const primary = isTenant ? { label: 'Tenant', people: u.tenants } : { label: 'Owner', people: u.owners };
+                        const plates = (u.vehicles || [])
+                            .filter((v) => v.is_parking_active !== false && v.plate);
+                        return (
                         <Paper key={u.id} sx={{ p: 1.5 }} onClick={() => openView(u)}>
-                            <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                 <Box>
-                                    <Typography fontWeight={700}>{u.number}</Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                        {u.blockLabel || '—'} · {u.bhk || '—'}
+                                    <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1.2 }}>
+                                        {u.number}
+                                        {u.bhk ? <Box component="span" sx={{ fontWeight: 500, color: 'text.secondary' }}>{` · ${u.bhk} BHK`}</Box> : null}
                                     </Typography>
                                 </Box>
-                                <RowMenu
-                                    unit={u}
-                                    onView={openView}
-                                    onEdit={openEdit}
-                                    onDelete={setDeleteUnit}
-                                />
+                                <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                                    <Chip
+                                        size="small"
+                                        label={occupancyLabel(u.occupancy)}
+                                        color={u.occupancy === 'OWNER_OCCUPIED' ? 'success' : u.occupancy === 'TENANT_OCCUPIED' ? 'primary' : 'default'}
+                                        variant={u.occupancy === 'VACANT' ? 'outlined' : 'filled'}
+                                    />
+                                    <RowMenu
+                                        unit={u}
+                                        onView={openView}
+                                        onEdit={openEdit}
+                                        onDelete={setDeleteUnit}
+                                    />
+                                </Stack>
                             </Stack>
-                            <Chip size="small" sx={{ mt: 1 }} label={occupancyLabel(u.occupancy)} />
+                            <Typography variant="body2" sx={{ mt: 1, fontWeight: 600 }}>
+                                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>{primary.label}: </Box>
+                                {peopleNames(primary.people) || '—'}
+                            </Typography>
+                            <Stack direction="row" sx={{ mt: 0.75, flexWrap: 'wrap', gap: 0.5 }}>
+                                {plates.length ? plates.map((v) => (
+                                    <Chip
+                                        key={v.id || v.plate}
+                                        size="small"
+                                        variant="outlined"
+                                        icon={<span style={{ fontSize: '0.8rem', marginLeft: 6 }}>{String(v.type || 'CAR').toUpperCase() === 'BIKE' ? '🏍' : '🚗'}</span>}
+                                        label={v.plate}
+                                    />
+                                )) : (
+                                    <Typography variant="caption" color="text.secondary">No vehicles</Typography>
+                                )}
+                                {(u.car_limit != null || u.bike_limit != null) ? (
+                                    <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', ml: 'auto' }}>
+                                        {u.car_limit ?? 0}C/{u.bike_limit ?? 0}B
+                                    </Typography>
+                                ) : null}
+                            </Stack>
                         </Paper>
-                    ))}
+                        );
+                    })}
                 </Stack>
                 )
             ) : (

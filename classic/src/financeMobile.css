@@ -30,7 +30,7 @@
     font-size: 0.8rem;
   }
 
-  #ledger-sync-panel .ledger-sync-panel,
+  :is(#ledger-sync-panel, #fn-ledger-sync-panel) .ledger-sync-panel,
   .ledger-sync-panel {
     margin-bottom: 0.25rem;
     border-radius: 10px;
@@ -119,8 +119,8 @@
   }
 
   .ledger-toolbar__actions > *,
-  .ledger-toolbar__actions #ledger-columns-slot,
-  .ledger-toolbar__actions #ledger-columns-slot > * {
+  .ledger-toolbar__actions :is(#ledger-columns-slot, #fn-ledger-columns-slot),
+  .ledger-toolbar__actions :is(#ledger-columns-slot, #fn-ledger-columns-slot) > * {
     min-width: 0;
   }
 
@@ -145,7 +145,7 @@
     box-sizing: border-box;
   }
 
-  #ledger-download-xlsx .fa-solid {
+  :is(#ledger-download-xlsx, #fn-ledger-download-xlsx) .fa-solid {
     font-size: 0.72rem;
   }
 
@@ -169,23 +169,23 @@
     min-width: 0;
   }
 
-  #ledger-bulk-apply,
-  #ledger-bulk-save,
-  #ledger-bulk-delete {
+  :is(#ledger-bulk-apply, #fn-ledger-bulk-apply),
+  :is(#ledger-bulk-save, #fn-ledger-bulk-save),
+  :is(#ledger-bulk-delete, #fn-ledger-bulk-delete) {
     width: 100%;
     justify-content: center;
     min-height: 2rem;
   }
 
-  #ledger-bulk-apply {
+  :is(#ledger-bulk-apply, #fn-ledger-bulk-apply) {
     grid-column: 1;
   }
 
-  #ledger-bulk-save {
+  :is(#ledger-bulk-save, #fn-ledger-bulk-save) {
     grid-column: 2;
   }
 
-  #ledger-bulk-delete {
+  :is(#ledger-bulk-delete, #fn-ledger-bulk-delete) {
     grid-column: 1 / -1;
   }
 
@@ -205,12 +205,12 @@
     overflow: visible;
   }
 
-  .ledger-toolbar__actions #ledger-columns-slot {
+  .ledger-toolbar__actions :is(#ledger-columns-slot, #fn-ledger-columns-slot) {
     display: block;
     width: 100%;
   }
 
-  .ledger-toolbar__actions #ledger-columns-slot > details {
+  .ledger-toolbar__actions :is(#ledger-columns-slot, #fn-ledger-columns-slot) > details {
     width: 100%;
   }
 
@@ -237,8 +237,8 @@
   }
 
   /* Avoid page-section clipping the dropdown */
-  #subview-ledger.page-section,
-  #subview-ledger {
+  :is(#subview-ledger, #fn-subview-ledger).page-section,
+  :is(#subview-ledger, #fn-subview-ledger) {
     overflow: visible;
   }
 
@@ -283,11 +283,11 @@
 
 /* ── Shared finance subview spacing ── */
 @media (max-width: 767px) {
-  #subview-reports,
+  :is(#subview-reports, #fn-subview-reports),
   #subview-activity,
   #subview-gl,
-  #subview-bank-recon,
-  #subview-finance-docs {
+  :is(#subview-bank-recon, #fn-subview-bank-recon),
+  :is(#subview-finance-docs, #fn-subview-finance-docs) {
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
     padding-bottom: 1rem !important;
@@ -703,11 +703,11 @@
     text-align: center;
   }
 
-  .bank-recon-source-tab:not(#bank-recon-tab-opening) .bank-recon-source-tab__hint {
+  .bank-recon-source-tab:not(:is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening)) .bank-recon-source-tab__hint {
     display: none;
   }
 
-  #bank-recon-tab-opening .bank-recon-source-tab__hint {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-source-tab__hint {
     display: block;
     font-size: 0.54rem;
     line-height: 1.15;
@@ -718,12 +718,12 @@
     text-align: center;
   }
 
-  #bank-recon-tab-opening:has(.bank-recon-opening-panel__badge--warn:not([hidden])) .bank-recon-source-tab__hint,
-  #bank-recon-tab-opening:has(.bank-recon-opening-panel__badge--unset:not([hidden])) .bank-recon-source-tab__hint {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening):has(.bank-recon-opening-panel__badge--warn:not([hidden])) .bank-recon-source-tab__hint,
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening):has(.bank-recon-opening-panel__badge--unset:not([hidden])) .bank-recon-source-tab__hint {
     display: none;
   }
 
-  #bank-recon-tab-opening .bank-recon-opening-panel__badge--ok {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-opening-panel__badge--ok {
     display: none !important;
   }
 
@@ -739,30 +739,30 @@
     margin-left: 0;
   }
 
-  #bank-recon-tab-opening {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) {
     align-items: center;
   }
 
-  #bank-recon-tab-opening .bank-recon-source-tab__text {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-source-tab__text {
     flex: 0 1 auto;
     min-width: 0;
     width: 100%;
   }
 
-  #bank-recon-tab-opening .bank-recon-source-tab__title-row {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-source-tab__title-row {
     justify-content: center;
     width: 100%;
   }
 
-  #bank-recon-tab-opening .bank-recon-source-tab__title-row strong {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-source-tab__title-row strong {
     font-size: 0.62rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  #bank-recon-tab-opening .bank-recon-opening-panel__badge--warn,
-  #bank-recon-tab-opening .bank-recon-opening-panel__badge--unset {
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-opening-panel__badge--warn,
+  :is(#bank-recon-tab-opening, #fn-bank-recon-tab-opening) .bank-recon-opening-panel__badge--unset {
     position: absolute;
     top: 0.15rem;
     right: 0.12rem;
@@ -1024,7 +1024,7 @@
   }
 
   .bank-recon-source-panel__actions .bank-recon-passbook-jobs-btn,
-  .bank-recon-source-panel__actions #bank-recon-passbook-jobs-refresh-inline {
+  .bank-recon-source-panel__actions :is(#bank-recon-passbook-jobs-refresh-inline, #fn-bank-recon-passbook-jobs-refresh-inline) {
     font-size: 0.72rem;
   }
 
@@ -1068,14 +1068,14 @@
   }
 
   .bank-recon-bulk-bar .bank-recon-bulk-count,
-  .bank-recon-bulk-bar #bank-recon-bulk-count {
+  .bank-recon-bulk-bar :is(#bank-recon-bulk-count, #fn-bank-recon-bulk-count) {
     grid-column: 1 / -1;
     font-size: 0.68rem;
     margin-top: -0.2rem;
     margin-bottom: 0.1rem;
   }
 
-  .bank-recon-bulk-bar #bank-recon-post-all-ready {
+  .bank-recon-bulk-bar :is(#bank-recon-post-all-ready, #fn-bank-recon-post-all-ready) {
     grid-column: 1 / -1;
   }
 
@@ -1132,7 +1132,7 @@
 }
 
 @media (max-width: 767px) {
-  #bank-recon-table-shell {
+  :is(#bank-recon-table-shell, #fn-bank-recon-table-shell) {
     min-height: min(58vh, 520px);
     height: auto;
     max-height: none;
@@ -1154,15 +1154,15 @@
 /* ── Finance tables → stacked cards (ledger, bank recon) ── */
 @media (max-width: 767px) {
   #ledger-table-wrap,
-  #cash-ledger-items .bank-recon-table-wrap,
-  #ledger-excluded-items .bank-recon-table-wrap {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table-wrap,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table-wrap {
     overflow: visible;
   }
 
-  #cash-ledger-items .bank-recon-table,
-  #ledger-excluded-items .bank-recon-table,
-  #bank-recon-lines .bank-recon-table,
-  #bank-recon-txns .bank-recon-table {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table,
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table {
     display: block;
     width: 100%;
     min-width: 0;
@@ -1170,26 +1170,26 @@
     background: transparent;
   }
 
-  #cash-ledger-items .bank-recon-table thead,
-  #ledger-excluded-items .bank-recon-table thead,
-  #bank-recon-lines .bank-recon-table thead,
-  #bank-recon-txns .bank-recon-table thead {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table thead,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table thead,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table thead,
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table thead {
     display: none;
   }
 
-  #cash-ledger-items .bank-recon-table tbody,
-  #ledger-excluded-items .bank-recon-table tbody,
-  #bank-recon-lines .bank-recon-table tbody,
-  #bank-recon-txns .bank-recon-table tbody {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table tbody,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table tbody,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tbody,
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table tbody {
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
   }
 
-  #cash-ledger-items .bank-recon-table tr.ledger-txn-row,
-  #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row,
-  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly),
-  #bank-recon-txns .bank-recon-table tr.bank-recon-table__row--ledger {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table tr.ledger-txn-row,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table tr.ledger-excluded-row,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly),
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table tr.bank-recon-table__row--ledger {
     display: grid;
     border: 1px solid #eef0f3;
     border-radius: 14px;
@@ -1199,7 +1199,7 @@
     gap: 0.35rem 0.55rem;
   }
 
-  #cash-ledger-items .bank-recon-table tr.ledger-txn-row {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table tr.ledger-txn-row {
     position: relative;
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
@@ -1213,13 +1213,13 @@
     align-items: start;
   }
 
-  #cash-ledger-items .bank-recon-table tr.ledger-txn-row.bank-recon-table__row--mismatch {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table tr.ledger-txn-row.bank-recon-table__row--mismatch {
     background: color-mix(in srgb, var(--danger, #dc2626) 8%, #fff);
     border-color: color-mix(in srgb, var(--danger, #dc2626) 22%, #eef0f3);
     box-shadow: inset 3px 0 0 color-mix(in srgb, var(--danger, #dc2626) 45%, #fff);
   }
 
-  #ledger-excluded-items .bank-recon-table tr.ledger-excluded-row {
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table tr.ledger-excluded-row {
     grid-template-columns: 1fr auto;
     grid-template-areas:
       "date amount"
@@ -1228,9 +1228,9 @@
       "actions actions";
   }
 
-  #ledger-excluded-items td.bank-recon-table__cell--date { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
-  #ledger-excluded-items td.bank-recon-table__cell--desc { grid-area: desc; font-size: 0.82rem; }
-  #ledger-excluded-items td.bank-recon-table__cell--num {
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell--date { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell--desc { grid-area: desc; font-size: 0.82rem; }
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell--num {
     grid-area: amount;
     display: inline-block;
     text-align: right;
@@ -1238,18 +1238,18 @@
     font-variant-numeric: tabular-nums;
   }
 
-  #ledger-excluded-items td.bank-recon-table__cell--num + td.bank-recon-table__cell--num {
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell--num + td.bank-recon-table__cell--num {
     margin-left: 0.35rem;
   }
-  #ledger-excluded-items td.bank-recon-table__cell:nth-child(5),
-  #ledger-excluded-items td.bank-recon-table__cell:nth-child(6) {
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell:nth-child(5),
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell:nth-child(6) {
     grid-area: meta;
     font-size: 0.75rem;
     color: var(--text-dim);
   }
-  #ledger-excluded-items td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
 
-  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly) {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr.bank-recon-table__row:not(.bank-recon-table__row--readonly) {
     grid-template-columns: auto 1fr auto;
     grid-template-areas:
       "check date type"
@@ -1260,7 +1260,7 @@
       "actions actions actions";
   }
 
-  #bank-recon-txns .bank-recon-table tr.bank-recon-table__row--ledger {
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table tr.bank-recon-table__row--ledger {
     grid-template-columns: 1fr auto;
     grid-template-areas:
       "date amount"
@@ -1269,10 +1269,10 @@
       "actions actions";
   }
 
-  #cash-ledger-items .bank-recon-table tr td,
-  #ledger-excluded-items .bank-recon-table tr td,
-  #bank-recon-lines .bank-recon-table tr td,
-  #bank-recon-txns .bank-recon-table tr td {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table tr td,
+  :is(#ledger-excluded-items, #fn-ledger-excluded-items) .bank-recon-table tr td,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr td,
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table tr td {
     display: block;
     border: none;
     padding: 0;
@@ -1283,7 +1283,7 @@
   }
 
   /* Ledger row areas — separate columns so checkbox never covers the date */
-  #cash-ledger-items td.bank-recon-table__cell--check {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--check {
     grid-area: check;
     display: flex;
     align-items: center;
@@ -1297,14 +1297,14 @@
     text-align: left;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--check input.ledger-row-check {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--check input.ledger-row-check {
     margin: 0;
     width: 1.05rem;
     height: 1.05rem;
     flex: 0 0 auto;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--date {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--date {
     grid-area: date;
     display: flex;
     flex-direction: column;
@@ -1319,7 +1319,7 @@
     padding: 0;
     text-align: left;
   }
-  #cash-ledger-items .ledger-card-date {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-date {
     font-size: 0.78rem;
     font-weight: 700;
     color: var(--text-dim);
@@ -1328,7 +1328,7 @@
     display: flex;
     align-items: center;
   }
-  #cash-ledger-items .ledger-card-meta {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1340,29 +1340,29 @@
     color: var(--text-dim);
     line-height: 1.25;
   }
-  #cash-ledger-items .ledger-card-meta__sep {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__sep {
     opacity: 0.45;
     font-weight: 500;
   }
-  #cash-ledger-items .ledger-card-meta__item--in { color: var(--success); }
-  #cash-ledger-items .ledger-card-meta__item--out { color: var(--danger); }
-  #cash-ledger-items .ledger-card-meta__item--ok { color: #15803d; }
-  #cash-ledger-items .ledger-card-meta__item--open { color: #b45309; }
-  #cash-ledger-items .ledger-card-meta__item--warn { color: #b45309; }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__item--in { color: var(--success); }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__item--out { color: var(--danger); }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__item--ok { color: #15803d; }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__item--open { color: #b45309; }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-card-meta__item--warn { color: #b45309; }
 
-  #cash-ledger-items td.bank-recon-table__cell--desc { grid-area: desc; }
-  #cash-ledger-items td.bank-recon-table__cell--classify { grid-area: classify; }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--desc { grid-area: desc; }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--classify { grid-area: classify; }
 
   /* Desktop pills move into the compact meta line on cards */
-  #cash-ledger-items td.bank-recon-table__cell--type,
-  #cash-ledger-items td.bank-recon-table__cell--ledger {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--type,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--ledger {
     display: none !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--bills {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--bills {
     display: none !important; /* linked-bills count is secondary on cards; omit to keep balance row clean */
   }
-  #cash-ledger-items td.bank-recon-table__cell--actions {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--actions {
     grid-area: actions;
     padding-top: 0.35rem;
     margin-top: 0.15rem;
@@ -1371,11 +1371,11 @@
     overflow: hidden; /* keep icons from covering ↑↓ */
   }
 
-  #cash-ledger-items tr.ledger-txn-row:not(:has(td.bank-recon-table__cell--order .bank-recon-order-btns)) td.bank-recon-table__cell--actions {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) tr.ledger-txn-row:not(:has(td.bank-recon-table__cell--order .bank-recon-order-btns)) td.bank-recon-table__cell--actions {
     grid-column: 1 / -1;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order {
     grid-area: order;
     display: flex;
     align-items: center;
@@ -1390,7 +1390,7 @@
     overflow: visible;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order:empty {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order:empty {
     display: none !important;
     border-top: 0;
     padding: 0;
@@ -1398,13 +1398,13 @@
     min-width: 0;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-order-btns {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order .bank-recon-order-btns {
     flex-direction: row;
     align-items: center;
     gap: 0.1rem;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order .bank-recon-move-step {
     display: block;
     width: 1.65rem;
     min-width: 1.65rem;
@@ -1417,13 +1417,13 @@
     -moz-appearance: textfield;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-outer-spin-button,
-  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-inner-spin-button {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-outer-spin-button,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order .bank-recon-move-step::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--order .bank-recon-order-btns .btn--icon {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--order .bank-recon-order-btns .btn--icon {
     width: 1.35rem;
     height: 1.35rem;
     min-width: 1.35rem;
@@ -1432,12 +1432,12 @@
     border-radius: 999px;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--ocr {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--ocr {
     display: none !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in,
-  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--num.bank-recon-amt--in,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--num.bank-recon-amt--out {
     grid-area: amount;
     font-size: 0.95rem;
     font-weight: 800;
@@ -1449,15 +1449,15 @@
     padding: 0;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--in { color: var(--success); }
-  #cash-ledger-items td.bank-recon-table__cell--num.bank-recon-amt--out { color: var(--danger); }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--num.bank-recon-amt--in { color: var(--success); }
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--num.bank-recon-amt--out { color: var(--danger); }
 
-  #cash-ledger-items td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out):not(.bank-recon-table__cell--computed):not(.bank-recon-table__cell--passbook) {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--num:not(.bank-recon-amt--in):not(.bank-recon-amt--out):not(.bank-recon-table__cell--computed):not(.bank-recon-table__cell--passbook) {
     display: none !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--computed,
-  #cash-ledger-items td.bank-recon-table__cell--computed.ledger-col--desktop-hidden {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--computed,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--computed.ledger-col--desktop-hidden {
     display: block !important;
     grid-area: calc;
     font-size: 0.68rem;
@@ -1467,7 +1467,7 @@
     padding: 0.15rem 0 !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--computed::before {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--computed::before {
     content: 'Calc ';
     font-weight: 700;
     text-transform: uppercase;
@@ -1476,8 +1476,8 @@
     letter-spacing: 0.02em;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--passbook,
-  #cash-ledger-items td.bank-recon-table__cell--passbook.ledger-col--desktop-hidden {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--passbook,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--passbook.ledger-col--desktop-hidden {
     display: block !important;
     grid-area: passbook;
     font-size: 0.68rem;
@@ -1487,7 +1487,7 @@
     padding: 0.15rem 0 !important;
   }
 
-  #cash-ledger-items td.bank-recon-table__cell--passbook::before {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) td.bank-recon-table__cell--passbook::before {
     content: 'Passbook ';
     font-weight: 700;
     text-transform: uppercase;
@@ -1496,30 +1496,30 @@
     letter-spacing: 0.02em;
   }
 
-  #cash-ledger-items .ledger-classify-cell {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-classify-cell {
     min-width: 0;
     width: 100%;
   }
 
-  #cash-ledger-items .ledger-classify-cell .fdoc-cat-display {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-classify-cell .fdoc-cat-display {
     width: 100%;
   }
 
-  #cash-ledger-items .ledger-txn-row--classify-open .fdoc-cat-editor {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .ledger-txn-row--classify-open .fdoc-cat-editor {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
   }
 
-  #cash-ledger-items .bank-recon-classify-combobox,
-  #cash-ledger-items .bank-recon-vendor-input,
-  #cash-ledger-items .bank-recon-cell-input {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-classify-combobox,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-vendor-input,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-cell-input {
     width: 100%;
     min-width: 0;
     max-width: none;
   }
 
-  #cash-ledger-items .bank-recon-row-actions {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-row-actions {
     display: flex;
     flex-wrap: nowrap;
     justify-content: flex-start;
@@ -1533,11 +1533,11 @@
     box-sizing: border-box;
   }
 
-  #cash-ledger-items .bank-recon-row-actions::-webkit-scrollbar {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-row-actions::-webkit-scrollbar {
     display: none;
   }
 
-  #cash-ledger-items .bank-recon-row-actions .btn {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-row-actions .btn {
     flex: 0 0 auto;
     min-width: 2.15rem;
     display: inline-flex;
@@ -1549,45 +1549,45 @@
   }
 
   /* Icon-only actions — titles/aria-labels remain for long-press */
-  #cash-ledger-items .bank-recon-row-actions .btn--icon::after {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-row-actions .btn--icon::after {
     content: none;
   }
 
-  #cash-ledger-items .bank-recon-order-btns {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-order-btns {
     display: inline-flex;
     gap: 0.25rem;
     align-items: center;
   }
 
   /* Bank recon statement row areas */
-  #bank-recon-lines td.bank-recon-table__cell--order,
-  #bank-recon-lines td.bank-recon-table__cell--ocr,
-  #bank-recon-lines td.bank-recon-table__cell--num:not(:has(.bank-recon-cell-input--num)) {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--order,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--ocr,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--num:not(:has(.bank-recon-cell-input--num)) {
     display: none !important;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--check { grid-area: check; align-self: start; }
-  #bank-recon-lines td.bank-recon-table__cell--date { grid-area: date; }
-  #bank-recon-lines td.bank-recon-table__cell--type { grid-area: type; justify-self: end; align-self: start; }
-  #bank-recon-lines td.bank-recon-table__cell--desc { grid-area: desc; }
-  #bank-recon-lines td.bank-recon-table__cell--classify { grid-area: classify; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--check { grid-area: check; align-self: start; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--date { grid-area: date; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--type { grid-area: type; justify-self: end; align-self: start; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--desc { grid-area: desc; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--classify { grid-area: classify; }
 
-  #bank-recon-lines .bank-recon-classify-actions {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-classify-actions {
     flex-direction: column;
     align-items: stretch;
     flex-wrap: nowrap;
   }
 
-  #bank-recon-lines .bank-recon-classify-actions .bank-recon-classify-combobox,
-  #bank-recon-lines .bank-recon-classify-actions .bank-recon-vendor-input {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-classify-actions .bank-recon-classify-combobox,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-classify-actions .bank-recon-vendor-input {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
   }
-  #bank-recon-lines td.bank-recon-table__cell--match { grid-area: match; }
-  #bank-recon-lines td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--match { grid-area: match; }
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--actions { grid-area: actions; padding-top: 0.35rem; margin-top: 0.15rem; border-top: 1px solid #f1f3f5; }
 
-  #bank-recon-lines .bank-recon-row-actions {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-row-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: stretch;
@@ -1595,7 +1595,7 @@
     width: 100%;
   }
 
-  #bank-recon-lines .bank-recon-row-actions .btn {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-row-actions .btn {
     flex: 1 1 calc(50% - 0.2rem);
     min-width: 0;
     display: inline-flex;
@@ -1606,17 +1606,17 @@
     font-size: 0.72rem !important;
   }
 
-  #bank-recon-lines .bank-recon-row-actions .btn--icon {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-row-actions .btn--icon {
     min-width: 0;
   }
 
-  #bank-recon-lines .bank-recon-row-actions .btn--icon::after {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-row-actions .btn--icon::after {
     content: attr(aria-label);
     font-size: 0.68rem;
     font-weight: 600;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--match::before {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--match::before {
     content: 'Match ledger';
     display: block;
     font-size: 0.62rem;
@@ -1626,7 +1626,7 @@
     margin-bottom: 0.25rem;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--classify::before {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--classify::before {
     content: 'Category / vendor';
     display: block;
     font-size: 0.62rem;
@@ -1636,13 +1636,13 @@
     margin-bottom: 0.25rem;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--num:has(.bank-recon-cell-input--num) {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--num:has(.bank-recon-cell-input--num) {
     grid-area: amount;
     display: block;
     width: 100%;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--num:has([data-field="debit"])::before {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--num:has([data-field="debit"])::before {
     content: 'Debit';
     display: block;
     font-size: 0.62rem;
@@ -1652,7 +1652,7 @@
     margin-bottom: 0.2rem;
   }
 
-  #bank-recon-lines td.bank-recon-table__cell--num:has([data-field="credit"])::before {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) td.bank-recon-table__cell--num:has([data-field="credit"])::before {
     content: 'Credit';
     display: block;
     font-size: 0.62rem;
@@ -1662,37 +1662,37 @@
     margin-bottom: 0.2rem;
   }
 
-  #bank-recon-lines .bank-recon-cell-input--desc,
-  #bank-recon-lines .bank-recon-cell-input--num,
-  #bank-recon-lines .bank-recon-cell-select,
-  #cash-ledger-items .bank-recon-cell-input--desc {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-cell-input--desc,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-cell-input--num,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-cell-select,
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-cell-input--desc {
     width: 100%;
     max-width: none;
   }
 
   /* Processed / readonly bank lines — simpler cards */
-  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr.bank-recon-table__row--readonly {
     display: block;
     padding: 0.7rem 0.85rem;
   }
 
-  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly td {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr.bank-recon-table__row--readonly td {
     padding: 0.15rem 0;
   }
 
-  #bank-recon-lines .bank-recon-table tr.bank-recon-table__row--readonly td.bank-recon-table__cell--check {
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-table tr.bank-recon-table__row--readonly td.bank-recon-table__cell--check {
     float: left;
     margin-right: 0.5rem;
   }
 
   /* Unmatched ledger in recon panel */
-  #bank-recon-txns td:nth-child(1) { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
-  #bank-recon-txns td:nth-child(2) { grid-area: type; }
-  #bank-recon-txns td:nth-child(3) { grid-area: amount; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
-  #bank-recon-txns td:nth-child(4) { grid-area: desc; font-size: 0.82rem; }
-  #bank-recon-txns td:nth-child(5) { grid-area: actions; padding-top: 0.4rem; margin-top: 0.2rem; border-top: 1px solid #f1f3f5; }
+  :is(#bank-recon-txns, #fn-bank-recon-txns) td:nth-child(1) { grid-area: date; font-size: 0.78rem; font-weight: 700; color: var(--text-dim); }
+  :is(#bank-recon-txns, #fn-bank-recon-txns) td:nth-child(2) { grid-area: type; }
+  :is(#bank-recon-txns, #fn-bank-recon-txns) td:nth-child(3) { grid-area: amount; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+  :is(#bank-recon-txns, #fn-bank-recon-txns) td:nth-child(4) { grid-area: desc; font-size: 0.82rem; }
+  :is(#bank-recon-txns, #fn-bank-recon-txns) td:nth-child(5) { grid-area: actions; padding-top: 0.4rem; margin-top: 0.2rem; border-top: 1px solid #f1f3f5; }
 
-  #bank-recon-txns .bank-recon-table-wrap--compact {
+  :is(#bank-recon-txns, #fn-bank-recon-txns) .bank-recon-table-wrap--compact {
     overflow: visible;
   }
 }
@@ -1712,31 +1712,31 @@
     margin: 0;
   }
 
-  #bank-recon-bulk-post,
-  #bank-recon-bulk-delete {
+  :is(#bank-recon-bulk-post, #fn-bank-recon-bulk-post),
+  :is(#bank-recon-bulk-delete, #fn-bank-recon-bulk-delete) {
     font-size: 0 !important;
   }
 
-  #bank-recon-bulk-post .fa-solid,
-  #bank-recon-bulk-delete .fa-solid {
+  :is(#bank-recon-bulk-post, #fn-bank-recon-bulk-post) .fa-solid,
+  :is(#bank-recon-bulk-delete, #fn-bank-recon-bulk-delete) .fa-solid {
     font-size: 0.72rem;
     margin: 0;
   }
 
-  #bank-recon-bulk-post::after {
+  :is(#bank-recon-bulk-post, #fn-bank-recon-bulk-post)::after {
     content: 'Post';
     font-size: 0.68rem;
     font-weight: 600;
   }
 
-  #bank-recon-bulk-delete::after {
+  :is(#bank-recon-bulk-delete, #fn-bank-recon-bulk-delete)::after {
     content: 'Delete';
     font-size: 0.68rem;
     font-weight: 600;
   }
 
-  #cash-ledger-items .bank-recon-row-actions .btn,
-  #bank-recon-lines .bank-recon-row-actions .btn {
+  :is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-row-actions .btn,
+  :is(#bank-recon-lines, #fn-bank-recon-lines) .bank-recon-row-actions .btn {
     min-width: 2.25rem;
   }
 
@@ -1753,21 +1753,21 @@
 
 /* ── Bills & receipts (finance-docs) ── */
 @media (max-width: 767px) {
-  #subview-finance-docs .raised-page-toolbar {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar {
     gap: 0.55rem;
     margin-bottom: 0.65rem;
   }
 
-  #subview-finance-docs .raised-page-toolbar__left {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar__left {
     min-width: 0;
     width: 100%;
   }
 
-  #subview-finance-docs .raised-page-toolbar .fa-panel__title {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar .fa-panel__title {
     font-size: 0.95rem;
   }
 
-  #subview-finance-docs .raised-page-toolbar .fa-panel__hint {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar .fa-panel__hint {
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
@@ -1777,18 +1777,18 @@
     line-height: 1.35;
   }
 
-  #subview-finance-docs .raised-page-meta {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-meta {
     font-size: 0.72rem;
   }
 
-  #subview-finance-docs .raised-page-toolbar__actions {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar__actions {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.4rem;
   }
 
-  #subview-finance-docs .raised-page-toolbar__actions .btn {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar__actions .btn {
     flex: none;
     width: 100%;
     max-width: none;
@@ -1797,12 +1797,12 @@
   }
 
   /* 3 KPIs: 2-up then full-width third (no empty cell) */
-  #subview-finance-docs .fdoc-float-kpis.ledger-kpi-bar {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) .fdoc-float-kpis.ledger-kpi-bar {
     margin-left: 0;
     margin-right: 0;
   }
 
-  #subview-finance-docs .fdoc-float-kpis .ledger-kpi:last-child:nth-child(odd) {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) .fdoc-float-kpis .ledger-kpi:last-child:nth-child(odd) {
     grid-column: 1 / -1;
     border-right: 0;
   }
@@ -1893,12 +1893,12 @@
   }
 
   /* Bills list table → stacked cards (exclude funding / cash-to-bank tables) */
-  #subview-finance-docs > .fa-table-wrap {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap {
     overflow: visible;
     margin-bottom: 1rem !important;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table.fa-pivot-table {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table.fa-pivot-table {
     display: block;
     width: 100%;
     min-width: 0;
@@ -1906,17 +1906,17 @@
     background: transparent;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table thead {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table thead {
     display: none;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tbody {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tbody {
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
     grid-template-areas:
@@ -1933,68 +1933,68 @@
     box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td {
     border: 0;
     padding: 0;
     background: transparent;
     font-size: 0.78rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-check-col {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table .fdoc-check-col {
     grid-area: check;
     align-self: start;
     padding-top: 0.15rem;
     width: auto;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(2) {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(2) {
     grid-area: date;
     font-weight: 700;
     font-size: 0.82rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(3) {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(3) {
     grid-area: kind;
     font-size: 0.72rem;
     color: var(--text-dim, #64748b);
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-cat-col {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table .fdoc-cat-col {
     grid-area: cat;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(5) {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(5) {
     grid-area: vendor;
     color: var(--text-dim, #64748b);
     font-size: 0.74rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(6) {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td:nth-child(6) {
     grid-area: pay;
     align-self: center;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr.fdoc-row td.cash-float-amt {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr.fdoc-row td.cash-float-amt {
     grid-area: amount;
     text-align: right;
     font-weight: 800;
     font-size: 0.9rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-status-cell {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table .fdoc-status-cell {
     grid-area: status;
     justify-self: end;
     align-self: start;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table .fdoc-actions {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table .fdoc-actions {
     grid-area: actions;
     justify-self: end;
     display: inline-flex;
     gap: 0.25rem;
   }
 
-  #subview-finance-docs > .fa-table-wrap > .cash-float-table tr:not(.fdoc-row) td {
+  :is(#subview-finance-docs, #fn-subview-finance-docs) > .fa-table-wrap > .cash-float-table tr:not(.fdoc-row) td {
     display: block;
     padding: 0.85rem;
     border: 1px solid #eef0f3;
@@ -2045,13 +2045,13 @@
     grid-area: amt;
   }
 
-  .fdoc-cash-opening #fdoc-cash-opening-save {
+  .fdoc-cash-opening :is(#fdoc-cash-opening-save, #fn-fdoc-cash-opening-save) {
     grid-area: save;
     flex: none;
     width: 100%;
   }
 
-  .fdoc-cash-opening #fdoc-cash-opening-match {
+  .fdoc-cash-opening :is(#fdoc-cash-opening-match, #fn-fdoc-cash-opening-match) {
     grid-area: match;
     flex: none;
     width: 100%;
@@ -2062,7 +2062,7 @@
   }
 
   .fdoc-funding-table-wrap,
-  #fdoc-cash-to-bank-table.fa-table-wrap {
+  :is(#fdoc-cash-to-bank-table, #fn-fdoc-cash-to-bank-table).fa-table-wrap {
     overflow: visible;
     margin: 0;
     padding: 0;
@@ -2326,7 +2326,7 @@
 }
 
 @media (max-width: 520px) {
-  #subview-finance-docs .raised-page-toolbar .fa-panel__hint {
+  :is(#subview-finance-docs, #fn-subview-finance-docs, #fn-subview-invoices-raised) .raised-page-toolbar .fa-panel__hint {
     -webkit-line-clamp: 3;
     line-clamp: 3;
   }

@@ -387,6 +387,7 @@ export function renderInvoicesRaisedPage() {
         const filterRow = `<tr class="raised-filter-row">${cols.map((c) => {
             const active = String(columnFilters[c.key] || '').trim();
             return `<th class="${c.numeric ? 'fa-num' : ''}">
+          <span class="raised-col-filter__label">${esc(c.label)}</span>
           <input type="search" class="raised-col-filter${active ? ' raised-col-filter--active' : ''}"
             data-raised-col-filter="${esc(c.key)}"
             value="${esc(columnFilters[c.key] || '')}"
@@ -405,7 +406,13 @@ export function renderInvoicesRaisedPage() {
             tbody.innerHTML = list.map((row) => `
         <tr>
           ${cols.map((c) =>
-                `<td class="${c.numeric ? 'fa-num' : ''}">${esc(cellValue(row, c.key))}</td>`).join('')}
+                `<td class="${c.numeric ? 'fa-num' : ''}" data-col="${esc(c.key)}" data-label="${esc(c.label)}">${esc(cellValue(row, c.key))}</td>`).join('')}
+          <td class="raised-card-more">
+            <label class="raised-card-more__label">
+              <input type="checkbox" class="raised-card-toggle" hidden />
+              <span class="raised-card-more__text"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i> Details</span>
+            </label>
+          </td>
         </tr>`).join('');
         }
     }
@@ -460,6 +467,19 @@ export function initInvoicesRaisedPage() {
     document.getElementById('fn-raised-clear-filters')?.addEventListener('click', () => {
         clearFilters();
     });
+    // Mobile: Filters toggle reveals the labeled filter panel (desktop always shows the filter row).
+    const filtersToggle = document.getElementById('fn-raised-filters-toggle');
+    const raisedWrap = document.querySelector('#fn-subview-invoices-raised .raised-table-wrap');
+    const syncFiltersToggle = () => {
+        const open = raisedWrap?.classList.contains('raised-filters-open') || filtersActive();
+        raisedWrap?.classList.toggle('raised-filters-open', open);
+        filtersToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    filtersToggle?.addEventListener('click', () => {
+        const open = raisedWrap?.classList.toggle('raised-filters-open');
+        filtersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    syncFiltersToggle();
     document.getElementById('fn-raised-col-picker')?.addEventListener('change', (e) => {
         const input = e.target.closest('[data-raised-col]');
         if (!input) return;

@@ -952,6 +952,11 @@ const combinedChartOptions = (interactive) => ({
         : { mode: 'nearest', intersect: false },
     plugins: {
         legend: {
+            // On phones the legend is hidden by default; the card's legend
+            // toggle button flips this to reclaim chart space.
+            display: !interactive
+                || (typeof window !== 'undefined'
+                    && window.matchMedia('(min-width: 768px)').matches),
             position: 'bottom',
             labels: { boxWidth: 10, font: { size: 10 }, padding: 6 },
         },

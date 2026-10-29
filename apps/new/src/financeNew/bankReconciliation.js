@@ -689,6 +689,17 @@ let bankReconFilters = {
     ledger: { q: '', type: 'all' },
 };
 let bankReconMismatchNav = { work: -1, processed: -1 };
+let bankReconShowAllRows = { work: false, processed: false };
+const BANK_RECON_MOBILE_ROW_LIMIT = 50;
+const capBankReconRows = (scope, list) => {
+    const mobile = window.matchMedia?.('(max-width: 767px)').matches;
+    if (!mobile || bankReconShowAllRows[scope] || list.length <= BANK_RECON_MOBILE_ROW_LIMIT) {
+        return { list, truncated: false };
+    }
+    return { list: list.slice(0, BANK_RECON_MOBILE_ROW_LIMIT), truncated: true };
+};
+const bankReconShowAllBtn = (scope, total) =>
+    `<p class="bank-recon-show-all-wrap"><button type="button" class="btn btn-outline btn--small bank-recon-show-all" data-show-scope="${scope}">Show all ${total} rows</button></p>`;
 let bankReconFilterSearchTimer = null;
 const BANK_RECON_TABLE_HEIGHT_KEY = 'bankReconTableHeightPx_v4';
 /** Original scroll area was capped at 640px; minimum default is +250px. */
@@ -1048,6 +1059,30 @@ const renderFilterBar = (scope, { mismatchCount = 0, showStatus = false, showTyp
       </div>`;
 };
 
+/** Collapsible "Search & filters" panel — badge shows active filter count. */
+const renderFiltersPanel = (scope, filterBarHtml, viewControlsHtml = '') => {
+    const f = bankReconFilters[scope] || {};
+    const active = (f.q?.trim() ? 1 : 0)
+        + (f.type && f.type !== 'all' ? 1 : 0)
+        + (f.status && f.status !== 'all' ? 1 : 0)
+        + (f.match_status && f.match_status !== 'all' ? 1 : 0)
+        + (f.mismatchOnly ? 1 : 0);
+    const open = active > 0
+        || (typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches);
+    return `
+      <details class="bank-recon-filters-panel"${open ? ' open' : ''}>
+        <summary class="bank-recon-filters-toggle" title="Search and column filters">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <span>Search &amp; filters</span>
+          <span class="bank-recon-filters-toggle__badge" ${active ? '' : 'hidden'}>${active || ''}</span>
+        </summary>
+        <div class="bank-recon-filters-panel__body">
+          ${filterBarHtml}
+          ${viewControlsHtml}
+        </div>
+      </details>`;
+};
+
 const focusMismatchRow = (scope, dir) => {
     const linesRoot = document.getElementById('fn-bank-recon-lines');
     if (!linesRoot) return;
@@ -1146,6 +1181,12 @@ const wireBankReconFiltersOnce = () => {
         const scope = btn.dataset.filterScope;
         const dir = parseInt(btn.dataset.mismatchDir, 10) || 1;
         focusMismatchRow(scope, dir);
+    });
+    document.addEventListener('click', (e) => {
+        const showAll = e.target.closest?.('.bank-recon-show-all');
+        if (!showAll) return;
+        bankReconShowAllRows[showAll.dataset.showScope || 'work'] = true;
+        renderBankReconciliation();
     });
 };
 
@@ -2066,30 +2107,35 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
         showMismatch: true,
         showType: true,
     });
+    const viewControlsHtml = `
+          <div class="bank-recon-view-controls">
+            <details class="bank-recon-height-picker">
+              <summary class="btn btn-outline btn--small" title="Table height"><i class="fa-solid fa-up-down" aria-hidden="true"></i> Height</summary>
+              <div class="bank-recon-height-picker__menu">
+                <button type="button" class="bank-recon-height-preset" data-height-preset="compact">Compact</button>
+                <button type="button" class="bank-recon-height-preset" data-height-preset="medium">Medium</button>
+                <button type="button" class="bank-recon-height-preset" data-height-preset="tall">Tall</button>
+                <button type="button" class="bank-recon-height-preset" data-height-preset="full">Full screen</button>
+              </div>
+            </details>
+          </div>`;
+    const filtersPanelHtml = renderFiltersPanel('work', filterBarHtml, viewControlsHtml);
     const bulkBarHtml = `
       <div class="bank-recon-bulk-bar">
         <label class="bank-recon-bulk-select-all">
           <input type="checkbox" id="fn-bank-recon-select-all" aria-label="Select all rows" />
           <span>Select all</span>
         </label>
+        <span id="fn-bank-recon-bulk-count" class="bank-recon-bulk-count"></span>
         <button type="button" class="btn btn-primary btn--small" id="fn-bank-recon-post-all-ready" disabled title="Create ledger entries for every row with category filled">
           <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Post all ready
         </button>
         <button type="button" class="btn btn-outline btn--small" id="fn-bank-recon-bulk-post" disabled title="Post selected rows that have category filled">
           <i class="fa-solid fa-check-double" aria-hidden="true"></i> Post selected
         </button>
-        <button type="button" class="btn btn-outline btn--small" id="fn-bank-recon-bulk-delete" disabled data-cap="accounts.delete">
+        <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-bank-recon-bulk-delete" disabled data-cap="accounts.delete">
           <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
         </button>
-        <details class="bank-recon-height-picker">
-          <summary class="btn btn-outline btn--small" title="Table height"><i class="fa-solid fa-up-down" aria-hidden="true"></i> Height</summary>
-          <div class="bank-recon-height-picker__menu">
-            <button type="button" class="bank-recon-height-preset" data-height-preset="compact">Compact</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="medium">Medium</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="tall">Tall</button>
-            <button type="button" class="bank-recon-height-preset" data-height-preset="full">Full screen</button>
-          </div>
-        </details>
         <details class="bank-recon-columns-picker">
           <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
           <div class="bank-recon-columns-picker__menu">
@@ -2107,12 +2153,17 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
             </label>
           </div>
         </details>
-        <span id="fn-bank-recon-bulk-count" class="bank-recon-bulk-count"></span>
-      </div>`;
+      </div>
+      ${filtersPanelHtml}`;
 
     const header = `
-      <p class="bank-recon-work-hint">Calculated (parentheses) starts from the <strong>ledger</strong> bank balance, then adds unmatched rows in order. For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. Use <strong>Rules</strong> above, then <strong>Post all ready</strong>. Drag the table corner to resize, or use <strong>Height</strong>.</p>
-      ${filterBarHtml}
+      <span class="fa-info-anchor bank-recon-work-hint-anchor">
+        <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-bank-recon-work-tip" title="How this table works">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <span class="sr-only">How this table works</span>
+        </button>
+        <span class="fa-info-tip" id="fn-bank-recon-work-tip" hidden role="tooltip">Calculated (parentheses) starts from the <strong>ledger</strong> bank balance, then adds unmatched rows in order. For <strong>expenses</strong>, pick category, sub-category, and vendor — auto-saves when you <strong>select</strong> from the list. Use <strong>+ Add</strong> for new values, then click <strong>Post</strong>. For <strong>income</strong>, selecting a category saves immediately. Use <strong>Rules</strong> above, then <strong>Post all ready</strong>.</span>
+      </span>
       ${bulkBarHtml}`;
 
     if (!unmatched.length) {
@@ -2133,7 +2184,9 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
 
     const orderMeta = buildSameDayOrderIndex(filtered);
 
-    const rows = sortBankReconLines(filtered).map((line) => {
+    const allRows = sortBankReconLines(filtered);
+    const { list: visibleRows, truncated: rowsTruncated } = capBankReconRows('work', allRows);
+    const rows = visibleRows.map((line) => {
         const lineType = bankLineType(line);
         const isIncome = lineType === 'IN';
         const ledgerTxns = getUnmatchedLedgerTxns(lineType);
@@ -2226,6 +2279,7 @@ const renderStatementTable = (unmatched, visibleColumns = {}) => {
           <tbody>${rows}</tbody>
         </table>
         </div>
+        ${rowsTruncated ? bankReconShowAllBtn('work', allRows.length) : ''}
       </div>`;
 };
 
@@ -2246,7 +2300,8 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
         showStatus: true,
     });
 
-    const body = sortedFiltered.map((line) => {
+    const { list: visibleProcessed, truncated: processedTruncated } = capBankReconRows('processed', sortedFiltered);
+    const body = visibleProcessed.map((line) => {
         const isIncome = bankLineType(line) === 'IN';
         const amt = bankLineAmount(line);
         const amtLabel = isIncome ? `+${formatMoney(amt)}` : `-${formatMoney(amt)}`;
@@ -2264,14 +2319,14 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
             <input type="checkbox" class="bank-recon-processed-check" data-line="${line.id}" aria-label="Select processed line" />
           </td>
           ${visibleColumns.ocrRow ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr">${formatOcrRowDisplay(line) ?? '—'}</td>` : ''}
-          <td class="bank-recon-table__cell">${esc(formatDisplayDate(line.line_date))}</td>
+          <td class="bank-recon-table__cell bank-recon-table__cell--date">${esc(formatDisplayDate(line.line_date))}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--desc">${esc(line.description || '—')}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--amount ${isIncome ? 'bank-recon-amt--in' : 'bank-recon-amt--out'}">${amtLabel}</td>
           ${renderBalanceCells(line, visibleColumns)}
-          <td class="bank-recon-table__cell"><span class="bank-recon-status ${statusClass}">${status}</span>${txnLabel ? `<span class="bank-recon-processed-txn">${esc(txnLabel)}</span>` : ''}</td>
+          <td class="bank-recon-table__cell bank-recon-table__cell--status"><span class="bank-recon-status ${statusClass}">${status}</span>${txnLabel ? `<span class="bank-recon-processed-txn">${esc(txnLabel)}</span>` : ''}</td>
           <td class="bank-recon-table__cell bank-recon-table__cell--actions">
             <div class="bank-recon-row-actions">
-              ${line.match_status === 'MATCHED' ? `<button type="button" class="btn btn-outline btn--small bank-edit-btn" data-line="${line.id}" title="Return to work queue to re-classify or re-match">Edit</button>` : ''}
+              ${line.match_status === 'MATCHED' ? `<button type="button" class="btn btn-outline btn--small bank-edit-btn" data-line="${line.id}" title="Unmatch — returns this line to the work queue (re-match to undo)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span class="bank-btn-label"> Unmatch</span></button>` : ''}
               <button type="button" class="btn btn-outline btn--small btn--icon btn--danger bank-delete-btn" data-cap="accounts.delete" data-line="${line.id}" title="Delete" aria-label="Delete"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
             </div>
           </td>
@@ -2297,33 +2352,35 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
           </button>
         </div>
         <p class="bank-recon-recalc-status bank-recon-recalc-status--inline bank-recon-processed-recalc-status" hidden></p>
-        ${filterBarHtml}
         <div class="bank-recon-bulk-bar bank-recon-bulk-bar--processed">
           <label class="bank-recon-bulk-select-all">
             <input type="checkbox" class="bank-recon-processed-select-all" aria-label="Select all processed rows" />
             <span>Select all</span>
           </label>
+          <span class="bank-recon-bulk-count bank-recon-bulk-count--processed"></span>
           <button type="button" class="btn btn-outline btn--small bank-recon-processed-bulk-return" disabled title="Move selected rows back to unmatched work queue">
             <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Return selected
           </button>
           <button type="button" class="btn btn-outline btn--small btn--danger bank-recon-processed-bulk-delete" disabled data-cap="accounts.delete" title="Permanently delete selected statement lines">
             <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete selected
           </button>
-          <details class="bank-recon-columns-picker">
-            <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
-            <div class="bank-recon-columns-picker__menu">
-              <label class="bank-recon-columns-picker__option">
-                <input type="checkbox" data-column-toggle="passbookBalance" ${showJoined ? 'checked' : ''} />
-                <span>Passbook / calculated</span>
-              </label>
-              <label class="bank-recon-columns-picker__option">
-                <input type="checkbox" data-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
-                <span>OCR row #</span>
-              </label>
-            </div>
-          </details>
-          <span class="bank-recon-bulk-count bank-recon-bulk-count--processed"></span>
         </div>
+        ${renderFiltersPanel('processed', filterBarHtml, `
+          <div class="bank-recon-view-controls">
+            <details class="bank-recon-columns-picker">
+              <summary class="btn btn-outline btn--small"><i class="fa-solid fa-table-columns" aria-hidden="true"></i> Columns</summary>
+              <div class="bank-recon-columns-picker__menu">
+                <label class="bank-recon-columns-picker__option">
+                  <input type="checkbox" data-column-toggle="passbookBalance" ${showJoined ? 'checked' : ''} />
+                  <span>Passbook / calculated</span>
+                </label>
+                <label class="bank-recon-columns-picker__option">
+                  <input type="checkbox" data-column-toggle="ocrRow" ${visibleColumns.ocrRow ? 'checked' : ''} />
+                  <span>OCR row #</span>
+                </label>
+              </div>
+            </details>
+          </div>`)}
         ${filterNote}
         ${emptyFiltered || `<div class="bank-recon-table-wrap bank-recon-table-wrap--compact">
           <table class="bank-recon-table bank-recon-table--processed">
@@ -2342,6 +2399,7 @@ const renderProcessedLinesSection = (matched, ignored, visibleColumns = {}) => {
             <tbody>${body}</tbody>
           </table>
         </div>`}
+        ${processedTruncated ? bankReconShowAllBtn('processed', sortedFiltered.length) : ''}
       </section>`;
 };
 
@@ -2429,6 +2487,7 @@ const wireProcessedLines = (root) => {
 
     root.querySelectorAll('.bank-edit-btn, .bank-unmatch-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
+            if (!confirm('Unmatch this statement line? It returns to the work queue — re-match it there to undo.')) return;
             try {
                 await unmatchBankLine(btn.dataset.line);
                 renderBankReconciliation();
@@ -2511,8 +2570,14 @@ const renderLedgerTable = (ledgerTxns) => {
         : (filtered.length > 80 ? '<p class="bank-recon-filter-note">Showing first 80 unmatched ledger entries</p>' : '');
 
     return `
-      <p class="bank-recon-work-hint bank-recon-work-hint--ledger">These BANK ledger entries have no linked statement line. <strong>To statements</strong> moves the row back to the work queue so you can classify and post again. Or <strong>Match</strong> to an existing statement row, or <strong>Edit</strong> / <strong>Delete</strong> if duplicate or wrong.</p>
-      ${filterBarHtml}
+      <span class="fa-info-anchor bank-recon-work-hint-anchor">
+        <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-bank-recon-ledger-tip" title="About these ledger entries">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <span class="sr-only">About these ledger entries</span>
+        </button>
+        <span class="fa-info-tip" id="fn-bank-recon-ledger-tip" hidden role="tooltip">These BANK ledger entries have no linked statement line. <strong>To statements</strong> moves the row back to the work queue so you can classify and post again. Or <strong>Match</strong> to an existing statement row, or <strong>Edit</strong> / <strong>Delete</strong> if duplicate or wrong.</span>
+      </span>
+      ${renderFiltersPanel('ledger', filterBarHtml)}
       <div class="bank-recon-bulk-bar bank-recon-bulk-bar--ledger">
         <label class="bank-recon-bulk-select-all">
           <input type="checkbox" id="fn-bank-recon-ledger-select-all" aria-label="Select all unmatched ledger entries" />
@@ -2605,6 +2670,7 @@ const wireLedgerTable = (txnsEl) => {
                 await withButtonBusy(bulkDeleteBtn, 'Deleting…', async () => {
                     await postFnMutation('deleteTransactions', { transaction_ids: ids });
                 });
+                invalidateUnmatchedBankCache({ removeTxnIds: ids });
                 renderBankReconciliation();
                 window.renderCashLedger?.();
                 window.processFinances?.();
@@ -2687,10 +2753,12 @@ const wireLedgerTable = (txnsEl) => {
 
         const delBtn = e.target.closest('.bank-recon-ledger-delete');
         if (delBtn) {
+            if (!confirm('Permanently delete this ledger entry?')) return;
             try {
                 await withButtonBusy(delBtn, 'Deleting…', async () => {
-                    await window.delTxn?.(delBtn.dataset.txn);
+                    await postFnMutation('deleteTransactions', { transaction_ids: [delBtn.dataset.txn] });
                 });
+                invalidateUnmatchedBankCache({ removeTxnIds: [delBtn.dataset.txn] });
                 renderBankReconciliation();
                 window.renderFinanceAnalytics?.();
             } catch (err) {

@@ -2,11 +2,18 @@
           <div class="raised-page-toolbar">
             <div class="raised-page-toolbar__left">
               <div>
-                <h3 class="fa-panel__title" style="margin:0;">Bills &amp; receipts</h3>
-                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">
-                  Supporting vouchers with uploads — not the passbook ledger.
-                  Link cash spends to a Petty Cash funding line (1 ledger → many bills). Cash float store lives here.
-                </p>
+                <h3 class="fa-panel__title" style="margin:0;">Bills &amp; receipts
+                  <span class="fa-info-anchor">
+                    <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fdoc-info-tip" title="About bills &amp; receipts">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                      <span class="sr-only">About bills &amp; receipts</span>
+                    </button>
+                    <span class="fa-info-tip" id="fn-fdoc-info-tip" hidden role="tooltip">
+                      Supporting vouchers with uploads — not the passbook ledger.
+                      Link cash spends to a Petty Cash funding line (1 ledger → many bills). Cash float store lives here.
+                    </span>
+                  </span>
+                </h3>
               </div>
               <p id="fn-fdoc-meta" class="raised-page-meta"></p>
             </div>
@@ -18,6 +25,30 @@
                 <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Import Excel
               </button>
               <input type="file" id="fn-fdoc-file" accept=".xlsx,.xls" hidden />
+              <input type="file" id="fn-fdoc-attach-input" accept="image/*,application/pdf" multiple hidden />
+              <input type="file" id="fn-fdoc-attach-camera" accept="image/*" capture="environment" hidden />
+              <div id="fn-fdoc-attach-menu" class="fdoc-attach-menu" hidden role="menu">
+                <button type="button" class="fdoc-attach-menu__item" data-attach-mode="camera" role="menuitem">
+                  <i class="fa-solid fa-camera" aria-hidden="true"></i> Take photo
+                </button>
+                <button type="button" class="fdoc-attach-menu__item" data-attach-mode="files" role="menuitem">
+                  <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Choose files
+                </button>
+              </div>
+              <div id="fn-fdoc-camera-modal" class="fdoc-camera-modal" hidden role="dialog" aria-modal="true" aria-label="Take photo">
+                <div class="fdoc-camera-modal__backdrop" data-camera-close></div>
+                <div class="fdoc-camera-modal__panel">
+                  <video id="fn-fdoc-camera-video" autoplay playsinline muted></video>
+                  <div class="fdoc-camera-modal__bar">
+                    <button type="button" class="btn btn-outline btn--small" data-camera-close>
+                      <i class="fa-solid fa-xmark" aria-hidden="true"></i> Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary btn--small" id="fn-fdoc-camera-shoot">
+                      <i class="fa-solid fa-camera" aria-hidden="true"></i> Capture
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -2,12 +2,22 @@
           <div class="raised-page-toolbar">
             <div class="raised-page-toolbar__left">
               <div>
-                <h3 class="fa-panel__title" style="margin:0;">Invoices raised</h3>
-                <p class="fa-panel__hint" style="margin:0.25rem 0 0;">Data from invoices raised in tools like NoBroker or MyGate — upload Excel and filter for financial tracking. Amount filters support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</p>
+                <h3 class="fa-panel__title" style="margin:0;">Invoices raised
+                  <span class="fa-info-anchor">
+                    <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-raised-info-tip" title="About invoices raised">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                      <span class="sr-only">About invoices raised</span>
+                    </button>
+                    <span class="fa-info-tip" id="fn-raised-info-tip" hidden role="tooltip">Data from invoices raised in tools like NoBroker or MyGate — upload Excel and filter for financial tracking. Amount filters support <code>0</code>, <code>&gt;1000</code>, <code>&gt;=500</code>, <code>&lt;100</code>.</span>
+                  </span>
+                </h3>
               </div>
               <p id="fn-raised-page-meta" class="raised-page-meta"></p>
             </div>
             <div class="raised-page-toolbar__actions">
+              <button type="button" class="btn btn-outline btn--small" id="fn-raised-filters-toggle" aria-expanded="false" title="Show column filters">
+                <i class="fa-solid fa-filter" aria-hidden="true"></i> Filters
+              </button>
               <button type="button" class="btn btn-outline btn--small" id="fn-raised-clear-filters" hidden title="Clear column filters">
                 Clear filters
               </button>

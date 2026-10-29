@@ -133,6 +133,57 @@ async function injectModals({ ledgerOnly = false, bankRecon = false } = {}) {
     host.innerHTML = parts.join('\n');
 }
 
+/** Delegated toggle for [data-fa-info] info buttons — wired once per page load. */
+function wireInfoTips() {
+    if (document.documentElement.dataset.faInfoWired === '1') return;
+    document.documentElement.dataset.faInfoWired = '1';
+    document.addEventListener('click', (e) => {
+        const legendBtn = e.target.closest('[data-fa-legend-toggle]');
+        if (legendBtn) {
+            e.preventDefault();
+            const canvas = document.getElementById('fn-fa-combined-chart');
+            const chart = canvas && window.Chart?.getChart(canvas);
+            if (!chart) return;
+            const legend = chart.options.plugins.legend;
+            legend.display = !legend.display;
+            legendBtn.setAttribute('aria-expanded', legend.display ? 'true' : 'false');
+            legendBtn.title = legend.display ? 'Hide legend' : 'Show legend';
+            chart.update();
+            return;
+        }
+        const btn = e.target.closest('[data-fa-info]');
+        if (btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tip = document.getElementById(btn.getAttribute('aria-controls'));
+            if (!tip) return;
+            const open = tip.hidden;
+            document.querySelectorAll('.fa-info-tip:not([hidden])').forEach((t) => {
+                t.hidden = true;
+                t.style.transform = '';
+                document.querySelector(`[data-fa-info][aria-controls="${t.id}"]`)?.setAttribute('aria-expanded', 'false');
+            });
+            tip.hidden = !open;
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                // Keep the tip on-screen when the button sits near an edge.
+                const r = tip.getBoundingClientRect();
+                if (r.right > window.innerWidth - 8) {
+                    const shift = r.right - (window.innerWidth - 8);
+                    tip.style.transform = `translateX(-${Math.ceil(shift)}px)`;
+                }
+            }
+            return;
+        }
+        if (e.target.closest('.fa-info-tip')) return;
+        document.querySelectorAll('.fa-info-tip:not([hidden])').forEach((t) => {
+            t.hidden = true;
+            t.style.transform = '';
+            document.querySelector(`[data-fa-info][aria-controls="${t.id}"]`)?.setAttribute('aria-expanded', 'false');
+        });
+    });
+}
+
 /**
  * Boot auth → paint shell + page HTML → optional modals.
  * Does not load feature modules or page data APIs.
@@ -143,6 +194,7 @@ export async function mountFinancePage({
     withModals = false,
     withBankReconModals = false,
 } = {}) {
+    document.documentElement.dataset.financeApp = '1';
     const status = document.querySelector('#app-shell-page .finance-mpa-status, #app-shell-root .finance-mpa-status');
     if (status) status.textContent = 'Loading…';
 
@@ -173,6 +225,7 @@ export async function mountFinancePage({
 
     await injectHeaderActions(meta);
     placeReportsSettingsInHeader();
+    wireInfoTips();
 
     if (withModals || withBankReconModals) {
         await injectModals({

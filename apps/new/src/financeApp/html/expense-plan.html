@@ -1,6 +1,12 @@
 <div id="fn-subview-expense-plan" class="eplan-subview" style="padding: 0;">
           <div class="eplan-toolbar">
-            <p class="fa-panel__hint" style="margin:0;">Planned spends over the horizon vs book balance. Click a row for details.</p>
+            <span class="fa-info-anchor">
+              <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-eplan-info-tip" title="About the expense plan">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                <span class="sr-only">About the expense plan</span>
+              </button>
+              <span class="fa-info-tip" id="fn-eplan-info-tip" hidden role="tooltip">Planned spends over the horizon vs book balance. Click a row for details.</span>
+            </span>
             <div class="eplan-toolbar__actions">
               <label class="eplan-horizon">
                 <span>Horizon</span>

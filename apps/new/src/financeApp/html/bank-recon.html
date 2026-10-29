@@ -85,7 +85,13 @@
                     </table>
                   </div>
                   <div class="bank-recon-manual-entry__actions">
-                    <p class="bank-recon-manual-entry__hint">Use when OCR misses rows or print overlaps. Add multiple rows, then save — balances are recalculated after insert.</p>
+                    <span class="fa-info-anchor">
+                      <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-bank-recon-manual-tip" title="When to use manual entry">
+                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                        <span class="sr-only">When to use manual entry</span>
+                      </button>
+                      <span class="fa-info-tip" id="fn-bank-recon-manual-tip" hidden role="tooltip">Use when OCR misses rows or print overlaps. Add multiple rows, then save — balances are recalculated after insert.</span>
+                    </span>
                     <div class="bank-recon-manual-entry__buttons">
                       <button type="button" class="btn btn-outline btn--small" id="fn-bank-recon-manual-cancel">Cancel</button>
                       <button type="button" class="btn btn-primary btn--small" id="fn-bank-recon-manual-save"><i class="fa-solid fa-floppy-disk"></i> Save rows</button>

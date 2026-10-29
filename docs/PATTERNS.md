@@ -409,7 +409,43 @@ ledger links and completion state.
 
 ---
 
-## 14. When to add a new pattern here
+## 14. Finance MPA mobile CSS — `fn-*` id bridging
+
+**What.** `classic/src/financeMobile.css` holds all mobile/tablet layout rules
+(≤767px card-table transforms, toolbar grids, header chrome). It is shared by
+the classic SPA *and* the Finance MPA (`apps/new/src/financeApp/finance-app.css`
+`@import`s it).
+
+**The problem it solves.** MPA fragments rename classic element ids `#x` →
+`#fn-x` (`#fn-cash-ledger-items`, `#fn-subview-ledger`, …). Classic selectors
+that are *id-scoped* therefore silently do not match in the MPA, even though
+class-based rules apply fine.
+
+**The convention.** Wherever an MPA counterpart id exists, selectors are
+written as `:is(#classic-id, #fn-classic-id)` — e.g.
+`:is(#cash-ledger-items, #fn-cash-ledger-items) .bank-recon-table`. This keeps
+one source of truth; the added alternative matches nothing in the classic SPA.
+
+**Rules when adding mobile CSS for finance pages:**
+
+- Prefer class selectors — they work in both apps unchanged.
+- For id-scoped rules, check the MPA fragment (`apps/new/src/financeApp/html/`)
+  for the `fn-` twin and use `:is(#x, #fn-x)`. Some ids are shared unchanged
+  (e.g. `#ledger-table-shell`, `#ledger-table-wrap`) — those need no twin.
+- MPA-only structures (no classic analogue) live in `finance-app.css`, scoped
+  to `html[data-finance-app="1"]`.
+- `raised-page-*` rules apply to both `#fn-subview-finance-docs` and
+  `#fn-subview-invoices-raised` — the MPA split the raised list into its own
+  page.
+- **Informational text goes behind ⓘ buttons**, not static hint paragraphs:
+  `<span class="fa-info-anchor">` + `[data-fa-info]` button +
+  `span.fa-info-tip` (toggled by a delegated listener in
+  `financeApp/mount.js#wireInfoTips`). Applies on all viewports — do not add
+  `fa-panel__hint` paragraphs for section descriptions in MPA fragments.
+
+---
+
+## 15. When to add a new pattern here
 
 Before merging a PR that introduces a non-obvious data-flow or behavioral
 convention (e.g. a new "auto-derive on null" field, a new cross-app sync
