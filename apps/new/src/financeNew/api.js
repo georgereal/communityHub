@@ -62,15 +62,7 @@ export async function postFinanceMongo(action, payload = {}) {
         loadLedger: () => financeNewFetch('/api/finance/ledger', { query: { apartment_id, ...payload } }),
         loadLedgerSummary: () => financeNewFetch('/api/finance/ledger/summary', { query: { apartment_id } }),
         listVouchers: () => financeNewFetch('/api/finance/vouchers', {
-            query: {
-                apartment_id,
-                limit: payload.limit,
-                offset: payload.offset,
-                kind: payload.kind,
-                status: payload.status,
-                q: payload.q,
-                pay: payload.pay,
-            },
+            query: { apartment_id, ...payload },
         }),
         voucherAggregates: () => financeNewFetch('/api/finance/vouchers/aggregates', { query: { apartment_id } }),
         loadBankImports: () => financeNewFetch('/api/finance/bank/imports', { query: { apartment_id } }),

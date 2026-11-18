@@ -95,6 +95,10 @@ function resolveRoute(method, parts, body, query) {
     const m = method.toUpperCase();
     const [a, b, c] = parts;
     const q = query || {};
+    // Excel-style column filters — forward any col_* query param untouched.
+    const colFilters = Object.fromEntries(
+        Object.entries(q).filter(([k]) => k.startsWith('col_')),
+    );
 
     if (!a) {
         return { kind: 'error', status: 404, error: 'Missing resource path under /api/finance/' };
@@ -111,6 +115,7 @@ function resolveRoute(method, parts, body, query) {
                 action: 'loadLedger',
                 collection: 'ledger_entries',
                 bodyPatch: {
+                    ...colFilters,
                     limit: q.limit,
                     offset: q.offset,
                     q: q.q,
@@ -151,6 +156,7 @@ function resolveRoute(method, parts, body, query) {
                 action: 'exportLedger',
                 collection: 'ledger_entries',
                 bodyPatch: {
+                    ...colFilters,
                     limit: q.limit,
                     offset: q.offset,
                     q: q.q,
@@ -210,12 +216,18 @@ function resolveRoute(method, parts, body, query) {
                 action: 'listVouchers',
                 collection: 'vouchers',
                 bodyPatch: {
+                    ...colFilters,
                     limit: q.limit,
                     offset: q.offset,
                     kind: q.kind,
                     status: q.status,
                     q: q.q,
                     pay: q.pay,
+                    sort: q.sort,
+                    sort_dir: q.sort_dir,
+                    unlinked: q.unlinked,
+                    ids: q.ids,
+                    transaction_ids: q.transaction_ids,
                 },
             };
         }
@@ -476,6 +488,10 @@ export default async function handler(req, res) {
             source_scope: getQueryParam(req, 'source_scope'),
             transaction_id: getQueryParam(req, 'transaction_id'),
             transaction_ids: getQueryParam(req, 'transaction_ids'),
+            ids: getQueryParam(req, 'ids'),
+            unlinked: getQueryParam(req, 'unlinked'),
+            sort: getQueryParam(req, 'sort'),
+            sort_dir: getQueryParam(req, 'sort_dir'),
             include_excluded: getQueryParam(req, 'include_excluded'),
             months: getQueryParam(req, 'months'),
             monthCount: getQueryParam(req, 'monthCount'),
@@ -483,6 +499,15 @@ export default async function handler(req, res) {
             cashExpenseReporting: getQueryParam(req, 'cashExpenseReporting'),
             pivotDimension: getQueryParam(req, 'pivotDimension'),
         };
+        // Excel-style column filters — pass any col_* query param through.
+        try {
+            const rawUrl = req.url?.startsWith('http')
+                ? req.url
+                : `https://${req.headers?.host || 'localhost'}${req.url || ''}`;
+            for (const [k, v] of new URL(rawUrl).searchParams.entries()) {
+                if (k.startsWith('col_') && v) query[k] = v;
+            }
+        } catch { /* ignore */ }
 
         const route = resolveRoute(method, parts, body, query);
         if (route.kind === 'error') {

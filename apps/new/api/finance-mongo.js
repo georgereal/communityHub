@@ -2,6 +2,7 @@
  * Finance-New read API — remodeled Mongo collections (communityHub).
  * POST { action, apartment_id, ... }
  */
+import crypto from 'node:crypto';
 import { requireAnyApartmentPermission } from '../../../packages/server/serverAuth.js';
 import { readJsonBody } from '../../../packages/server/vercelRequest.js';
 import { getMongoDb } from '../../../packages/server/mongoClient.js';
@@ -18,8 +19,54 @@ function aptFilter(apartmentId) {
     return { apartment_id: apartmentId };
 }
 
+/**
+ * Master category list (finance_categories collection). Seeds rows for
+ * categories already in use on ledger entries / vouchers so the dropdowns
+ * share one list on every page without loading those packs.
+ */
+async function loadMasterCategories(db, apartmentId) {
+    const col = db.collection('finance_categories');
+    const [stored, ledgerIn, ledgerOut, voucherIn, voucherOut] = await Promise.all([
+        col.find(aptFilter(apartmentId)).toArray(),
+        db.collection('ledger_entries').distinct('cat', { ...aptFilter(apartmentId), type: 'IN' }),
+        db.collection('ledger_entries').distinct('cat', { ...aptFilter(apartmentId), type: 'OUT' }),
+        db.collection('vouchers').distinct('cat', { ...aptFilter(apartmentId), kind: 'IN' }),
+        db.collection('vouchers').distinct('cat', { ...aptFilter(apartmentId), kind: 'OUT' }),
+    ]);
+
+    const seen = new Set(stored.map((c) => `${c.type}|${String(c.name || '').toLowerCase()}`));
+    const missing = [];
+    const addUsed = (names, type) => {
+        for (const name of names || []) {
+            const clean = String(name || '').trim();
+            if (!clean) continue;
+            const key = `${type}|${clean.toLowerCase()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            missing.push({
+                id: crypto.randomUUID(),
+                apartment_id: apartmentId,
+                name: clean,
+                type,
+                source: 'in_use',
+                created_at: new Date().toISOString(),
+            });
+        }
+    };
+    addUsed(ledgerIn, 'IN');
+    addUsed(ledgerOut, 'OUT');
+    addUsed(voucherIn, 'IN');
+    addUsed(voucherOut, 'OUT');
+    if (missing.length) await col.insertMany(missing, { ordered: false });
+
+    return [...stored, ...missing].map(({ _id, ...rest }) => rest);
+}
+
 async function boot(db, apartmentId) {
-    const config = await db.collection('finance_config').findOne(aptFilter(apartmentId));
+    const [config, categories] = await Promise.all([
+        db.collection('finance_config').findOne(aptFilter(apartmentId)),
+        loadMasterCategories(db, apartmentId),
+    ]);
     const [
         ledgerCount,
         voucherCount,
@@ -35,6 +82,7 @@ async function boot(db, apartmentId) {
     ]);
 
     return {
+        categories,
         config: config || {
             apartment_id: apartmentId,
             bankAccount: null,
@@ -126,16 +174,127 @@ async function listVouchers(db, apartmentId, body = {}) {
     const ids = body.ids || body.document_ids;
     if (Array.isArray(ids) && ids.length) {
         filter.id = { $in: ids.map(String) };
+    } else if (typeof ids === 'string' && ids.trim()) {
+        filter.id = { $in: ids.split(',').map((s) => s.trim()).filter(Boolean) };
     }
     const txnIds = body.transaction_ids || body.transactionIds;
-    if (Array.isArray(txnIds) && txnIds.length) {
+    if (txnIds && !Array.isArray(txnIds)) {
+        filter.transaction_id = { $in: String(txnIds).split(',').map((s) => s.trim()).filter(Boolean) };
+    } else if (Array.isArray(txnIds) && txnIds.length) {
         filter.transaction_id = { $in: txnIds.map(String) };
     }
+
+    // Excel-style column filters from the Bills & receipts UI.
+    const and = () => { filter.$and = filter.$and || []; return filter.$and; };
+    const pushOr = (ors) => { if (ors.length) and().push({ $or: ors }); };
+    const textRe = (s) => ({ $regex: String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
+
+    const colDate = String(body.col_date || '').trim();
+    if (colDate) {
+        and().push({
+            $expr: {
+                $regexMatch: {
+                    input: { $toString: '$doc_date' },
+                    regex: String(colDate).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                    options: 'i',
+                },
+            },
+        });
+    }
+
+    const colParticulars = String(body.col_particulars || '').trim();
+    if (colParticulars) {
+        const re = textRe(colParticulars);
+        pushOr([{ description: re }, { vendor_name: re }]);
+    }
+
+    const colCat = String(body.col_cat || '').trim();
+    if (colCat) {
+        const re = textRe(colCat);
+        pushOr([{ cat: re }, { sub_category: re }, { vendor_name: re }]);
+    }
+
+    const colKind = String(body.col_kind || '').trim().toLowerCase();
+    if (colKind) {
+        const wantsIn = colKind.includes('in') || colKind.includes('receipt');
+        const wantsOut = colKind.includes('out') || colKind.includes('expense') || colKind.includes('bill');
+        if (wantsIn && !wantsOut) filter.kind = 'IN';
+        else if (wantsOut && !wantsIn) filter.kind = 'OUT';
+    }
+
+    const colStatus = String(body.col_status || '').trim().toLowerCase();
+    if (colStatus && ['unpaid', 'paid', 'linked', 'void', 'open'].includes(colStatus)) {
+        filter.status = colStatus;
+    }
+
+    const colWallet = String(body.col_wallet || '').trim().toUpperCase();
+    if (colWallet === 'CASH' || colWallet === 'BANK') {
+        if (colWallet === 'BANK') {
+            pushOr([
+                { payment_mode: 'BANK' },
+                { notes: { $regex: 'Cheque:|Payment:\\s*Online', $options: 'i' } },
+            ]);
+        } else {
+            // UI-created docs lack payment_mode — match cash notes too.
+            pushOr([
+                { payment_mode: 'CASH' },
+                { notes: { $regex: 'Payment:\\s*Cash', $options: 'i' } },
+                { notes: { $in: ['cash', 'Cash'] } },
+            ]);
+        }
+    }
+
+    let colAmount = null;
+    if (body.col_amount) {
+        try { colAmount = typeof body.col_amount === 'string' ? JSON.parse(body.col_amount) : body.col_amount; } catch { colAmount = null; }
+    }
+    if (colAmount && colAmount.kind === 'number') {
+        const v = parseFloat(colAmount.value);
+        const v2 = parseFloat(colAmount.value2);
+        // Signed amount: IN → +amount, OUT → −amount.
+        const signed = { $cond: [{ $eq: ['$kind', 'IN'] }, '$amount', { $multiply: ['$amount', -1] }] };
+        // eq matches the displayed magnitude — "equals 1" hits a −₹1 expense too.
+        const absSigned = { $abs: signed };
+        const op = colAmount.op;
+        const exprs = [];
+        if (op === 'eq' && Number.isFinite(v)) exprs.push({ $gte: [absSigned, Math.abs(v) - 0.005] }, { $lte: [absSigned, Math.abs(v) + 0.005] });
+        else if (op === 'gt' && Number.isFinite(v)) exprs.push({ $gt: [signed, v] });
+        else if (op === 'gte' && Number.isFinite(v)) exprs.push({ $gte: [signed, v] });
+        else if (op === 'lt' && Number.isFinite(v)) exprs.push({ $lt: [signed, v] });
+        else if (op === 'lte' && Number.isFinite(v)) exprs.push({ $lte: [signed, v] });
+        else if (op === 'between' && (Number.isFinite(v) || Number.isFinite(v2))) {
+            const lo = Number.isFinite(v) && Number.isFinite(v2) ? Math.min(v, v2) : (Number.isFinite(v) ? v : -Infinity);
+            const hi = Number.isFinite(v) && Number.isFinite(v2) ? Math.max(v, v2) : (Number.isFinite(v2) ? v2 : Infinity);
+            exprs.push({ $gte: [signed, lo] }, { $lte: [signed, hi] });
+        }
+        exprs.forEach((e) => and().push({ $expr: e }));
+    }
+
+    // Column sort — whitelist of real fields; date desc remains the default.
+    const SORT_FIELDS = {
+        doc_date: 'doc_date',
+        date: 'doc_date',
+        kind: 'kind',
+        cat: 'cat',
+        particulars: 'vendor_name',
+        vendor: 'vendor_name',
+        amount: 'amount',
+        status: 'status',
+        wallet: 'payment_mode',
+        payment: 'payment_mode',
+    };
+    const sortField = SORT_FIELDS[String(body.sort || '').toLowerCase()];
+    const sortDir = String(body.sort_dir || '').toLowerCase() === 'asc' ? 1 : -1;
+    const sortSpec = !sortField
+        ? { doc_date: -1, created_at: -1 }
+        : sortField === 'doc_date'
+            ? { doc_date: sortDir, created_at: -1 }
+            : { [sortField]: sortDir, doc_date: -1, created_at: -1 };
 
     const col = db.collection('vouchers');
     const [total, rows] = await Promise.all([
         col.countDocuments(filter),
-        col.find(filter).sort({ doc_date: -1, created_at: -1 }).skip(offset).limit(limit).toArray(),
+        col.find(filter).sort(sortSpec).skip(offset).limit(limit).toArray(),
     ]);
     return {
         rows,
@@ -203,6 +362,9 @@ async function voucherAggregates(db, apartmentId) {
                 type: 1,
                 amount: 1,
                 date: 1,
+                description: 1,
+                vendor_name: 1,
+                bank_reference: 1,
                 is_cash_float: 1,
                 exclude_from_cash_float: 1,
             },
@@ -247,6 +409,9 @@ async function voucherAggregates(db, apartmentId) {
             wallet: t.wallet,
             amount: parseFloat(t.amount) || 0,
             date: t.date ? String(t.date).slice(0, 10) : null,
+            description: t.description || null,
+            vendor_name: t.vendor_name || null,
+            bank_reference: t.bank_reference || null,
             is_cash_float: !!t.is_cash_float,
             exclude_from_cash_float: !!t.exclude_from_cash_float,
         }))

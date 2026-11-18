@@ -2,6 +2,7 @@
  * Ledger list filters + pagination — shared by loadLedger / export / unmatched-bank.
  */
 import { dayKey } from '../money.js';
+import { computeLedgerRunningBalances } from './ledgerBalances.js';
 
 function aptFilter(apartmentId) {
     return { apartment_id: apartmentId };
@@ -225,6 +226,80 @@ export function buildLedgerListFilter(apartmentId, body = {}) {
         });
     }
 
+    // Excel-style column filters from the ledger UI (passbook/bills stay client-side).
+    const and = () => { filter.$and = filter.$and || []; return filter.$and; };
+    const pushOr = (ors) => { if (ors.length) and().push({ $or: ors }); };
+    const textRe = (s) => ({ $regex: escapeRe(String(s).trim()), $options: 'i' });
+
+    const colDate = String(body.col_date || '').trim();
+    if (colDate) {
+        // `date` is stored as ISO string/Date — normalize to string and substring-match.
+        and().push({
+            $expr: {
+                $regexMatch: {
+                    input: { $toString: '$date' },
+                    regex: escapeRe(colDate),
+                    options: 'i',
+                },
+            },
+        });
+    }
+
+    const colDesc = String(body.col_description || '').trim();
+    if (colDesc) {
+        const re = textRe(colDesc);
+        pushOr([{ description: re }, { bank_reference: re }, { vendor_invoice: re }]);
+    }
+
+    const colType = String(body.col_type || '').trim().toLowerCase();
+    if (colType) {
+        // Client joins tokens: 'income'|'expense' 'no reports' 'reconciled'.
+        // 'reconciled' can't be evaluated server-side — skip it (client post-filter).
+        const wantsIn = colType.includes('income');
+        const wantsOut = colType.includes('expense');
+        if (wantsIn && !wantsOut) filter.type = 'IN';
+        else if (wantsOut && !wantsIn) filter.type = 'OUT';
+        if (colType.includes('no report')) filter.exclude_from_reports = true;
+    }
+
+    const colCat = String(body.col_cat || '').trim();
+    if (colCat) {
+        const re = textRe(colCat);
+        pushOr([{ cat: re }, { sub_category: re }, { vendor_name: re }]);
+    }
+
+    const colWallet = String(body.col_wallet || '').trim();
+    if (colWallet) {
+        const re = textRe(colWallet);
+        pushOr([{ wallet: re }]);
+    }
+
+    let colAmount = null;
+    if (body.col_amount) {
+        try { colAmount = typeof body.col_amount === 'string' ? JSON.parse(body.col_amount) : body.col_amount; } catch { colAmount = null; }
+    }
+    if (colAmount && colAmount.kind === 'number') {
+        const v = parseFloat(colAmount.value);
+        const v2 = parseFloat(colAmount.value2);
+        // Signed amount: IN → +amount, OUT → −amount.
+        const signed = { $cond: [{ $eq: ['$type', 'IN'] }, '$amount', { $multiply: ['$amount', -1] }] };
+        const op = colAmount.op;
+        const exprs = [];
+        // eq matches the displayed magnitude — "equals 1" should hit a −₹1 expense too.
+        const absSigned = { $abs: signed };
+        if (op === 'eq' && Number.isFinite(v)) exprs.push({ $gte: [absSigned, Math.abs(v) - 0.005] }, { $lte: [absSigned, Math.abs(v) + 0.005] });
+        else if (op === 'gt' && Number.isFinite(v)) exprs.push({ $gt: [signed, v] });
+        else if (op === 'gte' && Number.isFinite(v)) exprs.push({ $gte: [signed, v] });
+        else if (op === 'lt' && Number.isFinite(v)) exprs.push({ $lt: [signed, v] });
+        else if (op === 'lte' && Number.isFinite(v)) exprs.push({ $lte: [signed, v] });
+        else if (op === 'between' && (Number.isFinite(v) || Number.isFinite(v2))) {
+            const lo = Number.isFinite(v) && Number.isFinite(v2) ? Math.min(v, v2) : (Number.isFinite(v) ? v : -Infinity);
+            const hi = Number.isFinite(v) && Number.isFinite(v2) ? Math.max(v, v2) : (Number.isFinite(v2) ? v2 : Infinity);
+            exprs.push({ $gte: [signed, lo] }, { $lte: [signed, hi] });
+        }
+        exprs.forEach((e) => and().push({ $expr: e }));
+    }
+
     return filter;
 }
 
@@ -301,6 +376,25 @@ export async function loadLedgerPage(db, apartmentId, body = {}) {
 
     const config = await db.collection('finance_config').findOne(aptFilter(apartmentId)) || {};
     const lb = config.ledgerBalance || {};
+
+    // Paginated rows rely on stored running_balance_after for the calculated
+    // column — recompute live when it is stale or was never recalculated.
+    const bankRowsMissingBalance = entries.some((t) =>
+        String(t.wallet || '').toUpperCase() === 'BANK'
+        && !t.excluded_from_ledger
+        && (t.running_balance_after == null || t.running_balance_after === ''));
+    if ((lb.needsRecalc === true || bankRowsMissingBalance)
+        && config.bankAccount?.opening_balance != null) {
+        try {
+            const { byId } = await computeLedgerRunningBalances(db, apartmentId, config);
+            for (const t of entries) {
+                const id = String(t._id || t.id);
+                if (byId.has(id)) t.running_balance_after = byId.get(id);
+            }
+        } catch (err) {
+            console.warn('[finance/ledger] live balance overlay failed:', err?.message || err);
+        }
+    }
 
     return {
         entries,

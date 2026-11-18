@@ -10,6 +10,7 @@ import {
     loadFinanceNewBilling,
     loadFinanceNewBookBalance,
     loadFinanceNewLedger,
+    loadFinanceNewLedgerSummary,
     loadFinanceNewVoucherAggregates,
     loadFinanceNewVouchers,
 } from './api.js';
@@ -23,7 +24,7 @@ const aptId = () => portalState.access?.activeApartmentId || null;
 export async function ensureBootMapped({ force = false } = {}) {
     await ensureFinanceNewBoot({ force });
     const s = getFinanceNew();
-    applyMongoPacksToClassic({ config: s.config, counts: s.counts });
+    applyMongoPacksToClassic({ config: s.config, counts: s.counts, categories: s.categories });
     return s;
 }
 
@@ -92,7 +93,7 @@ async function loadVouchersPageMapped(opts = {}) {
 
 /**
  * Reload one or more packs after a mutation.
- * @param {Array<'boot'|'ledger'|'bank'|'billing'|'nobroker'|'vouchers'|'voucherAggregates'|'bookBalance'>} packs
+ * @param {Array<'boot'|'ledger'|'bank'|'billing'|'nobroker'|'vouchers'|'voucherAggregates'|'bookBalance'|'ledgerSummary'>} packs
  */
 export async function reloadFinancePacks(packs = [], { force = true } = {}) {
     const set = new Set(packs);
@@ -109,6 +110,7 @@ export async function reloadFinancePacks(packs = [], { force = true } = {}) {
     if (set.has('vouchers')) jobs.push(loadVouchersPageMapped({ limit: 50, offset: 0, force }));
     if (set.has('voucherAggregates')) jobs.push(loadFinanceNewVoucherAggregates({ force }));
     if (set.has('bookBalance')) jobs.push(loadFinanceNewBookBalance({ force }));
+    if (set.has('ledgerSummary')) jobs.push(loadFinanceNewLedgerSummary({ force }));
     if (jobs.length) await Promise.all(jobs);
     return getFinanceNew();
 }

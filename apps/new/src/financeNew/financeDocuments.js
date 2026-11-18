@@ -22,6 +22,7 @@ import {
   registerCustomSubCategory,
 } from '../classifyOptions.js';
 import { postFnMutation, filesToBase64Payload } from './mongoMutations.js';
+import { renderFdocColHeader, wireFdocExcelColFilters, fdocServerListParams } from './docsColFilter.js';
 import { withButtonBusy } from '../buttonBusy.js';
 import { applySavedTransactionLocally } from './ledgerTxnLocal.js';
 import { computeCashFloatStore, isBankPettyFunding } from './cashFloat.js';
@@ -432,6 +433,7 @@ const fdocFilterKey = () => {
     filterState.pay,
     filterState.q.trim().toLowerCase(),
     report,
+    JSON.stringify(fdocServerListParams()),
   ].join('|');
 };
 
@@ -631,6 +633,7 @@ const fetchFinanceDocsPage = async (offset, { useCache = true } = {}) => {
     status: filterState.status,
     pay: filterState.pay,
     q: filterState.q,
+    ...fdocServerListParams(),
   });
   const page = {
     documents: result.documents || [],
@@ -647,7 +650,7 @@ const fetchFinanceDocsPage = async (offset, { useCache = true } = {}) => {
 /** Ensure first page (or current filter) is loaded for the Bills table. */
 export async function ensureFinanceDocumentsListPage({ reset = false } = {}) {
   const key = fdocFilterKey();
-  if (reset || listState.filterKey !== key || listState.mode === 'tail') {
+  if (reset || listState.filterKey !== key) {
     listState.filterKey = key;
     listState.items = [];
     listState.nextOffset = 0;
@@ -682,35 +685,13 @@ export async function loadMoreFinanceDocuments() {
   return listState;
 }
 
-/** Jump to oldest page of the current filter (end of list). */
-export async function jumpFinanceDocumentsToBottom() {
-  listState.loading = true;
-  try {
-    // Need total — use cached page 0 or fetch it
-    let total = listState.total;
-    if (!total) {
-      const first = await fetchFinanceDocsPage(0);
-      total = first.total;
-    }
-    const offset = Math.max(0, total - FDOC_PAGE_SIZE);
-    const page = await fetchFinanceDocsPage(offset);
-    listState.mode = 'tail';
-    listState.filterKey = fdocFilterKey();
-    listState.items = page.documents;
-    listState.total = page.total;
-    listState.nextOffset = page.total;
-    listState.hasMore = false;
-  } finally {
-    listState.loading = false;
-  }
-  return listState;
-}
-
-export async function jumpFinanceDocumentsToTop() {
-  listState.mode = 'forward';
+/** Column filter / sort changed — reset to first page and repaint. */
+export async function refetchFinanceDocsFromFilters() {
   listState.filterKey = '';
+  listPageCache.clear();
   await ensureFinanceDocumentsListPage({ reset: true });
-  return listState;
+  paintFinanceDocumentsTable();
+  renderFdocListChrome();
 }
 
 /** Prefetch docs linked to ledger rows (badges / open-bill actions). */
@@ -770,8 +751,6 @@ export async function ensureFinanceDocumentById(docId) {
 
 const renderFdocListChrome = () => {
   const meta = document.getElementById('fn-fdoc-meta');
-  const jumpBtn = document.getElementById('fn-fdoc-jump-bottom');
-  const topBtn = document.getElementById('fn-fdoc-jump-top');
   const sentinel = document.getElementById('fn-fdoc-scroll-sentinel');
   const summary = aggregatesCache?.summary;
   const staffOnly = isStaffBillsOnly();
@@ -793,14 +772,8 @@ const renderFdocListChrome = () => {
     }
   }
 
-  if (jumpBtn) {
-    jumpBtn.hidden = listState.mode === 'tail' || total <= FDOC_PAGE_SIZE;
-    jumpBtn.disabled = !!listState.loading;
-  }
-  if (topBtn) {
-    topBtn.hidden = listState.mode !== 'tail';
-    topBtn.disabled = !!listState.loading;
-  }
+  const moreBtn = document.getElementById('fn-fdoc-more-btn');
+  if (moreBtn) moreBtn.disabled = !!listState.loading;
   if (sentinel) {
     sentinel.hidden = listState.mode !== 'forward' || !listState.hasMore;
     sentinel.textContent = listState.loading ? 'Loading…' : 'Scroll for more';
@@ -1113,6 +1086,22 @@ const isFundingLedgerTxn = (t) => {
   return isBankPettyFunding(t);
 };
 
+/**
+ * All funding ledger entries — the loaded txns page plus
+ * aggregatesCache.fundingEntries (unpaginated, from voucher aggregates).
+ * fnFinances().txns only holds ~50 rows, so buckets outside the page
+ * would vanish from the link dialog and break the carry-forward chain.
+ */
+const allFundingLedgerTxns = () => {
+  const txns = fnFinances().txns || [];
+  const seen = new Set(txns.map((t) => String(t?.id || '')));
+  const supplement = (aggregatesCache?.fundingEntries || [])
+    .filter((e) => !seen.has(String(e?.id || '')));
+  return [...txns, ...supplement]
+    .filter(isFundingLedgerTxn)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+};
+
 /** Linked ledger line eligible for the Bills & Receipts wallet (cash-float) action. */
 const canMarkLinkedTxnAsCashFloat = (t) => {
   if (!t || t.excluded_from_ledger) return false;
@@ -1210,12 +1199,10 @@ const planCashFloatBucketAllocation = (funding, openingAmt = getCashFloatOpening
 };
 
 const fundingBucketOf = (txnId) => {
-  const t = (fnFinances().txns || []).find((x) => x.id === txnId);
+  const t = allFundingLedgerTxns().find((x) => x.id === txnId)
+    || (fnFinances().txns || []).find((x) => x.id === txnId);
   if (!t) return null;
-  const funding = (fnFinances().txns || [])
-    .filter(isFundingLedgerTxn)
-    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
-  const plan = planCashFloatBucketAllocation(funding);
+  const plan = planCashFloatBucketAllocation(allFundingLedgerTxns());
   const row = plan.byTxnId.get(txnId);
   if (row) {
     return {
@@ -1278,10 +1265,8 @@ const docsLinkMode = (docs) => {
 };
 
 const ledgerCandidatesForCashLink = () => {
-  const funding = (fnFinances().txns || []).filter(isFundingLedgerTxn);
-  const plan = planCashFloatBucketAllocation(
-    [...funding].sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))),
-  );
+  const funding = allFundingLedgerTxns();
+  const plan = planCashFloatBucketAllocation(funding);
   return funding
     .map((t) => {
       const row = plan.byTxnId.get(t.id);
@@ -1783,6 +1768,11 @@ const openLinkModal = (docIds, { walletDeposit = false } = {}) => {
   refreshLinkModalList();
   modal.hidden = false;
   if (mode === 'cheque' || mode === 'cash-deposit') setTimeout(() => searchEl?.focus(), 40);
+  if (mode === 'cash') {
+    void ensureFinanceDocumentsAggregates()
+      .then(() => refreshLinkModalList())
+      .catch((err) => console.warn('[fdoc] link modal aggregates:', err?.message || err));
+  }
 };
 
 const linkSelectedDocsToTxn = async (txnId) => {
@@ -2091,23 +2081,38 @@ export async function downloadFinanceDocumentsTemplate() {
       { width: 14 },
       { width: 22 },
       { width: 42 },
+      { width: 20 },
       { width: 14 },
     ];
   };
 
   const expenses = wb.addWorksheet('Expenses');
-  expenses.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Amount']);
-  expenses.addRow(['', '', 'Airtel', 'Wifi bill - Mar', 356]);
-  expenses.addRow(['', '', '', 'Staff - Tea / Coffee / Biscuits', 3080]);
-  expenses.addRow([todayISO(), '27091', 'Tria Solution LLP', 'Lift AMC invoice', 12150.82]);
-  expenses.addRow([todayISO(), '27101', 'B. Munikrishna', 'Petty cash reimbursement', 10000]);
+  expenses.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Category', 'Amount']);
+  expenses.addRow(['', '', 'Airtel', 'Wifi bill - Mar', 'Airtel', 356]);
+  expenses.addRow(['', '', '', 'Staff - Tea / Coffee / Biscuits', 'Staff Expenses', 3080]);
+  expenses.addRow([todayISO(), '27091', 'Tria Solution LLP', 'Lift AMC invoice', 'Lift Repair', 12150.82]);
+  expenses.addRow([todayISO(), '27101', 'B. Munikrishna', 'Petty cash reimbursement', 'Petty Cash', 10000]);
   styleHeader(expenses);
+  expenses.getColumn(5).width = 20;
 
   const income = wb.addWorksheet('Income');
-  income.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Amount']);
-  income.addRow([todayISO(), '', '', 'Cash collection - Flat A101', 5000]);
-  income.addRow([todayISO(), '45210', '', 'Maintenance - Flat B204', 8500]);
+  income.addRow(['Date', 'Cheque No.', 'Vendor', 'Description / Particulars', 'Category', 'Amount']);
+  income.addRow([todayISO(), '', '', 'Cash collection - Flat A101', 'Maintenance', 5000]);
+  income.addRow([todayISO(), '45210', '', 'Maintenance - Flat B204', 'Maintenance', 8500]);
   styleHeader(income);
+  income.getColumn(5).width = 20;
+
+  // Master category reference — copy exact names into the Category column.
+  const cats = wb.addWorksheet('Categories');
+  cats.addRow(['Expense categories', 'Income categories']);
+  const outCats = buildCategoryOptions(false);
+  const inCats = buildCategoryOptions(true);
+  for (let i = 0; i < Math.max(outCats.length, inCats.length); i += 1) {
+    cats.addRow([outCats[i] || '', inCats[i] || '']);
+  }
+  cats.getRow(1).font = { bold: true };
+  cats.getColumn(1).width = 28;
+  cats.getColumn(2).width = 28;
 
   // Tip sheet
   const notes = wb.addWorksheet('Read me');
@@ -2120,6 +2125,7 @@ export async function downloadFinanceDocumentsTemplate() {
   notes.addRow(['• Vendor is optional — leave blank to fill later in the app']);
   notes.addRow(['• Do not put item / purpose text in Vendor (use Description / Particulars)']);
   notes.addRow(['• Description / Particulars is never copied into Vendor']);
+  notes.addRow(['• Category is optional — matched to master categories (case-insensitive). See the Categories sheet for valid names; unmatched text is kept as a custom category']);
   notes.getColumn(1).width = 78;
 
   const buf = await wb.xlsx.writeBuffer();
@@ -2789,11 +2795,30 @@ const renderFdocAttachmentIcons = (doc) => {
   </button>${addChip}`;
 };
 
+/** Excel-style sortable/filterable header cells (per-column menus). */
+const renderFdocTableHead = () => {
+  const cells = {
+    date: renderFdocColHeader('Date', { filterKey: 'date' }),
+    kind: renderFdocColHeader('Kind', { filterKey: 'kind' }),
+    cat: renderFdocColHeader('Category / sub', { filterKey: 'cat' }),
+    particulars: renderFdocColHeader('Particulars', { filterKey: 'particulars' }),
+    wallet: renderFdocColHeader('Wallet', { filterKey: 'wallet' }),
+    amount: renderFdocColHeader('Amount', { filterKey: 'amount', align: 'right' }),
+    status: renderFdocColHeader('Status', { filterKey: 'status' }),
+  };
+  for (const [key, html] of Object.entries(cells)) {
+    const th = document.querySelector(`#fn-subview-finance-docs th[data-fdoc-th="${key}"]`);
+    if (th) th.innerHTML = html;
+  }
+  wireFdocExcelColFilters(document.getElementById('fn-subview-finance-docs'));
+};
+
 const paintFinanceDocumentsTable = () => {
   const body = document.getElementById('fn-fdoc-table-body');
   if (!body) return;
 
   applyFinanceDocsStaffMode();
+  renderFdocTableHead();
   const staffOnly = isStaffBillsOnly();
   const manage = canManageFinanceDocs();
 
@@ -2806,8 +2831,8 @@ const paintFinanceDocumentsTable = () => {
 
   if (!docs.length) {
     body.innerHTML = listState.loading
-      ? `<tr><td colspan="9" class="fa-panel__hint">Loading bills &amp; receipts…</td></tr>`
-      : `<tr><td colspan="9" class="fa-panel__hint">No bills or receipts yet. Use Add bill / Add receipt, or Import Excel (Expenses + Income sheets). Attachments go to private Cloudflare R2.</td></tr>`;
+      ? `<tr><td colspan="10" class="fa-panel__hint">Loading bills &amp; receipts…</td></tr>`
+      : `<tr><td colspan="10" class="fa-panel__hint">No bills or receipts yet. Use Add bill / Add receipt, or Import Excel (Expenses + Income sheets). Attachments go to private Cloudflare R2.</td></tr>`;
     syncBulkActionButtons();
     return;
   }
@@ -2873,6 +2898,13 @@ const paintFinanceDocumentsTable = () => {
           ? 'fdoc-pay fdoc-pay--online'
           : (pay.mode === 'unpaid' ? 'fdoc-pay fdoc-pay--unpaid' : 'fdoc-pay');
     const isIncome = d.kind === 'IN';
+    const walletRaw = String(d.payment_mode || '').toUpperCase();
+    // payment_mode is only stamped on Excel imports — fall back to the notes-derived mode.
+    const walletLabel = walletRaw === 'BANK' ? 'Bank'
+      : walletRaw === 'CASH' ? 'Cash'
+        : pay.mode === 'cash' ? 'Cash'
+          : (pay.mode === 'cheque' || pay.mode === 'online') ? 'Bank'
+            : '—';
     return `<tr class="fdoc-row fdoc-row--clickable" data-doc-id="${esc(d.id)}" data-doc-kind="${isIncome ? 'IN' : 'OUT'}" title="Click row to view details">
       <td class="fdoc-check-col"${staffOnly ? ' hidden' : ''} data-cap="accounts.docs_manage">
         <input type="checkbox" class="fdoc-row-check" value="${esc(d.id)}" aria-label="Select bill" ${staffOnly ? 'disabled' : ''} />
@@ -2882,6 +2914,7 @@ const paintFinanceDocumentsTable = () => {
       <td class="fdoc-cat-col">${renderFdocClassifyCell(d, isIncome)}</td>
       <td class="fdoc-cell-open">${esc(formatVendorParticulars(d.vendor_name, d.description))}</td>
       <td class="fdoc-cell-open"><span class="${payClass}">${esc(pay.label)}</span></td>
+      <td class="fdoc-cell-open"><span class="fdoc-pay">${esc(walletLabel)}</span></td>
       <td class="cash-float-amt fdoc-cell-open">${formatMoney(d.amount)}</td>
       <td class="fdoc-status-cell">
         ${linkLabel}
@@ -2932,7 +2965,7 @@ export function renderFinanceDocumentsPage() {
     } catch (err) {
       console.warn('[fdoc] page load failed:', err?.message || err);
       if (body && !listState.items.length) {
-        body.innerHTML = `<tr><td colspan="9" class="fa-panel__hint">Could not load bills: ${esc(err?.message || 'error')}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="10" class="fa-panel__hint">Could not load bills: ${esc(err?.message || 'error')}</td></tr>`;
       }
     }
   })();
@@ -3214,25 +3247,32 @@ export function initFinanceDocumentsPage() {
     searchDebounceTimer = setTimeout(onFilterChange, 280);
   });
 
-  document.getElementById('fn-fdoc-jump-bottom')?.addEventListener('click', () => {
-    void withButtonBusy(document.getElementById('fn-fdoc-jump-bottom'), 'Loading…', async () => {
-      await jumpFinanceDocumentsToBottom();
-      paintFinanceDocumentsTable();
-      renderFdocListChrome();
-      requestAnimationFrame(() => {
-        const rows = document.querySelectorAll('#fn-fdoc-table-body tr.fdoc-row');
-        rows[rows.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      });
-    }).catch((err) => alert(err?.message || 'Could not jump to end of list.'));
-  });
-
-  document.getElementById('fn-fdoc-jump-top')?.addEventListener('click', () => {
-    void withButtonBusy(document.getElementById('fn-fdoc-jump-top'), 'Loading…', async () => {
-      await jumpFinanceDocumentsToTop();
-      paintFinanceDocumentsTable();
-      renderFdocListChrome();
-      document.getElementById('fn-fdoc-table-body')?.closest('.fa-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }).catch((err) => alert(err?.message || 'Could not return to newest bills.'));
+  const moreBtn = document.getElementById('fn-fdoc-more-btn');
+  const moreMenu = document.getElementById('fn-fdoc-more-menu');
+  const closeMoreMenu = () => {
+    if (moreMenu) moreMenu.hidden = true;
+    document.removeEventListener('click', closeMoreMenu, true);
+    document.removeEventListener('keydown', onMoreMenuKey);
+  };
+  const onMoreMenuKey = (e) => {
+    if (e.key === 'Escape') closeMoreMenu();
+  };
+  moreBtn?.addEventListener('click', () => {
+    if (!moreMenu) return;
+    if (!moreMenu.hidden) {
+      closeMoreMenu();
+      return;
+    }
+    moreMenu.hidden = false;
+    const r = moreBtn.getBoundingClientRect();
+    const menuW = moreMenu.offsetWidth || 160;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - menuW - 8));
+    moreMenu.style.left = `${left}px`;
+    moreMenu.style.top = `${r.bottom + 4}px`;
+    setTimeout(() => {
+      document.addEventListener('click', closeMoreMenu, true);
+      document.addEventListener('keydown', onMoreMenuKey);
+    }, 0);
   });
 
   document.getElementById('fn-fdoc-select-all')?.addEventListener('change', (e) => {
@@ -3272,6 +3312,7 @@ export function initFinanceDocumentsPage() {
     void withButtonBusy(btn, 'Deleting…', bulkDeleteSelectedDocs);
   });
   document.getElementById('fn-fdoc-sync-cats')?.addEventListener('click', () => {
+    closeMoreMenu();
     const btn = document.getElementById('fn-fdoc-sync-cats');
     void withButtonBusy(btn, 'Syncing…', syncSelectedCategories);
   });

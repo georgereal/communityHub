@@ -186,7 +186,8 @@ const matchesNumberOp = (actual, spec) => {
     const v2 = parseFilterNumber(spec.value2);
     switch (spec.op) {
         case 'eq':
-            return v != null && Math.abs(n - v) < 0.005;
+            // Match magnitude — "equals 1" hits a −₹1 expense too (server agrees).
+            return v != null && Math.abs(Math.abs(n) - Math.abs(v)) < 0.005;
         case 'gt':
             return v != null && n > v;
         case 'gte':

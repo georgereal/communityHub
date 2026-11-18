@@ -75,6 +75,10 @@ let optionalKeys = loadOptionalKeys();
 /** @type {Record<string, string>} per-column filter expressions */
 let columnFilters = {};
 let wired = false;
+/** @type {Array<object>} rows from the latest render — for the Details modal */
+let lastRows = [];
+let lastChargeHeads = [];
+let lastRawKeys = [];
 
 const ACCOUNT_NAME_KEYS = [
     'Account Name', 'Owner Name', 'Tenant Name', 'Resident Name',
@@ -363,6 +367,9 @@ export function renderInvoicesRaisedPage() {
     const rawKeys = allRawFieldKeys(rows);
     const cols = visibleColumns(chargeHeads, rawKeys);
     const list = filteredRows(rows, cols);
+    lastRows = list;
+    lastChargeHeads = chargeHeads;
+    lastRawKeys = rawKeys;
 
     renderColumnPicker(chargeHeads, rawKeys);
     syncClearFiltersBtn();
@@ -383,7 +390,7 @@ export function renderInvoicesRaisedPage() {
     const thead = document.getElementById('fn-raised-table-head');
     if (thead) {
         const headerRow = `<tr>${cols.map((c) =>
-            `<th class="${c.numeric ? 'fa-num' : ''}">${esc(c.label)}</th>`).join('')}</tr>`;
+            `<th class="${c.numeric ? 'fa-num' : ''}">${esc(c.label)}</th>`).join('')}<th class="raised-card-more-head"></th></tr>`;
         const filterRow = `<tr class="raised-filter-row">${cols.map((c) => {
             const active = String(columnFilters[c.key] || '').trim();
             return `<th class="${c.numeric ? 'fa-num' : ''}">
@@ -394,28 +401,122 @@ export function renderInvoicesRaisedPage() {
             placeholder="${esc(filterPlaceholder(c))}"
             aria-label="Filter ${esc(c.label)}" />
         </th>`;
-        }).join('')}</tr>`;
+        }).join('')}<th></th></tr>`;
         thead.innerHTML = headerRow + filterRow;
     }
     if (tbody) {
         if (!list.length) {
-            tbody.innerHTML = `<tr><td colspan="${Math.max(cols.length, 1)}" class="maintenance-dues-empty">${
+            tbody.innerHTML = `<tr><td colspan="${Math.max(cols.length + 1, 1)}" class="maintenance-dues-empty">${
                 rows.length ? 'No rows match the column filters.' : 'No invoice rows to show.'
             }</td></tr>`;
         } else {
-            tbody.innerHTML = list.map((row) => `
+            tbody.innerHTML = list.map((row, idx) => `
         <tr>
           ${cols.map((c) =>
                 `<td class="${c.numeric ? 'fa-num' : ''}" data-col="${esc(c.key)}" data-label="${esc(c.label)}">${esc(cellValue(row, c.key))}</td>`).join('')}
           <td class="raised-card-more">
-            <label class="raised-card-more__label">
+            <label class="raised-card-more__label raised-card-more__label--mobile">
               <input type="checkbox" class="raised-card-toggle" hidden />
               <span class="raised-card-more__text"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i> Details</span>
             </label>
+            <button type="button" class="raised-details-btn" data-raised-details="${idx}">
+              <i class="fa-solid fa-chevron-down" aria-hidden="true"></i> Details
+            </button>
           </td>
         </tr>`).join('');
         }
     }
+}
+
+/** Raw fields that look numeric but are identifiers/metadata, not money. */
+const RAW_META_KEY = /(id|no\.?\b|number|flat|area|date|month|year|name|file|status|period|type)/i;
+
+const asAmount = (v) => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = parseFloat(String(v ?? '').replace(/[,₹\s]/g, ''));
+    return Number.isFinite(n) && String(v ?? '').trim() !== '' ? n : null;
+};
+
+/** Split the invoice into metadata pairs + an amounts line-item table. */
+const detailSections = (row) => {
+    const meta = [];
+    const pushMeta = (label, value) => {
+        const v = value == null || value === '' ? '—' : value;
+        if (!meta.some(([l]) => l.toLowerCase() === label.toLowerCase())) meta.push([label, v]);
+    };
+    pushMeta('Unit', row.unit_number);
+    pushMeta('Resident', accountNameOf(row));
+    pushMeta('Month', monthLabel(row.billing_month));
+    OPTIONAL_META.forEach((c) => {
+        if (c.key !== 'resident_name') pushMeta(c.label, row[c.key]);
+    });
+
+    const amounts = lastChargeHeads.map((h) => [h, chargeAmount(row, h)]);
+
+    const seen = new Set(meta.map(([l]) => l.toLowerCase()));
+    lastRawKeys.forEach((f) => {
+        const v = row.raw?.[f];
+        if (v == null || v === '') return;
+        const amt = asAmount(v);
+        if (amt != null && !RAW_META_KEY.test(f)) {
+            if (!amounts.some(([l]) => l.toLowerCase() === f.toLowerCase())) amounts.push([f, amt]);
+        } else if (!seen.has(f.toLowerCase())) {
+            pushMeta(f, formatCell(v));
+        }
+    });
+    return { meta, amounts };
+};
+
+function openRaisedDetailsModal(row) {
+    closeRaisedDetailsModal();
+    const { meta, amounts } = detailSections(row);
+    const overlay = document.createElement('div');
+    overlay.className = 'raised-details-overlay';
+    overlay.id = 'fn-raised-details-overlay';
+    overlay.innerHTML = `
+      <div class="raised-details-modal" role="dialog" aria-modal="true" aria-label="Invoice details">
+        <div class="raised-details-modal__head">
+          <span class="raised-details-modal__title">Invoice ${esc(row.invoice_number || '')}</span>
+          <button type="button" class="raised-details-modal__close" aria-label="Close">&times;</button>
+        </div>
+        <dl class="raised-details-modal__grid">
+          ${meta.map(([label, value]) => `
+            <div class="raised-details-modal__item">
+              <dt>${esc(label)}</dt>
+              <dd>${esc(value)}</dd>
+            </div>`).join('')}
+        </dl>
+        <div class="raised-details-modal__section">Charges</div>
+        <table class="raised-details-amounts">
+          <tbody>
+            ${amounts.map(([label, amt]) => `
+              <tr>
+                <td>${esc(label)}</td>
+                <td class="fa-num">${esc(formatMoney(amt))}</td>
+              </tr>`).join('')}
+            <tr class="raised-details-amounts__total">
+              <td>Total raised</td>
+              <td class="fa-num">${esc(formatMoney(row.total_raised))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay || e.target.closest('.raised-details-modal__close')) {
+            closeRaisedDetailsModal();
+        }
+    });
+    document.addEventListener('keydown', onDetailsEsc);
+    document.body.appendChild(overlay);
+}
+
+function closeRaisedDetailsModal() {
+    document.getElementById('fn-raised-details-overlay')?.remove();
+    document.removeEventListener('keydown', onDetailsEsc);
+}
+
+function onDetailsEsc(e) {
+    if (e.key === 'Escape') closeRaisedDetailsModal();
 }
 
 async function handleUpload(file) {
@@ -493,6 +594,12 @@ export function initInvoicesRaisedPage() {
     // Column filter row — preserve focus while typing
     const tableWrap = document.querySelector('#fn-subview-invoices-raised .raised-table-wrap')
         || document.querySelector('#subview-invoices-raised .raised-table-wrap');
+    tableWrap?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-raised-details]');
+        if (!btn) return;
+        const row = lastRows[Number(btn.dataset.raisedDetails)];
+        if (row) openRaisedDetailsModal(row);
+    });
     tableWrap?.addEventListener('input', (e) => {
         const input = e.target.closest('[data-raised-col-filter]');
         if (!input) return;

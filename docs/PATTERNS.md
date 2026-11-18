@@ -445,7 +445,144 @@ one source of truth; the added alternative matches nothing in the classic SPA.
 
 ---
 
-## 15. When to add a new pattern here
+## 15. Master category list (`finance_categories`) + ledger running-balance overlay
+
+### Master category list
+
+**What.** One server-side collection `finance_categories`
+(`{ id, apartment_id, name, type: 'IN'|'OUT' }`) is the master list of income /
+expense categories for every Finance-New page (ledger, bank recon, bills,
+quick capture, admin).
+
+**Why.** `buildCategoryOptions()` (`apps/new/src/classifyOptions.js`) merges
+several sources; previously, categories that existed only on ledger rows or
+vouchers were missing on pages (bank recon) that deliberately don't load those
+packs, and `extraCategories` was session-only so custom categories vanished on
+reload.
+
+**Where.**
+- `apps/new/api/finance-mongo.js` `boot()` → `loadMasterCategories()` returns
+  the collection rows **plus** auto-seeds rows for `cat` values already in use
+  on `ledger_entries` / `vouchers` (typed by `type`/`kind`), so no data
+  migration is needed.
+- `apps/new/api/finance-mongo-mutations.js` `tableWrite` — `expense_categories`
+  table upserts/deletes into `finance_categories` (dedupe: type + name,
+  case-insensitive).
+- `apps/new/src/classifyOptions.js` `registerCustomCategory` pushes to session
+  state **and** fires `mongoUpsert('expense_categories', …)` (best-effort);
+  `registerCustomSubCategory` does the same via `expense_sub_categories`
+  (config `subCategories` master list).
+- `state.js` → `s.categories`; `load.js` `ensureBootMapped` and
+  `packCache.js` pass `categories` into `applyMongoPacksToClassic`, which maps
+  them to `f.extraCategories`.
+
+**Rule.** Never add a page-specific category list — extend the master
+collection (or `INCOME_CATS`/`EXPENSE_CATS` for system defaults).
+
+### Ledger running-balance overlay on reads
+
+**What.** `loadLedgerPage` (`financeMongo/services/ledgerList.js`) overlays a
+live-computed `running_balance_after` on returned BANK rows whenever
+`config.ledgerBalance.needsRecalc` is true **or** any returned active BANK row
+lacks a stored value — provided an opening balance is set.
+
+**Why.** The ledger list is paginated (50-row windows), so the client cannot
+live-walk the full ledger and relies on stored `running_balance_after`, which
+only exists after a `recalculateLedgerBalances` run. The overlay restores the
+"calculated" paren in the Passbook/calc column without a manual recalc.
+
+**Where.** Shared walk lives in
+`apps/new/api/financeMongo/services/ledgerBalances.js`
+(`loadBankLedgerChronological`, `computeLedgerRunningBalances`) — the same
+ordering (`line_date` when matched, then statement line order) as
+`recalculateLedgerBalances`, which imports it. Client display logic:
+`ledgerTable.js` `ledgerRunningBalancesForDisplay` — stored map for partial
+windows, live walk merged over stored for fully loaded ledgers.
+
+---
+
+## 16. Tax amount table (Taxable / Tax % / Tax ₹ / Total)
+
+**What.** Expense entry points show a 4-cell amount table instead of a single
+amount field. The user fills any consistent pair and the rest computes
+(base + pct → tax + total; total + pct → base + tax; base + tax → total + pct;
+total + tax → base + pct). Tax % defaults to 0, so existing flows are
+unchanged when it's left alone.
+
+**Where.**
+- `apps/new/src/financeNew/taxAmountTable.js` — `wireTaxAmountTable`,
+  `readTaxAmountTable`, `fillTaxAmountTable`, `resetTaxAmountTable`. The
+  `total` cell keeps the legacy element id (`cash-amt`,
+  `fn-eplan-item-amount`, `fn-eplan-rec-amount`) so existing reads are
+  untouched.
+- `apps/new/src/financeApp/html/_cash-modal.html` — expense section (shared by
+  "Add bill" and "Add expense"; income side has no tax table).
+- `apps/new/src/financeApp/html/expense-plan.html` — one-off and recurring
+  forms.
+- `finances.js` `saveCashData` and `expensePlan.js` `saveOneOff` /
+  `saveRecurring` send `tax_percent`, `taxable_amount`, `tax_amount` with the
+  save; `amount` stays the **total** (final figure). All server saves pass
+  these fields through (`vouchers`, `ledger_entries`, config plan lists).
+
+**Rule.** When adding an amount entry form, use the tax table and store the
+computed total in `amount`; keep `taxable_amount`/`tax_amount`/`tax_percent`
+as the audit trail — never reinterpret `amount` as pre-tax.
+
+**Recurring templates.** On the expense-plan recurring form the tax table's
+Total is the **lump sum for the whole schedule**; period rows only distribute
+it (no per-period tax/amount). `total_amount` stores the lump, `period_amounts`
+the per-index shares (row-sum must equal `total_amount` — last row absorbs
+rounding drift), `period_dates` (index-aligned array, nulls = use computed
+cadence date) stores per-row date overrides. `projectRecurringOccurrences`
+resolves `period_dates` so `occurrence_links`/`occurrence_amounts`/
+`completed_dates` stay keyed to the effective date. Templates with no Term are
+ongoing — there the Total field is the per-period amount (`total_amount` null).
+
+---
+
+## 17. Petty Cash funding entries — never read from the paginated ledger page
+
+**What.** Any feature that needs *all* Petty Cash funding ledger entries
+(bucket tables, cash-float KPIs, link dialogs) must merge
+`voucherAggregates.fundingEntries` into `fnFinances().txns`, deduped by `id`.
+The API (`voucherAggregates` in `apps/new/api/finance-mongo.js`) returns every
+funding entry unpaginated — `cat`/`wallet`/`amount`/`date`/`is_cash_float`/
+`exclude_from_cash_float`/`description`/`vendor_name`/`bank_reference`.
+
+**Why.** `fnFinances().txns` holds only the loaded ledger window (~50 newest
+rows). A funding entry outside that window silently drops out of
+`planCashFloatBucketAllocation`, so its amount never enters the carry chain —
+later buckets then render as `Used ₹0 · Full` and the bucket itself disappears.
+This bit twice: the BANK BUCKETS panel (fixed via `computeCashFloatStore`)
+and the "Link cash bills" dialog (fixed via `allFundingLedgerTxns`).
+
+**Where.**
+- `cashFloat.js` `computeCashFloatStore` — merges `voucherAggregates.fundingEntries`.
+- `financeDocuments.js` `allFundingLedgerTxns()` — same merge off
+  `aggregatesCache.fundingEntries`; used by `fundingBucketOf` and
+  `ledgerCandidatesForCashLink`. `openLinkModal` triggers
+  `ensureFinanceDocumentsAggregates()` so the supplement is fresh.
+
+**Rule.** New code needing funding entries must use the merged list, never a
+bare `fnFinances().txns.filter(isFundingLedgerTxn)`.
+
+**Excel-style col_* filters are server-side.** Ledger (`/api/finance/ledger`)
+and Bills & receipts (`listVouchers`) accept `col_*` params
+(date/description/particulars/cat/kind/status/wallet/pay/amount) plus
+`sort`/`sort_dir`; `excelColMenu.js` is the shared header-menu factory —
+`ledgerColFilter.js` and `docsColFilter.js` inject their own state. `eq`
+matches |amount| (magnitude); gt/lt/between stay signed. `passbook`/`bills`
+ledger columns remain client-only.
+
+**Amount mirroring on link.** `linkFinanceDocuments` mirrors the ledger
+amount onto a bill **only** for a 1:1 payment link (single doc ↔ non-funding
+OUT txn). Bucket/deposit links must never overwrite `voucher.amount` — many
+bills share one funding txn, so mirroring silently rewrites every bill to the
+bucket amount (this corrupted an Aug-29 batch to ₹10,000 each).
+
+---
+
+## 18. When to add a new pattern here
 
 Before merging a PR that introduces a non-obvious data-flow or behavioral
 convention (e.g. a new "auto-derive on null" field, a new cross-app sync

@@ -1,7 +1,7 @@
 /**
  * Map ledger UI / pivot filter state → GET /api/finance/ledger query params.
  */
-import { getLedgerCategoryFilter, getLedgerPivotFilter } from './ledgerFilter.js';
+import { getLedgerCategoryFilter, getLedgerColumnFilters, getLedgerPivotFilter } from './ledgerFilter.js';
 
 export function buildLedgerServerQuery(extra = {}) {
     const q = { ...extra };
@@ -10,6 +10,18 @@ export function buildLedgerServerQuery(extra = {}) {
 
     const search = (document.getElementById('fn-cash-search')?.value || '').trim();
     if (search) q.q = search;
+
+    // Excel-style column filters → DB. Passbook/bills stay client-side
+    // (computed / cross-collection); everything else filters at the source.
+    const colFilters = getLedgerColumnFilters();
+    for (const [key, val] of Object.entries(colFilters)) {
+        if (key === 'passbook' || key === 'bills') continue;
+        if (typeof val === 'string') {
+            if (val.trim()) q[`col_${key}`] = val.trim();
+        } else if (val && typeof val === 'object') {
+            q[`col_${key}`] = JSON.stringify(val);
+        }
+    }
 
     const pivot = getLedgerPivotFilter();
     if (pivot) {

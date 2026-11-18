@@ -10,6 +10,7 @@ export function emptyFinanceNewState() {
         classicHydrated: false,
         config: null,
         counts: {},
+        categories: [],
         finances: null,
         ledger: null,
         admin: null,
@@ -65,6 +66,7 @@ export function applyFinanceNewBoot(payload = {}) {
     s.bootApartmentId = portalState.access?.activeApartmentId || null;
     s.config = payload.config || null;
     s.counts = payload.counts || {};
+    s.categories = Array.isArray(payload.categories) ? payload.categories : (s.categories || []);
     s.lastError = null;
     return s;
 }

@@ -1353,6 +1353,32 @@ html[data-finance-app="1"] #fn-subview-reports .fa-pivot-table tfoot td:first-ch
   }
 }
 
+/* ── Bills & receipts filters: single wrapping line ── */
+
+html[data-finance-app="1"] .fdoc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+}
+
+html[data-finance-app="1"] .fdoc-filters__search {
+  flex: 1 1 13rem;
+  min-width: 10rem;
+}
+
+html[data-finance-app="1"] .fdoc-filters__select {
+  flex: 0 0 auto;
+}
+
+html[data-finance-app="1"] .fdoc-filters__actions {
+  display: contents;
+}
+
+html[data-finance-app="1"] .fdoc-filters .fa-info-anchor {
+  margin-left: -0.3rem;
+}
+
 @media (max-width: 767px) {
   /* ── Bills & receipts toolbar: icon-only action row ── */
 
@@ -1698,6 +1724,152 @@ html[data-finance-app="1"] #fn-subview-reports .fa-pivot-table tfoot td:first-ch
   }
 }
 
+/* Invoices raised: filter-row labels only show in the mobile filters panel. */
+html[data-finance-app="1"] .raised-col-filter__label {
+  display: none;
+}
+
+/* Invoices raised: desktop "Details" opens a centered modal; the inline expander is mobile-only. */
+html[data-finance-app="1"] .raised-table .raised-card-more__label--mobile {
+  display: none;
+}
+
+html[data-finance-app="1"] .raised-details-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 0;
+  background: transparent;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #64748b;
+  cursor: pointer;
+}
+
+html[data-finance-app="1"] .raised-details-btn:hover {
+  color: #2563eb;
+}
+
+.raised-details-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.raised-details-modal {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 82vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.raised-details-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.raised-details-modal__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main, #0f172a);
+}
+
+.raised-details-modal__close {
+  border: 0;
+  background: transparent;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+}
+
+.raised-details-modal__close:hover {
+  color: #0f172a;
+}
+
+.raised-details-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.4rem 1rem;
+  margin: 0;
+}
+
+.raised-details-modal__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed #eef0f3;
+  font-size: 0.78rem;
+}
+
+.raised-details-modal__item dt {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+  align-self: center;
+}
+
+.raised-details-modal__item dd {
+  margin: 0;
+  text-align: right;
+  color: var(--text-main, #0f172a);
+  word-break: break-word;
+}
+
+.raised-details-modal__section {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.raised-details-amounts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.raised-details-amounts td {
+  padding: 0.28rem 0;
+  border-bottom: 1px dashed #eef0f3;
+  color: var(--text-main, #0f172a);
+}
+
+.raised-details-amounts td.fa-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.raised-details-amounts__total td {
+  border-bottom: 0;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.45rem;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 767px) {
   /* Invoices raised: table rows → label:value cards */
   html[data-finance-app="1"] .raised-table-wrap {
@@ -1876,7 +2048,16 @@ html[data-finance-app="1"] #fn-subview-reports .fa-pivot-table tfoot td:first-ch
   }
 
   /* Details expander */
+  html[data-finance-app="1"] .raised-table .raised-details-btn {
+    display: none;
+  }
+
+  html[data-finance-app="1"] .raised-table .raised-card-more__label--mobile {
+    display: inline-flex;
+  }
+
   html[data-finance-app="1"] .raised-table td.raised-card-more {
+    display: block;
     order: 6;
     flex: 1 1 100%;
     padding-top: 0.25rem;
@@ -2444,4 +2625,393 @@ html[data-finance-app="1"] #fn-subview-reports .fa-pivot-table tfoot td:first-ch
   html[data-finance-app="1"] #fn-bank-recon-lines .bank-recon-table--processed td.bank-recon-table__cell--amount {
     display: block !important;
   }
+}
+
+/* Taxable / tax% / tax₹ / total mini-table (cash modal, expense plan) */
+html[data-finance-app="1"] .tax-table {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+html[data-finance-app="1"] .tax-table__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+html[data-finance-app="1"] .tax-table__cell > span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim, #64748b);
+  text-transform: none;
+}
+html[data-finance-app="1"] .tax-table__cell input {
+  width: 100%;
+  min-width: 0;
+}
+html[data-finance-app="1"] .tax-table__cell--total input {
+  font-weight: 700;
+}
+html[data-finance-app="1"] .tax-table-wrap > .expense-label,
+html[data-finance-app="1"] .tax-table-wrap > span:first-child {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+@media (max-width: 520px) {
+  html[data-finance-app="1"] .tax-table {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Recurring template — editable period schedule table */
+html[data-finance-app="1"] .eplan-rec-periods__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim, #64748b);
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+html[data-finance-app="1"] .eplan-rec-periods__table td {
+  padding: 0.2rem 0.4rem;
+  vertical-align: middle;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table tfoot td {
+  border-top: 1px solid var(--border, #e2e8f0);
+  font-weight: 700;
+  padding-top: 0.4rem;
+}
+html[data-finance-app="1"] .eplan-rec-period-row__idx {
+  color: var(--text-dim, #64748b);
+  font-size: 0.8rem;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table .eplan-rec-period-row__amt,
+html[data-finance-app="1"] .eplan-rec-periods__table .eplan-rec-period-row__date {
+  width: 100%;
+  min-width: 0;
+  text-align: right;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table .eplan-rec-period-row__date {
+  text-align: left;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table [data-eplan-pct-col] input {
+  width: 4.5rem;
+}
+html[data-finance-app="1"] .eplan-rec-periods__total--mismatch {
+  color: var(--danger, #b91c1c);
+}
+html[data-finance-app="1"] .eplan-rec-period-row--date-override .eplan-rec-period-row__date {
+  border-color: var(--accent, #2563eb);
+  background: rgba(37, 99, 235, 0.06);
+}
+
+/* Recurring modal — labelled field groups */
+html[data-finance-app="1"] .eplan-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+html[data-finance-app="1"] .eplan-form-group__label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-dim, #64748b);
+  text-transform: none;
+}
+html[data-finance-app="1"] .eplan-repeat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem 0.65rem;
+}
+html[data-finance-app="1"] .eplan-repeat-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-dim, #64748b);
+}
+@media (max-width: 560px) {
+  html[data-finance-app="1"] .eplan-repeat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Expense-plan modal — consistent compact typography */
+html[data-finance-app="1"] #fn-eplan-modal input.expense-combobox,
+html[data-finance-app="1"] #fn-eplan-modal select.expense-combobox,
+html[data-finance-app="1"] #fn-eplan-modal .tax-table input,
+html[data-finance-app="1"] #fn-eplan-modal .eplan-rec-periods__table input {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  min-height: 1.9rem;
+}
+html[data-finance-app="1"] #fn-eplan-modal .eplan-form-grid label > span,
+html[data-finance-app="1"] #fn-eplan-modal .eplan-repeat-grid label > span,
+html[data-finance-app="1"] #fn-eplan-modal .tax-table__cell > span {
+  font-size: 0.66rem;
+}
+html[data-finance-app="1"] #fn-eplan-modal .eplan-form-group__label {
+  font-size: 0.68rem;
+}
+
+/* Period schedule — aligned compact columns */
+html[data-finance-app="1"] .eplan-rec-periods__table {
+  table-layout: fixed;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table th:nth-child(1),
+html[data-finance-app="1"] .eplan-rec-periods__table td:nth-child(1) {
+  width: 2.4rem;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table th[data-eplan-pct-col],
+html[data-finance-app="1"] .eplan-rec-periods__table td[data-eplan-pct-col],
+html[data-finance-app="1"] .eplan-rec-periods__table td:has(.eplan-rec-period-row__pct) {
+  width: 5.5rem;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table th:last-child,
+html[data-finance-app="1"] .eplan-rec-periods__table td:last-child {
+  width: 7.5rem;
+  text-align: right;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table .eplan-rec-period-row__amt {
+  text-align: right;
+}
+html[data-finance-app="1"] .eplan-rec-periods__total {
+  text-align: right;
+  white-space: nowrap;
+}
+html[data-finance-app="1"] .eplan-rec-period-row__pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+html[data-finance-app="1"] .eplan-rec-period-row__pct input {
+  width: 4rem;
+}
+
+/* Period schedule — undo legacy flex/grid row styles that break the table */
+html[data-finance-app="1"] .eplan-rec-periods__table tbody.eplan-rec-periods__list {
+  display: table-row-group;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table tr.eplan-rec-period-row {
+  display: table-row;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
+}
+html[data-finance-app="1"] .eplan-rec-periods__table tr.eplan-rec-period-row > td {
+  display: table-cell;
+}
+html[data-finance-app="1"] .eplan-rec-periods.eplan-rec-periods--panel {
+  display: block;
+  max-height: min(34vh, 280px);
+  overflow: auto;
+}
+
+/* Recurring modal — left column (amount + repeat) beside schedule, docs full row */
+html[data-finance-app="1"] #fn-eplan-modal-recurring .eplan-modal-bottom .eplan-rec-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+html[data-finance-app="1"] #fn-eplan-modal-recurring .eplan-modal-bottom .eplan-card--full {
+  grid-column: 1 / -1;
+}
+html[data-finance-app="1"] #fn-eplan-modal-recurring .eplan-rec-left .eplan-form-group {
+  background: #fff;
+}
+
+/* Expense-plan detail modal — compact 2-col layout */
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail__title {
+  margin-bottom: 0.5rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 1.5rem;
+  margin-bottom: 0.7rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-dl__meta {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem 1rem;
+  padding-top: 0.55rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail__actions {
+  margin-top: 0.4rem;
+}
+@media (max-width: 620px) {
+  html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Expense-plan detail — installment context strip */
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.7rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-strip__tag {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent, #2563eb);
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-strip__amt {
+  margin-left: auto;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+/* Expense-plan detail — recurring installment summary + list */
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-head .eplan-detail__title {
+  margin: 0;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-head__sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-dim, #64748b);
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-badge {
+  flex-shrink: 0;
+  padding: 0.14rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-badge--open {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-badge--done {
+  background: #ecfdf5;
+  color: #047857;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-badge--overdue {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-list {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.7rem;
+  font-size: 0.82rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-list th {
+  text-align: left;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--text-dim, #64748b);
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-list td {
+  padding: 0.28rem 0.4rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row__idx {
+  color: var(--text-dim, #64748b);
+  font-size: 0.74rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row__amt {
+  font-weight: 700;
+  text-align: right;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-list th:nth-child(3) {
+  text-align: right;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row__status {
+  color: var(--text-dim, #64748b);
+  font-size: 0.74rem;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row--current {
+  background: #eff6ff;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row--current .eplan-inst-row__status {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row--done {
+  color: #94a3b8;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-inst-row--done .eplan-inst-row__status {
+  color: #047857;
+}
+
+/* Expense-plan detail — documents (template attachments) section */
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail-docs {
+  margin: 0 0 0.7rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail-docs__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim, #64748b);
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail-docs__hint {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+html[data-finance-app="1"] #fn-eplan-detail-modal .eplan-detail-docs .eplan-detail-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Ledger rows — petty cash tint + no-reports greyed */
+html[data-finance-app="1"] tr.ledger-txn-row--petty td {
+  background: #ede9fe;
+}
+html[data-finance-app="1"] tr.ledger-txn-row--petty:hover td {
+  background: #ddd6fe;
+}
+html[data-finance-app="1"] tr.ledger-txn-row--no-reports {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+html[data-finance-app="1"] tr.ledger-txn-row--no-reports .ledger-desc-text,
+html[data-finance-app="1"] tr.ledger-txn-row--no-reports .ledger-card-date {
+  color: #94a3b8;
+}
+html[data-finance-app="1"] .ledger-cash-float-btn--on {
+  color: #7c3aed;
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+html[data-finance-app="1"] .ledger-cash-float-btn--on:hover {
+  background: #ede9fe;
 }

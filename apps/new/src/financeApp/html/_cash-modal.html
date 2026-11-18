@@ -85,9 +85,18 @@
           </div>
         </div>
 
-        <div class="expense-form__section expense-form__section--amount">
-          <label class="expense-label" for="cash-amt">Amount (₹)</label>
-          <input type="number" id="cash-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+        <div class="expense-form__section expense-form__section--amount tax-table-wrap">
+          <span class="expense-label">Amount (₹) — fill any two, the rest compute</span>
+          <div class="tax-table">
+            <label class="tax-table__cell"><span>Taxable</span>
+              <input type="number" id="cash-taxable-amt" inputmode="decimal" min="0" step="0.01" placeholder="0" /></label>
+            <label class="tax-table__cell"><span>Tax %</span>
+              <input type="number" id="cash-tax-pct" inputmode="decimal" min="0" step="0.01" value="0" /></label>
+            <label class="tax-table__cell"><span>Tax ₹</span>
+              <input type="number" id="cash-tax-amt" inputmode="decimal" min="0" step="0.01" placeholder="0" /></label>
+            <label class="tax-table__cell tax-table__cell--total"><span>Total</span>
+              <input type="number" id="cash-amt" class="expense-amount" inputmode="decimal" min="0" step="0.01" placeholder="0" /></label>
+          </div>
         </div>
 
         <div class="expense-form__section expense-form__section--date">

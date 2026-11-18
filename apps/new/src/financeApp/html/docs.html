@@ -118,37 +118,60 @@
               <option value="unpaid">Unpaid only</option>
             </select>
             <div class="fdoc-filters__actions">
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-jump-bottom" title="Jump to oldest bills">
-                <i class="fa-solid fa-angles-down" aria-hidden="true"></i>
-                <span class="fdoc-action-full">Jump to end</span>
-                <span class="fdoc-action-short">End</span>
-              </button>
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-jump-top" hidden title="Back to newest bills">
-                <i class="fa-solid fa-angles-up" aria-hidden="true"></i>
-                <span class="fdoc-action-full">Newest first</span>
-                <span class="fdoc-action-short">Top</span>
-              </button>
               <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-bulk-link" data-cap="accounts.docs_manage" disabled title="Link selected">
                 <i class="fa-solid fa-link" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Link selected</span>
                 <span class="fdoc-action-short">Link</span>
               </button>
+              <span class="fa-info-anchor">
+                <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fdoc-bulk-link-tip" title="About Link selected">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  <span class="sr-only">About Link selected</span>
+                </button>
+                <span class="fa-info-tip" id="fn-fdoc-bulk-link-tip" hidden role="tooltip">Links ticked paid bills to a bank-ledger line — a <strong>petty-cash bucket</strong>, a cheque payment, or another matching transaction.</span>
+              </span>
               <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-deposit-wallet" data-cap="accounts.docs_manage" title="Deposit wallet to bank">
                 <i class="fa-solid fa-building-columns" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Deposit wallet to bank</span>
                 <span class="fdoc-action-short">Deposit</span>
               </button>
-              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-sync-cats" data-cap="accounts.docs_manage" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
-                <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
-                <span class="fdoc-action-full">Sync categories</span>
-                <span class="fdoc-action-short">Sync</span>
+              <span class="fa-info-anchor">
+                <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fdoc-deposit-wallet-tip" title="About Deposit wallet to bank">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  <span class="sr-only">About Deposit wallet to bank</span>
+                </button>
+                <span class="fa-info-tip" id="fn-fdoc-deposit-wallet-tip" hidden role="tooltip">Record cash moved from the <strong>wallet float into the bank</strong> — tick cash receipts to deposit those, or continue with float only.</span>
+              </span>
+              <button type="button" class="btn btn-outline btn--small" id="fn-fdoc-more-btn" data-cap="accounts.docs_manage" title="More actions">
+                <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                <span class="fdoc-action-full">More</span>
+                <span class="fdoc-action-short">More</span>
               </button>
+              <span class="fa-info-anchor">
+                <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fdoc-more-tip" title="About More actions">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  <span class="sr-only">About More actions</span>
+                </button>
+                <span class="fa-info-tip" id="fn-fdoc-more-tip" hidden role="tooltip">Less-used maintenance actions live here — e.g. <strong>Sync categories</strong> copies the ledger category/sub-category onto linked cheque bills (bank entry wins when both are set).</span>
+              </span>
               <button type="button" class="btn btn-outline btn--small btn--danger" id="fn-fdoc-bulk-delete" data-cap="accounts.delete" disabled title="Delete selected">
                 <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
                 <span class="fdoc-action-full">Delete selected</span>
                 <span class="fdoc-action-short">Delete</span>
               </button>
+              <span class="fa-info-anchor">
+                <button type="button" class="fa-info-btn" data-fa-info aria-expanded="false" aria-controls="fn-fdoc-bulk-delete-tip" title="About Delete selected">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                  <span class="sr-only">About Delete selected</span>
+                </button>
+                <span class="fa-info-tip" id="fn-fdoc-bulk-delete-tip" hidden role="tooltip">Permanently deletes the ticked bills/receipts — cannot be undone.</span>
+              </span>
             </div>
+          </div>
+          <div id="fn-fdoc-more-menu" class="fdoc-attach-menu" hidden role="menu">
+            <button type="button" class="fdoc-attach-menu__item" id="fn-fdoc-sync-cats" role="menuitem" title="Sync category/sub between linked cheque bills and bank ledger (bank wins if set)">
+              <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Sync categories
+            </button>
           </div>
 
           <div class="fa-table-wrap" style="margin-bottom:1.25rem;">
@@ -158,13 +181,14 @@
                   <th class="fdoc-check-col" data-cap="accounts.docs_manage">
                     <input type="checkbox" id="fn-fdoc-select-all" title="Select all rows" aria-label="Select all bills" />
                   </th>
-                  <th>Date</th>
-                  <th>Kind</th>
-                  <th>Category / sub</th>
-                  <th>Particulars</th>
+                  <th data-fdoc-th="date"></th>
+                  <th data-fdoc-th="kind"></th>
+                  <th data-fdoc-th="cat"></th>
+                  <th data-fdoc-th="particulars"></th>
                   <th>Payment</th>
-                  <th>Amount</th>
-                  <th>Status</th>
+                  <th data-fdoc-th="wallet"></th>
+                  <th class="cash-float-amt" data-fdoc-th="amount"></th>
+                  <th data-fdoc-th="status"></th>
                   <th></th>
                 </tr>
               </thead>

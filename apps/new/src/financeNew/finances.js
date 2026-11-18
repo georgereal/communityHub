@@ -38,6 +38,7 @@ import { EXPENSE_CATS, INCOME_CATS, BANK_REJECT_CAT, defaultExcludeFromReports, 
 import { buildCategoryOptions, buildSubCategoryOptions } from '../classifyOptions.js';
 import { getCashWalletLeft } from './financeDocuments.js';
 import { ensureVendorInDirectory, listDirectoryVendors } from './vendors.js';
+import { wireTaxAmountTable, readTaxAmountTable, fillTaxAmountTable, resetTaxAmountTable } from './taxAmountTable.js';
 
 async function loadMaintenanceBilling() {
     return import('./maintenanceBilling.js');
@@ -737,6 +738,17 @@ export const initExpenseModal = () => {
     wirePillGroup(document.getElementById('expense-wallet-pills'), syncBankWalletUI);
     wirePillGroup(document.getElementById('income-wallet-pills'), syncBankWalletUI);
 
+    const taxTotal = document.getElementById('cash-amt');
+    if (taxTotal && !taxTotal.dataset.taxWired) {
+        taxTotal.dataset.taxWired = '1';
+        wireTaxAmountTable({
+            base: document.getElementById('cash-taxable-amt'),
+            pct: document.getElementById('cash-tax-pct'),
+            tax: document.getElementById('cash-tax-amt'),
+            total: taxTotal,
+        });
+    }
+
     const billPayPills = document.getElementById('bill-payment-pills');
     if (billPayPills && !billPayPills.dataset.wired) {
         billPayPills.dataset.wired = '1';
@@ -1429,6 +1441,12 @@ export const saveCashData = async () => {
     const bankRefEl = document.getElementById(isIncome ? 'income-bank-ref' : 'expense-bank-ref');
 
     const amt = parseFloat(amtEl?.value);
+    const taxFields = !isIncome ? readTaxAmountTable({
+        base: document.getElementById('cash-taxable-amt'),
+        pct: document.getElementById('cash-tax-pct'),
+        tax: document.getElementById('cash-tax-amt'),
+        total: amtEl,
+    }) : {};
     let desc = descEl?.value?.trim() || null;
     const cat = resolveCategory(catInput?.value, isIncome);
     if (isIncome && cat === 'Maintenance Collection' && saveTarget === 'ledger') {
@@ -1521,6 +1539,9 @@ export const saveCashData = async () => {
                     sub_category,
                     notes,
                     transaction_id: linkTxnId,
+                    tax_percent: taxFields.tax_percent ?? null,
+                    taxable_amount: taxFields.taxable_amount ?? null,
+                    tax_amount: taxFields.tax_amount ?? null,
                     source: existing?.source || 'manual',
                     status: linkTxnId
                         ? 'linked'
@@ -1597,6 +1618,9 @@ export const saveCashData = async () => {
             id: txnId,
             apartment_id,
             amount: amt,
+            tax_percent: taxFields.tax_percent ?? null,
+            taxable_amount: taxFields.taxable_amount ?? null,
+            tax_amount: taxFields.tax_amount ?? null,
             cat,
             sub_category,
             vendor_name,
@@ -1685,7 +1709,12 @@ document.getElementById('receipt-modal')?.addEventListener('click', (e) => {
 });
 
 const openExpenseFormDefaults = (wallet = 'CASH') => {
-    document.getElementById('cash-amt').value = '';
+    resetTaxAmountTable({
+        base: document.getElementById('cash-taxable-amt'),
+        pct: document.getElementById('cash-tax-pct'),
+        tax: document.getElementById('cash-tax-amt'),
+        total: document.getElementById('cash-amt'),
+    });
     document.getElementById('cash-desc').value = '';
     document.getElementById('expense-vendor-input').value = '';
     document.getElementById('expense-invoice-input').value = '';
@@ -2118,7 +2147,12 @@ bindFinanceNewWindow('openFinanceDocumentEdit', (doc, { readOnly = false } = {})
         syncIncomeExtraSection(doc.cat || 'Other Income');
     } else {
         openExpenseFormDefaults('CASH');
-        document.getElementById('cash-amt').value = doc.amount ?? '';
+        fillTaxAmountTable({
+            base: document.getElementById('cash-taxable-amt'),
+            pct: document.getElementById('cash-tax-pct'),
+            tax: document.getElementById('cash-tax-amt'),
+            total: document.getElementById('cash-amt'),
+        }, doc);
         document.getElementById('cash-date').value = String(doc.doc_date || '').slice(0, 10);
         document.getElementById('cash-desc').value = cleanDesc;
         document.getElementById('expense-cat-input').value = labelForCat(doc.cat || 'Other');

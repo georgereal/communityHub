@@ -11,6 +11,7 @@ import {
 import { readJsonBody } from '../../../packages/server/vercelRequest.js';
 import { getMongoDb } from '../../../packages/server/mongoClient.js';
 import { logMongoApi } from '../../../packages/server/mongoLog.js';
+import { loadBankLedgerChronological } from './financeMongo/services/ledgerBalances.js';
 import {
     isR2Configured,
     r2PutObject,
@@ -264,42 +265,6 @@ async function markLedgerBalanceDirty(db, apartmentId, fromDate = null) {
     };
     await saveConfig(db, apartmentId, { ledgerBalance: next });
     return next;
-}
-
-async function loadBankLedgerChronological(db, apartmentId) {
-    const [entries, imports] = await Promise.all([
-        db.collection('ledger_entries').find({
-            ...apt(apartmentId),
-            wallet: 'BANK',
-            excluded_from_ledger: { $ne: true },
-        }).toArray(),
-        db.collection('bank_imports').find(apt(apartmentId)).toArray(),
-    ]);
-    const lineByTxn = new Map();
-    for (const imp of imports) {
-        for (const line of imp.lines || []) {
-            if (line.transaction_id) lineByTxn.set(String(line.transaction_id), line);
-        }
-    }
-    const sortDay = (t) => {
-        const line = lineByTxn.get(String(t._id || t.id));
-        return dayKey(line?.line_date || t.date);
-    };
-    entries.sort((a, b) => {
-        const dayCmp = sortDay(a).localeCompare(sortDay(b));
-        if (dayCmp) return dayCmp;
-        const lineA = lineByTxn.get(String(a._id || a.id));
-        const lineB = lineByTxn.get(String(b._id || b.id));
-        if (lineA && lineB) {
-            const orderCmp = (lineA.line_order || 0) - (lineB.line_order || 0);
-            if (orderCmp) return orderCmp;
-            const ocrCmp = (lineA.source_row_index || 0) - (lineB.source_row_index || 0);
-            if (ocrCmp) return ocrCmp;
-        } else if (lineA && !lineB) return -1;
-        else if (!lineA && lineB) return 1;
-        return String(a._id || a.id).localeCompare(String(b._id || b.id));
-    });
-    return { entries, lineByTxn, sortDay };
 }
 
 /**
@@ -798,6 +763,15 @@ async function linkFinanceDocuments(db, apartmentId, body) {
     if (!txn) throw Object.assign(new Error('Ledger row not found.'), { status: 404 });
     const inferredNotes = paymentNotesFromLedgerTxn(txn);
     const txnAmt = roundMoney(Math.abs(parseFloat(txn.amount) || 0));
+    // Petty Cash funding buckets / bank deposits host many bills — each bill
+    // keeps its own amount. Only a 1:1 payment (single bill ↔ single OUT
+    // payment) mirrors the ledger amount onto the bill.
+    const isFundingTxn = String(txn.type || '').toUpperCase() === 'OUT'
+        && (txn.is_cash_float === true
+            || String(txn.cat || '').trim().toLowerCase() === 'petty cash');
+    const mirrorTxnAmount = ids.length === 1
+        && String(txn.type || '').toUpperCase() === 'OUT'
+        && !isFundingTxn;
     const documents = [];
     let config = null;
     for (const id of ids) {
@@ -812,7 +786,7 @@ async function linkFinanceDocuments(db, apartmentId, body) {
             updated_at: nowIso(),
         };
         // Ledger is the actuals source of truth — mirror its amount on the bill.
-        if (txnAmt > 0 && roundMoney(existing.amount) !== txnAmt) next.amount = txnAmt;
+        if (mirrorTxnAmount && txnAmt > 0 && roundMoney(existing.amount) !== txnAmt) next.amount = txnAmt;
         if (inferredNotes && notesNeedPaymentMode(existing.notes)) {
             next.notes = inferredNotes;
         } else if (inferredNotes && existing.notes && !/Paid on:/i.test(String(existing.notes))) {
@@ -2055,6 +2029,9 @@ async function saveExpensePlanRecurring(db, apartmentId, body) {
     const period_percents = Array.isArray(item.period_percents)
         ? item.period_percents.map((v) => Math.round((Number(v) || 0) * 100) / 100)
         : (item.period_percents === null ? null : existing?.period_percents);
+    const period_dates = Array.isArray(item.period_dates)
+        ? item.period_dates.map((d) => (d ? String(d).slice(0, 10) : null))
+        : (item.period_dates === null ? null : existing?.period_dates);
     const row = {
         ...existing,
         ...item,
@@ -2064,6 +2041,7 @@ async function saveExpensePlanRecurring(db, apartmentId, body) {
         total_amount: item.total_amount != null ? roundMoney(item.total_amount) : (item.total_amount === null ? null : existing?.total_amount),
         period_amounts,
         period_percents,
+        period_dates,
         completed_dates: Array.isArray(item.completed_dates)
             ? item.completed_dates.map((d) => String(d).slice(0, 10)).filter(Boolean)
             : (existing?.completed_dates || []),
@@ -2114,6 +2092,34 @@ async function tableWrite(db, apartmentId, body) {
     const op = body.op;
     const rows = Array.isArray(body.rows) ? body.rows : (body.row ? [body.row] : []);
     const filter = body.filter || {};
+
+    if (table === 'expense_categories') {
+        const col = db.collection('finance_categories');
+        if (op === 'upsert' || op === 'insert') {
+            for (const row of rows) {
+                const name = String(row.name || '').trim();
+                const type = row.type === 'IN' ? 'IN' : 'OUT';
+                if (!name) continue;
+                await col.updateOne(
+                    {
+                        apartment_id: apartmentId,
+                        type,
+                        name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+                    },
+                    {
+                        $set: { name, type, updated_at: nowIso() },
+                        $setOnInsert: { id: row.id || uid(), apartment_id: apartmentId, created_at: nowIso() },
+                    },
+                    { upsert: true },
+                );
+            }
+        } else if (op === 'delete') {
+            const id = filter.id || rows[0]?.id;
+            if (id) await col.deleteOne({ apartment_id: apartmentId, id: String(id) });
+        }
+        const data = await col.find(apt(apartmentId)).toArray();
+        return { ok: true, data: data.map(({ _id, ...rest }) => rest) };
+    }
 
     if (table === 'expense_vendors' || table === 'expense_sub_categories'
         || table === 'maintenance_charge_heads' || table === 'maintenance_penalty_rules'

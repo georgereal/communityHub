@@ -13,49 +13,49 @@ export { postFinanceMongoMutation } from './api.js';
 
 /** Which Mongo packs to reload after a successful mutation. */
 const MUTATION_PACKS = {
-    saveTransaction: ['ledger'],
-    saveLedgerEntry: ['ledger'],
-    deleteTransaction: ['ledger'],
-    deleteLedgerEntry: ['ledger'],
-    deleteTransactions: ['ledger'],
-    bulkUpdateTransactions: ['ledger'],
-    setLedgerExclusion: ['ledger'],
-    returnLedgerTxnToStatement: ['ledger', 'bank'],
-    recalculateLedgerBalances: ['ledger'],
+    saveTransaction: ['ledger', 'ledgerSummary'],
+    saveLedgerEntry: ['ledger', 'ledgerSummary'],
+    deleteTransaction: ['ledger', 'ledgerSummary'],
+    deleteLedgerEntry: ['ledger', 'ledgerSummary'],
+    deleteTransactions: ['ledger', 'ledgerSummary'],
+    bulkUpdateTransactions: ['ledger', 'ledgerSummary'],
+    setLedgerExclusion: ['ledger', 'ledgerSummary'],
+    returnLedgerTxnToStatement: ['ledger', 'bank', 'ledgerSummary'],
+    recalculateLedgerBalances: ['ledger', 'ledgerSummary'],
 
     saveFinanceDocument: ['vouchers', 'voucherAggregates'],
     saveVoucher: ['vouchers', 'voucherAggregates'],
     deleteFinanceDocument: ['vouchers', 'voucherAggregates'],
     deleteVoucher: ['vouchers', 'voucherAggregates'],
     importFinanceDocuments: ['vouchers', 'voucherAggregates'],
-    linkFinanceDocuments: ['vouchers', 'voucherAggregates', 'ledger'],
-    unlinkFinanceDocuments: ['vouchers', 'voucherAggregates', 'ledger'],
+    linkFinanceDocuments: ['vouchers', 'voucherAggregates', 'ledger', 'ledgerSummary'],
+    unlinkFinanceDocuments: ['vouchers', 'voucherAggregates', 'ledger', 'ledgerSummary'],
     syncFinanceDocumentCategories: ['vouchers', 'voucherAggregates'],
 
     setCashFloatFlag: ['ledger', 'voucherAggregates'],
 
     importBankStatement: ['bank'],
-    saveBankOpeningBalance: ['bank'],
+    saveBankOpeningBalance: ['bank', 'ledgerSummary'],
     clearBankStatementData: ['bank'],
     reorderBankStatementLines: ['bank'],
     recalculateBankStatementBalances: ['bank'],
-    unmatchBankLines: ['bank', 'ledger'],
+    unmatchBankLines: ['bank', 'ledger', 'ledgerSummary'],
     deleteBankStatementLines: ['bank'],
-    createTxnsFromBankLines: ['bank', 'ledger', 'boot'],
+    createTxnsFromBankLines: ['bank', 'ledger', 'boot', 'ledgerSummary'],
     matchBankLine: ['bank', 'ledger'],
-    unmatchBankLine: ['bank', 'ledger'],
+    unmatchBankLine: ['bank', 'ledger', 'ledgerSummary'],
     ignoreBankLine: ['bank'],
     updateBankStatementLine: ['bank'],
-    createTxnFromBankLine: ['bank', 'ledger', 'boot'],
-    createLedgerFromBankLineAuto: ['bank', 'ledger', 'boot'],
-    createTxnsFromBankLines: ['bank', 'ledger', 'boot'],
+    createTxnFromBankLine: ['bank', 'ledger', 'boot', 'ledgerSummary'],
+    createLedgerFromBankLineAuto: ['bank', 'ledger', 'boot', 'ledgerSummary'],
+    createTxnsFromBankLines: ['bank', 'ledger', 'boot', 'ledgerSummary'],
 
     // Expense-plan / config mutations return `config` in the response —
     // postFnMutation applies it via applyMongoPacksToClassic, no boot refetch.
-    completeExpensePlanItem: ['ledger'],
-    reopenExpensePlanItem: ['ledger'],
-    linkExpensePlanItem: ['ledger'],
-    setExpensePlanOccurrenceStatus: ['ledger'],
+    completeExpensePlanItem: ['ledger', 'ledgerSummary'],
+    reopenExpensePlanItem: ['ledger', 'ledgerSummary'],
+    linkExpensePlanItem: ['ledger', 'ledgerSummary'],
+    setExpensePlanOccurrenceStatus: ['ledger', 'ledgerSummary'],
     // tableWrite: caller (mongoWrite) reloads the specific table pack
 };
 
@@ -71,6 +71,11 @@ export async function postFnMutation(action, payload = {}) {
     if (!apartment_id) throw new Error('No active apartment selected.');
 
     if (action === 'listFinanceDocuments') {
+        // Pass Excel-style col_* filters + sort through to listVouchers.
+        const passthrough = Object.fromEntries(
+            Object.entries(payload)
+                .filter(([k, v]) => v != null && v !== '' && (k.startsWith('col_') || k === 'sort' || k === 'sort_dir' || k === 'unlinked')),
+        );
         const json = await postFinanceMongo('listVouchers', {
             limit: payload.limit ?? 50,
             offset: payload.offset ?? 0,
@@ -80,6 +85,7 @@ export async function postFnMutation(action, payload = {}) {
             pay: payload.pay || 'all',
             ids: payload.ids || payload.document_ids,
             transaction_ids: payload.transaction_ids || payload.transactionIds,
+            ...passthrough,
         });
         const rows = (json.rows || json.documents || []).map((v) => {
             const { ledgerEntryId, _schema, _remodeledAt, _id, ...rest } = v;

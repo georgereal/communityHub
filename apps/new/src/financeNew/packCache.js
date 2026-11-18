@@ -40,6 +40,7 @@ function snapshotFromState(s) {
         booted: !!s.booted,
         config: s.config,
         counts: s.counts || {},
+        categories: s.categories || [],
         // Do not session-cache large ledger windows — only metadata / first-page skip.
         ledgerEntries: null,
         ledgerLoaded: false,
@@ -71,6 +72,7 @@ function applySnapshot(snap) {
     s.bootApartmentId = snap.bootApartmentId || null;
     s.config = snap.config || null;
     s.counts = snap.counts || {};
+    s.categories = Array.isArray(snap.categories) ? snap.categories : [];
     if (snap.ledgerLoaded && Array.isArray(snap.ledgerEntries)) {
         s.ledgerEntries = snap.ledgerEntries;
         s.ledgerLoaded = true;
@@ -111,6 +113,7 @@ function applySnapshot(snap) {
     applyMongoPacksToClassic({
         config: s.config,
         counts: s.counts,
+        categories: s.categories,
         ledgerEntries: s.ledgerLoaded ? s.ledgerEntries : undefined,
         vouchers: s.vouchersLoaded ? s.vouchers : undefined,
         vouchersTotal: s.vouchersLoaded ? s.vouchersTotal : undefined,

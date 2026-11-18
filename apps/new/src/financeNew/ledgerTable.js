@@ -668,7 +668,11 @@ const renderLedgerRow = (raw, {
         ? `<td class="bank-recon-table__cell bank-recon-table__cell--num bank-recon-table__cell--ocr" title="OCR / statement row sequence">${formatOcrRowDisplay(stmt.line) ?? '—'}</td>`
         : '';
 
-    return `<tr class="bank-recon-table__row ledger-txn-row${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}${passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}" data-txn-id="${t.id}" data-line-type="${lineType}" data-txn-date="${esc(String(t.date || '').slice(0, 10))}">
+    // Same predicate as the wallet button: float-marked or bank petty funding.
+    const isPetty = String(t.wallet || '').toUpperCase() === 'CASH'
+        || t.is_cash_float
+        || (isBankPettyFunding(t) && !t.exclude_from_cash_float);
+    return `<tr class="bank-recon-table__row ledger-txn-row${isDirty(t.id) ? ' ledger-txn-row--dirty' : ''}${passbookMismatch ? ' bank-recon-table__row--mismatch' : ''}${isPetty ? ' ledger-txn-row--petty' : ''}${t.exclude_from_reports ? ' ledger-txn-row--no-reports' : ''}" data-txn-id="${t.id}" data-line-type="${lineType}" data-txn-date="${esc(String(t.date || '').slice(0, 10))}">
       ${visibleColumns.rowOrder ? renderLedgerOrderButtons(t.id, orderMeta) : ''}
       <td class="bank-recon-table__cell bank-recon-table__cell--check">
         <input type="checkbox" class="ledger-row-check" data-txn="${t.id}" aria-label="Select row" />
@@ -709,7 +713,7 @@ const renderLedgerRow = (raw, {
       <td class="bank-recon-table__cell bank-recon-table__cell--actions">
         <div class="bank-recon-row-actions">
           ${receiptBtn}
-          <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn" data-cap="accounts.edit" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
+          <button type="button" class="btn btn-outline btn--small btn--icon ledger-cash-float-btn${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? ' ledger-cash-float-btn--on' : ''}" data-cap="accounts.edit" data-txn="${t.id}" title="${t.is_cash_float ? 'Remove from Petty Cash float buckets' : (t.exclude_from_cash_float ? 'Add back to Petty Cash float buckets' : 'Mark as cash float (Petty Cash funding)')}" aria-label="Cash float">${t.is_cash_float || (isBankPettyFunding(t) && !t.exclude_from_cash_float) ? '<i class="fa-solid fa-wallet" aria-hidden="true"></i>' : '<i class="fa-regular fa-wallet" aria-hidden="true"></i>'}</button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-exclude-btn ${t.exclude_from_reports ? 'ledger-exclude-btn--on' : ''}" data-cap="accounts.edit" data-txn="${t.id}" title="${t.exclude_from_reports ? 'Include back in reports' : 'Omit from reports (stays in ledger + bank balance)'}" aria-label="Toggle report exclusion">${t.exclude_from_reports ? '<i class="fa-solid fa-eye-slash" aria-hidden="true"></i>' : '<i class="fa-solid fa-eye" aria-hidden="true"></i>'}</button>
           <button type="button" class="btn btn-outline btn--small btn--icon ledger-bill-btn" data-cap="accounts.bills_enter" data-txn="${t.id}" title="Bill / receipt — create, link, or edit" aria-label="Bill or receipt"><i class="fa-solid fa-file-invoice" aria-hidden="true"></i></button>
           <button type="button" class="btn btn-outline btn--small btn--icon" data-cap="accounts.edit" onclick="window.editTxn('${t.id}')" title="Edit ledger line" aria-label="Edit"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
@@ -875,10 +879,16 @@ const saveLedgerClassifyRow = async (row) => {
 /** Running balances for Passbook / calc — stored when partial or dirty; live walk only on full clean ledger. */
 function ledgerRunningBalancesForDisplay(txns = null) {
     const s = getFinanceNew();
-    const meta = getLedgerBalanceMeta();
-    if (meta.needsRecalc) return new Map();
-    if (s.ledgerLoadedPartial) return ledgerStoredBalanceById(txns);
-    return ledgerCalculatedBalanceById(txns);
+    // Stored running_balance_after — the API overlays a live recompute when it
+    // is missing or the ledger is flagged needsRecalc, so it stays the fast path.
+    const stored = ledgerStoredBalanceById(txns);
+    if (s.ledgerLoadedPartial) return stored;
+    // Full ledger in memory: live walk wins, stored fills rows the walk skips.
+    const live = ledgerCalculatedBalanceById(txns);
+    for (const [id, bal] of stored) {
+        if (!live.has(id)) live.set(id, bal);
+    }
+    return live;
 }
 
 export const renderEditableLedgerRows = (txns, { formatTxnDetail, getAllAttachmentPaths }) => {

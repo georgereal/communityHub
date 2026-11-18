@@ -12,6 +12,7 @@ function emptyClassicFinances() {
         txns: [],
         vendors: [],
         subCategories: [],
+        extraCategories: [],
         maintenanceInvoices: [],
         maintenanceAllocations: [],
         maintenanceChargeHeads: [],
@@ -149,6 +150,12 @@ export function applyMongoPacksToClassic(packs = {}) {
     f.bankAccount = cfg.bankAccount || null;
     s.admin.bankAccount = f.bankAccount;
     s.ledger.accounts = cfg.chartOfAccounts || [];
+
+    if (Array.isArray(packs.categories)) {
+        f.extraCategories = packs.categories
+            .map((c) => ({ name: c.name, type: c.type === 'IN' ? 'IN' : 'OUT' }))
+            .filter((c) => c.name);
+    }
 
     if (Array.isArray(packs.ledgerEntries)) {
         const mapped = packs.ledgerEntries.map(mapLedgerEntry);

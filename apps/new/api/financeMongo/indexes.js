@@ -35,6 +35,10 @@ export const FINANCE_BANK_IMPORT_INDEXES = [
     { key: { apartment_id: 1, created_at: -1 }, name: 'idx_bank_imports_apt_created' },
 ];
 
+export const FINANCE_CATEGORY_INDEXES = [
+    { key: { apartment_id: 1, type: 1, name: 1 }, name: 'idx_categories_apt_type_name' },
+];
+
 export const FINANCE_VOUCHER_INDEXES = [
     { key: { apartment_id: 1, doc_date: -1, created_at: -1 }, name: 'idx_vouchers_apt_doc_created' },
 ];
@@ -45,5 +49,6 @@ export async function ensureFinanceIndexes(db) {
         createIndexesSafe(db.collection('ledger_entries'), FINANCE_LEDGER_INDEXES),
         createIndexesSafe(db.collection('bank_imports'), FINANCE_BANK_IMPORT_INDEXES),
         createIndexesSafe(db.collection('vouchers'), FINANCE_VOUCHER_INDEXES),
+        createIndexesSafe(db.collection('finance_categories'), FINANCE_CATEGORY_INDEXES),
     ]);
 }

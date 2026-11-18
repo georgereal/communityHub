@@ -56,7 +56,8 @@ function catsFromChart(isIncome) {
         .filter(Boolean);
 }
 
-/** Remember a custom category so dropdowns refresh before/without a round-trip. */
+/** Remember a custom category so dropdowns refresh before/without a round-trip.
+ *  Persists to the finance_categories master list so every page shares it. */
 export const registerCustomCategory = (cat, isIncome = false) => {
     const name = String(cat || '').trim();
     if (!name) return name;
@@ -65,7 +66,12 @@ export const registerCustomCategory = (cat, isIncome = false) => {
     const exists = f.extraCategories.some(
         (c) => c.type === type && String(c.name).toLowerCase() === name.toLowerCase(),
     );
-    if (!exists) f.extraCategories.push({ name, type });
+    if (!exists) {
+        f.extraCategories.push({ name, type });
+        import('./financeNew/mongoWrite.js')
+            .then(({ mongoUpsert }) => mongoUpsert('expense_categories', { name, type }, { rehydrate: false }))
+            .catch(() => { /* master-list sync is best-effort */ });
+    }
     if (portalState.finances && portalState.finances !== f) {
         const existsClassic = portalState.finances.extraCategories.some(
             (c) => c.type === type && String(c.name).toLowerCase() === name.toLowerCase(),
@@ -75,7 +81,8 @@ export const registerCustomCategory = (cat, isIncome = false) => {
     return name;
 };
 
-/** Remember a custom sub-category under a category. */
+/** Remember a custom sub-category under a category.
+ *  Persists via expense_sub_categories (finance_config.subCategories master list). */
 export const registerCustomSubCategory = (catKey, name) => {
     const category = normalizeCategoryKey(catKey) || String(catKey || '').trim();
     const sub = String(name || '').trim();
@@ -86,7 +93,12 @@ export const registerCustomSubCategory = (catKey, name) => {
         (r) => (r.category === category || r.category === catKey)
             && String(r.name).toLowerCase() === sub.toLowerCase(),
     );
-    if (!exists) f.subCategories.push({ category, name: sub });
+    if (!exists) {
+        f.subCategories.push({ category, name: sub });
+        import('./financeNew/mongoWrite.js')
+            .then(({ mongoUpsert }) => mongoUpsert('expense_sub_categories', { category, name: sub }, { rehydrate: false }))
+            .catch(() => { /* master-list sync is best-effort */ });
+    }
     return sub;
 };
 

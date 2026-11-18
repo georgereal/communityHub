@@ -15,6 +15,20 @@ import { refreshCapabilityGates } from '../capUi.js';
 import { can } from '../capabilities.js';
 import { canCrud } from '../rbacMatrix.js';
 import { wireClassifyCombobox, setClassifyInputState } from '../classifyCombobox.js';
+import { wireTaxAmountTable, readTaxAmountTable, fillTaxAmountTable, resetTaxAmountTable } from './taxAmountTable.js';
+
+const oneOffTaxEls = () => ({
+    base: document.getElementById('fn-eplan-item-taxable'),
+    pct: document.getElementById('fn-eplan-item-tax-pct'),
+    tax: document.getElementById('fn-eplan-item-tax-amt'),
+    total: document.getElementById('fn-eplan-item-amount'),
+});
+const recTaxEls = () => ({
+    base: document.getElementById('fn-eplan-rec-taxable'),
+    pct: document.getElementById('fn-eplan-rec-tax-pct'),
+    tax: document.getElementById('fn-eplan-rec-tax-amt'),
+    total: document.getElementById('fn-eplan-rec-amount'),
+});
 
 const formatMoney = (n) =>
   `₹${parseFloat(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -149,6 +163,18 @@ const attachDetailBlock = (attachments) => {
     return `<button type="button" class="fdoc-chip__open eplan-detail-att" data-eplan-detail-att="${i}">${esc(name)}</button>`;
   }).join(' ');
   return `<div class="eplan-dl__block"><dt>Proposals / invoices (${atts.length})</dt><dd class="eplan-detail-atts">${chips}</dd></div>`;
+};
+
+const attachDocsSection = (attachments) => {
+  const atts = Array.isArray(attachments) ? attachments : [];
+  const chips = atts.map((att, i) => {
+    const name = attachmentLabelOf(att, i);
+    return `<button type="button" class="fdoc-chip__open eplan-detail-att" data-eplan-detail-att="${i}">${esc(name)}</button>`;
+  }).join(' ');
+  return `<section class="eplan-detail-docs">
+    <div class="eplan-detail-docs__head"><span>Documents (${atts.length})</span><span class="eplan-detail-docs__hint">from template</span></div>
+    ${atts.length ? `<div class="eplan-detail-atts">${chips}</div>` : '<p class="fa-panel__hint">None attached</p>'}
+  </section>`;
 };
 
 const rowActionsHtml = ({ editAttr, editValue, delAttr, delValue }) => {
@@ -374,6 +400,7 @@ const listOccurrenceDates = ({
   cadence = 'monthly',
   termCount = null,
   maxN = 24,
+  periodDates = null,
 } = {}) => {
   const startIso = String(startDate || todayISO()).slice(0, 10);
   const step = cadenceStepMonths(cadence);
@@ -383,14 +410,16 @@ const listOccurrenceDates = ({
 
   const dates = [];
   for (let i = 0; i < limit; i += 1) {
-    dates.push(i === 0 ? startIso : addMonthsToIso(startIso, i * step));
+    const computed = i === 0 ? startIso : addMonthsToIso(startIso, i * step);
+    const override = Array.isArray(periodDates) ? periodDates[i] : null;
+    dates.push(override ? String(override).slice(0, 10) : computed);
   }
   return dates;
 };
 
-const endDateFromTerm = (startDate, cadence, termCount) => {
+const endDateFromTerm = (startDate, cadence, termCount, periodDates = null) => {
   if (!termCount) return null;
-  const dates = listOccurrenceDates({ startDate, cadence, termCount });
+  const dates = listOccurrenceDates({ startDate, cadence, termCount, periodDates });
   return dates.length ? dates[dates.length - 1] : null;
 };
 
@@ -442,6 +471,7 @@ export const projectRecurringOccurrences = (templates, fromIso, toIso) => {
       startDate: startIso,
       cadence: t.cadence,
       termCount: termCount || 120,
+      periodDates: Array.isArray(t.period_dates) ? t.period_dates : null,
     });
 
     dates.forEach((iso, occIndex) => {
@@ -608,6 +638,7 @@ const closeModal = () => {
   convertFromRecurringId = null;
   window.__eplanEditingPeriodAmounts = [];
   window.__eplanEditingPeriodPercents = [];
+  window.__eplanEditingPeriodDates = [];
   splitScheduleDirty = false;
   resetAttachDraft([]);
 };
@@ -625,6 +656,7 @@ const readOneOffDraft = () => ({
   cat: document.getElementById('fn-eplan-item-cat')?.value?.trim() || 'Other',
   vendor_name: document.getElementById('fn-eplan-item-vendor')?.value?.trim() || '',
   amount: parseFloat(document.getElementById('fn-eplan-item-amount')?.value || '') || 0,
+  ...readTaxAmountTable(oneOffTaxEls()),
   plan_date: document.getElementById('fn-eplan-item-date')?.value || todayISO(),
   due_date: document.getElementById('fn-eplan-item-due')?.value
     || document.getElementById('fn-eplan-item-date')?.value
@@ -646,6 +678,7 @@ const readRecurringDraft = () => {
     cat: document.getElementById('fn-eplan-rec-cat')?.value?.trim() || 'Other',
     vendor_name: '',
     amount,
+    ...readTaxAmountTable(recTaxEls()),
     plan_date: planDate,
     due_date: dueDate,
     start_date: start,
@@ -737,7 +770,6 @@ const convertRecurringFormToOneOff = () => {
 const fillOneOffForm = (item) => {
   const dateEl = document.getElementById('fn-eplan-item-date');
   const dueEl = document.getElementById('fn-eplan-item-due');
-  const amt = document.getElementById('fn-eplan-item-amount');
   const desc = document.getElementById('fn-eplan-item-desc');
   const vendor = document.getElementById('fn-eplan-item-vendor');
   const cat = document.getElementById('fn-eplan-item-cat');
@@ -749,7 +781,11 @@ const fillOneOffForm = (item) => {
     if (item) dueEl.dataset.touched = '1';
     else delete dueEl.dataset.touched;
   }
-  if (amt) amt.value = item?.amount != null ? String(item.amount) : '';
+  if (item?.amount != null || item?.taxable_amount != null || item?.tax_percent != null) {
+    fillTaxAmountTable(oneOffTaxEls(), item);
+  } else {
+    resetTaxAmountTable(oneOffTaxEls());
+  }
   if (desc) desc.value = item?.description || item?.title || '';
   if (vendor) vendor.value = item?.vendor_name || '';
   if (cat) {
@@ -786,6 +822,14 @@ const collectManualPeriodAmounts = () => {
   return inputs.map((el) => round2(parseFloat(el.value) || 0));
 };
 
+/** Per-row date overrides — index-aligned; null keeps the computed cadence date. */
+const collectManualPeriodDates = () =>
+  [...document.querySelectorAll('#fn-eplan-rec-periods-list [data-eplan-period-date]')]
+    .map((el) => {
+      const v = String(el.value || '').slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(v) && el.dataset.overridden === '1' ? v : null;
+    });
+
 const refreshRecurringAmountUi = () => {
   const mode = document.getElementById('fn-eplan-rec-amount-mode')?.value || 'per_period';
   const label = document.getElementById('fn-eplan-rec-amount-label');
@@ -795,21 +839,21 @@ const refreshRecurringAmountUi = () => {
   const meta = readRecurringFormMeta();
 
   if (label) {
-    if (mode === 'total_split' || mode === 'percent_split') label.textContent = 'Lump sum (total)';
-    else if (mode === 'manual') label.textContent = 'Reference amount (optional)';
-    else label.textContent = 'Amount each period';
+    label.textContent = !meta.term_count && mode === 'per_period'
+      ? 'Amount each period — fill any two, the rest compute'
+      : 'Total amount — fill any two, the rest compute';
   }
-  if (amountWrap) amountWrap.hidden = mode === 'manual';
+  if (amountWrap) amountWrap.hidden = false;
 
   const needsTerm = mode === 'total_split' || mode === 'percent_split' || mode === 'manual';
   if (hint) {
     if (needsTerm && !meta.term_count) {
       hint.hidden = false;
       hint.textContent = 'Set Term (periods) so the lump sum can be split across the schedule.';
-    } else if (mode === 'total_split' && meta.term_count && meta.amountInput != null && !splitScheduleDirty) {
+    } else if (meta.term_count && meta.amountInput != null && !splitScheduleDirty && mode !== 'percent_split') {
       const each = splitEqualAmounts(meta.amountInput, meta.term_count);
       hint.hidden = false;
-      hint.textContent = `Equal split · ${meta.term_count} periods · edit any period below`
+      hint.textContent = `Equal split · ${meta.term_count} periods · edit any row below`
         + (each.some((a) => a !== each[0]) ? ` (last balances to ${formatMoney(each[each.length - 1])})` : ` · ${formatMoney(each[0])} each`);
     } else if (mode === 'percent_split' && meta.term_count && meta.amountInput != null) {
       hint.hidden = false;
@@ -837,22 +881,60 @@ const refreshRecurringAmountUi = () => {
   }
 };
 
+const updatePeriodSumFooter = () => {
+  const sumEl = document.getElementById('fn-eplan-rec-periods-total');
+  const headEl = document.getElementById('fn-eplan-rec-periods-sum');
+  const meta = readRecurringFormMeta();
+  const vals = collectManualPeriodAmounts();
+  const rowSum = round2(vals.reduce((s, a) => s + a, 0));
+  const target = meta.amountInput != null ? round2(meta.amountInput) : null;
+  const delta = target != null ? round2(rowSum - target) : 0;
+  const pctMode = meta.amount_mode === 'percent_split';
+  const pcts = pctMode ? collectManualPeriodPercents() : null;
+  const pctSum = pcts ? round2(pcts.reduce((s, p) => s + p, 0)) : null;
+
+  let text = `${formatMoney(rowSum)}`;
+  if (target != null && Math.abs(delta) > 0.004) {
+    text += ` · Δ ${delta > 0 ? '+' : ''}${formatMoney(delta)} vs total`;
+  }
+  if (pctSum != null) {
+    const pctOk = Math.abs(pctSum - 100) < 0.05;
+    text += ` · ${pctSum}%${pctOk ? '' : ' (should be 100%)'}`;
+  }
+  if (sumEl) {
+    sumEl.textContent = text;
+    sumEl.classList.toggle('eplan-rec-periods__total--mismatch', Math.abs(delta) > 0.004 && target != null);
+  }
+  if (headEl) {
+    headEl.textContent = target != null
+      ? `${formatMoney(rowSum)} of ${formatMoney(target)}`
+      : `Sum ${formatMoney(rowSum)}`;
+  }
+};
+
 const renderPeriodSchedule = () => {
   const list = document.getElementById('fn-eplan-rec-periods-list');
-  const sumEl = document.getElementById('fn-eplan-rec-periods-sum');
+  const table = list?.closest('#fn-eplan-rec-periods');
+  const headEl = document.getElementById('fn-eplan-rec-periods-sum');
   if (!list) return;
   const meta = readRecurringFormMeta();
   if (!meta.term_count) {
     list.innerHTML = '';
-    if (sumEl) sumEl.textContent = '';
+    const totalEl = document.getElementById('fn-eplan-rec-periods-total');
+    if (totalEl) totalEl.textContent = '';
+    if (headEl) headEl.textContent = '';
     return;
   }
 
-  const dates = listOccurrenceDates({
+  const computedDates = listOccurrenceDates({
     startDate: meta.start_date,
     cadence: meta.cadence,
     termCount: meta.term_count,
   });
+  const savedDates = Array.isArray(window.__eplanEditingPeriodDates)
+    ? window.__eplanEditingPeriodDates
+    : [];
+  const dates = computedDates.map((iso, i) => savedDates[i] || iso);
 
   const mode = meta.amount_mode;
   const existingManual = collectManualPeriodAmounts();
@@ -872,110 +954,74 @@ const renderPeriodSchedule = () => {
     const total = meta.amountInput != null ? meta.amountInput : 0;
     amounts = splitByPercents(total, percents);
     window.__eplanEditingPeriodAmounts = amounts.slice();
-  } else if (mode === 'total_split') {
+  } else {
     if (splitScheduleDirty && existingManual.length === dates.length) {
       amounts = existingManual;
-    } else if (splitScheduleDirty && window.__eplanEditingPeriodAmounts?.length === dates.length) {
-      amounts = dates.map((_, i) => round2(window.__eplanEditingPeriodAmounts[i] ?? 0));
+    } else if (window.__eplanEditingPeriodAmounts?.length === dates.length) {
+      amounts = window.__eplanEditingPeriodAmounts.map((v) => round2(v));
     } else if (meta.amountInput != null) {
       amounts = splitEqualAmounts(meta.amountInput, dates.length);
     } else {
       amounts = dates.map(() => 0);
     }
     window.__eplanEditingPeriodAmounts = amounts.slice();
-  } else if (mode === 'manual') {
-    if (existingManual.length === dates.length) {
-      amounts = existingManual;
-    } else if (window.__eplanEditingPeriodAmounts?.length) {
-      amounts = dates.map((_, i) => round2(window.__eplanEditingPeriodAmounts[i] ?? 0));
-    } else if (meta.amountInput != null) {
-      amounts = splitEqualAmounts(meta.amountInput, dates.length);
-    } else {
-      amounts = dates.map(() => 0);
-    }
-    window.__eplanEditingPeriodAmounts = amounts.slice();
-  } else {
-    const each = meta.amountInput != null ? round2(meta.amountInput) : 0;
-    amounts = dates.map(() => each);
   }
 
-  const editableAmt = mode === 'manual' || mode === 'total_split';
   const editablePct = mode === 'percent_split';
-  list.innerHTML = dates.map((iso, i) => `
-    <div class="eplan-rec-period-row">
-      <span class="eplan-rec-period-row__idx">#${i + 1}</span>
-      <span class="eplan-rec-period-row__date">${esc(fmtDate(iso))}</span>
+  table?.querySelectorAll('[data-eplan-pct-col]').forEach((el) => { el.hidden = !editablePct; });
+
+  list.innerHTML = dates.map((iso, i) => {
+    const overridden = savedDates[i] && savedDates[i] !== computedDates[i];
+    return `<tr class="eplan-rec-period-row${overridden ? ' eplan-rec-period-row--date-override' : ''}">
+      <td class="eplan-rec-period-row__idx">#${i + 1}</td>
+      <td><input type="date" class="expense-combobox eplan-rec-period-row__date" data-eplan-period-date="${i}" value="${esc(iso)}"${overridden ? ' data-overridden="1"' : ''} /></td>
       ${editablePct
-        ? `<label class="eplan-rec-period-row__pct"><input type="number" class="expense-combobox" data-eplan-period-pct="${i}" step="0.01" min="0" max="100" value="${percents[i]}" />%</label>
-           <span class="eplan-rec-period-row__amt cash-float-amt">${formatMoney(amounts[i])}</span>`
-        : (editableAmt
-          ? `<input type="number" class="expense-combobox eplan-rec-period-row__amt" data-eplan-period-amt="${i}" step="1" min="0" value="${amounts[i]}" />`
-          : `<span class="eplan-rec-period-row__amt cash-float-amt">${formatMoney(amounts[i])}</span>`)}
-    </div>`).join('');
+        ? `<td><label class="eplan-rec-period-row__pct"><input type="number" class="expense-combobox" data-eplan-period-pct="${i}" step="0.01" min="0" max="100" value="${percents[i]}" />%</label></td>`
+        : ''}
+      <td><input type="number" class="expense-combobox eplan-rec-period-row__amt" data-eplan-period-amt="${i}" step="0.01" min="0" value="${amounts[i]}" /></td>
+    </tr>`;
+  }).join('');
 
-  const total = round2(amounts.reduce((s, a) => s + a, 0));
-  const pctSum = percents ? round2(percents.reduce((s, p) => s + p, 0)) : null;
-  if (sumEl) {
-    if (mode === 'percent_split') {
-      const pctOk = Math.abs((pctSum || 0) - 100) < 0.05;
-      sumEl.textContent = `Sum ${formatMoney(total)} · ${pctSum}%${pctOk ? '' : ' (should be 100%)'}`;
-    } else if (mode === 'total_split' && meta.amountInput != null) {
-      const delta = round2(total - meta.amountInput);
-      sumEl.textContent = delta === 0
-        ? `Sum ${formatMoney(total)}`
-        : `Sum ${formatMoney(total)} (${delta > 0 ? '+' : ''}${formatMoney(delta)} vs lump sum)`;
-    } else {
-      sumEl.textContent = `Sum ${formatMoney(total)}`;
-    }
-  }
+  updatePeriodSumFooter();
 
-  if (editableAmt) {
-    list.querySelectorAll('[data-eplan-period-amt]').forEach((input) => {
-      input.addEventListener('input', () => {
-        splitScheduleDirty = true;
-        const vals = collectManualPeriodAmounts();
-        window.__eplanEditingPeriodAmounts = vals;
-        if (sumEl) {
-          const t = round2(vals.reduce((s, a) => s + a, 0));
-          if (mode === 'total_split' && meta.amountInput != null) {
-            const delta = round2(t - meta.amountInput);
-            sumEl.textContent = delta === 0
-              ? `Sum ${formatMoney(t)}`
-              : `Sum ${formatMoney(t)} (${delta > 0 ? '+' : ''}${formatMoney(delta)} vs lump sum)`;
-          } else {
-            sumEl.textContent = `Sum ${formatMoney(t)}`;
-          }
-        }
-      });
+  list.querySelectorAll('[data-eplan-period-date]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const v = String(input.value || '').slice(0, 10);
+      const idx = Number(input.dataset.eplanPeriodDate);
+      const computed = computedDates[idx];
+      input.dataset.overridden = v && v !== computed ? '1' : '';
+      input.closest('.eplan-rec-period-row')?.classList
+        .toggle('eplan-rec-period-row--date-override', !!input.dataset.overridden);
+      window.__eplanEditingPeriodDates = collectManualPeriodDates();
     });
-  }
-  if (editablePct) {
-    list.querySelectorAll('[data-eplan-period-pct]').forEach((input) => {
-      input.addEventListener('input', () => {
-        splitScheduleDirty = true;
-        const pcts = collectManualPeriodPercents();
-        window.__eplanEditingPeriodPercents = pcts;
-        const amts = splitByPercents(meta.amountInput != null ? meta.amountInput : 0, pcts);
-        window.__eplanEditingPeriodAmounts = amts;
-        list.querySelectorAll('.eplan-rec-period-row').forEach((row, i) => {
-          const amtEl = row.querySelector('.eplan-rec-period-row__amt');
-          if (amtEl) amtEl.textContent = formatMoney(amts[i] || 0);
-        });
-        if (sumEl) {
-          const t = round2(amts.reduce((s, a) => s + a, 0));
-          const ps = round2(pcts.reduce((s, p) => s + p, 0));
-          const pctOk = Math.abs(ps - 100) < 0.05;
-          sumEl.textContent = `Sum ${formatMoney(t)} · ${ps}%${pctOk ? '' : ' (should be 100%)'}`;
-        }
-      });
+  });
+
+  list.querySelectorAll('[data-eplan-period-amt]').forEach((input) => {
+    input.addEventListener('input', () => {
+      splitScheduleDirty = true;
+      window.__eplanEditingPeriodAmounts = collectManualPeriodAmounts();
+      updatePeriodSumFooter();
     });
-  }
+  });
+
+  list.querySelectorAll('[data-eplan-period-pct]').forEach((input) => {
+    input.addEventListener('input', () => {
+      splitScheduleDirty = true;
+      const pcts = collectManualPeriodPercents();
+      window.__eplanEditingPeriodPercents = pcts;
+      const amts = splitByPercents(meta.amountInput != null ? meta.amountInput : 0, pcts);
+      window.__eplanEditingPeriodAmounts = amts;
+      list.querySelectorAll('[data-eplan-period-amt]').forEach((amtInput, i) => {
+        amtInput.value = amts[i] != null ? String(amts[i]) : '';
+      });
+      updatePeriodSumFooter();
+    });
+  });
 };
 
 const fillRecurringForm = (t) => {
   const startEl = document.getElementById('fn-eplan-rec-start');
   const titleEl = document.getElementById('fn-eplan-rec-title');
-  const amt = document.getElementById('fn-eplan-rec-amount');
   const day = document.getElementById('fn-eplan-rec-day');
   const dueDay = document.getElementById('fn-eplan-rec-due-day');
   const cadence = document.getElementById('fn-eplan-rec-cadence');
@@ -988,6 +1034,7 @@ const fillRecurringForm = (t) => {
   const periodPercents = parsePeriodPercents(t?.period_percents) || [];
   window.__eplanEditingPeriodAmounts = periodAmounts.slice();
   window.__eplanEditingPeriodPercents = periodPercents.slice();
+  window.__eplanEditingPeriodDates = Array.isArray(t?.period_dates) ? t.period_dates.slice() : [];
   // Preserve saved custom splits when editing; otherwise recompute from lump sum.
   splitScheduleDirty = Boolean(
     (mode === 'total_split' || mode === 'percent_split' || mode === 'manual')
@@ -1000,11 +1047,16 @@ const fillRecurringForm = (t) => {
     const known = ['per_period', 'total_split', 'percent_split', 'manual'];
     modeEl.value = known.includes(mode) ? mode : 'per_period';
   }
-  if (amt) {
-    if ((mode === 'total_split' || mode === 'percent_split') && t?.total_amount != null) {
-      amt.value = String(t.total_amount);
-    } else if (t?.amount != null) amt.value = String(t.amount);
-    else amt.value = '';
+  // Total field is the lump sum: prefer total_amount; derive from per-period
+  // amount × term for legacy per_period templates.
+  const termN = parseInt(t?.term_count, 10) || null;
+  const recAmountValue = t?.total_amount != null
+    ? t.total_amount
+    : (t?.amount != null && termN ? round2(Number(t.amount) * termN) : t?.amount);
+  if (t) {
+    fillTaxAmountTable(recTaxEls(), { ...t, amount: recAmountValue });
+  } else {
+    resetTaxAmountTable(recTaxEls());
   }
   if (day) day.value = String(t?.day_of_month ?? 1);
   if (dueDay) {
@@ -1623,22 +1675,91 @@ const showDetail = async (row) => {
     await fetchBillById(financeDocId);
   }
 
+  const occIndex = row.occ_index != null ? Number(row.occ_index) + 1 : null;
+  const termN = row.term_count ?? tmpl?.term_count ?? null;
+  const tmplTotal = tmpl?.total_amount != null ? Number(tmpl.total_amount)
+    : (termN != null ? round2((parseFloat(tmpl?.amount) || 0) * termN) : null);
+  const installmentLabel = occIndex != null && termN
+    ? `Installment ${occIndex} of ${termN}`
+    : (occIndex != null ? `Installment ${occIndex}` : 'Recurring');
+  const totalLabel = tmplTotal != null ? ` of ${formatMoney(tmplTotal)} total` : '';
+  const cadenceLabel = `${esc(row.cadence || tmpl?.cadence || '—')} · day ${esc(row.day_of_month ?? tmpl?.day_of_month ?? '—')} · due ${esc(row.due_day_of_month ?? tmpl?.due_day_of_month ?? row.day_of_month ?? '—')}`;
+  const statusLabel = done ? 'Done' : (rowIsOverdue(row) ? 'Overdue' : 'Open');
+  const statusCls = done ? 'eplan-badge--done' : (rowIsOverdue(row) ? 'eplan-badge--overdue' : 'eplan-badge--open');
+
+  // Installment list — all periods for term'd templates; window around the
+  // current index for ongoing templates.
+  const completedSet = new Set(
+    (Array.isArray(tmpl?.completed_dates) ? tmpl.completed_dates : [])
+      .map((d) => String(d).slice(0, 10)),
+  );
+  const links = tmpl?.occurrence_links && typeof tmpl.occurrence_links === 'object' ? tmpl.occurrence_links : {};
+  const docLinks = tmpl?.occurrence_finance_docs && typeof tmpl.occurrence_finance_docs === 'object' ? tmpl.occurrence_finance_docs : {};
+  const occAmounts = tmpl?.occurrence_amounts && typeof tmpl.occurrence_amounts === 'object' ? tmpl.occurrence_amounts : {};
+  const periodAmountsArr = parsePeriodAmounts(tmpl?.period_amounts) || [];
+  const allDates = tmpl
+    ? listOccurrenceDates({
+      startDate: String(tmpl.start_date || '').slice(0, 10),
+      cadence: tmpl.cadence,
+      termCount: termN || 120,
+      periodDates: Array.isArray(tmpl.period_dates) ? tmpl.period_dates : null,
+    })
+    : [];
+  let instIdxs = allDates.map((_, i) => i);
+  if (!termN && occIndex != null && instIdxs.length > 5) {
+    const cur = occIndex - 1;
+    instIdxs = instIdxs.slice(Math.max(0, cur - 2), cur + 3);
+  } else if (instIdxs.length > 24) {
+    const cur = occIndex != null ? occIndex - 1 : 0;
+    instIdxs = instIdxs.slice(Math.max(0, cur - 2), cur + 22);
+  }
+  const todayIso = todayISO();
+  const instRows = instIdxs.map((i) => {
+    const iso = allDates[i];
+    const amt = occAmounts[iso] != null
+      ? round2(occAmounts[iso])
+      : (periodAmountsArr[i] != null ? periodAmountsArr[i]
+        : round2(parseFloat(tmpl?.amount) || 0));
+    const isDone = completedSet.has(iso);
+    const isCurrent = iso === String(row.plan_date).slice(0, 10);
+    const overdue = !isDone && iso < todayIso;
+    const status = isDone ? 'Done' : (overdue ? 'Overdue' : 'Open');
+    const chips = [
+      links[iso] ? 'linked' : '',
+      docLinks[iso] ? 'doc' : '',
+    ].filter(Boolean);
+    return `<tr class="eplan-inst-row${isCurrent ? ' eplan-inst-row--current' : ''}${isDone ? ' eplan-inst-row--done' : ''}">
+      <td class="eplan-inst-row__idx">#${i + 1}</td>
+      <td class="eplan-inst-row__date">${esc(fmtDate(iso))}</td>
+      <td class="eplan-inst-row__amt">${formatMoney(amt)}</td>
+      <td class="eplan-inst-row__status">${isDone ? '✓ ' : ''}${status}${chips.length ? ` · ${chips.join(' · ')}` : ''}</td>
+    </tr>`;
+  }).join('');
+
   openDetailModal(row.title || 'Recurring');
   body.innerHTML = `
-    <p class="eplan-detail__title">${esc(row.title || 'Recurring')}</p>
-    <dl class="eplan-dl">
-      <div class="eplan-dl__block"><dt>What’s it for</dt><dd>${esc(row.title || row.description || '—')}</dd></div>
-      <div class="eplan-dl__block"><dt>Category</dt><dd>${esc(categoryDisplayLabel(row.cat) || row.cat || '—')}</dd></div>
-      <div class="eplan-dl__block"><dt>Amount</dt><dd>${formatMoney(row.amount)}</dd></div>
+    <div class="eplan-inst-head">
+      <div class="eplan-inst-head__meta">
+        <p class="eplan-detail__title">${esc(row.title || 'Recurring')}</p>
+        <p class="eplan-inst-head__sub">Recurring · ${cadenceLabel} · ${esc(categoryDisplayLabel(row.cat) || row.cat || '—')}</p>
+      </div>
+      <span class="eplan-badge ${statusCls}">${statusLabel}</span>
+    </div>
+    <div class="eplan-inst-strip">
+      <span class="eplan-inst-strip__tag">${esc(installmentLabel)}</span>
+      <span class="eplan-inst-strip__amt">${formatMoney(row.amount)}${esc(totalLabel)}</span>
+    </div>
+    <table class="eplan-inst-list">
+      <thead><tr><th>#</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody>${instRows}</tbody>
+    </table>
+    ${attachDocsSection(attachmentsOf(tmpl))}
+    <dl class="eplan-dl eplan-dl--meta-only">
       ${linkedLedgerBlock(txnId)}
       ${linkedFinanceDocBlock(financeDocId)}
-      ${attachDetailBlock(attachmentsOf(tmpl))}
       <div class="eplan-dl__meta">
-        <div><dt>Type</dt><dd>Recurring</dd></div>
-        <div><dt>Status</dt><dd>${done ? 'Done' : (rowIsOverdue(row) ? 'Open · overdue' : 'Open')}</dd></div>
         <div><dt>Planned for</dt><dd>${esc(fmtDate(row.plan_date))}</dd></div>
         <div><dt>Due by</dt><dd>${esc(fmtDate(row.due_date || row.plan_date))}</dd></div>
-        <div><dt>Cadence</dt><dd>${esc(row.cadence || tmpl?.cadence || '—')} · day ${esc(row.day_of_month ?? tmpl?.day_of_month ?? '—')} · due ${esc(row.due_day_of_month ?? tmpl?.due_day_of_month ?? row.day_of_month ?? '—')}</dd></div>
         <div><dt>Starts</dt><dd>${esc(fmtDate(row.start_date || tmpl?.start_date))}</dd></div>
         <div><dt>Ends</dt><dd>${esc(row.end_date || tmpl?.end_date ? fmtDate(row.end_date || tmpl.end_date) : 'Ongoing')}</dd></div>
       </div>
@@ -2212,6 +2333,7 @@ const saveOneOff = async () => {
     plan_date,
     due_date,
     amount,
+    ...readTaxAmountTable(oneOffTaxEls()),
     cat,
     description,
     vendor_name,
@@ -2269,83 +2391,83 @@ const saveRecurring = async () => {
   const amountInput = parseFloat(document.getElementById('fn-eplan-rec-amount')?.value || '');
 
   if (!title) throw new Error('Title is required.');
-  if (amount_mode === 'total_split' || amount_mode === 'percent_split' || amount_mode === 'manual') {
-    if (!term_count) throw new Error('Set Term (periods) for lump-sum or manual amounts.');
+  if (!term_count && amount_mode !== 'per_period') {
+    throw new Error('Set Term (periods) for lump-sum or manual amounts.');
   }
 
   let amount = 0;
   let total_amount = null;
   let period_amounts = null;
   let period_percents = null;
+  let period_dates = null;
 
-  if (amount_mode === 'per_period') {
-    if (!Number.isFinite(amountInput)) throw new Error('Amount each period is required.');
-    amount = amountInput;
-    if (term_count) {
-      period_amounts = Array.from({ length: term_count }, () => round2(amount));
-      total_amount = round2(amount * term_count);
+  if (!term_count) {
+    // Ongoing — the Total field is the per-period amount (nothing to split).
+    if (!Number.isFinite(amountInput) || amountInput <= 0) {
+      throw new Error('Amount each period is required.');
     }
-  } else if (amount_mode === 'total_split') {
-    if (!Number.isFinite(amountInput) || amountInput < 0) throw new Error('Lump sum amount is required.');
-    total_amount = amountInput;
-    period_amounts = collectManualPeriodAmounts();
-    if (period_amounts.length !== term_count) {
-      renderPeriodSchedule();
-      period_amounts = collectManualPeriodAmounts();
-    }
-    if (period_amounts.length !== term_count) {
-      period_amounts = splitEqualAmounts(amountInput, term_count);
-    }
-    amount = period_amounts[0] || 0;
-  } else if (amount_mode === 'percent_split') {
-    if (!Number.isFinite(amountInput) || amountInput < 0) throw new Error('Lump sum amount is required.');
-    total_amount = amountInput;
-    period_percents = collectManualPeriodPercents();
-    if (period_percents.length !== term_count) {
-      renderPeriodSchedule();
-      period_percents = collectManualPeriodPercents();
-    }
-    if (period_percents.length !== term_count) {
-      period_percents = equalPercents(term_count);
-    }
-    const pctSum = round2(period_percents.reduce((s, p) => s + p, 0));
-    if (Math.abs(pctSum - 100) > 0.05) {
-      throw new Error(`Percent weights must total 100% (currently ${pctSum}%).`);
-    }
-    period_amounts = splitByPercents(amountInput, period_percents);
-    amount = period_amounts[0] || 0;
+    amount = round2(amountInput);
   } else {
-    period_amounts = collectManualPeriodAmounts();
-    if (period_amounts.length !== term_count) {
-      // rebuild from schedule if list empty
-      renderPeriodSchedule();
+    // Term'd — the Total field is the lump sum; rows distribute it.
+    if (!Number.isFinite(amountInput) || amountInput <= 0) {
+      throw new Error('Total amount is required.');
+    }
+    total_amount = round2(amountInput);
+
+    // Ensure the schedule reflects current inputs before collecting.
+    renderPeriodSchedule();
+    if (amount_mode === 'percent_split') {
+      period_percents = collectManualPeriodPercents();
+      if (period_percents.length !== term_count) period_percents = equalPercents(term_count);
+      const pctSum = round2(period_percents.reduce((s, p) => s + p, 0));
+      if (Math.abs(pctSum - 100) > 0.05) {
+        throw new Error(`Percent weights must total 100% (currently ${pctSum}%).`);
+      }
+      period_amounts = splitByPercents(total_amount, period_percents);
+    } else {
       period_amounts = collectManualPeriodAmounts();
+      if (period_amounts.length !== term_count) {
+        period_amounts = splitEqualAmounts(total_amount, term_count);
+      }
     }
-    if (period_amounts.length !== term_count) {
-      throw new Error('Enter an amount for each period.');
+    const rowSum = round2(period_amounts.reduce((s, a) => s + a, 0));
+    const delta = round2(rowSum - total_amount);
+    if (Math.abs(delta) > 0.05) {
+      throw new Error(
+        `Period amounts add up to ${formatMoney(rowSum)} — ${delta > 0 ? 'over' : 'short of'} the ${formatMoney(total_amount)} total by ${formatMoney(Math.abs(delta))}. Adjust the rows or the total.`,
+      );
     }
-    total_amount = round2(period_amounts.reduce((s, a) => s + a, 0));
+    // Reconcile rounding drift into the last row so the stored split sums exactly.
+    if (delta !== 0) {
+      period_amounts[period_amounts.length - 1] = round2(period_amounts[period_amounts.length - 1] - delta);
+    }
     amount = period_amounts[0] || 0;
+
+    const dateOverrides = collectManualPeriodDates();
+    period_dates = dateOverrides.some(Boolean) ? dateOverrides : null;
   }
 
   const end_date = term_count
-    ? endDateFromTerm(start_date, cadence, term_count)
+    ? endDateFromTerm(start_date, cadence, term_count, period_dates)
     : null;
 
   const existing = editingRecurringId
     ? getRecurring().find((x) => x.id === editingRecurringId)
     : null;
 
+  const { amount: _recTotalInput, ...recTax } = readTaxAmountTable(recTaxEls());
   const result = await postFnMutation('saveExpensePlanRecurring', {
     apartment_id: apt,
     ...(editingRecurringId ? { id: editingRecurringId } : {}),
     title,
     amount,
+    ...recTax,
     total_amount,
     amount_mode,
     term_count,
     period_amounts,
     period_percents,
+    period_dates,
     completed_dates: existing?.completed_dates || [],
     occurrence_links: existing?.occurrence_links || {},
     cadence,
@@ -2400,6 +2522,9 @@ export const initExpensePlanPage = () => {
     getOptions: catOptionsList,
   });
 
+  wireTaxAmountTable(oneOffTaxEls());
+  wireTaxAmountTable(recTaxEls());
+
   // Keep due day in sync with on-day as a default when user hasn't touched due day.
   document.getElementById('fn-eplan-rec-day')?.addEventListener('input', (e) => {
     const due = document.getElementById('fn-eplan-rec-due-day');
@@ -2429,6 +2554,9 @@ export const initExpensePlanPage = () => {
           splitScheduleDirty = false;
           window.__eplanEditingPeriodAmounts = [];
           window.__eplanEditingPeriodPercents = [];
+        }
+        if (id === 'fn-eplan-rec-term' || id === 'fn-eplan-rec-start' || id === 'fn-eplan-rec-cadence' || id === 'fn-eplan-rec-amount-mode') {
+          window.__eplanEditingPeriodDates = [];
         }
         refreshRecurringAmountUi();
       });
