@@ -89,8 +89,9 @@ ssh -i "$KEY" "$HOST" 'systemctl restart communityhub'
 # Download remote env (keep private)
 scp -i "$KEY" "$HOST:/etc/communityhub.env" ./communityhub.env.from-vm
 
-# Download Caddyfile
+# Download Caddy root + CommunityHub site fragment
 scp -i "$KEY" "$HOST:/etc/caddy/Caddyfile" ./Caddyfile.from-vm
+scp -i "$KEY" "$HOST:/etc/caddy/sites/communityhub.caddy" ./communityhub.caddy.from-vm
 
 # Download a slice of journal to a file
 ssh -i "$KEY" "$HOST" 'journalctl -u communityhub -n 200 --no-pager' > ./communityhub.journal.txt
@@ -169,11 +170,12 @@ ssh -i "$KEY" "$HOST" 'systemctl reload caddy'    # Caddyfile change
 ssh -i "$KEY" "$HOST" 'systemctl restart caddy'   # if reload fails
 ```
 
-Re-apply HTTPS Caddyfile after editing templates:
+Re-apply the HTTPS site fragment after editing templates (safe on the shared Caddy
+host — only touches `/etc/caddy/sites/communityhub.caddy` and the root import line):
 
 ```bash
 ssh -i "$KEY" "$HOST" \
-  'DOMAIN=communityhub.evolyx.in bash ~/communityhub-deploy/setup-remote.sh'
+  'DOMAIN=communityhub.evolyx.in SKIP_PACKAGES=1 bash ~/communityhub-deploy/setup-remote.sh'
 ```
 
 ---
@@ -273,5 +275,6 @@ ssh -i "$KEY" "$HOST" 'ufw status verbose'
 | Login never hits API | Firebase **Authorized domains** includes `communityhub.evolyx.in` |
 | Deploy SSH fail | Key / host in `hetzner.deploy.env` |
 | Secrets not applied | Confirm `/etc/communityhub.env` + `systemctl restart communityhub` |
-| HTTPS broken | `journalctl -u caddy -n 80`; DNS A still `2.31.20.217`; ports 80/443 open |
+| HTTPS broken | `journalctl -u caddy -n 80`; `ls /etc/caddy/sites/` has `communityhub.caddy`; DNS A still `2.31.20.217`; ports 80/443 open |
+| Other apps’ TLS broke after our deploy | `/etc/caddy/Caddyfile` must only `import /etc/caddy/sites/*.caddy`; never replace the whole root |
 | Disk full | `df -h /` — clear old logs if needed: `journalctl --vacuum-time=7d` |

@@ -3,9 +3,14 @@
 Production host for the long-running Node server (replaces Vercel serverless for this stack).
 
 ```
-Internet → Caddy (:443 HTTPS, auto Let’s Encrypt)
+Internet → Caddy (:443 HTTPS, auto Let’s Encrypt — shared host, per-app site fragments)
          → Node 127.0.0.1:3000  (/api/* + dist/)
 ```
+
+> **Shared Caddy host:** this VM also serves other apps (notebook, tripplanner, …).
+> CommunityHub does **not** own `/etc/caddy/Caddyfile`. The root file only does
+> `import /etc/caddy/sites/*.caddy`; this app manages just its own fragment,
+> `/etc/caddy/sites/communityhub.caddy`. Never copy a full Caddyfile over the root.
 
 | Item | Value |
 | --- | --- |
@@ -56,9 +61,13 @@ npm run bootstrap:hetzner
 # DOMAIN=communityhub.evolyx.in SKIP_DEPLOY=1 npm run bootstrap:hetzner
 ```
 
-This installs Node 22, Caddy, creates `/opt/communityhub`, systemd unit `communityhub.service`, and an initial Caddyfile.
+This installs Node 22, Caddy, creates `/opt/communityhub`, systemd unit `communityhub.service`, and a Caddy **site fragment** (`/etc/caddy/sites/communityhub.caddy`) imported by the shared root Caddyfile.
 
-**IP-first path we used:** bootstrap with **no** `DOMAIN` → HTTP on `:80` → smoke-test → then DNS + HTTPS.
+`setup-remote.sh` supports two layouts via `CADDY_LAYOUT`:
+- `shared` (default) — per-app fragment under `/etc/caddy/sites/`; preserves other apps’ configs.
+- `standalone` — rewrites `/etc/caddy/Caddyfile` entirely; only for single-app hosts.
+
+**IP-first path (single-app hosts only):** `CADDY_LAYOUT=standalone` with **no** `DOMAIN` → HTTP on `:80` → smoke-test → then DNS + HTTPS.
 
 ### 1.4 Secrets
 
@@ -96,12 +105,15 @@ At your DNS host for `evolyx.in`:
 
 ```bash
 ssh -i ~/.ssh/id_ed25519_hetzner root@2.31.20.217
-DOMAIN=communityhub.evolyx.in bash ~/communityhub-deploy/setup-remote.sh
+DOMAIN=communityhub.evolyx.in SKIP_PACKAGES=1 bash ~/communityhub-deploy/setup-remote.sh
 # ensure SESSION_COOKIE_SECURE=1 in /etc/communityhub.env
 systemctl restart communityhub
 ```
 
-Caddy obtains a **Let’s Encrypt** certificate automatically (HTTP-01 on port 80).
+This installs/updates `/etc/caddy/sites/communityhub.caddy`, ensures the root
+Caddyfile imports `/etc/caddy/sites/*.caddy`, validates the config, and reloads
+Caddy. Other apps’ fragments are untouched. Caddy obtains a **Let’s Encrypt**
+certificate automatically (HTTP-01 on port 80).
 
 ### 1.8 Firebase
 
@@ -222,9 +234,11 @@ server/                         # long-running Node entry (shared with Vite API 
 ### VM
 
 ```
-/opt/communityhub/              # app (dist, api, server, packages, …)
-/etc/communityhub.env           # secrets (EnvironmentFile)
-/etc/caddy/Caddyfile
+/opt/communityhub/                    # app (dist, api, server, packages, …)
+/etc/communityhub.env                 # secrets (EnvironmentFile)
+/etc/caddy/Caddyfile                  # shared root — imports sites/*.caddy only
+/etc/caddy/sites/communityhub.caddy   # this app’s site fragment (ours)
+/etc/caddy/sites/<other>.caddy        # other apps’ fragments (not ours — do not touch)
 /etc/systemd/system/communityhub.service
 /var/log/caddy/communityhub.log
 ```
@@ -239,6 +253,8 @@ server/                         # long-running Node entry (shared with Vite API 
 | `workspace-boot` 401 only | Normal until signed in; then Firebase authorized domain + cookies |
 | No `auth-session` logs | Login failed in browser (Firebase authorized domains) |
 | HTTPS TLS errors right after DNS | Wait for Caddy ACME; `journalctl -u caddy -f` |
+| HTTPS fails / `ERR_SSL_PROTOCOL_ERROR`, other sites fine | Check `communityhub` fragment exists: `ls /etc/caddy/sites/`; re-run `DOMAIN=communityhub.evolyx.in SKIP_PACKAGES=1 bash ~/communityhub-deploy/setup-remote.sh` |
+| `permission denied` importing a site fragment | Fragment not world-readable: `chmod 644 /etc/caddy/sites/*.caddy` |
 | Cert won’t renew | Port 80 blocked, DNS moved, or `caddy` stopped |
 | Env changes ignored | `systemctl restart communityhub` after editing `/etc/communityhub.env` |
 

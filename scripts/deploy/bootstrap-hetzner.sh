@@ -6,7 +6,7 @@
 # Optional:
 #   SKIP_BOOTSTRAP=1  — only deploy
 #   SKIP_DEPLOY=1     — only bootstrap
-#   DOMAIN=communityhub.evolyx.in  — write HTTPS Caddyfile during bootstrap
+#   DOMAIN=communityhub.evolyx.in  — install HTTPS Caddy site fragment during bootstrap
 #   HETZNER_SYNC_ENV=0 — do not push .env.local
 set -euo pipefail
 

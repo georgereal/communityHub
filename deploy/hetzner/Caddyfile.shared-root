@@ -1,0 +1,5 @@
+# Shared Caddy root for a multi-app Hetzner host.
+# Each app should install only its own site fragment under /etc/caddy/sites/*.caddy
+# instead of replacing this file.
+
+import /etc/caddy/sites/*.caddy
